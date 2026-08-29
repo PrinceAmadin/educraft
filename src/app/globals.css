@@ -1,0 +1,496 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ── LIGHT THEME ────────────────────────────────────────── */
+  :root {
+    --background: 40 24% 97%; /* warm bone, not clinical white */
+    --foreground: 222 47% 11%;
+
+    --card: 40 20% 99%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --elevated: 40 16% 94%;
+
+    --primary: 175 84% 28%;
+    --primary-hover: 175 80% 23%;
+    --primary-foreground: 0 0% 100%;
+
+    --gold: 32 78% 38%;
+    --gold-hover: 28 80% 32%;
+    --gold-foreground: 0 0% 100%;
+
+    --secondary: 40 16% 94%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 40 16% 94%;
+    --muted-foreground: 220 12% 38%;
+    --subtle-foreground: 220 12% 42%;
+
+    --accent: 40 16% 94%;
+    --accent-foreground: 222 47% 11%;
+
+    --success: 160 84% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 90% 40%;
+    --warning-foreground: 0 0% 100%;
+    --danger: 0 72% 48%;
+    --danger-foreground: 0 0% 100%;
+    --info: 217 85% 50%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 38 18% 87%;
+    --border-hover: 38 14% 76%;
+    --hairline: 222 30% 20%; /* used at low alpha */
+    --input: 38 18% 87%;
+    --ring: 175 84% 28%;
+
+    /* Paper surfaces — the hero/quality compositions */
+    --paper: 0 0% 100%;
+    --paper-ink: 222 30% 13%;
+    --paper-muted: 220 10% 48%;
+    --paper-line: 222 12% 88%;
+
+    /* Dramatic ground — stays dark in both themes */
+    --ink-deep: 224 52% 5%;
+
+    --radius: 0.5rem;
+
+    /* Section grounds. The page alternates between two, never one flat fill. */
+    --ground-a: 40 24% 97%;
+    --ground-b: 40 20% 99%;
+
+    /* Scene lighting — read by the WebGL workspace so the 3D belongs to
+       the page instead of sitting on top of it. */
+    --scene-key: 40 30% 96%;
+    --scene-rim: 175 84% 40%;
+    --scene-ambient: 0.72;
+  }
+
+  /* ── DARK THEME (default) ───────────────────────────────── */
+  .dark {
+    --background: 223 49% 8%;
+    --foreground: 210 40% 96%;
+
+    --card: 221 39% 11%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 221 39% 11%;
+    --popover-foreground: 210 40% 96%;
+
+    --elevated: 218 32% 15%;
+
+    --primary: 174 72% 41%;
+    --primary-hover: 175 78% 34%;
+    --primary-foreground: 224 52% 5%;
+
+    --gold: 38 88% 58%;
+    --gold-hover: 34 92% 50%;
+    --gold-foreground: 224 52% 5%;
+
+    --secondary: 218 32% 15%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 68%;
+    --subtle-foreground: 215 16% 58%;
+
+    --accent: 218 32% 15%;
+    --accent-foreground: 210 40% 96%;
+
+    --success: 160 74% 45%;
+    --success-foreground: 224 52% 5%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 224 52% 5%;
+    --danger: 0 84% 62%;
+    --danger-foreground: 0 0% 100%;
+    --info: 217 91% 62%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 206 40% 20%;
+    --border-hover: 198 42% 30%;
+    --hairline: 205 45% 82%; /* used at low alpha */
+    --input: 217 33% 17%;
+    --ring: 174 72% 41%;
+
+    --paper: 42 28% 96%;
+    --paper-ink: 222 32% 13%;
+    --paper-muted: 220 10% 45%;
+    --paper-line: 222 12% 87%;
+
+    --ink-deep: 224 55% 4%;
+
+    --ground-a: 223 49% 8%;
+    --ground-b: 223 44% 6%;
+
+    --scene-key: 205 40% 92%;
+    --scene-rim: 174 72% 46%;
+    --scene-ambient: 0.42;
+  }
+
+  /* ── NON-COLOUR TOKENS ──────────────────────────────────── */
+  :root {
+    /* Motion. Three durations, one easing family. */
+    --motion-fast: 180ms;
+    --motion-normal: 420ms;
+    --motion-slow: 780ms;
+    --ease-editorial: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+    /* Z-axis architecture. Six planes; no ad-hoc z-index anywhere else. */
+    --z-ground: 0; /* page background            */
+    --z-atmosphere: 1; /* gradients, grain, planes   */
+    --z-content: 2; /* section content            */
+    --z-media: 3; /* bleeding media, 3D canvas  */
+    --z-overlay: 20; /* hover planes, in-flow pops */
+    --z-nav: 40; /* sticky header              */
+    --z-modal: 60; /* sheets, dialogs            */
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    /* No horizontal overflow, ever — hero elements bleed deliberately */
+    overflow-x: clip;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  [id] {
+    scroll-margin-top: 6rem;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+}
+
+@layer components {
+  /* ── LAYOUT SYSTEM ─────────────────────────────────────────
+     Three widths, deliberately different. Sections pick one;
+     the page never repeats a single container rhythm.        */
+
+  .shell {
+    width: 100%;
+    max-width: theme("maxWidth.shell");
+    margin-inline: auto;
+    padding-inline: theme("spacing.gutter");
+  }
+
+  .shell-wide {
+    width: 100%;
+    max-width: 1720px;
+    margin-inline: auto;
+    padding-inline: theme("spacing.gutter");
+  }
+
+  /* Narrow editorial column, offset left rather than centred */
+  .shell-column {
+    width: 100%;
+    max-width: 1440px;
+    margin-inline: auto;
+    padding-inline: theme("spacing.gutter");
+  }
+
+  /* 12-column grid — the alignment anchor shared by every section */
+  .grid-12 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    column-gap: clamp(1rem, 2.2vw, 2rem);
+  }
+
+  @media (min-width: 768px) {
+    .grid-12 {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+    }
+  }
+
+  /* ── INK ISLAND ───────────────────────────────────────────
+     The closing block and the footer are dark in both themes.
+     Rather than hard-coding colours into those components, the
+     region re-scopes the semantic tokens — so `text-foreground`,
+     `text-subtle`, `bg-primary` and every hairline keep working
+     unchanged inside it, and there is one place to tune them.  */
+  .ground-ink {
+    background-color: hsl(var(--ink-deep));
+    color: hsl(210 40% 96%);
+
+    --foreground: 210 40% 96%;
+    --muted-foreground: 215 20% 72%;
+    --subtle-foreground: 215 14% 54%;
+    --hairline: 205 45% 82%;
+    --elevated: 222 40% 13%;
+    --primary: 174 72% 45%;
+    --primary-hover: 175 78% 39%;
+    --primary-foreground: 224 52% 5%;
+    --gold: 38 88% 58%;
+    --ring: 174 72% 45%;
+  }
+
+  /* ── HAIRLINES (the only permitted "border") ─────────────── */
+  .rule {
+    height: 1px;
+    background: hsl(var(--hairline) / 0.14);
+  }
+
+  .rule-v {
+    width: 1px;
+    background: hsl(var(--hairline) / 0.12);
+  }
+
+  /* ── EDITORIAL METADATA ──────────────────────────────────── */
+  .eyebrow {
+    @apply font-mono text-eyebrow font-medium uppercase text-subtle;
+  }
+
+  .index-mark {
+    @apply font-mono text-[0.6875rem] font-medium tabular-nums;
+    letter-spacing: 0.12em;
+  }
+
+  /* ── EDITORIAL INDEX ──────────────────────────────────────
+     Attending to one entry recedes the others. Nothing is
+     hidden — the dimmed entries stay above 4.5:1 against the
+     ground, and touch devices never enter the dimmed state.  */
+  .index-list > * {
+    transition: opacity var(--motion-normal) var(--ease-editorial);
+  }
+
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .index-list:hover > *,
+    .index-list:focus-within > * {
+      opacity: 0.5;
+    }
+
+    .index-list > *:hover,
+    .index-list > *:focus-within {
+      opacity: 1;
+    }
+  }
+}
+
+@layer utilities {
+  .tabular {
+    @apply font-mono tabular-nums;
+  }
+
+  /* Editorial accent — italic serif on a single emphasised word */
+  .accent-serif {
+    @apply font-serif italic;
+    letter-spacing: -0.015em;
+    font-weight: 400;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .pb-safe {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  }
+
+  /* ── AMBIENT DEPTH ────────────────────────────────────────
+     Background layers instead of boxes. Extremely restrained. */
+
+  .ambient-teal {
+    background-image: radial-gradient(
+      60% 50% at 50% 0%,
+      hsl(var(--primary) / 0.13),
+      transparent 68%
+    );
+  }
+
+  .ambient-gold {
+    background-image: radial-gradient(
+      45% 45% at 80% 40%,
+      hsl(var(--gold) / 0.07),
+      transparent 70%
+    );
+  }
+
+  /* Closing section: one localised light source low and left, so the ink
+     ground reads as a lit room rather than a flat black rectangle. */
+  .ambient-ink {
+    background-image:
+      radial-gradient(72% 90% at 16% 108%, hsl(var(--primary) / 0.24), transparent 62%),
+      radial-gradient(48% 60% at 90% -8%, hsl(var(--gold) / 0.1), transparent 70%);
+  }
+
+  /* Fine film grain — kills banding on the large gradients */
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Paper stock — hero and quality compositions.
+     In the light theme the sheet is white on a bone ground, barely three
+     steps apart, so the shadow alone cannot describe an edge. A hairline
+     ring draws the cut of the page; the ambient shadows then give it lift.
+     The dark theme needs no ring — a bright sheet on ink is already an edge. */
+  .paper-surface {
+    background: hsl(var(--paper));
+    color: hsl(var(--paper-ink));
+    box-shadow:
+      0 0 0 1px hsl(var(--paper-ink) / 0.08),
+      0 1px 2px hsl(224 60% 2% / 0.07),
+      0 10px 24px -10px hsl(224 60% 2% / 0.18),
+      0 34px 66px -30px hsl(224 60% 2% / 0.26);
+  }
+
+  .dark .paper-surface {
+    box-shadow:
+      0 1px 1px hsl(0 0% 0% / 0.3),
+      0 10px 26px -10px hsl(0 0% 0% / 0.6),
+      0 40px 80px -30px hsl(0 0% 0% / 0.8);
+  }
+
+  /* Faux body copy on paper — typographic texture, not gray boxes */
+  .paper-lines {
+    background-image: repeating-linear-gradient(
+      to bottom,
+      hsl(var(--paper-ink) / 0.5) 0,
+      hsl(var(--paper-ink) / 0.5) 1px,
+      transparent 1px,
+      transparent 7px
+    );
+  }
+
+  /* Link underline that draws in from the left */
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px;
+    background-position: 0% 100%;
+    background-repeat: no-repeat;
+    transition: background-size 0.4s theme("transitionTimingFunction.editorial");
+  }
+  .link-underline:hover,
+  .link-underline:focus-visible {
+    background-size: 100% 1px;
+  }
+
+  /* ── SECTION GROUNDS ──────────────────────────────────────
+     Sections meet through a gradient, never a hard seam.     */
+  .ground-b {
+    background-color: hsl(var(--ground-b));
+  }
+
+  .seam-into-b {
+    background-image: linear-gradient(
+      to bottom,
+      hsl(var(--ground-a)),
+      hsl(var(--ground-b))
+    );
+  }
+
+  .seam-into-a {
+    background-image: linear-gradient(
+      to bottom,
+      hsl(var(--ground-b)),
+      hsl(var(--ground-a))
+    );
+  }
+
+  /* Fade a bleeding element's foot back into the page ground */
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  }
+
+  /* Horizontal edge fade for the scrolling discipline index */
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 6%,
+      #000 94%,
+      transparent
+    );
+    mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+  }
+}
+
+/* ── SCROLL REVEAL ──────────────────────────────────────────
+   Opt-in via <Reveal>. Elements are visible by default so the
+   page is never blank if JS fails or motion is reduced.       */
+@media (prefers-reduced-motion: no-preference) {
+  [data-reveal="pending"] {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+
+  [data-reveal] {
+    transition:
+      opacity var(--motion-slow) var(--ease-editorial),
+      transform var(--motion-slow) var(--ease-editorial),
+      clip-path 0.9s var(--ease-editorial);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+
+  [data-reveal="shown"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  /* Variant: type wipes up from its own baseline instead of sliding.
+     Reserved for the two largest statements on the page. */
+  [data-reveal-variant="wipe"][data-reveal="pending"] {
+    opacity: 1;
+    transform: none;
+    clip-path: inset(0 0 108% 0);
+  }
+
+  [data-reveal-variant="wipe"][data-reveal="shown"] {
+    clip-path: inset(-20% 0 -20% 0);
+  }
+
+  /* Variant: rows arrive from the left, matching the reading direction
+     of the service catalogue. */
+  [data-reveal-variant="in-from-left"][data-reveal="pending"] {
+    transform: translate3d(-26px, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

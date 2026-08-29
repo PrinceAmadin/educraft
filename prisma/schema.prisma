@@ -1,0 +1,517 @@
+// EduCraft WorkBase — database schema
+// Mirrors the entity model in EDUCRAFT_WORKBASE_BLUEPRINT_v2.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+
+  // Supabase gives two connection strings and they are not interchangeable.
+  //
+  //   DATABASE_URL  port 6543, ?pgbouncer=true — the transaction pooler.
+  //                 What the app runs on. Serverless functions open a
+  //                 connection per invocation, and the pooler is what stops
+  //                 that exhausting Postgres.
+  //
+  //   DIRECT_URL    port 5432 — a direct session connection.
+  //                 Migrations only. Prisma Migrate needs advisory locks and
+  //                 prepared statements, neither of which survive pgbouncer
+  //                 in transaction mode, so running migrations through 6543
+  //                 fails with confusing "prepared statement already exists"
+  //                 errors.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── AUTH & USERS ───────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  OPS_MANAGER
+  WORKER
+  AMBASSADOR
+  CLIENT
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  /// What the UI greets this person by. Role profiles (Worker, Ambassador,
+  /// Client) carry their own fullName; staff accounts have no profile row,
+  /// so without this the UI falls back to the email local-part.
+  displayName  String?
+  phone        String?  @unique
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workerProfile     Worker?
+  ambassadorProfile Ambassador?
+  clientProfile     Client?
+
+  notifications     Notification[]
+  statusChanges     ProjectStatusLog[] @relation("ChangedBy")
+  paymentsConfirmed Payment[]          @relation("ConfirmedBy")
+
+  @@index([role])
+}
+
+// ─── UNIVERSITIES ───────────────────────────────────────
+
+enum UniversityType {
+  FEDERAL
+  STATE
+  PRIVATE
+}
+
+enum Region {
+  SOUTH_SOUTH
+  SOUTH_WEST
+  SOUTH_EAST
+  NORTH_CENTRAL
+  NORTH_WEST
+  NORTH_EAST
+}
+
+model University {
+  id           String         @id @default(cuid())
+  name         String
+  abbreviation String         @unique
+  type         UniversityType
+  state        String
+  region       Region
+  status       String         @default("Active") // Active, Prospecting, Inactive
+  entryDate    DateTime?
+  createdAt    DateTime       @default(now())
+
+  clients     Client[]
+  ambassadors Ambassador[]
+
+  @@index([region])
+  @@index([status])
+}
+
+// ─── CLIENTS ────────────────────────────────────────────
+
+model Client {
+  id               String      @id @default(cuid())
+  clientId         String      @unique // EC-C-XXXXX
+  fullName         String
+  phone            String
+  email            String?
+  universityId     String
+  university       University  @relation(fields: [universityId], references: [id])
+  faculty          String
+  department       String
+  level            String
+  referredById     String?
+  referredBy       Ambassador? @relation(fields: [referredById], references: [id])
+  referralCodeUsed String?
+  status           String      @default("Active")
+  notes            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  projects Project[]
+
+  @@index([universityId])
+  @@index([referredById])
+  @@index([phone])
+}
+
+// ─── SERVICES ───────────────────────────────────────────
+
+enum ServiceCategory {
+  ACADEMIC
+  DESIGN
+  CAREER
+  LEARNING
+  DIGITAL
+}
+
+enum PricingModel {
+  FIXED
+  VARIABLE
+  QUOTE
+}
+
+model Service {
+  id                       String          @id @default(cuid())
+  serviceCode              String          @unique
+  serviceName              String
+  category                 ServiceCategory
+  basePrice                Float
+  pricingModel             PricingModel    @default(FIXED)
+  intakeFormTemplate       String
+  estimatedDays            Int             @default(7)
+  requiresDownpayment      Boolean         @default(true)
+  downpaymentPercentage    Float           @default(45)
+  isActive                 Boolean         @default(true)
+  description              String?
+  deliverables             String?
+  expressDeliverySurcharge Float?
+  sortOrder                Int             @default(0)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  variants ServiceVariant[]
+  projects Project[]
+
+  @@index([category, isActive])
+}
+
+model ServiceVariant {
+  id         String  @id @default(cuid())
+  serviceId  String
+  service    Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  name       String
+  priceAddon Float
+  isActive   Boolean @default(true)
+  sortOrder  Int     @default(0)
+
+  @@index([serviceId])
+}
+
+// ─── PROJECTS ───────────────────────────────────────────
+
+enum ProjectStatus {
+  NEW
+  DOWNPAYMENT_VERIFIED
+  REQUIREMENTS_CONFIRMED
+  ASSIGNED
+  IN_PROGRESS
+  AWAITING_CLIENT_INPUT
+  SUBMITTED
+  IN_QA_REVIEW
+  REVISION_NEEDED
+  APPROVED
+  BALANCE_VERIFIED
+  DELIVERED
+  SUPERVISOR_CORRECTIONS
+  COMPLETED
+  ON_HOLD
+  CANCELLED
+  REFUNDED
+  DISPUTED
+}
+
+enum ProjectType {
+  THEORETICAL
+  PRACTICAL
+  DESIGN_BASED
+  SURVEY_BASED
+  NOT_APPLICABLE
+}
+
+enum ReferencingStyle {
+  APA_7TH
+  APA_6TH
+  HARVARD
+  IEEE
+  CHICAGO
+  MLA
+  CUSTOM
+}
+
+enum DataRequirement {
+  PRIMARY
+  SECONDARY
+  BOTH
+  NONE
+  NOT_SURE
+}
+
+model Project {
+  id               String  @id @default(cuid())
+  projectId        String  @unique // EC-XXXXX
+  clientId         String
+  client           Client  @relation(fields: [clientId], references: [id])
+  serviceId        String
+  service          Service @relation(fields: [serviceId], references: [id])
+  serviceVariantId String?
+
+  // ── Status ──
+  status            ProjectStatus @default(NEW)
+  isExpressDelivery Boolean       @default(false)
+
+  // ── Academic fields ──
+  projectTitle        String?
+  matricNumber        String?
+  projectPartners     String?
+  supervisorName      String?
+  otherSupervisors    String?
+  hodName             String?
+  projectType         ProjectType       @default(NOT_APPLICABLE)
+  chapterCount        Int?
+  referencingStyle    ReferencingStyle?
+  minimumPages        String?
+  dataRequirements    DataRequirement?
+  departmentOutline   String?
+  specialInstructions String?
+
+  // ── Service-specific payload (CV, presentation, letter, …) ──
+  additionalData Json?
+
+  // ── Preliminary pages (FYP) ──
+  dedicationType        String?
+  dedicationDetails     Json?
+  acknowledgmentDetails Json?
+
+  // ── Mid-project collection ──
+  ch3Requirements     String?
+  ch4Data             String?
+  ch4Requirements     String?
+  implementationSpecs String?
+
+  // ── Deadlines ──
+  clientDeadline     DateTime?
+  internalDeadline   DateTime?
+  deadlinePausedAt   DateTime?
+  deadlinePausedDays Int       @default(0)
+
+  // ── Pricing ──
+  price                Float
+  downpaymentAmount    Float
+  downpaymentStatus    String    @default("Unpaid") // Unpaid, Paid, Verified
+  downpaymentDate      DateTime?
+  downpaymentReference String?
+  balanceAmount        Float
+  balanceStatus        String    @default("Unpaid")
+  balanceDate          DateTime?
+  balanceReference     String?
+
+  // ── Assignment ──
+  workerId           String?
+  worker             Worker?   @relation(fields: [workerId], references: [id])
+  assignedDate       DateTime?
+  workerAccepted     Boolean   @default(false)
+  workerAcceptedDate DateTime?
+
+  // ── QA ──
+  qaReviewerId  String?
+  qaStatus      String?
+  qaScore       Int?
+  qaNotes       String?
+  revisionCount Int     @default(0)
+
+  // ── Delivery ──
+  deliveryDate                DateTime?
+  clientFeedback              String?
+  supervisorCorrections       Boolean   @default(false)
+  supervisorCorrectionDetails String?
+  supervisorCorrectionStatus  String?
+  supervisorCorrectionCount   Int       @default(0)
+  finalCompletionDate         DateTime?
+
+  // ── Commission & payout ──
+  ambassadorId         String?
+  ambassador           Ambassador? @relation(fields: [ambassadorId], references: [id])
+  ambassadorCommRate   Float?
+  ambassadorCommission Float?
+  ambassadorCommPaid   Boolean     @default(false)
+  workerPayoutRate     Float       @default(40)
+  workerPayout         Float?
+  workerPayoutPaid     Boolean     @default(false)
+  educraftRevenue      Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  files     ProjectFile[]
+  statusLog ProjectStatusLog[]
+  payments  Payment[]
+
+  @@index([status])
+  @@index([clientId])
+  @@index([workerId])
+  @@index([ambassadorId])
+  @@index([serviceId])
+  @@index([internalDeadline])
+  @@index([createdAt])
+}
+
+model ProjectFile {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileName   String
+  fileUrl    String
+  fileSize   Int?
+  fileType   String?
+  // from_client, from_worker, qa_reviewed, delivered,
+  // supervisor_correction, ch34_data, department_outline
+  category   String
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+
+  @@index([projectId, category])
+}
+
+model ProjectStatusLog {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromStatus  ProjectStatus
+  toStatus    ProjectStatus
+  changedById String?
+  changedBy   User?         @relation("ChangedBy", fields: [changedById], references: [id])
+  notes       String?
+  createdAt   DateTime      @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+// ─── WORKERS ────────────────────────────────────────────
+
+model Worker {
+  id                    String   @id @default(cuid())
+  workerId              String   @unique // EC-W-XXXXX
+  fullName              String
+  phone                 String
+  email                 String?
+  specialties           String[]
+  skills                String[]
+  serviceTypes          String[]
+  educationLevel        String?
+  status                String   @default("Active") // Active, On Break, Suspended, Terminated
+  maxConcurrentProjects Int      @default(3)
+  bankName              String?
+  accountNumber         String?
+  accountName           String?
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  projects Project[]
+
+  @@index([status])
+}
+
+// ─── AMBASSADORS ────────────────────────────────────────
+
+enum AmbassadorTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+}
+
+model Ambassador {
+  id            String         @id @default(cuid())
+  ambassadorId  String         @unique // EC-A-XXXXX
+  fullName      String
+  phone         String
+  email         String?
+  universityId  String
+  university    University     @relation(fields: [universityId], references: [id])
+  department    String?
+  level         String?
+  referralCode  String         @unique
+  status        String         @default("Active")
+  tier          AmbassadorTier @default(BRONZE)
+  bankName      String?
+  accountNumber String?
+  accountName   String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  referredClients Client[]
+  projects        Project[]
+
+  @@index([universityId])
+  @@index([status])
+}
+
+// ─── PAYMENTS ───────────────────────────────────────────
+
+enum PaymentType {
+  CLIENT_DOWNPAYMENT
+  CLIENT_BALANCE
+  WORKER_PAYOUT
+  AMBASSADOR_COMMISSION
+  EXPENSE
+  REFUND
+}
+
+enum PaymentDirection {
+  INFLOW
+  OUTFLOW
+}
+
+model Payment {
+  id            String           @id @default(cuid())
+  paymentId     String           @unique // EC-PAY-XXXXX
+  type          PaymentType
+  direction     PaymentDirection
+  projectId     String?
+  project       Project?         @relation(fields: [projectId], references: [id])
+  personName    String?
+  personRole    String?
+  amount        Float
+  paymentMethod String?
+  reference     String?
+  confirmedById String?
+  confirmedBy   User?            @relation("ConfirmedBy", fields: [confirmedById], references: [id])
+  status        String           @default("Pending") // Pending, Confirmed, Failed, Reversed
+  notes         String?
+  date          DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+
+  @@index([type, status])
+  @@index([projectId])
+  @@index([date])
+}
+
+// ─── EXPENSES ───────────────────────────────────────────
+
+model Expense {
+  id          String   @id @default(cuid())
+  category    String // Software, Internet, Marketing, Equipment, Personnel, Misc
+  description String
+  amount      Float
+  date        DateTime
+  recurring   Boolean  @default(false)
+  frequency   String?
+  approvedBy  String?
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+  @@index([category])
+}
+
+// ─── NOTIFICATIONS ──────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String // info, warning, urgent, success
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+}
+
+// ─── SETTINGS ───────────────────────────────────────────
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
