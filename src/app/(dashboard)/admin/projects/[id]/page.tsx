@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getProjectDetail } from "@/lib/services/projects";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
 import { ProjectActions } from "@/components/projects/ProjectActions";
+import { toCandidate } from "@/lib/pipeline";
 import { ProjectTabs, type ProjectTab } from "@/components/projects/ProjectTabs";
 import { RequirementsTab } from "@/components/projects/tabs/RequirementsTab";
 import { TimelineTab } from "@/components/projects/tabs/TimelineTab";
@@ -54,13 +55,7 @@ export default async function ProjectDetailPage({
       <ProjectDetailHeader project={project} />
 
       <ProjectActions
-        project={{
-          id: project.projectId,
-          status: project.status,
-          downpaymentStatus: project.downpaymentStatus,
-          balanceStatus: project.balanceStatus,
-          hasWorker: Boolean(project.workerId),
-        }}
+        project={{ code: project.projectId, candidate: toCandidate(project) }}
       />
 
       <div className="rounded-xl border border-border bg-card p-4 sm:p-5">

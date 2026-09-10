@@ -16,7 +16,7 @@ const OPEN_STATUSES: ProjectStatus[] = [
 ];
 
 const AT_RISK_WINDOW_DAYS = 3;
-const REVISION_ESCALATION_THRESHOLD = 3;
+const REVISION_ESCALATION_THRESHOLD = 3; // MAX_REVISIONS
 
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -152,7 +152,7 @@ export async function getDashboardSummary(now: Date = new Date()): Promise<Dashb
     db.project.count({
       where: {
         status: { in: OPEN_STATUSES },
-        revisionCount: { gt: REVISION_ESCALATION_THRESHOLD },
+        revisionCount: { gte: REVISION_ESCALATION_THRESHOLD },
       },
     }),
   ]);

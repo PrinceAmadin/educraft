@@ -2,106 +2,16 @@ import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { TIER_COMMISSION_RATE } from "@/lib/constants";
 import { computePrice, computeSplit } from "@/lib/pricing";
+import {
+  MAX_REVISIONS,
+  TRANSITIONS,
+  allowedTransitions,
+  type TransitionCandidate,
+} from "@/lib/pipeline";
 import type { CreateProjectInput } from "@/lib/validations/projects";
 
-// ─────────────────────────────────────────────────────────────
-// Pipeline state machine
-// ─────────────────────────────────────────────────────────────
-
-export interface TransitionRule {
-  to: ProjectStatus;
-  /** Human label for the action button that performs this move. */
-  action: string;
-  /** Returns null when allowed, or a reason string when blocked. */
-  guard?: (p: TransitionCandidate) => string | null;
-}
-
-/** The subset of a project the guards need. */
-export interface TransitionCandidate {
-  status: ProjectStatus;
-  workerId: string | null;
-  workerAccepted: boolean;
-  downpaymentStatus: string;
-  balanceStatus: string;
-  qaStatus: string | null;
-  projectTitle: string | null;
-  serviceId: string;
-  fileCount: number;
-}
-
-/**
- * Allowed forward transitions, keyed by current status. Loops
- * (REVISION_NEEDED, SUPERVISOR_CORRECTIONS) and admin-only holds
- * (ON_HOLD, CANCELLED, …) are handled separately.
- */
-export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
-  NEW: [
-    {
-      to: "DOWNPAYMENT_VERIFIED",
-      action: "Verify downpayment",
-      guard: (p) =>
-        p.downpaymentStatus === "Verified" ? null : "Downpayment is not verified yet",
-    },
-  ],
-  DOWNPAYMENT_VERIFIED: [
-    {
-      to: "REQUIREMENTS_CONFIRMED",
-      action: "Confirm requirements",
-      guard: (p) =>
-        p.projectTitle && p.serviceId ? null : "Project needs a title and a service",
-    },
-  ],
-  REQUIREMENTS_CONFIRMED: [
-    {
-      to: "ASSIGNED",
-      action: "Assign worker",
-      guard: (p) => (p.workerId ? null : "No worker assigned"),
-    },
-  ],
-  ASSIGNED: [
-    {
-      to: "IN_PROGRESS",
-      action: "Mark in progress",
-      guard: (p) => (p.workerAccepted ? null : "Worker has not accepted yet"),
-    },
-  ],
-  IN_PROGRESS: [
-    { to: "AWAITING_CLIENT_INPUT", action: "Pause for client input" },
-    {
-      to: "SUBMITTED",
-      action: "Mark submitted",
-      guard: (p) => (p.fileCount > 0 ? null : "No worker files uploaded"),
-    },
-  ],
-  AWAITING_CLIENT_INPUT: [{ to: "IN_PROGRESS", action: "Resume" }],
-  SUBMITTED: [{ to: "IN_QA_REVIEW", action: "Move to QA" }],
-  IN_QA_REVIEW: [
-    {
-      to: "APPROVED",
-      action: "Approve",
-      guard: (p) => (p.qaStatus === "Passed" ? null : "QA has not passed"),
-    },
-    { to: "REVISION_NEEDED", action: "Request revision" },
-  ],
-  REVISION_NEEDED: [{ to: "SUBMITTED", action: "Resubmit" }],
-  APPROVED: [
-    {
-      to: "BALANCE_VERIFIED",
-      action: "Verify balance",
-      guard: (p) => (p.balanceStatus === "Verified" ? null : "Balance is not verified yet"),
-    },
-  ],
-  BALANCE_VERIFIED: [{ to: "DELIVERED", action: "Deliver" }],
-  DELIVERED: [
-    { to: "SUPERVISOR_CORRECTIONS", action: "Log supervisor corrections" },
-    { to: "COMPLETED", action: "Mark completed" },
-  ],
-  SUPERVISOR_CORRECTIONS: [{ to: "DELIVERED", action: "Re-deliver" }],
-};
-
-export function allowedTransitions(candidate: TransitionCandidate): TransitionRule[] {
-  return TRANSITIONS[candidate.status] ?? [];
-}
+export { TRANSITIONS, allowedTransitions } from "@/lib/pipeline";
+export type { TransitionRule, TransitionCandidate } from "@/lib/pipeline";
 
 // ─────────────────────────────────────────────────────────────
 // List
@@ -193,7 +103,7 @@ function buildWhere(filters: ProjectListFilters, now: Date): Prisma.ProjectWhere
   } else if (filters.flag === "overdue") {
     and.push({ status: { in: OPEN_STATUSES }, internalDeadline: { lt: now } });
   } else if (filters.flag === "revision-escalated") {
-    and.push({ status: { in: OPEN_STATUSES }, revisionCount: { gt: 3 } });
+    and.push({ status: { in: OPEN_STATUSES }, revisionCount: { gte: 3 } });
   }
 
   return and.length ? { AND: and } : {};
@@ -329,6 +239,7 @@ export async function transitionProject(
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
     select: {
       id: true,
+      projectId: true,
       status: true,
       workerId: true,
       workerAccepted: true,
@@ -337,13 +248,25 @@ export async function transitionProject(
       qaStatus: true,
       projectTitle: true,
       serviceId: true,
+      specialInstructions: true,
+      departmentOutline: true,
+      additionalData: true,
+      revisionCount: true,
       deadlinePausedAt: true,
       internalDeadline: true,
+      files: { where: { category: "from_worker" }, select: { id: true } },
       _count: { select: { files: true } },
     },
   });
 
   if (!project) throw new TransitionError("Project not found");
+
+  const hasRequirementDetail =
+    Boolean(project.specialInstructions?.trim()) ||
+    Boolean(project.departmentOutline?.trim()) ||
+    (project.additionalData != null &&
+      typeof project.additionalData === "object" &&
+      Object.keys(project.additionalData as object).length > 0);
 
   const candidate: TransitionCandidate = {
     status: project.status,
@@ -354,14 +277,13 @@ export async function transitionProject(
     qaStatus: project.qaStatus,
     projectTitle: project.projectTitle,
     serviceId: project.serviceId,
-    fileCount: project._count.files,
+    hasRequirementDetail,
+    workerFileCount: project.files.length,
   };
 
   const rule = allowedTransitions(candidate).find((r) => r.to === to);
   if (!rule) {
-    throw new TransitionError(
-      `Cannot move from ${project.status} to ${to}`
-    );
+    throw new TransitionError(`Cannot move from ${project.status} to ${to}`);
   }
 
   const blocked = rule.guard?.(candidate);
@@ -373,7 +295,22 @@ export async function transitionProject(
   if (to === "DELIVERED") data.deliveryDate = now;
   if (to === "COMPLETED") data.finalCompletionDate = now;
   if (to === "APPROVED") data.qaStatus = "Passed";
-  if (to === "REVISION_NEEDED") data.revisionCount = { increment: 1 };
+
+  let flaggedForFounder = false;
+  if (to === "REVISION_NEEDED") {
+    data.revisionCount = { increment: 1 };
+    if (project.revisionCount + 1 >= MAX_REVISIONS) flaggedForFounder = true;
+  }
+
+  if (project.status === "SUPERVISOR_CORRECTIONS" && to === "DELIVERED") {
+    data.supervisorCorrectionCount = { increment: 1 };
+    data.supervisorCorrectionStatus = "Resolved";
+  }
+  if (to === "SUPERVISOR_CORRECTIONS") {
+    data.supervisorCorrections = true;
+    data.supervisorCorrectionStatus = "Pending";
+    if (note) data.supervisorCorrectionDetails = note;
+  }
 
   // Deadline clock: pause on the way into AWAITING_CLIENT_INPUT, and on the
   // way out add the paused span back onto the internal deadline.
@@ -405,9 +342,29 @@ export async function transitionProject(
     }),
   ]);
 
+  if (flaggedForFounder) {
+    await notifyFounders(
+      "Revision cap reached",
+      `${project.projectId} has hit ${MAX_REVISIONS} revisions and needs founder review.`,
+      `/admin/projects/${project.projectId}`
+    );
+  }
+
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
   return detail;
+}
+
+/** Fan a warning notification out to every active founder / super admin. */
+async function notifyFounders(title: string, message: string, link: string): Promise<void> {
+  const admins = await db.user.findMany({
+    where: { role: "SUPER_ADMIN", isActive: true },
+    select: { id: true },
+  });
+  if (admins.length === 0) return;
+  await db.notification.createMany({
+    data: admins.map((a) => ({ userId: a.id, title, message, type: "urgent", link })),
+  });
 }
 
 interface VerifyPaymentOptions {
