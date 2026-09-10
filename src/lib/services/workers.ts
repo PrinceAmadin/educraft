@@ -218,28 +218,40 @@ export async function getWorkerDetail(id: string) {
 // ── Mutations ────────────────────────────────────────────────
 
 export async function createWorker(input: CreateWorkerInput) {
-  const worker = await db.$transaction(async (tx) => {
-    return tx.worker.create({
-      data: {
-        workerId: await nextId("WORKER", tx),
-        fullName: input.fullName,
-        phone: input.phone,
-        email: input.email || null,
-        educationLevel: input.educationLevel || null,
-        specialties: input.specialties,
-        skills: input.skills,
-        serviceTypes: [],
-        maxConcurrentProjects: input.maxConcurrentProjects,
-        bankName: input.bankName || null,
-        accountNumber: input.accountNumber || null,
-        accountName: input.accountName || null,
-        notes: input.notes || null,
-        status: "Active",
-      },
-      select: { id: true, workerId: true },
-    });
-  });
-  return worker;
+  // Single write — no transaction needed. Retry once on the rare id clash.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await db.worker.create({
+        data: {
+          workerId: await nextId("WORKER"),
+          fullName: input.fullName,
+          phone: input.phone,
+          email: input.email || null,
+          educationLevel: input.educationLevel || null,
+          specialties: input.specialties,
+          skills: input.skills,
+          serviceTypes: [],
+          maxConcurrentProjects: input.maxConcurrentProjects,
+          bankName: input.bankName || null,
+          accountNumber: input.accountNumber || null,
+          accountName: input.accountName || null,
+          notes: input.notes || null,
+          status: "Active",
+        },
+        select: { id: true, workerId: true },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002" &&
+        attempt < 2
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new TransitionError("Could not allocate a worker id — try again");
 }
 
 export async function updateWorkerStatus(id: string, status: string) {

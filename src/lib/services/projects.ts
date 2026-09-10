@@ -4,8 +4,6 @@ import { TIER_COMMISSION_RATE } from "@/lib/constants";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import type { CreateProjectInput } from "@/lib/validations/projects";
 
-type DbClient = Prisma.TransactionClient | typeof db;
-
 // ─────────────────────────────────────────────────────────────
 // Pipeline state machine
 // ─────────────────────────────────────────────────────────────
@@ -636,6 +634,10 @@ export async function createProjectManual(
   if (input.courseCode) additionalData.courseCode = input.courseCode;
   if (input.wordCount) additionalData.wordCount = input.wordCount;
 
+  // Ids generated up front so the transaction only does writes.
+  const newProjectId = await nextId("PROJECT");
+  const newClientId = input.clientMode === "new" ? await nextId("CLIENT") : null;
+
   const created = await db.$transaction(async (tx) => {
     let clientId: string;
 
@@ -650,7 +652,7 @@ export async function createProjectManual(
     } else {
       const newClient = await tx.client.create({
         data: {
-          clientId: await nextId("CLIENT", tx),
+          clientId: newClientId as string,
           fullName: (input.fullName ?? "").trim(),
           phone: (input.phone ?? "").trim(),
           email: input.email ? input.email : null,
@@ -669,7 +671,7 @@ export async function createProjectManual(
 
     const project = await tx.project.create({
       data: {
-        projectId: await nextId("PROJECT", tx),
+        projectId: newProjectId,
         clientId,
         serviceId: service.id,
         serviceVariantId,
@@ -716,7 +718,7 @@ export async function createProjectManual(
     });
 
     return project;
-  });
+  }, { timeout: 15_000 });
 
   return { id: created.id, projectId: created.projectId };
 }
@@ -738,10 +740,14 @@ const ID_PREFIX = {
  * Derived from the current row count plus a collision retry — good enough
  * at this scale and readable, which the blueprint asks for.
  */
-export async function nextId(
-  kind: keyof typeof ID_PREFIX,
-  client: DbClient = db
-): Promise<string> {
+/**
+ * Sequential id for an entity type. Always reads through `db` (never a
+ * transaction client) and is meant to be called BEFORE opening a transaction —
+ * keeping slow count/exists round-trips out of the interactive-transaction
+ * budget. Callers that write inside a transaction should catch a P2002 on the
+ * id column and retry with a fresh call.
+ */
+export async function nextId(kind: keyof typeof ID_PREFIX): Promise<string> {
   const prefix = ID_PREFIX[kind];
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -750,24 +756,24 @@ export async function nextId(
 
     switch (kind) {
       case "PROJECT":
-        count = await client.project.count();
-        exists = async (id) => (await client.project.count({ where: { projectId: id } })) > 0;
+        count = await db.project.count();
+        exists = async (id) => (await db.project.count({ where: { projectId: id } })) > 0;
         break;
       case "CLIENT":
-        count = await client.client.count();
-        exists = async (id) => (await client.client.count({ where: { clientId: id } })) > 0;
+        count = await db.client.count();
+        exists = async (id) => (await db.client.count({ where: { clientId: id } })) > 0;
         break;
       case "WORKER":
-        count = await client.worker.count();
-        exists = async (id) => (await client.worker.count({ where: { workerId: id } })) > 0;
+        count = await db.worker.count();
+        exists = async (id) => (await db.worker.count({ where: { workerId: id } })) > 0;
         break;
       case "AMBASSADOR":
-        count = await client.ambassador.count();
-        exists = async (id) => (await client.ambassador.count({ where: { ambassadorId: id } })) > 0;
+        count = await db.ambassador.count();
+        exists = async (id) => (await db.ambassador.count({ where: { ambassadorId: id } })) > 0;
         break;
       case "PAYMENT":
-        count = await client.payment.count();
-        exists = async (id) => (await client.payment.count({ where: { paymentId: id } })) > 0;
+        count = await db.payment.count();
+        exists = async (id) => (await db.payment.count({ where: { paymentId: id } })) > 0;
         break;
     }
 

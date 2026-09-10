@@ -314,12 +314,12 @@ Update this section as you build:
 - [x] Manual project creation
 - [x] Client management
 - [x] Worker management + assignment
-- [ ] Ambassador management
-- [ ] Payout system
+- [x] Ambassador management
+- [x] Payout system (worker + ambassador; CSV export still pending)
 - [ ] Intake forms (multi-step, conditional)
-- [ ] Referral tracking
+- [x] Referral tracking (code generation, referral link, referred-client history)
 - [x] Pipeline status transitions (state machine + guards; QA screen still pending)
-- [x] Payment verification (downpayment/balance verify; ambassador commission record deferred to Day 5)
+- [x] Payment verification (downpayment/balance verify; ambassador commission recorded on payout, not downpayment)
 - [ ] Notifications
 - [ ] QA review system
 - [ ] Worker portal
