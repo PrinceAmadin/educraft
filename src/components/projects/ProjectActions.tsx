@@ -54,31 +54,18 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
   const rules = allowedTransitions(candidate);
   const buttons: React.ReactNode[] = [];
 
-  // Payment-leg verifications (these also advance the status server-side).
-  if (candidate.downpaymentStatus === "Paid") {
+  // Payment verification lives in the Financials tab; nudge toward it when a
+  // leg is paid but unverified.
+  const paidUnverified =
+    candidate.downpaymentStatus === "Paid" || candidate.balanceStatus === "Paid";
+  if (paidUnverified) {
     buttons.push(
-      <Button
-        key="verify-dp"
-        size="sm"
-        disabled={pending !== null}
-        onClick={() => post("verify-dp", "verify-payment", { leg: "downpayment" })}
+      <span
+        key="pay-hint"
+        className="text-xs text-gold"
       >
-        {pending === "verify-dp" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-        Verify downpayment
-      </Button>
-    );
-  }
-  if (candidate.balanceStatus === "Paid") {
-    buttons.push(
-      <Button
-        key="verify-bal"
-        size="sm"
-        disabled={pending !== null}
-        onClick={() => post("verify-bal", "verify-payment", { leg: "balance" })}
-      >
-        {pending === "verify-bal" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-        Verify balance
-      </Button>
+        A payment is awaiting verification — Financials tab.
+      </span>
     );
   }
 

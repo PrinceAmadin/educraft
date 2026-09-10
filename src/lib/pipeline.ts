@@ -114,9 +114,26 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
 };
 
 /** Admin overrides available from most non-terminal statuses. */
-export const ADMIN_HOLDS: ProjectStatus[] = ["ON_HOLD", "CANCELLED", "REFUNDED", "DISPUTED"];
+export const ADMIN_HOLDS = ["ON_HOLD", "CANCELLED", "REFUNDED", "DISPUTED"] as const;
+export type AdminHold = (typeof ADMIN_HOLDS)[number];
+
+export const HOLD_LABELS: Record<AdminHold, string> = {
+  ON_HOLD: "Put on hold",
+  CANCELLED: "Cancel project",
+  REFUNDED: "Mark refunded",
+  DISPUTED: "Mark disputed",
+};
 
 const TERMINAL: ProjectStatus[] = ["COMPLETED", "CANCELLED", "REFUNDED"];
+
+/**
+ * Admin holds are allowed from any non-terminal status. ON_HOLD can also be
+ * lifted back to the status the project was in before (handled server-side).
+ */
+export function canHold(from: ProjectStatus, to: AdminHold): boolean {
+  if (from === to) return false;
+  return !TERMINAL.includes(from);
+}
 
 export function allowedTransitions(candidate: TransitionCandidate): TransitionRule[] {
   return TRANSITIONS[candidate.status] ?? [];

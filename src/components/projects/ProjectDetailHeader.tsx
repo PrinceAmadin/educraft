@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { StatusBadge } from "@/components/projects/StatusBadge";
+import { ProjectHoldControl } from "@/components/projects/ProjectHoldControl";
 import { cn, deadlineInfo, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
 
@@ -20,13 +21,16 @@ export function ProjectDetailHeader({ project }: { project: ProjectDetail }) {
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/admin/projects"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        All projects
-      </Link>
+      <div className="flex items-center justify-between gap-3">
+        <Link
+          href="/admin/projects"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
+        >
+          <ArrowLeft className="size-4" aria-hidden />
+          All projects
+        </Link>
+        <ProjectHoldControl projectCode={project.projectId} status={project.status} />
+      </div>
 
       <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

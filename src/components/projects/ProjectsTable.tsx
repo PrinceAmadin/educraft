@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { PaymentQuickAction } from "@/components/projects/PaymentQuickAction";
 import {
   Table,
   TableBody,
@@ -118,6 +119,9 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
               <TableHead className="text-right">Price</TableHead>
               <TableHead>Payment</TableHead>
               <TableHead>
+                <span className="sr-only">Quick actions</span>
+              </TableHead>
+              <TableHead>
                 <span className="sr-only">Open</span>
               </TableHead>
             </TableRow>
@@ -178,6 +182,13 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                     >
                       {paymentStandingLabel(row)}
                     </span>
+                  </TableCell>
+                  <TableCell>
+                    <PaymentQuickAction
+                      projectCode={row.projectId}
+                      downpaymentStatus={row.downpaymentStatus}
+                      balanceStatus={row.balanceStatus}
+                    />
                   </TableCell>
                   <TableCell>
                     <Link

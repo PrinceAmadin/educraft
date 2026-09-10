@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
+import { notifyUsers } from "@/lib/services/notifications";
 
 /**
  * Money owed out. Both legs gate on `status = COMPLETED` and the relevant
@@ -245,7 +246,7 @@ export async function markPayouts(input: {
     date: input.date,
   };
 
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     let targets: string[] = [];
 
     if (input.scope === "one") {
@@ -273,6 +274,7 @@ export async function markPayouts(input: {
 
     let paidCount = 0;
     let totalAmount = 0;
+    const paidTargets: { id: string; amount: number }[] = [];
     for (const target of targets) {
       const amount =
         input.kind === "worker"
@@ -281,10 +283,40 @@ export async function markPayouts(input: {
       if (amount > 0) {
         paidCount += 1;
         totalAmount += amount;
+        paidTargets.push({ id: target, amount });
       }
     }
 
     if (paidCount === 0) throw new TransitionError("Nothing pending to pay");
-    return { paidCount, totalAmount };
+    return { paidCount, totalAmount, paidTargets };
   }, { timeout: 20_000 });
+
+  // Notify each recipient who has a user account.
+  if (result.paidTargets.length > 0) {
+    const ids = result.paidTargets.map((t) => t.id);
+    const rows =
+      input.kind === "worker"
+        ? await db.worker.findMany({ where: { id: { in: ids } }, select: { id: true, userId: true } })
+        : await db.ambassador.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, userId: true },
+          });
+    const byId = new Map<string, string | null>(rows.map((r) => [r.id, r.userId]));
+    await Promise.all(
+      result.paidTargets.map((t) =>
+        notifyUsers([byId.get(t.id) ?? undefined], {
+          title: input.kind === "worker" ? "Payout sent" : "Commission paid",
+          message: `${formatNairaMinimal(t.amount)} was recorded as paid to you.`,
+          type: "success",
+          link: input.kind === "worker" ? "/worker/earnings" : "/ambassador/commissions",
+        })
+      )
+    );
+  }
+
+  return { paidCount: result.paidCount, totalAmount: result.totalAmount };
+}
+
+function formatNairaMinimal(n: number): string {
+  return `₦${Math.round(n).toLocaleString("en-NG")}`;
 }

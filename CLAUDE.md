@@ -319,8 +319,8 @@ Update this section as you build:
 - [x] Intake forms (multi-step, conditional) — /intake selection + 7 templates (fyp, termpaper, seminar, it, cv, presentation, editing); `letter` still falls back to WhatsApp
 - [x] Referral tracking (code generation, referral link, referred-client history, URL ?ref= prefill, commission linking)
 - [x] Pipeline status transitions (state machine + guards; QA screen still pending)
-- [x] Payment verification (downpayment/balance verify; ambassador commission recorded on payout, not downpayment)
-- [ ] Notifications
+- [x] Payment verification (mark-paid + verify modal with method/reference/date/notes; list quick action; ADMIN_HOLDS control on detail page)
+- [x] Notifications (in-app: topbar bell + feed, mark read/all; triggers for intake, payments, assignment, QA, revision cap, referral, payouts)
 - [ ] QA review system
 - [ ] Worker portal
 - [ ] Ambassador portal

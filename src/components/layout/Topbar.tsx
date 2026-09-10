@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, LogOut, Search, Settings, User } from "lucide-react";
+import { LogOut, Search, Settings, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,9 @@ interface TopbarProps {
   name: string;
   email: string;
   roleLabel: string;
-  unreadCount?: number;
 }
 
-export function Topbar({ role, name, email, roleLabel, unreadCount = 0 }: TopbarProps) {
+export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role);
 
   return (
@@ -65,22 +65,7 @@ export function Topbar({ role, name, email, roleLabel, unreadCount = 0 }: Topbar
 
         <ThemeToggle />
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="relative text-muted-foreground hover:text-foreground"
-          aria-label={
-            unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"
-          }
-        >
-          <Bell className="h-[18px] w-[18px]" />
-          {unreadCount > 0 && (
-            <span className="absolute right-1.5 top-1.5 flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-danger opacity-75 animate-pulse-dot" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-danger" />
-            </span>
-          )}
-        </Button>
+        <NotificationBell />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

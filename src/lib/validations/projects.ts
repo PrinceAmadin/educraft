@@ -26,7 +26,23 @@ export const transitionBodySchema = z.object({
 
 export const verifyPaymentBodySchema = z.object({
   leg: z.enum(["downpayment", "balance"]),
-  reference: z.string().trim().max(120).optional(),
+  paymentMethod: z.string().trim().max(60).optional().or(z.literal("")),
+  reference: z.string().trim().max(120).optional().or(z.literal("")),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .or(z.literal("")),
+  notes: z.string().trim().max(1000).optional().or(z.literal("")),
+});
+
+export const markPaymentBodySchema = z.object({
+  leg: z.enum(["downpayment", "balance"]),
+});
+
+export const holdBodySchema = z.object({
+  to: z.enum(["ON_HOLD", "CANCELLED", "REFUNDED", "DISPUTED"]),
+  note: z.string().trim().min(3, "A reason is required").max(1000),
 });
 
 export const assignWorkerBodySchema = z.object({

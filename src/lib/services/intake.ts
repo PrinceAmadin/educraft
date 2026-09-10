@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
+import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { TIER_COMMISSION_RATE } from "@/lib/constants";
 import { resolveTemplate } from "@/lib/intake-templates";
@@ -114,16 +115,18 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
   let ambassadorId: string | null = null;
   let ambassadorCommRate: number | null = null;
   let referralCodeUsed: string | null = null;
+  let ambassadorUserId: string | null = null;
   const code = input.referralCode?.trim();
   if (code) {
     const ambassador = await db.ambassador.findUnique({
       where: { referralCode: code },
-      select: { id: true, tier: true, status: true },
+      select: { id: true, tier: true, status: true, userId: true },
     });
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
       ambassadorCommRate = TIER_COMMISSION_RATE[ambassador.tier] ?? 10;
       referralCodeUsed = code;
+      ambassadorUserId = ambassador.userId;
     }
   }
 
@@ -276,6 +279,22 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
     },
     { timeout: 15_000 }
   );
+
+  await notifyAdmins({
+    title: "New project submitted",
+    message: `${created.projectId}: ${input.fullName.trim()} submitted ${input.projectTitle?.trim() || "a project"} through the intake form.`,
+    type: "info",
+    link: `/admin/projects/${created.projectId}`,
+  });
+
+  if (ambassadorUserId) {
+    await notifyUsers([ambassadorUserId], {
+      title: "Your referral code was used",
+      message: `A new client signed up with your code on ${created.projectId}.`,
+      type: "info",
+      link: "/ambassador/referrals",
+    });
+  }
 
   return { projectId: created.projectId };
 }

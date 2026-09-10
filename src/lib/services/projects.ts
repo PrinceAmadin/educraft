@@ -6,8 +6,11 @@ import {
   MAX_REVISIONS,
   TRANSITIONS,
   allowedTransitions,
+  canHold,
+  type AdminHold,
   type TransitionCandidate,
 } from "@/lib/pipeline";
+import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import type { CreateProjectInput } from "@/lib/validations/projects";
 
 export { TRANSITIONS, allowedTransitions } from "@/lib/pipeline";
@@ -254,6 +257,7 @@ export async function transitionProject(
       revisionCount: true,
       deadlinePausedAt: true,
       internalDeadline: true,
+      worker: { select: { userId: true } },
       files: { where: { category: "from_worker" }, select: { id: true } },
       _count: { select: { files: true } },
     },
@@ -342,12 +346,39 @@ export async function transitionProject(
     }),
   ]);
 
+  // ── Notifications ──
+  const adminLink = `/admin/projects/${project.projectId}`;
   if (flaggedForFounder) {
-    await notifyFounders(
-      "Revision cap reached",
-      `${project.projectId} has hit ${MAX_REVISIONS} revisions and needs founder review.`,
-      `/admin/projects/${project.projectId}`
-    );
+    await notifyAdmins({
+      title: "Revision cap reached",
+      message: `${project.projectId} has hit ${MAX_REVISIONS} revisions and needs founder review.`,
+      type: "urgent",
+      link: adminLink,
+    });
+  }
+  if (to === "SUBMITTED" && project.status === "IN_PROGRESS") {
+    await notifyAdmins({
+      title: "Work submitted",
+      message: `${project.projectId} has been submitted and needs a QA reviewer.`,
+      type: "info",
+      link: "/admin/qa",
+    });
+  }
+  if (to === "REVISION_NEEDED") {
+    await notifyUsers([project.worker?.userId], {
+      title: "Revision needed",
+      message: `QA sent ${project.projectId} back${note ? `: ${note}` : "."}`,
+      type: "warning",
+      link: "/worker/projects",
+    });
+  }
+  if (to === "APPROVED") {
+    await notifyUsers([project.worker?.userId], {
+      title: "QA passed",
+      message: `${project.projectId} passed QA review.`,
+      type: "success",
+      link: "/worker/projects",
+    });
   }
 
   const detail = await getProjectDetail(project.id);
@@ -355,22 +386,82 @@ export async function transitionProject(
   return detail;
 }
 
-/** Fan a warning notification out to every active founder / super admin. */
-async function notifyFounders(title: string, message: string, link: string): Promise<void> {
-  const admins = await db.user.findMany({
-    where: { role: "SUPER_ADMIN", isActive: true },
-    select: { id: true },
+// ── Admin holds ──────────────────────────────────────────────
+
+export async function holdProject(
+  idOrCode: string,
+  to: AdminHold,
+  note: string,
+  changedById: string
+): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true, projectId: true, status: true },
   });
-  if (admins.length === 0) return;
-  await db.notification.createMany({
-    data: admins.map((a) => ({ userId: a.id, title, message, type: "urgent", link })),
+  if (!project) throw new TransitionError("Project not found");
+  if (!canHold(project.status, to)) {
+    throw new TransitionError(`Cannot ${to.toLowerCase()} a project that is ${project.status}`);
+  }
+
+  await db.$transaction([
+    db.project.update({ where: { id: project.id }, data: { status: to } }),
+    db.projectStatusLog.create({
+      data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
+    }),
+  ]);
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+/** Lift ON_HOLD / DISPUTED back to the status the project was in before. */
+export async function resumeFromHold(
+  idOrCode: string,
+  changedById: string
+): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true, status: true },
   });
+  if (!project) throw new TransitionError("Project not found");
+  if (project.status !== "ON_HOLD" && project.status !== "DISPUTED") {
+    throw new TransitionError("This project is not on hold");
+  }
+
+  const lastHold = await db.projectStatusLog.findFirst({
+    where: { projectId: project.id, toStatus: project.status },
+    orderBy: { createdAt: "desc" },
+    select: { fromStatus: true },
+  });
+  const back = lastHold?.fromStatus ?? "NEW";
+
+  await db.$transaction([
+    db.project.update({ where: { id: project.id }, data: { status: back } }),
+    db.projectStatusLog.create({
+      data: {
+        projectId: project.id,
+        fromStatus: project.status,
+        toStatus: back,
+        changedById,
+        notes: "Resumed from hold",
+      },
+    }),
+  ]);
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
 }
 
 interface VerifyPaymentOptions {
   leg: "downpayment" | "balance";
   changedById: string;
+  paymentMethod?: string;
   reference?: string;
+  /** ISO date (YYYY-MM-DD) the client actually paid; defaults to now. */
+  paymentDate?: string;
+  notes?: string;
 }
 
 /**
@@ -380,7 +471,7 @@ interface VerifyPaymentOptions {
  */
 export async function verifyPayment(
   idOrCode: string,
-  { leg, changedById, reference }: VerifyPaymentOptions
+  { leg, changedById, paymentMethod, reference, paymentDate, notes }: VerifyPaymentOptions
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
@@ -389,6 +480,7 @@ export async function verifyPayment(
       projectId: true,
       status: true,
       client: { select: { fullName: true } },
+      ambassador: { select: { userId: true } },
       downpaymentStatus: true,
       downpaymentAmount: true,
       balanceStatus: true,
@@ -403,12 +495,21 @@ export async function verifyPayment(
   if (legStatus !== "Paid") throw new TransitionError("That payment is not marked paid yet");
 
   const now = new Date();
+  const paidOn = paymentDate ? new Date(paymentDate) : now;
   const amount = leg === "downpayment" ? project.downpaymentAmount : project.balanceAmount;
 
   const data: Prisma.ProjectUpdateInput =
     leg === "downpayment"
-      ? { downpaymentStatus: "Verified", downpaymentDate: now, downpaymentReference: reference }
-      : { balanceStatus: "Verified", balanceDate: now, balanceReference: reference };
+      ? {
+          downpaymentStatus: "Verified",
+          downpaymentDate: paidOn,
+          downpaymentReference: reference || null,
+        }
+      : {
+          balanceStatus: "Verified",
+          balanceDate: paidOn,
+          balanceReference: reference || null,
+        };
 
   const advance =
     leg === "downpayment" && project.status === "NEW"
@@ -430,9 +531,12 @@ export async function verifyPayment(
         personName: project.client.fullName,
         personRole: "Client",
         amount,
-        reference,
+        paymentMethod: paymentMethod || null,
+        reference: reference || null,
+        notes: notes || null,
         confirmedById: changedById,
         status: "Confirmed",
+        date: paidOn,
       },
     }),
   ];
@@ -452,6 +556,55 @@ export async function verifyPayment(
   }
 
   await db.$transaction(writes);
+
+  // A verified downpayment on a referred project is the "conversion" moment.
+  if (leg === "downpayment" && project.ambassador?.userId) {
+    await notifyUsers([project.ambassador.userId], {
+      title: "Referral converted",
+      message: `A client you referred paid their downpayment on ${project.projectId}.`,
+      type: "success",
+      link: "/ambassador/commissions",
+    });
+  }
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+/**
+ * Record that a client says they've paid — moves the leg to "Paid" (unverified)
+ * and pings the admins to verify. Does not create a Payment or advance status.
+ */
+export async function markPaymentPaid(
+  idOrCode: string,
+  leg: "downpayment" | "balance"
+): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true, projectId: true, downpaymentStatus: true, balanceStatus: true },
+  });
+  if (!project) throw new TransitionError("Project not found");
+
+  const legStatus = leg === "downpayment" ? project.downpaymentStatus : project.balanceStatus;
+  if (legStatus === "Verified") throw new TransitionError("That payment is already verified");
+  if (legStatus === "Paid") throw new TransitionError("That payment is already marked paid");
+
+  const now = new Date();
+  await db.project.update({
+    where: { id: project.id },
+    data:
+      leg === "downpayment"
+        ? { downpaymentStatus: "Paid", downpaymentDate: now }
+        : { balanceStatus: "Paid", balanceDate: now },
+  });
+
+  await notifyAdmins({
+    title: "Payment awaiting verification",
+    message: `${project.projectId}: ${leg === "downpayment" ? "downpayment" : "balance"} marked paid — verify it.`,
+    type: "warning",
+    link: `/admin/projects/${project.projectId}`,
+  });
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -476,14 +629,17 @@ export async function assignWorker(
     throw new TransitionError("Workers are assigned once requirements are confirmed");
   }
 
-  const worker = await db.worker.findUnique({ where: { id: workerId }, select: { id: true } });
+  const worker = await db.worker.findUnique({
+    where: { id: workerId },
+    select: { id: true, userId: true },
+  });
   if (!worker) throw new TransitionError("Worker not found");
 
   const now = new Date();
   await db.$transaction([
     db.project.update({
       where: { id: project.id },
-      data: { workerId, assignedDate: now, status: "ASSIGNED" },
+      data: { workerId, assignedDate: now, status: "ASSIGNED", workerAccepted: false },
     }),
     db.projectStatusLog.create({
       data: {
@@ -495,6 +651,17 @@ export async function assignWorker(
       },
     }),
   ]);
+
+  const full = await db.project.findUnique({
+    where: { id: project.id },
+    select: { projectId: true },
+  });
+  await notifyUsers([worker.userId], {
+    title: "New project assigned",
+    message: `${full?.projectId ?? "A project"} has been assigned to you — accept it to start.`,
+    type: "info",
+    link: "/worker/projects",
+  });
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");

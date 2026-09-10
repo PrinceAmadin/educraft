@@ -1,5 +1,6 @@
 import { LuCheck, LuClock } from "react-icons/lu";
 import { financialBreakdown } from "@/lib/project-display";
+import { PaymentVerification } from "@/components/projects/PaymentVerification";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
 
@@ -75,6 +76,26 @@ export function FinancialsTab({ project }: { project: ProjectDetail }) {
             <PaymentStatusPill status={f.balanceStatus} date={project.balanceDate} />
           </Line>
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold text-foreground">Verify payments</h3>
+        <PaymentVerification
+          projectCode={project.projectId}
+          leg="downpayment"
+          label="Downpayment"
+          amount={f.downpaymentAmount}
+          status={f.downpaymentStatus}
+          date={project.downpaymentDate}
+        />
+        <PaymentVerification
+          projectCode={project.projectId}
+          leg="balance"
+          label="Balance"
+          amount={f.balanceAmount}
+          status={f.balanceStatus}
+          date={project.balanceDate}
+        />
       </section>
 
       <section className="rounded-xl border border-border bg-card p-4">
