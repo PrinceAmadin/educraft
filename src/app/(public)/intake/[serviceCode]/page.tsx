@@ -1,0 +1,87 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import { db } from "@/lib/db";
+import { getServiceByCode } from "@/lib/services/intake";
+import { resolveTemplate } from "@/lib/intake-templates";
+import { IntakeForm } from "@/components/intake/IntakeForm";
+import { formatNaira } from "@/lib/utils";
+
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: { serviceCode: string };
+}): Promise<Metadata> {
+  const service = await getServiceByCode(params.serviceCode);
+  return { title: service ? `Start: ${service.serviceName}` : "Service not found" };
+}
+
+export default async function IntakeServicePage({
+  params,
+}: {
+  params: { serviceCode: string };
+}) {
+  const service = await getServiceByCode(params.serviceCode);
+  if (!service) notFound();
+
+  const template = resolveTemplate(service.intakeFormTemplate);
+
+  return (
+    <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:py-12">
+      <Link
+        href="/intake"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
+      >
+        <ArrowLeft className="size-4" aria-hidden />
+        All services
+      </Link>
+
+      <div className="mb-6 mt-4">
+        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+          {service.serviceName}
+        </h1>
+        <p className="mt-1 font-mono text-sm text-muted-foreground">
+          {service.pricingModel === "VARIABLE" && service.basePrice === 0
+            ? "Price confirmed after review"
+            : `${service.variants.length > 0 ? "from " : ""}${formatNaira(service.basePrice)}`}
+          {" · "}~{service.estimatedDays} days
+        </p>
+      </div>
+
+      {template ? (
+        <IntakeForm
+          template={template}
+          service={{
+            serviceCode: service.serviceCode,
+            serviceName: service.serviceName,
+            basePrice: service.basePrice,
+            estimatedDays: service.estimatedDays,
+            expressDeliverySurcharge: service.expressDeliverySurcharge,
+            pricingModel: service.pricingModel,
+          }}
+          universities={await db.university.findMany({
+            orderBy: { name: "asc" },
+            select: { id: true, name: true, abbreviation: true },
+          })}
+        />
+      ) : (
+        <div className="rounded-xl border border-border bg-card p-6 text-sm">
+          <p className="font-medium text-foreground">This one we handle over WhatsApp</p>
+          <p className="mt-1 text-muted-foreground">
+            The online form for this service isn&apos;t ready yet. Message us on 07063421088 or
+            educraft611@gmail.com with your requirements and we&apos;ll take it from there.
+          </p>
+          <Link
+            href="/intake"
+            className="mt-4 inline-flex text-sm font-medium text-primary hover:underline"
+          >
+            Choose another service
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}

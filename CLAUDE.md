@@ -316,7 +316,7 @@ Update this section as you build:
 - [x] Worker management + assignment
 - [x] Ambassador management
 - [x] Payout system (worker + ambassador; CSV export still pending)
-- [ ] Intake forms (multi-step, conditional)
+- [~] Intake forms (multi-step, conditional) — /intake selection + academic_fyp / academic_termpaper / academic_seminar; other templates (academic_it, career_cv, design_presentation, editing, letter) are Day 7+
 - [x] Referral tracking (code generation, referral link, referred-client history)
 - [x] Pipeline status transitions (state machine + guards; QA screen still pending)
 - [x] Payment verification (downpayment/balance verify; ambassador commission recorded on payout, not downpayment)
