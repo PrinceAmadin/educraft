@@ -322,7 +322,7 @@ Update this section as you build:
 - [x] Payment verification (mark-paid + verify modal with method/reference/date/notes; list quick action; ADMIN_HOLDS control on detail page)
 - [x] Notifications (in-app: topbar bell + feed, mark read/all; triggers for intake, payments, assignment, QA, revision cap, referral, payouts)
 - [x] QA review system (queue + checklist per template + pass/revision/escalate)
-- [ ] Worker portal
+- [x] Worker portal (dashboard, assignment detail with accept/submit, earnings, profile; strictly own-data scoped)
 - [ ] Ambassador portal
 - [ ] Ambassador application (/apply)
 - [ ] Services page (/services)
