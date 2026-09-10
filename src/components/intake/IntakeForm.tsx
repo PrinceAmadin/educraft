@@ -2,17 +2,18 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { FormProvider, useForm, useFormContext } from "react-hook-form";
+import { Controller, FormProvider, useFieldArray, useForm, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CircleAlert, Loader2 } from "lucide-react";
+import { CircleAlert, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Field } from "@/components/forms/Field";
+import { TagInput } from "@/components/forms/TagInput";
 import { FormProgress } from "@/components/intake/FormProgress";
 import { intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/intake";
 import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
-import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
+import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
 import { cn, formatNaira } from "@/lib/utils";
 
@@ -43,20 +44,6 @@ const STEP_FIELDS: Record<IntakeTemplate, Record<string, (keyof IntakeSubmitInpu
     prelims: ["dedicationType", "dedicationDetails", "acknowledgmentDetails"],
     review: ["agreeTerms"],
   },
-  academic_fyp_proposal: {
-    personal: ["fullName", "phone", "email", "universityId", "faculty", "department", "level", "matricNumber", "referralCode"],
-    project: ["projectTitle", "supervisorName", "hodName", "projectType", "chapterCount", "referencingStyle", "dataRequirements", "minimumPages"],
-    requirements: ["departmentOutline", "proposalNotes", "specialInstructions", "clientDeadline", "isExpressDelivery"],
-    prelims: ["dedicationType", "dedicationDetails", "acknowledgmentDetails"],
-    review: ["agreeTerms"],
-  },
-  academic_fyp_chapter: {
-    personal: ["fullName", "phone", "email", "universityId", "faculty", "department", "level", "matricNumber", "referralCode"],
-    project: ["projectTitle", "supervisorName", "hodName", "projectType", "chapterCount", "referencingStyle", "dataRequirements", "minimumPages"],
-    requirements: ["departmentOutline", "proposalNotes", "specialInstructions", "clientDeadline", "isExpressDelivery"],
-    prelims: ["dedicationType", "dedicationDetails", "acknowledgmentDetails"],
-    review: ["agreeTerms"],
-  },
   academic_termpaper: {
     personal: ["fullName", "phone", "email", "universityId", "department", "level", "referralCode"],
     details: ["courseTitle", "courseCode", "projectTitle", "wordCount", "referencingStyle", "clientDeadline"],
@@ -69,16 +56,45 @@ const STEP_FIELDS: Record<IntakeTemplate, Record<string, (keyof IntakeSubmitInpu
     requirements: ["departmentOutline", "specialInstructions", "clientDeadline", "isExpressDelivery"],
     review: ["agreeTerms"],
   },
+  academic_it: {
+    personal: ["fullName", "phone", "email", "universityId", "faculty", "department", "level", "matricNumber", "referralCode"],
+    it: ["companyName", "companyAddress", "itDuration", "companyDepartment", "companySupervisor", "projectTitle"],
+    files: ["specialInstructions", "clientDeadline"],
+    review: ["agreeTerms"],
+  },
+  career_cv: {
+    contact: ["fullName", "phone", "email", "linkedin", "address", "universityId", "referralCode"],
+    education: ["education"],
+    experience: ["experience"],
+    skills: ["skills", "certifications"],
+    style: ["stylePreference", "clientDeadline"],
+    review: ["agreeTerms"],
+  },
+  design_presentation: {
+    personal: ["fullName", "phone", "email", "universityId", "referralCode"],
+    presentation: ["projectTitle", "purpose", "audience", "slideCount", "contentSource"],
+    design: ["colorScheme", "designStyle"],
+    files: ["specialInstructions", "clientDeadline", "isExpressDelivery"],
+    review: ["agreeTerms"],
+  },
+  editing: {
+    personal: ["fullName", "phone", "email", "universityId", "referralCode"],
+    editing: ["editingType", "pageCount", "referencingStyle", "clientDeadline"],
+    files: ["specialInstructions"],
+    review: ["agreeTerms"],
+  },
 };
 
 export function IntakeForm({
   template,
   service,
   universities,
+  initialReferralCode = "",
 }: {
   template: IntakeTemplate;
   service: ServiceProp;
   universities: UniversityOption[];
+  initialReferralCode?: string;
 }) {
   const router = useRouter();
   const steps = TEMPLATE_STEPS[template];
@@ -89,21 +105,19 @@ export function IntakeForm({
     resolver: zodResolver(intakeSubmitSchema),
     mode: "onBlur",
     defaultValues: {
-      template: template === "academic_fyp" || template.startsWith("academic_fyp")
-        ? "academic_fyp"
-        : template === "academic_termpaper"
-          ? "academic_termpaper"
-          : "academic_seminar",
+      template,
       serviceCode: service.serviceCode,
       fullName: "",
       phone: "",
       email: "",
+      linkedin: "",
+      address: "",
       universityId: "",
       faculty: "",
       department: "",
       level: "",
       matricNumber: "",
-      referralCode: "",
+      referralCode: initialReferralCode,
       projectTitle: "",
       supervisorName: "",
       hodName: "",
@@ -114,6 +128,22 @@ export function IntakeForm({
       courseTitle: "",
       courseCode: "",
       lecturerInstructions: "",
+      companyName: "",
+      companyAddress: "",
+      itDuration: "",
+      companyDepartment: "",
+      companySupervisor: "",
+      education: [{ degree: "", school: "", year: "", cgpa: "" }],
+      experience: [{ title: "", company: "", dates: "", description: "" }],
+      skills: [],
+      certifications: [],
+      stylePreference: "",
+      purpose: "",
+      audience: "",
+      contentSource: "",
+      colorScheme: "",
+      designStyle: "",
+      editingType: "",
       departmentOutline: "",
       proposalNotes: "",
       specialInstructions: "",
@@ -122,7 +152,6 @@ export function IntakeForm({
       dedicationType: "",
       dedicationDetails: "",
       acknowledgmentDetails: "",
-      // agreeTerms intentionally unset (literal true required)
     } as Partial<IntakeSubmitInput> as IntakeSubmitInput,
   });
 
@@ -232,20 +261,69 @@ function StepContent({
   service: ServiceProp;
   price: ReturnType<typeof computePrice>;
 }) {
-  if (stepId === "personal")
-    return <PersonalStep universities={universities} minimal={template === "academic_termpaper"} />;
-  if (stepId === "project") return <FypProjectStep />;
-  if (stepId === "requirements" && template === "academic_seminar") return <SeminarRequirementsStep service={service} />;
-  if (stepId === "requirements") return <FypRequirementsStep service={service} />;
-  if (stepId === "prelims") return <FypPrelimsStep />;
-  if (stepId === "seminar") return <SeminarStep />;
-  if (stepId === "details") return <TermDetailsStep />;
-  if (stepId === "files") return <TermFilesStep />;
-  if (stepId === "review") return <ReviewStep service={service} price={price} />;
-  return null;
+  switch (stepId) {
+    case "personal":
+      return (
+        <PersonalStep
+          universities={universities}
+          variant={
+            template === "academic_termpaper" || template === "design_presentation" || template === "editing"
+              ? "light"
+              : "full"
+          }
+        />
+      );
+    case "contact":
+      return <CvContactStep universities={universities} />;
+    case "project":
+      return <FypProjectStep />;
+    case "requirements":
+      return template === "academic_seminar" ? (
+        <SeminarRequirementsStep service={service} />
+      ) : (
+        <FypRequirementsStep service={service} />
+      );
+    case "prelims":
+      return <FypPrelimsStep />;
+    case "seminar":
+      return <SeminarStep />;
+    case "details":
+      return <TermDetailsStep />;
+    case "it":
+      return <ItStep />;
+    case "education":
+      return <CvEducationStep />;
+    case "experience":
+      return <CvExperienceStep />;
+    case "skills":
+      return <CvSkillsStep />;
+    case "style":
+      return <CvStyleStep />;
+    case "presentation":
+      return <PresentationStep />;
+    case "design":
+      return <PresentationDesignStep />;
+    case "editing":
+      return <EditingStep />;
+    case "files":
+      return <FilesStep template={template} service={service} />;
+    case "review":
+      return <ReviewStep template={template} service={service} price={price} />;
+    default:
+      return null;
+  }
 }
 
 // ── Shared field helpers ─────────────────────────────────────
+
+function ReferralField() {
+  const { register } = useFormContext<IntakeSubmitInput>();
+  return (
+    <Field label="Referral code" htmlFor="referralCode" hint="From an EduCraft ambassador, if you have one">
+      <Input id="referralCode" {...register("referralCode")} />
+    </Field>
+  );
+}
 
 function ReferencingField() {
   const { register } = useFormContext<IntakeSubmitInput>();
@@ -269,11 +347,7 @@ function DeadlineField() {
     formState: { errors },
   } = useFormContext<IntakeSubmitInput>();
   return (
-    <Field
-      label="When do you need it?"
-      htmlFor="clientDeadline"
-      error={errors.clientDeadline?.message as string | undefined}
-    >
+    <Field label="When do you need it?" htmlFor="clientDeadline" error={errors.clientDeadline?.message as string | undefined}>
       <Input id="clientDeadline" type="date" {...register("clientDeadline")} />
     </Field>
   );
@@ -296,19 +370,44 @@ function ExpressField({ service }: { service: ServiceProp }) {
   );
 }
 
-// ── Steps ────────────────────────────────────────────────────
+function UniversitySelect({ universities }: { universities: UniversityOption[] }) {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<IntakeSubmitInput>();
+  return (
+    <Field label="University" required htmlFor="universityId" error={errors.universityId?.message as string | undefined}>
+      <Select id="universityId" {...register("universityId")}>
+        <option value="">Select your university</option>
+        {universities.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name} ({u.abbreviation})
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+const taClass = cn(
+  "w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle",
+  "focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+);
+
+// ── Academic steps ───────────────────────────────────────────
 
 function PersonalStep({
   universities,
-  minimal,
+  variant,
 }: {
   universities: UniversityOption[];
-  minimal: boolean;
+  variant: "full" | "light";
 }) {
   const {
     register,
     formState: { errors },
   } = useFormContext<IntakeSubmitInput>();
+  const full = variant === "full";
 
   return (
     <div className="space-y-5">
@@ -323,22 +422,18 @@ function PersonalStep({
         <Field label="Email" htmlFor="email" error={errors.email?.message}>
           <Input id="email" type="email" inputMode="email" autoComplete="email" {...register("email")} />
         </Field>
-        <Field label="University" required htmlFor="universityId" error={errors.universityId?.message}>
-          <Select id="universityId" {...register("universityId")}>
-            <option value="">Select your university</option>
-            {universities.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name} ({u.abbreviation})
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {!minimal ? (
+        <UniversitySelect universities={universities} />
+        {full ? (
           <Field label="Faculty" htmlFor="faculty">
             <Input id="faculty" {...register("faculty")} />
           </Field>
         ) : null}
-        <Field label="Department" required htmlFor="department" error={errors.department?.message}>
+        <Field
+          label="Department"
+          required={full}
+          htmlFor="department"
+          error={errors.department?.message as string | undefined}
+        >
           <Input id="department" {...register("department")} />
         </Field>
         <Field label="Level" htmlFor="level">
@@ -351,14 +446,12 @@ function PersonalStep({
             ))}
           </Select>
         </Field>
-        {!minimal ? (
+        {full ? (
           <Field label="Matric number" htmlFor="matricNumber">
             <Input id="matricNumber" {...register("matricNumber")} />
           </Field>
         ) : null}
-        <Field label="Referral code" htmlFor="referralCode" hint="From an EduCraft ambassador, if you have one">
-          <Input id="referralCode" {...register("referralCode")} />
-        </Field>
+        <ReferralField />
       </div>
     </div>
   );
@@ -372,7 +465,7 @@ function FypProjectStep() {
   return (
     <div className="space-y-5">
       <h2 className="text-base font-semibold text-foreground">Project</h2>
-      <Field label="Project topic" required htmlFor="projectTitle" error={errors.projectTitle?.message}>
+      <Field label="Project topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -419,18 +512,10 @@ function FypRequirementsStep({ service }: { service: ServiceProp }) {
   return (
     <div className="space-y-5">
       <h2 className="text-base font-semibold text-foreground">Requirements</h2>
-      <Field
-        label="Department outline"
-        htmlFor="departmentOutline"
-        hint="Paste your department's project outline, or describe the structure they expect"
-      >
+      <Field label="Department outline" htmlFor="departmentOutline" hint="Paste your department's outline, or describe the structure they expect">
         <textarea id="departmentOutline" rows={4} className={taClass} {...register("departmentOutline")} />
       </Field>
-      <Field
-        label="Proposal or existing work"
-        htmlFor="proposalNotes"
-        hint="Describe anything you've already written or been given"
-      >
+      <Field label="Proposal or existing work" htmlFor="proposalNotes" hint="Describe anything you've already written or been given">
         <textarea id="proposalNotes" rows={3} className={taClass} {...register("proposalNotes")} />
       </Field>
       <Field label="Special instructions" htmlFor="specialInstructions">
@@ -439,8 +524,7 @@ function FypRequirementsStep({ service }: { service: ServiceProp }) {
       <DeadlineField />
       <ExpressField service={service} />
       <p className="text-xs text-muted-foreground">
-        You&apos;ll share files (outline, proposal, questionnaires) with us on WhatsApp after
-        submitting.
+        You&apos;ll share files (outline, proposal, questionnaires) with us on WhatsApp after submitting.
       </p>
     </div>
   );
@@ -453,8 +537,7 @@ function FypPrelimsStep() {
     <div className="space-y-5">
       <h2 className="text-base font-semibold text-foreground">Preliminary pages</h2>
       <p className="text-sm text-muted-foreground">
-        Optional now — you can send these later. They help us prepare your dedication and
-        acknowledgment pages.
+        Optional now — these help us prepare your dedication and acknowledgment pages.
       </p>
       <fieldset className="space-y-2">
         <legend className="text-[13px] font-medium text-foreground">Dedication</legend>
@@ -475,11 +558,7 @@ function FypPrelimsStep() {
           <Input id="dedicationDetails" placeholder="e.g. My parents, Mr & Mrs Okafor" {...register("dedicationDetails")} />
         </Field>
       ) : null}
-      <Field
-        label="Acknowledgment"
-        htmlFor="acknowledgmentDetails"
-        hint="People to thank — supervisor, family, friends, sponsors"
-      >
+      <Field label="Acknowledgment" htmlFor="acknowledgmentDetails" hint="People to thank — supervisor, family, friends, sponsors">
         <textarea id="acknowledgmentDetails" rows={3} className={taClass} {...register("acknowledgmentDetails")} />
       </Field>
     </div>
@@ -494,7 +573,7 @@ function SeminarStep() {
   return (
     <div className="space-y-5">
       <h2 className="text-base font-semibold text-foreground">Seminar details</h2>
-      <Field label="Seminar topic" required htmlFor="projectTitle" error={errors.projectTitle?.message}>
+      <Field label="Seminar topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -512,11 +591,7 @@ function SeminarRequirementsStep({ service }: { service: ServiceProp }) {
   return (
     <div className="space-y-5">
       <h2 className="text-base font-semibold text-foreground">Requirements</h2>
-      <Field
-        label="Department outline / structure"
-        htmlFor="departmentOutline"
-        hint="Paste or describe what your department expects"
-      >
+      <Field label="Department outline / structure" htmlFor="departmentOutline" hint="Paste or describe what your department expects">
         <textarea id="departmentOutline" rows={4} className={taClass} {...register("departmentOutline")} />
       </Field>
       <Field label="Special instructions" htmlFor="specialInstructions">
@@ -544,7 +619,7 @@ function TermDetailsStep() {
           <Input id="courseCode" {...register("courseCode")} />
         </Field>
       </div>
-      <Field label="Topic" required htmlFor="projectTitle" error={errors.projectTitle?.message}>
+      <Field label="Topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -558,29 +633,325 @@ function TermDetailsStep() {
   );
 }
 
-function TermFilesStep() {
+function ItStep() {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<IntakeSubmitInput>();
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">IT placement</h2>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Company / organisation" required htmlFor="companyName" error={errors.companyName?.message as string | undefined}>
+          <Input id="companyName" {...register("companyName")} />
+        </Field>
+        <Field label="Company address" htmlFor="companyAddress">
+          <Input id="companyAddress" {...register("companyAddress")} />
+        </Field>
+        <Field label="Placement duration" required htmlFor="itDuration" error={errors.itDuration?.message as string | undefined} hint="e.g. 3 months, 6 months, 1 year">
+          <Input id="itDuration" {...register("itDuration")} />
+        </Field>
+        <Field label="Department at the company" htmlFor="companyDepartment">
+          <Input id="companyDepartment" {...register("companyDepartment")} />
+        </Field>
+        <Field label="Supervisor at the company" htmlFor="companySupervisor">
+          <Input id="companySupervisor" {...register("companySupervisor")} />
+        </Field>
+      </div>
+      <Field label="Report topic / focus" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
+        <Input id="projectTitle" {...register("projectTitle")} />
+      </Field>
+    </div>
+  );
+}
+
+// ── CV steps ─────────────────────────────────────────────────
+
+function CvContactStep({ universities }: { universities: UniversityOption[] }) {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<IntakeSubmitInput>();
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">Contact</h2>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Full name" required htmlFor="fullName" error={errors.fullName?.message}>
+          <Input id="fullName" autoComplete="name" {...register("fullName")} />
+        </Field>
+        <Field label="Phone (WhatsApp)" required htmlFor="phone" error={errors.phone?.message}>
+          <Input id="phone" inputMode="tel" {...register("phone")} />
+        </Field>
+        <Field label="Email" htmlFor="email" error={errors.email?.message}>
+          <Input id="email" type="email" inputMode="email" {...register("email")} />
+        </Field>
+        <Field label="LinkedIn" htmlFor="linkedin" hint="Profile URL or handle">
+          <Input id="linkedin" {...register("linkedin")} />
+        </Field>
+        <Field label="Address / city" htmlFor="address">
+          <Input id="address" {...register("address")} />
+        </Field>
+        <UniversitySelect universities={universities} />
+        <ReferralField />
+      </div>
+    </div>
+  );
+}
+
+function CvEducationStep() {
+  const { control, register } = useFormContext<IntakeSubmitInput>();
+  const { fields, append, remove } = useFieldArray({ control, name: "education" });
+  return (
+    <div className="space-y-4">
+      <h2 className="text-base font-semibold text-foreground">Education</h2>
+      {fields.map((f, i) => (
+        <div key={f.id} className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">Entry {i + 1}</span>
+            {fields.length > 1 ? (
+              <button type="button" onClick={() => remove(i)} className="text-xs text-danger hover:underline" aria-label={`Remove education entry ${i + 1}`}>
+                <Trash2 className="size-4" aria-hidden />
+              </button>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Degree / qualification" htmlFor={`edu-${i}-degree`}>
+              <Input id={`edu-${i}-degree`} {...register(`education.${i}.degree` as const)} />
+            </Field>
+            <Field label="School" htmlFor={`edu-${i}-school`}>
+              <Input id={`edu-${i}-school`} {...register(`education.${i}.school` as const)} />
+            </Field>
+            <Field label="Year" htmlFor={`edu-${i}-year`}>
+              <Input id={`edu-${i}-year`} {...register(`education.${i}.year` as const)} />
+            </Field>
+            <Field label="CGPA / grade" htmlFor={`edu-${i}-cgpa`}>
+              <Input id={`edu-${i}-cgpa`} {...register(`education.${i}.cgpa` as const)} />
+            </Field>
+          </div>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => append({ degree: "", school: "", year: "", cgpa: "" })}>
+        <Plus className="size-4" aria-hidden />
+        Add education
+      </Button>
+    </div>
+  );
+}
+
+function CvExperienceStep() {
+  const { control, register } = useFormContext<IntakeSubmitInput>();
+  const { fields, append, remove } = useFieldArray({ control, name: "experience" });
+  return (
+    <div className="space-y-4">
+      <h2 className="text-base font-semibold text-foreground">Experience</h2>
+      <p className="text-sm text-muted-foreground">Jobs, internships, volunteering, leadership roles.</p>
+      {fields.map((f, i) => (
+        <div key={f.id} className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-muted-foreground">Entry {i + 1}</span>
+            {fields.length > 1 ? (
+              <button type="button" onClick={() => remove(i)} className="text-danger hover:underline" aria-label={`Remove experience entry ${i + 1}`}>
+                <Trash2 className="size-4" aria-hidden />
+              </button>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Title / role" htmlFor={`exp-${i}-title`}>
+              <Input id={`exp-${i}-title`} {...register(`experience.${i}.title` as const)} />
+            </Field>
+            <Field label="Company / organisation" htmlFor={`exp-${i}-company`}>
+              <Input id={`exp-${i}-company`} {...register(`experience.${i}.company` as const)} />
+            </Field>
+            <Field label="Dates" htmlFor={`exp-${i}-dates`} hint="e.g. Jun 2024 – Aug 2024">
+              <Input id={`exp-${i}-dates`} {...register(`experience.${i}.dates` as const)} />
+            </Field>
+          </div>
+          <Field label="What you did" htmlFor={`exp-${i}-desc`}>
+            <textarea id={`exp-${i}-desc`} rows={2} className={taClass} {...register(`experience.${i}.description` as const)} />
+          </Field>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => append({ title: "", company: "", dates: "", description: "" })}>
+        <Plus className="size-4" aria-hidden />
+        Add experience
+      </Button>
+    </div>
+  );
+}
+
+function CvSkillsStep() {
+  const { control } = useFormContext<IntakeSubmitInput>();
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">Skills &amp; certifications</h2>
+      <Field label="Skills" htmlFor="skills" hint="Type and press Enter">
+        <Controller
+          control={control}
+          name="skills"
+          render={({ field }) => (
+            <TagInput id="skills" value={field.value ?? []} onChange={field.onChange} placeholder="e.g. Microsoft Excel" suggestions={[...COMMON_SKILLS]} />
+          )}
+        />
+      </Field>
+      <Field label="Certifications" htmlFor="certifications" hint="Courses, licences, awards">
+        <Controller
+          control={control}
+          name="certifications"
+          render={({ field }) => (
+            <TagInput id="certifications" value={field.value ?? []} onChange={field.onChange} placeholder="e.g. Google Data Analytics" />
+          )}
+        />
+      </Field>
+    </div>
+  );
+}
+
+const CV_STYLES = [
+  { value: "Modern", label: "Modern", blurb: "Clean, colour accent, single column" },
+  { value: "Classic", label: "Classic", blurb: "Traditional, black & white, formal" },
+  { value: "Creative", label: "Creative", blurb: "Bold layout, for design / media roles" },
+];
+
+function CvStyleStep() {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Lecturer instructions</h2>
-      <Field
-        label="Paste the assignment brief"
-        htmlFor="lecturerInstructions"
-        hint="Everything your lecturer asked for — marking guide, format, sources"
-      >
-        <textarea id="lecturerInstructions" rows={6} className={taClass} {...register("lecturerInstructions")} />
+      <h2 className="text-base font-semibold text-foreground">Style preference</h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {CV_STYLES.map((s) => (
+          <label
+            key={s.value}
+            className="flex cursor-pointer flex-col gap-1 rounded-lg border border-border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+          >
+            <span className="flex items-center gap-2">
+              <input type="radio" value={s.value} className="size-4 accent-primary" {...register("stylePreference")} />
+              <span className="font-medium text-foreground">{s.label}</span>
+            </span>
+            <span className="text-xs text-muted-foreground">{s.blurb}</span>
+          </label>
+        ))}
+      </div>
+      <DeadlineField />
+    </div>
+  );
+}
+
+// ── Presentation steps ───────────────────────────────────────
+
+function PresentationStep() {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<IntakeSubmitInput>();
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">Presentation</h2>
+      <Field label="Topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
+        <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Purpose" required htmlFor="purpose" error={errors.purpose?.message as string | undefined} hint="Class presentation, defence, pitch…">
+          <Input id="purpose" {...register("purpose")} />
+        </Field>
+        <Field label="Audience" htmlFor="audience">
+          <Input id="audience" {...register("audience")} />
+        </Field>
+        <Field label="Approx. slides" htmlFor="slideCount" error={errors.slideCount?.message as string | undefined}>
+          <Input id="slideCount" type="number" inputMode="numeric" min={1} {...register("slideCount")} />
+        </Field>
+      </div>
+      <Field label="Content source" htmlFor="contentSource" hint="Do you have the content, or should we write it? Paste what you have.">
+        <textarea id="contentSource" rows={3} className={taClass} {...register("contentSource")} />
+      </Field>
+    </div>
+  );
+}
+
+function PresentationDesignStep() {
+  const { register } = useFormContext<IntakeSubmitInput>();
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">Design preferences</h2>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Colour scheme" htmlFor="colorScheme" hint="Brand colours, school colours, or 'your choice'">
+          <Input id="colorScheme" {...register("colorScheme")} />
+        </Field>
+        <Field label="Style" htmlFor="designStyle" hint="Minimal, corporate, playful…">
+          <Input id="designStyle" {...register("designStyle")} />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+// ── Editing step ─────────────────────────────────────────────
+
+function EditingStep() {
+  const {
+    register,
+    formState: { errors },
+  } = useFormContext<IntakeSubmitInput>();
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">Editing</h2>
+      <Field label="What do you need?" required htmlFor="editingType" error={errors.editingType?.message as string | undefined}>
+        <Select id="editingType" {...register("editingType")}>
+          <option value="">Select</option>
+          <option value="Editing">Editing (grammar, clarity, flow)</option>
+          <option value="Formatting">Formatting only (layout, structure)</option>
+          <option value="Both">Both</option>
+        </Select>
+      </Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Approx. page count" htmlFor="pageCount" error={errors.pageCount?.message as string | undefined}>
+          <Input id="pageCount" type="number" inputMode="numeric" min={1} {...register("pageCount")} />
+        </Field>
+        <ReferencingField />
+      </div>
+      <DeadlineField />
       <p className="text-xs text-muted-foreground">
-        Have a document? You&apos;ll be able to send it on WhatsApp once you submit.
+        Editing is priced per document — we&apos;ll confirm the amount once we see it.
       </p>
     </div>
   );
 }
 
+// ── Files step (shared) ──────────────────────────────────────
+
+function FilesStep({ template, service }: { template: IntakeTemplate; service: ServiceProp }) {
+  const { register } = useFormContext<IntakeSubmitInput>();
+  const label =
+    template === "academic_it"
+      ? "Anything else we should know"
+      : template === "design_presentation"
+        ? "Content, references, or brand assets"
+        : template === "editing"
+          ? "Notes for the editor"
+          : "Special instructions";
+
+  return (
+    <div className="space-y-5">
+      <h2 className="text-base font-semibold text-foreground">Instructions</h2>
+      <Field label={label} htmlFor="specialInstructions">
+        <textarea id="specialInstructions" rows={5} className={taClass} {...register("specialInstructions")} />
+      </Field>
+      {template !== "editing" ? <DeadlineField /> : null}
+      {template === "design_presentation" ? <ExpressField service={service} /> : null}
+      <p className="text-xs text-muted-foreground">
+        Have documents to send? You&apos;ll be able to share them on WhatsApp once you submit.
+      </p>
+    </div>
+  );
+}
+
+// ── Review ───────────────────────────────────────────────────
+
 function ReviewStep({
+  template,
   service,
   price,
 }: {
+  template: IntakeTemplate;
   service: ServiceProp;
   price: ReturnType<typeof computePrice>;
 }) {
@@ -590,6 +961,7 @@ function ReviewStep({
     formState: { errors },
   } = useFormContext<IntakeSubmitInput>();
   const v = getValues();
+  const variablePrice = service.pricingModel === "VARIABLE" && service.basePrice === 0;
 
   return (
     <div className="space-y-5">
@@ -599,10 +971,21 @@ function ReviewStep({
         <Row label="Service" value={service.serviceName} />
         <Row label="Name" value={v.fullName} />
         <Row label="Phone" value={v.phone} />
-        <Row label="Department" value={v.department} />
-        <Row label="Topic" value={v.projectTitle} />
+        {v.projectTitle ? <Row label="Topic" value={v.projectTitle} /> : null}
+        {template === "career_cv" ? (
+          <Row
+            label="Entries"
+            value={`${(v.education ?? []).filter((e) => e.degree || e.school).length} education, ${
+              (v.experience ?? []).filter((e) => e.title || e.company).length
+            } experience`}
+          />
+        ) : null}
+        {template === "academic_it" && v.companyName ? <Row label="Company" value={v.companyName} /> : null}
+        {template === "editing" && v.editingType ? <Row label="Service" value={v.editingType} /> : null}
         {v.clientDeadline ? <Row label="Needed by" value={v.clientDeadline} /> : null}
-        <Row label="Express delivery" value={v.isExpressDelivery ? "Yes" : "No"} />
+        {template !== "editing" && template !== "career_cv" ? (
+          <Row label="Express delivery" value={v.isExpressDelivery ? "Yes" : "No"} />
+        ) : null}
         {v.referralCode ? <Row label="Referral code" value={v.referralCode} /> : null}
       </dl>
 
@@ -610,26 +993,28 @@ function ReviewStep({
         <div className="flex items-center justify-between">
           <span className="font-semibold text-foreground">Total price</span>
           <span className="font-mono font-semibold tabular-nums text-foreground">
-            {service.pricingModel === "VARIABLE" && service.basePrice === 0
-              ? "Confirmed after review"
-              : formatNaira(price.total)}
+            {variablePrice ? "Confirmed after review" : formatNaira(price.total)}
           </span>
         </div>
-        <div className="mt-1 flex items-center justify-between text-muted-foreground">
-          <span>Pay now (45% downpayment)</span>
-          <span className="font-mono tabular-nums">{formatNaira(price.downpaymentAmount)}</span>
-        </div>
-        <div className="flex items-center justify-between text-muted-foreground">
-          <span>Balance after QA approval</span>
-          <span className="font-mono tabular-nums">{formatNaira(price.balanceAmount)}</span>
-        </div>
+        {!variablePrice ? (
+          <>
+            <div className="mt-1 flex items-center justify-between text-muted-foreground">
+              <span>Pay now (45% downpayment)</span>
+              <span className="font-mono tabular-nums">{formatNaira(price.downpaymentAmount)}</span>
+            </div>
+            <div className="flex items-center justify-between text-muted-foreground">
+              <span>Balance after approval</span>
+              <span className="font-mono tabular-nums">{formatNaira(price.balanceAmount)}</span>
+            </div>
+          </>
+        ) : null}
       </div>
 
       <div className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">What happens next</p>
         <p className="mt-1">
           We confirm your details on WhatsApp and send payment instructions. Work begins once your
-          downpayment is verified. You can track progress any time with your project ID.
+          downpayment is verified. Track progress any time with your project ID.
         </p>
       </div>
 
@@ -640,9 +1025,7 @@ function ReviewStep({
           3 rounds of revisions within scope.
         </span>
       </label>
-      {errors.agreeTerms ? (
-        <p className="text-xs text-danger">{errors.agreeTerms.message as string}</p>
-      ) : null}
+      {errors.agreeTerms ? <p className="text-xs text-danger">{errors.agreeTerms.message as string}</p> : null}
     </div>
   );
 }
@@ -655,9 +1038,3 @@ function Row({ label, value }: { label: string; value?: string }) {
     </div>
   );
 }
-
-const taClass = cn(
-  "w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle",
-  "focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-);
-

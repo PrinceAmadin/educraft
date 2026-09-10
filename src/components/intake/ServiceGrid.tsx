@@ -54,8 +54,15 @@ function priceLabel(service: PublicService): string {
   return `${prefix}${formatNaira(service.basePrice)}`;
 }
 
-export function ServiceGrid({ services }: { services: PublicService[] }) {
+export function ServiceGrid({
+  services,
+  referralCode,
+}: {
+  services: PublicService[];
+  referralCode?: string;
+}) {
   const groups = groupServices(services);
+  const query = referralCode ? `?ref=${encodeURIComponent(referralCode)}` : "";
 
   return (
     <div className="space-y-10">
@@ -70,7 +77,7 @@ export function ServiceGrid({ services }: { services: PublicService[] }) {
               return (
                 <li key={service.id}>
                   <Link
-                    href={`/intake/${service.serviceCode}`}
+                    href={`/intake/${service.serviceCode}${query}`}
                     className="group flex h-full min-h-[88px] flex-col justify-between rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     <div>

@@ -21,13 +21,28 @@ export async function generateMetadata({
 
 export default async function IntakeServicePage({
   params,
+  searchParams,
 }: {
   params: { serviceCode: string };
+  searchParams: { ref?: string };
 }) {
   const service = await getServiceByCode(params.serviceCode);
   if (!service) notFound();
 
   const template = resolveTemplate(service.intakeFormTemplate);
+
+  // Validate a URL referral code so the form only prefills a real one.
+  const ref = searchParams.ref?.trim();
+  const referrer = ref
+    ? await db.ambassador.findUnique({
+        where: { referralCode: ref },
+        select: { status: true },
+      })
+    : null;
+  const initialReferralCode =
+    referrer && referrer.status !== "Suspended" && referrer.status !== "Terminated"
+      ? ref
+      : undefined;
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:py-12">
@@ -66,6 +81,7 @@ export default async function IntakeServicePage({
             orderBy: { name: "asc" },
             select: { id: true, name: true, abbreviation: true },
           })}
+          initialReferralCode={initialReferralCode}
         />
       ) : (
         <div className="rounded-xl border border-border bg-card p-6 text-sm">

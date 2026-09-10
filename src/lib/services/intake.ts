@@ -136,11 +136,60 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
 
   // Service-specific payload that has no dedicated column.
   const additionalData: Record<string, unknown> = {};
-  if (input.courseTitle) additionalData.courseTitle = input.courseTitle;
-  if (input.courseCode) additionalData.courseCode = input.courseCode;
-  if (input.wordCount) additionalData.wordCount = input.wordCount;
-  if (input.lecturerInstructions) additionalData.lecturerInstructions = input.lecturerInstructions;
-  if (input.proposalNotes) additionalData.proposalNotes = input.proposalNotes;
+  const add = (key: string, value: unknown) => {
+    if (value === undefined || value === null || value === "") return;
+    if (Array.isArray(value) && value.length === 0) return;
+    additionalData[key] = value;
+  };
+
+  add("courseTitle", input.courseTitle);
+  add("courseCode", input.courseCode);
+  add("wordCount", input.wordCount);
+  add("lecturerInstructions", input.lecturerInstructions);
+  add("proposalNotes", input.proposalNotes);
+
+  // IT report
+  add("companyName", input.companyName);
+  add("companyAddress", input.companyAddress);
+  add("itDuration", input.itDuration);
+  add("companyDepartment", input.companyDepartment);
+  add("companySupervisor", input.companySupervisor);
+
+  // CV / resume
+  add("linkedin", input.linkedin);
+  add("address", input.address);
+  add(
+    "education",
+    (input.education ?? []).filter((e) => e.degree || e.school || e.year || e.cgpa)
+  );
+  add(
+    "experience",
+    (input.experience ?? []).filter((e) => e.title || e.company || e.dates || e.description)
+  );
+  add("skills", input.skills);
+  add("certifications", input.certifications);
+  add("stylePreference", input.stylePreference);
+
+  // Presentation
+  add("purpose", input.purpose);
+  add("audience", input.audience);
+  add("slideCount", input.slideCount);
+  add("contentSource", input.contentSource);
+  add("colorScheme", input.colorScheme);
+  add("designStyle", input.designStyle);
+
+  // Editing
+  add("editingType", input.editingType);
+  add("pageCount", input.pageCount);
+
+  // Some templates carry no free-text topic — give the project a readable one.
+  const projectTitle =
+    input.projectTitle?.trim() ||
+    (input.template === "career_cv"
+      ? `CV / Resume — ${input.fullName.trim()}`
+      : input.template === "editing"
+        ? `Editing — ${input.fullName.trim()}`
+        : input.fullName.trim());
 
   const dedicationDetails =
     input.dedicationType || input.dedicationDetails
@@ -161,9 +210,9 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
           fullName: input.fullName.trim(),
           phone: input.phone.trim(),
           email: input.email || null,
-          universityId: input.universityId,
+          universityId: input.universityId as string,
           faculty: input.faculty || "",
-          department: input.department.trim(),
+          department: (input.department || "General").trim(),
           level: (input.level || "").trim(),
           referredById: ambassadorId,
           referralCodeUsed,
@@ -179,7 +228,7 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
           serviceId: service.id,
           status: "NEW",
           isExpressDelivery: input.isExpressDelivery,
-          projectTitle: input.projectTitle.trim(),
+          projectTitle,
           matricNumber: input.matricNumber || null,
           supervisorName: input.supervisorName || null,
           hodName: input.hodName || null,

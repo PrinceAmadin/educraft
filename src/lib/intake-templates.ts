@@ -1,15 +1,17 @@
 /**
  * Intake form templates. `intakeFormTemplate` on the Service row picks one.
- * Day 6 ships the three academic-writing templates; the rest fall back to a
- * "finish on WhatsApp" panel until their forms are built.
+ * Anything `resolveTemplate` can't map falls back to a "finish on WhatsApp"
+ * panel.
  */
 
 export const SUPPORTED_TEMPLATES = [
   "academic_fyp",
-  "academic_fyp_proposal",
-  "academic_fyp_chapter",
   "academic_termpaper",
   "academic_seminar",
+  "academic_it",
+  "career_cv",
+  "design_presentation",
+  "editing",
 ] as const;
 
 export type IntakeTemplate = (typeof SUPPORTED_TEMPLATES)[number];
@@ -19,6 +21,10 @@ export function resolveTemplate(raw: string): IntakeTemplate | null {
   if (raw.startsWith("academic_fyp")) return "academic_fyp";
   if (raw === "academic_termpaper") return "academic_termpaper";
   if (raw === "academic_seminar") return "academic_seminar";
+  if (raw === "academic_it") return "academic_it";
+  if (raw === "career_cv") return "career_cv";
+  if (raw === "design_presentation") return "design_presentation";
+  if (raw === "editing" || raw === "formatting") return "editing";
   return null;
 }
 
@@ -35,20 +41,6 @@ export const TEMPLATE_STEPS: Record<IntakeTemplate, StepDef[]> = {
     { id: "prelims", label: "Preliminary pages" },
     { id: "review", label: "Review" },
   ],
-  academic_fyp_proposal: [
-    { id: "personal", label: "Your details" },
-    { id: "project", label: "Project" },
-    { id: "requirements", label: "Requirements" },
-    { id: "prelims", label: "Preliminary pages" },
-    { id: "review", label: "Review" },
-  ],
-  academic_fyp_chapter: [
-    { id: "personal", label: "Your details" },
-    { id: "project", label: "Project" },
-    { id: "requirements", label: "Requirements" },
-    { id: "prelims", label: "Preliminary pages" },
-    { id: "review", label: "Review" },
-  ],
   academic_termpaper: [
     { id: "personal", label: "Your details" },
     { id: "details", label: "Details" },
@@ -59,6 +51,33 @@ export const TEMPLATE_STEPS: Record<IntakeTemplate, StepDef[]> = {
     { id: "personal", label: "Your details" },
     { id: "seminar", label: "Seminar" },
     { id: "requirements", label: "Requirements" },
+    { id: "review", label: "Review" },
+  ],
+  academic_it: [
+    { id: "personal", label: "Your details" },
+    { id: "it", label: "IT details" },
+    { id: "files", label: "Documents" },
+    { id: "review", label: "Review" },
+  ],
+  career_cv: [
+    { id: "contact", label: "Contact" },
+    { id: "education", label: "Education" },
+    { id: "experience", label: "Experience" },
+    { id: "skills", label: "Skills" },
+    { id: "style", label: "Style" },
+    { id: "review", label: "Review" },
+  ],
+  design_presentation: [
+    { id: "personal", label: "Your details" },
+    { id: "presentation", label: "Presentation" },
+    { id: "design", label: "Design" },
+    { id: "files", label: "Content" },
+    { id: "review", label: "Review" },
+  ],
+  editing: [
+    { id: "personal", label: "Your details" },
+    { id: "editing", label: "Editing" },
+    { id: "files", label: "Document" },
     { id: "review", label: "Review" },
   ],
 };

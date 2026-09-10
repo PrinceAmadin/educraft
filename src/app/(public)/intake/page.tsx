@@ -3,6 +3,7 @@ import { LuInbox } from "react-icons/lu";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ServiceGrid } from "@/components/intake/ServiceGrid";
 import { getActiveServices } from "@/lib/services/intake";
+import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
   title: "Start a project",
@@ -10,8 +11,25 @@ export const metadata: Metadata = {
 };
 export const dynamic = "force-dynamic";
 
-export default async function IntakePage() {
-  const services = await getActiveServices();
+export default async function IntakePage({
+  searchParams,
+}: {
+  searchParams: { ref?: string };
+}) {
+  const ref = searchParams.ref?.trim();
+
+  const [services, referrer] = await Promise.all([
+    getActiveServices(),
+    ref
+      ? db.ambassador.findUnique({
+          where: { referralCode: ref },
+          select: { fullName: true, status: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  const validRef =
+    referrer && referrer.status !== "Suspended" && referrer.status !== "Terminated" ? ref : undefined;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:py-14">
@@ -23,6 +41,11 @@ export default async function IntakePage() {
           Pick the service you need. You&apos;ll fill in a short form, we confirm the details, and
           work begins once your 45% downpayment lands.
         </p>
+        {validRef ? (
+          <p className="mt-3 inline-flex rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+            Referred by {referrer?.fullName} — your code is applied automatically
+          </p>
+        ) : null}
       </div>
 
       {services.length === 0 ? (
@@ -32,7 +55,7 @@ export default async function IntakePage() {
           description="Please check back shortly, or reach us on WhatsApp at 07063421088."
         />
       ) : (
-        <ServiceGrid services={services} />
+        <ServiceGrid services={services} referralCode={validRef} />
       )}
     </div>
   );
