@@ -69,6 +69,42 @@ export const PROJECT_TYPES = [
   { value: "NOT_APPLICABLE", label: "Not applicable" },
 ] as const;
 
+/** Quick-add suggestions for a worker's specialties (department areas). */
+export const COMMON_SPECIALTIES = [
+  "Mechanical Engineering",
+  "Electrical Engineering",
+  "Civil Engineering",
+  "Computer Science",
+  "Accounting",
+  "Economics",
+  "Business Administration",
+  "Mass Communication",
+  "Political Science",
+  "Microbiology",
+  "Biochemistry",
+  "Public Health",
+  "Education",
+  "Law",
+] as const;
+
+/** Quick-add suggestions for a worker's technical skills. */
+export const COMMON_SKILLS = [
+  "SPSS",
+  "MATLAB",
+  "AutoCAD",
+  "SolidWorks",
+  "Python",
+  "R",
+  "Stata",
+  "Origin",
+  "EViews",
+  "ANSYS",
+  "Arduino",
+  "Data Analysis",
+  "Statistical Modelling",
+  "Questionnaire Design",
+] as const;
+
 export interface NavItem {
   label: string;
   href: string;

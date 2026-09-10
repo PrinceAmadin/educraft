@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
 import { getProjectDetail } from "@/lib/services/projects";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
 import { ProjectActions } from "@/components/projects/ProjectActions";
@@ -32,15 +31,6 @@ export default async function ProjectDetailPage({
   const project = await getProjectDetail(params.id);
   if (!project) notFound();
 
-  const assignableWorkers =
-    project.status === "REQUIREMENTS_CONFIRMED"
-      ? await db.worker.findMany({
-          where: { status: "Active" },
-          orderBy: { fullName: "asc" },
-          select: { id: true, fullName: true },
-        })
-      : [];
-
   const tabs: ProjectTab[] = [
     { id: "requirements", label: "Requirements", content: <RequirementsTab project={project} /> },
     { id: "timeline", label: "Timeline", content: <TimelineTab project={project} /> },
@@ -71,7 +61,6 @@ export default async function ProjectDetailPage({
           balanceStatus: project.balanceStatus,
           hasWorker: Boolean(project.workerId),
         }}
-        workers={assignableWorkers.map((w) => ({ id: w.id, name: w.fullName }))}
       />
 
       <div className="rounded-xl border border-border bg-card p-4 sm:p-5">

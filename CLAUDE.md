@@ -313,7 +313,7 @@ Update this section as you build:
 - [x] Projects list + detail
 - [x] Manual project creation
 - [x] Client management
-- [ ] Worker management + assignment
+- [x] Worker management + assignment
 - [ ] Ambassador management
 - [ ] Payout system
 - [ ] Intake forms (multi-step, conditional)

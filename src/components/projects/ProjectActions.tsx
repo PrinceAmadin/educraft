@@ -1,17 +1,12 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CircleAlert, Loader2 } from "lucide-react";
 import type { ProjectStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-
-interface WorkerOption {
-  id: string;
-  name: string;
-}
 
 export interface ProjectActionState {
   id: string;
@@ -23,18 +18,10 @@ export interface ProjectActionState {
 
 type Pending = string | null;
 
-export function ProjectActions({
-  project,
-  workers,
-}: {
-  project: ProjectActionState;
-  workers: WorkerOption[];
-}) {
+export function ProjectActions({ project }: { project: ProjectActionState }) {
   const router = useRouter();
   const [pending, setPending] = React.useState<Pending>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [assigning, setAssigning] = React.useState(false);
-  const [workerId, setWorkerId] = React.useState("");
 
   const run = React.useCallback(
     async (key: string, path: string, body: unknown, method: "POST" | "PATCH" = "POST") => {
@@ -50,8 +37,6 @@ export function ProjectActions({
           const data = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(data?.error ?? "That action could not be completed.");
         }
-        setAssigning(false);
-        setWorkerId("");
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "That action could not be completed.");
@@ -94,50 +79,9 @@ export function ProjectActions({
 
   if (project.status === "REQUIREMENTS_CONFIRMED") {
     actions.push(
-      assigning ? (
-        <form
-          key="assign"
-          className="flex w-full flex-wrap items-center gap-2 sm:w-auto"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (workerId) run("assign", "assign", { workerId });
-          }}
-        >
-          <Select
-            value={workerId}
-            onChange={(e) => setWorkerId(e.target.value)}
-            className="h-9 w-full text-sm sm:w-56"
-            aria-label="Select a worker"
-            required
-          >
-            <option value="">Select a worker…</option>
-            {workers.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </Select>
-          <Button type="submit" size="sm" disabled={!workerId || pending !== null}>
-            {pending === "assign" ? <Loader2 className="size-4 animate-spin" /> : null}
-            Confirm
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setAssigning(false);
-              setError(null);
-            }}
-          >
-            Cancel
-          </Button>
-        </form>
-      ) : (
-        <Button key="assign" size="sm" onClick={() => setAssigning(true)} disabled={pending !== null}>
-          Assign worker
-        </Button>
-      )
+      <Button key="assign" asChild size="sm">
+        <Link href={`/admin/projects/${project.id}/assign`}>Assign worker</Link>
+      </Button>
     );
   }
 
