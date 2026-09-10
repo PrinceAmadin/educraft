@@ -41,6 +41,24 @@ export {
   LuMenu as IconMenu,
   LuX as IconClose,
 
+  /* Command Center */
+  LuFolderKanban as IconActiveProjects,
+  LuTrendingUp as IconRevenue,
+  LuWallet as IconPayouts,
+  LuTriangleAlert as IconAtRisk,
+  LuClock as IconDeadline,
+  LuActivity as IconActivity,
+  LuBellRing as IconActionRequired,
+  LuUserPlus as IconAssign,
+  LuClipboardCheck as IconQAQueue,
+  LuBanknote as IconVerifyPayment,
+  LuRotateCcw as IconRevision,
+  LuRefreshCw as IconRefresh,
+  LuCircleAlert as IconError,
+  LuInbox as IconEmpty,
+  LuMoveRight as IconTransition,
+  LuTrendingDown as IconTrendDown,
+
   /* Assurance + editorial */
   LuCircleCheck as IconCheck,
   LuQuote as IconQuote,

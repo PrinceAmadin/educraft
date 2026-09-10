@@ -1,0 +1,780 @@
+import { Prisma, type ProjectStatus } from "@prisma/client";
+import { db } from "@/lib/db";
+import { TIER_COMMISSION_RATE } from "@/lib/constants";
+import { computePrice, computeSplit } from "@/lib/pricing";
+import type { CreateProjectInput } from "@/lib/validations/projects";
+
+type DbClient = Prisma.TransactionClient | typeof db;
+
+// ─────────────────────────────────────────────────────────────
+// Pipeline state machine
+// ─────────────────────────────────────────────────────────────
+
+export interface TransitionRule {
+  to: ProjectStatus;
+  /** Human label for the action button that performs this move. */
+  action: string;
+  /** Returns null when allowed, or a reason string when blocked. */
+  guard?: (p: TransitionCandidate) => string | null;
+}
+
+/** The subset of a project the guards need. */
+export interface TransitionCandidate {
+  status: ProjectStatus;
+  workerId: string | null;
+  workerAccepted: boolean;
+  downpaymentStatus: string;
+  balanceStatus: string;
+  qaStatus: string | null;
+  projectTitle: string | null;
+  serviceId: string;
+  fileCount: number;
+}
+
+/**
+ * Allowed forward transitions, keyed by current status. Loops
+ * (REVISION_NEEDED, SUPERVISOR_CORRECTIONS) and admin-only holds
+ * (ON_HOLD, CANCELLED, …) are handled separately.
+ */
+export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
+  NEW: [
+    {
+      to: "DOWNPAYMENT_VERIFIED",
+      action: "Verify downpayment",
+      guard: (p) =>
+        p.downpaymentStatus === "Verified" ? null : "Downpayment is not verified yet",
+    },
+  ],
+  DOWNPAYMENT_VERIFIED: [
+    {
+      to: "REQUIREMENTS_CONFIRMED",
+      action: "Confirm requirements",
+      guard: (p) =>
+        p.projectTitle && p.serviceId ? null : "Project needs a title and a service",
+    },
+  ],
+  REQUIREMENTS_CONFIRMED: [
+    {
+      to: "ASSIGNED",
+      action: "Assign worker",
+      guard: (p) => (p.workerId ? null : "No worker assigned"),
+    },
+  ],
+  ASSIGNED: [
+    {
+      to: "IN_PROGRESS",
+      action: "Mark in progress",
+      guard: (p) => (p.workerAccepted ? null : "Worker has not accepted yet"),
+    },
+  ],
+  IN_PROGRESS: [
+    { to: "AWAITING_CLIENT_INPUT", action: "Pause for client input" },
+    {
+      to: "SUBMITTED",
+      action: "Mark submitted",
+      guard: (p) => (p.fileCount > 0 ? null : "No worker files uploaded"),
+    },
+  ],
+  AWAITING_CLIENT_INPUT: [{ to: "IN_PROGRESS", action: "Resume" }],
+  SUBMITTED: [{ to: "IN_QA_REVIEW", action: "Move to QA" }],
+  IN_QA_REVIEW: [
+    {
+      to: "APPROVED",
+      action: "Approve",
+      guard: (p) => (p.qaStatus === "Passed" ? null : "QA has not passed"),
+    },
+    { to: "REVISION_NEEDED", action: "Request revision" },
+  ],
+  REVISION_NEEDED: [{ to: "SUBMITTED", action: "Resubmit" }],
+  APPROVED: [
+    {
+      to: "BALANCE_VERIFIED",
+      action: "Verify balance",
+      guard: (p) => (p.balanceStatus === "Verified" ? null : "Balance is not verified yet"),
+    },
+  ],
+  BALANCE_VERIFIED: [{ to: "DELIVERED", action: "Deliver" }],
+  DELIVERED: [
+    { to: "SUPERVISOR_CORRECTIONS", action: "Log supervisor corrections" },
+    { to: "COMPLETED", action: "Mark completed" },
+  ],
+  SUPERVISOR_CORRECTIONS: [{ to: "DELIVERED", action: "Re-deliver" }],
+};
+
+export function allowedTransitions(candidate: TransitionCandidate): TransitionRule[] {
+  return TRANSITIONS[candidate.status] ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────
+// List
+// ─────────────────────────────────────────────────────────────
+
+export const PAGE_SIZE = 20;
+
+export type PaymentFilter = "Unpaid" | "Partial" | "Paid";
+export type ProjectFlag = "at-risk" | "overdue" | "revision-escalated";
+
+export interface ProjectListFilters {
+  status?: ProjectStatus;
+  serviceId?: string;
+  universityId?: string;
+  /** A worker id, or the literal "unassigned". */
+  workerId?: string;
+  payment?: PaymentFilter;
+  from?: string;
+  to?: string;
+  q?: string;
+  flag?: ProjectFlag;
+  page?: number;
+}
+
+const OPEN_STATUSES: ProjectStatus[] = [
+  "NEW",
+  "DOWNPAYMENT_VERIFIED",
+  "REQUIREMENTS_CONFIRMED",
+  "ASSIGNED",
+  "IN_PROGRESS",
+  "AWAITING_CLIENT_INPUT",
+  "SUBMITTED",
+  "IN_QA_REVIEW",
+  "REVISION_NEEDED",
+  "APPROVED",
+  "BALANCE_VERIFIED",
+  "DELIVERED",
+  "SUPERVISOR_CORRECTIONS",
+];
+
+function paymentWhere(payment: PaymentFilter): Prisma.ProjectWhereInput {
+  switch (payment) {
+    case "Unpaid":
+      return { downpaymentStatus: "Unpaid" };
+    case "Partial":
+      return {
+        downpaymentStatus: { in: ["Paid", "Verified"] },
+        NOT: { balanceStatus: "Verified" },
+      };
+    case "Paid":
+      return { balanceStatus: "Verified" };
+  }
+}
+
+function buildWhere(filters: ProjectListFilters, now: Date): Prisma.ProjectWhereInput {
+  const and: Prisma.ProjectWhereInput[] = [];
+
+  if (filters.status) and.push({ status: filters.status });
+  if (filters.serviceId) and.push({ serviceId: filters.serviceId });
+  if (filters.universityId) and.push({ client: { universityId: filters.universityId } });
+
+  if (filters.workerId === "unassigned") and.push({ workerId: null });
+  else if (filters.workerId) and.push({ workerId: filters.workerId });
+
+  if (filters.payment) and.push(paymentWhere(filters.payment));
+
+  if (filters.from) and.push({ createdAt: { gte: new Date(filters.from) } });
+  if (filters.to) {
+    // treat `to` as an inclusive calendar day
+    const end = new Date(filters.to);
+    end.setHours(23, 59, 59, 999);
+    and.push({ createdAt: { lte: end } });
+  }
+
+  if (filters.q?.trim()) {
+    const q = filters.q.trim();
+    and.push({
+      OR: [
+        { projectId: { contains: q, mode: "insensitive" } },
+        { projectTitle: { contains: q, mode: "insensitive" } },
+        { client: { fullName: { contains: q, mode: "insensitive" } } },
+      ],
+    });
+  }
+
+  const threeDays = new Date(now.getTime() + 3 * 86_400_000);
+  if (filters.flag === "at-risk") {
+    and.push({ status: "IN_PROGRESS", internalDeadline: { lt: threeDays } });
+  } else if (filters.flag === "overdue") {
+    and.push({ status: { in: OPEN_STATUSES }, internalDeadline: { lt: now } });
+  } else if (filters.flag === "revision-escalated") {
+    and.push({ status: { in: OPEN_STATUSES }, revisionCount: { gt: 3 } });
+  }
+
+  return and.length ? { AND: and } : {};
+}
+
+const listSelect = {
+  id: true,
+  projectId: true,
+  status: true,
+  projectTitle: true,
+  price: true,
+  downpaymentStatus: true,
+  balanceStatus: true,
+  clientDeadline: true,
+  internalDeadline: true,
+  createdAt: true,
+  client: { select: { id: true, fullName: true, university: { select: { abbreviation: true } } } },
+  service: { select: { serviceName: true } },
+  worker: { select: { id: true, fullName: true } },
+} satisfies Prisma.ProjectSelect;
+
+export type ProjectListRow = Prisma.ProjectGetPayload<{ select: typeof listSelect }>;
+
+export interface ProjectListResult {
+  rows: ProjectListRow[];
+  total: number;
+  page: number;
+  pageCount: number;
+}
+
+export async function listProjects(
+  filters: ProjectListFilters,
+  now: Date = new Date()
+): Promise<ProjectListResult> {
+  const page = Math.max(1, filters.page ?? 1);
+  const where = buildWhere(filters, now);
+
+  const [rows, total] = await db.$transaction([
+    db.project.findMany({
+      where,
+      select: listSelect,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    db.project.count({ where }),
+  ]);
+
+  return {
+    rows,
+    total,
+    page,
+    pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+  };
+}
+
+export interface FilterFacets {
+  services: { id: string; name: string }[];
+  universities: { id: string; name: string; abbreviation: string }[];
+  workers: { id: string; name: string }[];
+}
+
+export async function getFilterFacets(): Promise<FilterFacets> {
+  const [services, universities, workers] = await db.$transaction([
+    db.service.findMany({ orderBy: { serviceName: "asc" }, select: { id: true, serviceName: true } }),
+    db.university.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, abbreviation: true },
+    }),
+    db.worker.findMany({
+      where: { status: { not: "Terminated" } },
+      orderBy: { fullName: "asc" },
+      select: { id: true, fullName: true },
+    }),
+  ]);
+
+  return {
+    services: services.map((s) => ({ id: s.id, name: s.serviceName })),
+    universities,
+    workers: workers.map((w) => ({ id: w.id, name: w.fullName })),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Detail
+// ─────────────────────────────────────────────────────────────
+
+const detailInclude = {
+  client: { include: { university: true, referredBy: { select: { fullName: true, ambassadorId: true } } } },
+  service: true,
+  worker: true,
+  ambassador: { select: { fullName: true, ambassadorId: true, tier: true } },
+  files: { orderBy: { createdAt: "desc" } },
+  statusLog: {
+    orderBy: { createdAt: "asc" },
+    include: { changedBy: { select: { displayName: true, email: true } } },
+  },
+  payments: { orderBy: { date: "desc" } },
+} satisfies Prisma.ProjectInclude;
+
+export type ProjectDetail = Prisma.ProjectGetPayload<{ include: typeof detailInclude }>;
+
+/** Accepts either the cuid `id` or the human `EC-XXXXX` code. */
+export async function getProjectDetail(idOrCode: string): Promise<ProjectDetail | null> {
+  return db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    include: detailInclude,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mutations
+// ─────────────────────────────────────────────────────────────
+
+export class TransitionError extends Error {}
+
+interface TransitionOptions {
+  note?: string;
+  changedById: string;
+}
+
+/**
+ * Move a project to `to`, enforcing {@link TRANSITIONS} and writing a
+ * ProjectStatusLog in the same transaction. Side effects for specific
+ * targets (delivery date, deadline resume) are applied here too.
+ */
+export async function transitionProject(
+  idOrCode: string,
+  to: ProjectStatus,
+  { note, changedById }: TransitionOptions
+): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: {
+      id: true,
+      status: true,
+      workerId: true,
+      workerAccepted: true,
+      downpaymentStatus: true,
+      balanceStatus: true,
+      qaStatus: true,
+      projectTitle: true,
+      serviceId: true,
+      deadlinePausedAt: true,
+      internalDeadline: true,
+      _count: { select: { files: true } },
+    },
+  });
+
+  if (!project) throw new TransitionError("Project not found");
+
+  const candidate: TransitionCandidate = {
+    status: project.status,
+    workerId: project.workerId,
+    workerAccepted: project.workerAccepted,
+    downpaymentStatus: project.downpaymentStatus,
+    balanceStatus: project.balanceStatus,
+    qaStatus: project.qaStatus,
+    projectTitle: project.projectTitle,
+    serviceId: project.serviceId,
+    fileCount: project._count.files,
+  };
+
+  const rule = allowedTransitions(candidate).find((r) => r.to === to);
+  if (!rule) {
+    throw new TransitionError(
+      `Cannot move from ${project.status} to ${to}`
+    );
+  }
+
+  const blocked = rule.guard?.(candidate);
+  if (blocked) throw new TransitionError(blocked);
+
+  const data: Prisma.ProjectUpdateInput = { status: to };
+  const now = new Date();
+
+  if (to === "DELIVERED") data.deliveryDate = now;
+  if (to === "COMPLETED") data.finalCompletionDate = now;
+  if (to === "APPROVED") data.qaStatus = "Passed";
+  if (to === "REVISION_NEEDED") data.revisionCount = { increment: 1 };
+
+  // Deadline clock: pause on the way into AWAITING_CLIENT_INPUT, and on the
+  // way out add the paused span back onto the internal deadline.
+  if (to === "AWAITING_CLIENT_INPUT") {
+    data.deadlinePausedAt = now;
+  } else if (project.status === "AWAITING_CLIENT_INPUT" && project.deadlinePausedAt) {
+    const pausedDays = Math.ceil(
+      (now.getTime() - project.deadlinePausedAt.getTime()) / 86_400_000
+    );
+    data.deadlinePausedAt = null;
+    data.deadlinePausedDays = { increment: pausedDays };
+    if (project.internalDeadline && pausedDays > 0) {
+      data.internalDeadline = new Date(
+        project.internalDeadline.getTime() + pausedDays * 86_400_000
+      );
+    }
+  }
+
+  await db.$transaction([
+    db.project.update({ where: { id: project.id }, data }),
+    db.projectStatusLog.create({
+      data: {
+        projectId: project.id,
+        fromStatus: project.status,
+        toStatus: to,
+        changedById,
+        notes: note ?? rule.action,
+      },
+    }),
+  ]);
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+interface VerifyPaymentOptions {
+  leg: "downpayment" | "balance";
+  changedById: string;
+  reference?: string;
+}
+
+/**
+ * Verify a client payment leg that is marked "Paid". Sets the leg to
+ * "Verified", records a confirmed inbound Payment, and — when the project is
+ * sitting at the status that leg unblocks — advances it and logs the move.
+ */
+export async function verifyPayment(
+  idOrCode: string,
+  { leg, changedById, reference }: VerifyPaymentOptions
+): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      client: { select: { fullName: true } },
+      downpaymentStatus: true,
+      downpaymentAmount: true,
+      balanceStatus: true,
+      balanceAmount: true,
+    },
+  });
+
+  if (!project) throw new TransitionError("Project not found");
+
+  const legStatus = leg === "downpayment" ? project.downpaymentStatus : project.balanceStatus;
+  if (legStatus === "Verified") throw new TransitionError("That payment is already verified");
+  if (legStatus !== "Paid") throw new TransitionError("That payment is not marked paid yet");
+
+  const now = new Date();
+  const amount = leg === "downpayment" ? project.downpaymentAmount : project.balanceAmount;
+
+  const data: Prisma.ProjectUpdateInput =
+    leg === "downpayment"
+      ? { downpaymentStatus: "Verified", downpaymentDate: now, downpaymentReference: reference }
+      : { balanceStatus: "Verified", balanceDate: now, balanceReference: reference };
+
+  const advance =
+    leg === "downpayment" && project.status === "NEW"
+      ? ("DOWNPAYMENT_VERIFIED" as const)
+      : leg === "balance" && project.status === "APPROVED"
+        ? ("BALANCE_VERIFIED" as const)
+        : null;
+
+  if (advance) data.status = advance;
+
+  const writes: Prisma.PrismaPromise<unknown>[] = [
+    db.project.update({ where: { id: project.id }, data }),
+    db.payment.create({
+      data: {
+        paymentId: await nextId("PAYMENT"),
+        type: leg === "downpayment" ? "CLIENT_DOWNPAYMENT" : "CLIENT_BALANCE",
+        direction: "INFLOW",
+        projectId: project.id,
+        personName: project.client.fullName,
+        personRole: "Client",
+        amount,
+        reference,
+        confirmedById: changedById,
+        status: "Confirmed",
+      },
+    }),
+  ];
+
+  if (advance) {
+    writes.push(
+      db.projectStatusLog.create({
+        data: {
+          projectId: project.id,
+          fromStatus: project.status,
+          toStatus: advance,
+          changedById,
+          notes: `${leg === "downpayment" ? "Downpayment" : "Balance"} verified`,
+        },
+      })
+    );
+  }
+
+  await db.$transaction(writes);
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+interface AssignWorkerOptions {
+  workerId: string;
+  changedById: string;
+}
+
+export async function assignWorker(
+  idOrCode: string,
+  { workerId, changedById }: AssignWorkerOptions
+): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true, status: true },
+  });
+  if (!project) throw new TransitionError("Project not found");
+  if (project.status !== "REQUIREMENTS_CONFIRMED") {
+    throw new TransitionError("Workers are assigned once requirements are confirmed");
+  }
+
+  const worker = await db.worker.findUnique({ where: { id: workerId }, select: { id: true } });
+  if (!worker) throw new TransitionError("Worker not found");
+
+  const now = new Date();
+  await db.$transaction([
+    db.project.update({
+      where: { id: project.id },
+      data: { workerId, assignedDate: now, status: "ASSIGNED" },
+    }),
+    db.projectStatusLog.create({
+      data: {
+        projectId: project.id,
+        fromStatus: "REQUIREMENTS_CONFIRMED",
+        toStatus: "ASSIGNED",
+        changedById,
+        notes: "Worker assigned",
+      },
+    }),
+  ]);
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+export async function updateInternalNotes(
+  idOrCode: string,
+  notes: string
+): Promise<{ internalNotes: string | null }> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true },
+  });
+  if (!project) throw new TransitionError("Project not found");
+
+  return db.project.update({
+    where: { id: project.id },
+    data: { internalNotes: notes.trim() || null },
+    select: { internalNotes: true },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Manual creation
+// ─────────────────────────────────────────────────────────────
+
+export interface CreateProjectResult {
+  id: string;
+  projectId: string;
+}
+
+/**
+ * Admin-side project creation for WhatsApp intake. Resolves or creates the
+ * client, prices the service, links a referring ambassador if the code checks
+ * out, and opens the project at NEW with a status-log entry — all in one
+ * transaction so a half-created project can never exist.
+ */
+export async function createProjectManual(
+  input: CreateProjectInput,
+  createdById: string
+): Promise<CreateProjectResult> {
+  const service = await db.service.findUnique({
+    where: { id: input.serviceId },
+    include: { variants: true },
+  });
+  if (!service) throw new TransitionError("Service not found");
+
+  let variantAddon = 0;
+  let serviceVariantId: string | null = null;
+  if (input.serviceVariantId) {
+    const variant = service.variants.find((v) => v.id === input.serviceVariantId && v.isActive);
+    if (!variant) throw new TransitionError("Service variant not found");
+    variantAddon = variant.priceAddon;
+    serviceVariantId = variant.id;
+  }
+
+  const price = computePrice({
+    basePrice: service.basePrice,
+    variantAddon,
+    expressSurcharge: service.expressDeliverySurcharge ?? 0,
+    isExpressDelivery: input.isExpressDelivery,
+    override: input.priceOverride ?? null,
+  });
+
+  // Referral code → ambassador link (only for a brand-new client).
+  let ambassadorId: string | null = null;
+  let ambassadorCommRate: number | null = null;
+  let referralCodeUsed: string | null = null;
+
+  const referralCode =
+    input.clientMode === "new" ? (input.referralCode ?? "").trim() : "";
+  if (referralCode) {
+    const ambassador = await db.ambassador.findUnique({
+      where: { referralCode },
+      select: { id: true, tier: true, status: true },
+    });
+    if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
+      ambassadorId = ambassador.id;
+      ambassadorCommRate = TIER_COMMISSION_RATE[ambassador.tier] ?? 10;
+      referralCodeUsed = referralCode;
+    }
+  }
+
+  const split = computeSplit(price.total, ambassadorCommRate);
+
+  const now = new Date();
+  const clientDeadline = input.clientDeadline ? new Date(input.clientDeadline) : null;
+  const internalDeadline =
+    clientDeadline ?? new Date(now.getTime() + service.estimatedDays * 86_400_000);
+
+  const additionalData: Record<string, unknown> = {};
+  if (input.courseTitle) additionalData.courseTitle = input.courseTitle;
+  if (input.courseCode) additionalData.courseCode = input.courseCode;
+  if (input.wordCount) additionalData.wordCount = input.wordCount;
+
+  const created = await db.$transaction(async (tx) => {
+    let clientId: string;
+
+    if (input.clientMode === "existing") {
+      if (!input.clientId) throw new TransitionError("No client selected");
+      const existing = await tx.client.findUnique({
+        where: { id: input.clientId },
+        select: { id: true },
+      });
+      if (!existing) throw new TransitionError("Selected client not found");
+      clientId = existing.id;
+    } else {
+      const newClient = await tx.client.create({
+        data: {
+          clientId: await nextId("CLIENT", tx),
+          fullName: (input.fullName ?? "").trim(),
+          phone: (input.phone ?? "").trim(),
+          email: input.email ? input.email : null,
+          universityId: input.universityId as string,
+          faculty: input.faculty ?? "",
+          department: (input.department ?? "").trim(),
+          level: (input.level ?? "").trim(),
+          referredById: ambassadorId,
+          referralCodeUsed,
+          status: "Active",
+        },
+        select: { id: true },
+      });
+      clientId = newClient.id;
+    }
+
+    const project = await tx.project.create({
+      data: {
+        projectId: await nextId("PROJECT", tx),
+        clientId,
+        serviceId: service.id,
+        serviceVariantId,
+        status: "NEW",
+        isExpressDelivery: input.isExpressDelivery,
+        projectTitle: input.projectTitle,
+        matricNumber: input.matricNumber || null,
+        supervisorName: input.supervisorName || null,
+        hodName: input.hodName || null,
+        referencingStyle: input.referencingStyle ? input.referencingStyle : null,
+        minimumPages: input.minimumPages || null,
+        projectType: input.projectType ? input.projectType : "NOT_APPLICABLE",
+        chapterCount: input.chapterCount ?? null,
+        specialInstructions: input.specialInstructions || null,
+        additionalData:
+          Object.keys(additionalData).length > 0
+            ? (additionalData as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
+        clientDeadline,
+        internalDeadline,
+        price: price.total,
+        downpaymentAmount: price.downpaymentAmount,
+        balanceAmount: price.balanceAmount,
+        downpaymentStatus: "Unpaid",
+        balanceStatus: "Unpaid",
+        ambassadorId,
+        ambassadorCommRate,
+        ambassadorCommission: split.ambassadorCommission,
+        workerPayoutRate: 40,
+        workerPayout: split.workerPayout,
+        educraftRevenue: split.educraftRevenue,
+      },
+      select: { id: true, projectId: true },
+    });
+
+    await tx.projectStatusLog.create({
+      data: {
+        projectId: project.id,
+        fromStatus: "NEW",
+        toStatus: "NEW",
+        changedById: createdById,
+        notes: "Project created manually by admin",
+      },
+    });
+
+    return project;
+  });
+
+  return { id: created.id, projectId: created.projectId };
+}
+
+// ─────────────────────────────────────────────────────────────
+// ID generation
+// ─────────────────────────────────────────────────────────────
+
+const ID_PREFIX = {
+  PROJECT: "EC",
+  CLIENT: "EC-C",
+  WORKER: "EC-W",
+  AMBASSADOR: "EC-A",
+  PAYMENT: "EC-PAY",
+} as const;
+
+/**
+ * Sequential 5-digit id per entity type, e.g. EC-00234, EC-PAY-00007.
+ * Derived from the current row count plus a collision retry — good enough
+ * at this scale and readable, which the blueprint asks for.
+ */
+export async function nextId(
+  kind: keyof typeof ID_PREFIX,
+  client: DbClient = db
+): Promise<string> {
+  const prefix = ID_PREFIX[kind];
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let count: number;
+    let exists: (id: string) => Promise<boolean>;
+
+    switch (kind) {
+      case "PROJECT":
+        count = await client.project.count();
+        exists = async (id) => (await client.project.count({ where: { projectId: id } })) > 0;
+        break;
+      case "CLIENT":
+        count = await client.client.count();
+        exists = async (id) => (await client.client.count({ where: { clientId: id } })) > 0;
+        break;
+      case "WORKER":
+        count = await client.worker.count();
+        exists = async (id) => (await client.worker.count({ where: { workerId: id } })) > 0;
+        break;
+      case "AMBASSADOR":
+        count = await client.ambassador.count();
+        exists = async (id) => (await client.ambassador.count({ where: { ambassadorId: id } })) > 0;
+        break;
+      case "PAYMENT":
+        count = await client.payment.count();
+        exists = async (id) => (await client.payment.count({ where: { paymentId: id } })) > 0;
+        break;
+    }
+
+    const candidate = `${prefix}-${String(count + 1 + attempt).padStart(5, "0")}`;
+    if (!(await exists(candidate))) return candidate;
+  }
+
+  // Fall back to a timestamp suffix rather than loop forever.
+  return `${prefix}-${Date.now().toString().slice(-6)}`;
+}

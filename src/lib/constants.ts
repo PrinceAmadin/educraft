@@ -31,6 +31,44 @@ export const AMBASSADOR_TIERS = [
   { tier: "PLATINUM", min: 31, max: Infinity, rate: 15 },
 ] as const;
 
+/** Commission rate (%) for an ambassador tier. */
+export const TIER_COMMISSION_RATE: Record<string, number> = {
+  BRONZE: 10,
+  SILVER: 12,
+  GOLD: 15,
+  PLATINUM: 15,
+};
+
+/** Academic levels for client profiles and intake. */
+export const ACADEMIC_LEVELS = [
+  "100 Level",
+  "200 Level",
+  "300 Level",
+  "400 Level",
+  "500 Level",
+  "600 Level",
+  "Postgraduate",
+  "Graduate / Alumni",
+] as const;
+
+export const REFERENCING_STYLES = [
+  { value: "APA_7TH", label: "APA 7th" },
+  { value: "APA_6TH", label: "APA 6th" },
+  { value: "HARVARD", label: "Harvard" },
+  { value: "IEEE", label: "IEEE" },
+  { value: "CHICAGO", label: "Chicago" },
+  { value: "MLA", label: "MLA" },
+  { value: "CUSTOM", label: "Custom / other" },
+] as const;
+
+export const PROJECT_TYPES = [
+  { value: "THEORETICAL", label: "Theoretical" },
+  { value: "PRACTICAL", label: "Practical" },
+  { value: "DESIGN_BASED", label: "Design-based" },
+  { value: "SURVEY_BASED", label: "Survey-based" },
+  { value: "NOT_APPLICABLE", label: "Not applicable" },
+] as const;
+
 export interface NavItem {
   label: string;
   href: string;

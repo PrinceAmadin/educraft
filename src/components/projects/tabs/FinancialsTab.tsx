@@ -1,0 +1,154 @@
+import { LuCheck, LuClock } from "react-icons/lu";
+import { financialBreakdown } from "@/lib/project-display";
+import { cn, formatDate, formatNaira } from "@/lib/utils";
+import type { ProjectDetail } from "@/lib/services/projects";
+
+function PaymentStatusPill({ status, date }: { status: string; date?: Date | null }) {
+  if (status === "Verified") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
+        <LuCheck className="size-3.5" aria-hidden />
+        Verified{date ? ` · ${formatDate(date)}` : ""}
+      </span>
+    );
+  }
+  if (status === "Paid") {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-gold">
+        <LuClock className="size-3.5" aria-hidden />
+        Paid, awaiting verification
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+      <LuClock className="size-3.5" aria-hidden />
+      {status}
+    </span>
+  );
+}
+
+function Line({
+  label,
+  amount,
+  children,
+  strong,
+}: {
+  label: string;
+  amount: number | null;
+  children?: React.ReactNode;
+  strong?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-border py-2.5 last:border-0">
+      <div>
+        <p className={cn("text-sm", strong ? "font-semibold text-foreground" : "text-foreground")}>
+          {label}
+        </p>
+        {children ? <div className="mt-0.5">{children}</div> : null}
+      </div>
+      <p
+        className={cn(
+          "shrink-0 font-mono tabular-nums",
+          strong ? "text-base font-semibold text-foreground" : "text-sm text-foreground"
+        )}
+      >
+        {amount == null ? "—" : formatNaira(amount)}
+      </p>
+    </div>
+  );
+}
+
+export function FinancialsTab({ project }: { project: ProjectDetail }) {
+  const f = financialBreakdown(project);
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h3 className="text-sm font-semibold text-foreground">Price breakdown</h3>
+        <div className="mt-2">
+          <Line label="Total price" amount={f.total} strong />
+          <Line label="Downpayment (45%)" amount={f.downpaymentAmount}>
+            <PaymentStatusPill status={f.downpaymentStatus} date={project.downpaymentDate} />
+          </Line>
+          <Line label="Balance (55%)" amount={f.balanceAmount}>
+            <PaymentStatusPill status={f.balanceStatus} date={project.balanceDate} />
+          </Line>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Payout breakdown</h3>
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-xs font-medium",
+              f.payoutsDue
+                ? "border-transparent bg-success/15 text-success"
+                : "border-border bg-elevated text-muted-foreground"
+            )}
+          >
+            {f.payoutsDue ? "Due now" : "Due on completion"}
+          </span>
+        </div>
+        <div className="mt-2">
+          <Line
+            label={
+              f.ambassadorName
+                ? `Ambassador — ${f.ambassadorName}${f.ambassadorRate ? ` (${f.ambassadorRate}%)` : ""}`
+                : "Ambassador"
+            }
+            amount={f.ambassadorCommission}
+          >
+            {f.ambassadorName ? (
+              <span className="text-xs text-muted-foreground">
+                {f.ambassadorCommPaid ? "Paid" : f.payoutsDue ? "Unpaid" : "Not yet due"}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">No ambassador on this project</span>
+            )}
+          </Line>
+          <Line
+            label={`Worker${f.workerName ? ` — ${f.workerName}` : ""} (${f.workerPayoutRate}%)`}
+            amount={f.workerPayout}
+          >
+            <span className="text-xs text-muted-foreground">
+              {project.workerPayoutPaid ? "Paid" : f.payoutsDue ? "Unpaid" : "Not yet due"}
+            </span>
+          </Line>
+          <Line label="EduCraft revenue" amount={f.educraftRevenue} strong />
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Payouts become due when the project reaches COMPLETED. Ambassador commission is released
+          when the client&apos;s downpayment is verified.
+        </p>
+      </section>
+
+      {project.payments.length > 0 ? (
+        <section>
+          <h3 className="text-sm font-semibold text-foreground">Recorded payments</h3>
+          <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
+            {project.payments.map((p) => (
+              <li key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                <div>
+                  <p className="text-foreground">
+                    {p.type.replace(/_/g, " ").toLowerCase()}
+                    <span className="ml-2 font-mono text-xs text-muted-foreground">{p.paymentId}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(p.date)} · {p.status}
+                    {p.reference ? ` · ref ${p.reference}` : ""}
+                  </p>
+                </div>
+                <span className="shrink-0 font-mono tabular-nums text-foreground">
+                  {p.direction === "OUTFLOW" ? "−" : ""}
+                  {formatNaira(p.amount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}

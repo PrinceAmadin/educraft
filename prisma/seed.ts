@@ -476,7 +476,10 @@ async function main() {
   // ── Super admin ──
   const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? "admin@educraft.ng").toLowerCase();
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
-  const adminName = process.env.SEED_ADMIN_NAME ?? "Admin";
+  // The dashboard greets people by the first word of this name — "Prince
+  // Amadin" reads as "Welcome back, Prince". Override per-environment with
+  // SEED_ADMIN_NAME when the first admin is somebody else.
+  const adminName = process.env.SEED_ADMIN_NAME ?? "Prince Amadin";
 
   if (!adminPassword) {
     console.log(

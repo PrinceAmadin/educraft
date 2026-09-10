@@ -301,6 +301,10 @@ model Project {
   qaNotes       String?
   revisionCount Int     @default(0)
 
+  // ── Internal ──
+  /// Admin-only working notes. Never surfaced to client or worker.
+  internalNotes String?
+
   // ── Delivery ──
   deliveryDate                DateTime?
   clientFeedback              String?
