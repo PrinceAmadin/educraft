@@ -299,6 +299,8 @@ model Project {
   qaStatus      String?
   qaScore       Int?
   qaNotes       String?
+  /// Per-item QA checklist state: { "<item-id>": true }. Auto-saved.
+  qaChecklist   Json?
   revisionCount Int     @default(0)
 
   // ── Internal ──

@@ -1,0 +1,12 @@
+import { Skeleton } from "@/components/ui/skeleton";
+export default function Loading() {
+  return (
+    <div className="space-y-5">
+      <div><Skeleton className="h-8 w-32" /><Skeleton className="mt-2 h-4 w-80 max-w-full" /></div>
+      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[57px] rounded-none" />)}
+      </div>
+      <ul className="space-y-3 md:hidden">{Array.from({ length: 4 }).map((_, i) => <li key={i}><Skeleton className="h-[120px] rounded-xl" /></li>)}</ul>
+    </div>
+  );
+}

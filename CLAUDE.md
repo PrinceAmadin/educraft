@@ -321,7 +321,7 @@ Update this section as you build:
 - [x] Pipeline status transitions (state machine + guards; QA screen still pending)
 - [x] Payment verification (mark-paid + verify modal with method/reference/date/notes; list quick action; ADMIN_HOLDS control on detail page)
 - [x] Notifications (in-app: topbar bell + feed, mark read/all; triggers for intake, payments, assignment, QA, revision cap, referral, payouts)
-- [ ] QA review system
+- [x] QA review system (queue + checklist per template + pass/revision/escalate)
 - [ ] Worker portal
 - [ ] Ambassador portal
 - [ ] Ambassador application (/apply)

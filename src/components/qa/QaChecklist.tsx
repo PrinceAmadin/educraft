@@ -1,0 +1,126 @@
+"use client";
+
+import * as React from "react";
+import { LuCheck, LuCircleAlert } from "react-icons/lu";
+import { cn } from "@/lib/utils";
+import type { QaChecklistDef } from "@/lib/qa-checklists";
+
+/**
+ * QA checklist with debounced auto-save. `onChange` is called synchronously so
+ * the decision panel always submits the latest state alongside the decision.
+ */
+export function QaChecklist({
+  projectCode,
+  def,
+  initial,
+  onChange,
+  disabled = false,
+}: {
+  projectCode: string;
+  def: QaChecklistDef;
+  initial: Record<string, boolean>;
+  onChange?: (state: Record<string, boolean>) => void;
+  disabled?: boolean;
+}) {
+  const [state, setState] = React.useState<Record<string, boolean>>(initial);
+  const [saveState, setSaveState] = React.useState<"idle" | "saving" | "saved" | "error">("idle");
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const done = def.items.filter((i) => state[i.id]).length;
+
+  const persist = React.useCallback(
+    (next: Record<string, boolean>) => {
+      if (timer.current) clearTimeout(timer.current);
+      setSaveState("saving");
+      timer.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/admin/qa/${projectCode}/checklist`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ checklist: next }),
+          });
+          setSaveState(res.ok ? "saved" : "error");
+        } catch {
+          setSaveState("error");
+        }
+      }, 600);
+    },
+    [projectCode]
+  );
+
+  function toggle(id: string) {
+    if (disabled) return;
+    setState((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      onChange?.(next);
+      persist(next);
+      return next;
+    });
+  }
+
+  React.useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">{def.title}</h2>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="font-mono tabular-nums">
+            {done}/{def.items.length}
+          </span>
+          {saveState === "saving" ? (
+            <span>Saving…</span>
+          ) : saveState === "saved" ? (
+            <span className="inline-flex items-center gap-1 text-success">
+              <LuCheck className="size-3.5" aria-hidden />
+              Saved
+            </span>
+          ) : saveState === "error" ? (
+            <span className="inline-flex items-center gap-1 text-danger">
+              <LuCircleAlert className="size-3.5" aria-hidden />
+              Not saved
+            </span>
+          ) : null}
+        </span>
+      </div>
+
+      <ul className="mt-3 space-y-1">
+        {def.items.map((item) => {
+          const checked = Boolean(state[item.id]);
+          return (
+            <li key={item.id}>
+              <button
+                type="button"
+                onClick={() => toggle(item.id)}
+                disabled={disabled}
+                aria-pressed={checked}
+                className={cn(
+                  "flex w-full items-start gap-2.5 rounded-lg p-2 text-left text-sm transition-colors",
+                  "hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none",
+                  disabled && "cursor-default opacity-70 hover:bg-transparent"
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
+                    checked ? "border-primary bg-primary text-primary-foreground" : "border-border"
+                  )}
+                  aria-hidden
+                >
+                  {checked ? <LuCheck className="size-3" /> : null}
+                </span>
+                <span className={cn(checked ? "text-muted-foreground line-through" : "text-foreground")}>
+                  {item.label}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}

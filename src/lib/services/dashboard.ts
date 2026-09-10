@@ -147,7 +147,7 @@ export async function getDashboardSummary(now: Date = new Date()): Promise<Dashb
       where: { status: "REQUIREMENTS_CONFIRMED", workerId: null },
     }),
 
-    db.project.count({ where: { status: "SUBMITTED" } }),
+    db.project.count({ where: { status: { in: ["SUBMITTED", "IN_QA_REVIEW"] } } }),
 
     db.project.count({
       where: {
