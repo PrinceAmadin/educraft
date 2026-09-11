@@ -331,6 +331,6 @@ Update this section as you build:
 - [x] Expenses tracking (/admin/finance/expenses — add/filter/delete, month total, projected recurring)
 - [x] Reports (/admin/reports — monthly report, month picker, CSV/PDF export; Super Admin only)
 - [x] Settings + service management (general settings, service catalogue, team — pricing/team gated to Super Admin)
-- [ ] Mobile optimization pass
+- [x] Mobile optimization pass (audited every page against 375–1440px; fixed cramped stat grids, a QA checklist touch target, and referral-link input heights)
 - [ ] Light theme pass
 - [ ] Production deployment

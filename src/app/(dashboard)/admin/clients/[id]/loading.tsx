@@ -5,7 +5,7 @@ export default function ClientDetailLoading() {
     <div className="space-y-5">
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-[196px] rounded-xl" />
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <Skeleton key={i} className="h-[76px] rounded-xl" />
         ))}

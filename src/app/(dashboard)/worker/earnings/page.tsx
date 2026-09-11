@@ -33,7 +33,7 @@ export default async function WorkerEarningsPage() {
         <p className="mt-1 text-sm text-muted-foreground">Your 40% payout, per project.</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat label="Total earned" value={formatNaira(totalEarned)} />
         <Stat label="Total paid" value={formatNaira(totalPaid)} />
         <Stat label="Balance" value={formatNaira(balance)} strong />

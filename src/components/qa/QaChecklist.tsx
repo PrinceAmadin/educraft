@@ -99,14 +99,14 @@ export function QaChecklist({
                 disabled={disabled}
                 aria-pressed={checked}
                 className={cn(
-                  "flex w-full items-start gap-2.5 rounded-lg p-2 text-left text-sm transition-colors",
+                  "flex min-h-11 w-full items-center gap-2.5 rounded-lg p-2 text-left text-sm transition-colors",
                   "hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none",
                   disabled && "cursor-default opacity-70 hover:bg-transparent"
                 )}
               >
                 <span
                   className={cn(
-                    "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border",
+                    "flex size-4 shrink-0 items-center justify-center rounded border",
                     checked ? "border-primary bg-primary text-primary-foreground" : "border-border"
                   )}
                   aria-hidden

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { referralLink } from "@/lib/ambassador";
 
 export function ReferralLinkCard({ code }: { code: string }) {
@@ -34,11 +35,11 @@ export function ReferralLinkCard({ code }: { code: string }) {
         <span className="font-mono text-xs text-muted-foreground">{code}</span>
       </div>
       <div className="mt-2 flex items-stretch gap-2">
-        <input
+        <Input
           readOnly
           value={link}
           onFocus={(e) => e.currentTarget.select()}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-input px-3 font-mono text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="min-w-0 flex-1 font-mono text-xs"
           aria-label="Referral link"
         />
         <Button type="button" size="sm" variant="outline" onClick={copy} className="shrink-0">

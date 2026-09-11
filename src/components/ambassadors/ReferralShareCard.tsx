@@ -4,6 +4,7 @@ import * as React from "react";
 import { Check, Copy } from "lucide-react";
 import { LuMessageCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function ReferralShareCard({
   code,
@@ -41,11 +42,11 @@ export function ReferralShareCard({
 
       <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
-          <input
+          <Input
             readOnly
             value={link}
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full rounded-lg border border-border bg-input px-3 py-2.5 font-mono text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="font-mono text-sm"
             aria-label="Referral link"
           />
           <div className="mt-2 flex flex-wrap gap-2">

@@ -28,7 +28,7 @@ export default async function AmbassadorCommissionsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat label="Total earned" value={formatNaira(totalEarned)} />
         <Stat label="Total paid" value={formatNaira(totalPaid)} />
         <Stat label="Balance" value={formatNaira(balance)} strong />

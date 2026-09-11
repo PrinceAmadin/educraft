@@ -83,7 +83,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Stat label="Projects" value={String(stats.totalProjects)} />
         <Stat label="Total spent" value={formatNaira(stats.totalSpent, { compact: true })} />
         <Stat
