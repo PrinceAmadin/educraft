@@ -14,7 +14,8 @@
     "db:seed": "dotenv -e .env.local -- tsx prisma/seed.ts",
     "db:studio": "dotenv -e .env.local -- prisma studio",
     "db:deploy": "dotenv -e .env.local -- prisma migrate deploy",
-    "db:reset": "dotenv -e .env.local -- prisma migrate reset"
+    "db:reset": "dotenv -e .env.local -- prisma migrate reset",
+    "migrate:legacy": "dotenv -e .env.local -- tsx scripts/migrate-legacy-data.ts"
   },
   "prisma": {
     "seed": "dotenv -e .env.local -- tsx prisma/seed.ts"
@@ -61,6 +62,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.169.0",
     "autoprefixer": "^10.4.20",
+    "csv-parse": "^7.0.2",
     "dotenv-cli": "^11.0.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.18",
