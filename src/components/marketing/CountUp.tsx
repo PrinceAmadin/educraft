@@ -44,7 +44,13 @@ export function CountUp({
     [prefix, suffix, decimals]
   );
 
-  const [display, setDisplay] = React.useState(() => (reduced ? format(to) : format(0)));
+  // Always starts at format(0), matching what the server rendered — reduced
+  // resolves to false during SSR (no window to read the media query from),
+  // so branching on it here would make the client's very first render
+  // diverge from the server's and trip a hydration mismatch for anyone
+  // with prefers-reduced-motion on. The reduced-motion jump to the final
+  // value happens in the effect below instead, after hydration.
+  const [display, setDisplay] = React.useState(() => format(0));
 
   React.useEffect(() => {
     if (!inView) return;
