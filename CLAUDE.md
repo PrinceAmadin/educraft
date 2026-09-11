@@ -328,8 +328,8 @@ Update this section as you build:
 - [x] Services page (/services)
 - [x] Project tracker (/track — public, no sensitive data)
 - [ ] Financial dashboard
-- [ ] Expenses tracking
-- [ ] Reports
+- [x] Expenses tracking (/admin/finance/expenses — add/filter/delete, month total, projected recurring)
+- [x] Reports (/admin/reports — monthly report, month picker, CSV/PDF export; Super Admin only)
 - [x] Settings + service management (general settings, service catalogue, team — pricing/team gated to Super Admin)
 - [ ] Mobile optimization pass
 - [ ] Light theme pass
