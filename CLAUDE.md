@@ -327,7 +327,7 @@ Update this section as you build:
 - [x] Ambassador application (/apply + admin review/approve/reject)
 - [x] Services page (/services)
 - [x] Project tracker (/track — public, no sensitive data)
-- [ ] Financial dashboard
+- [x] Financial dashboard (/admin/finance — revenue cards, trend chart, cash flow breakdown, outstanding balances, business intelligence)
 - [x] Expenses tracking (/admin/finance/expenses — add/filter/delete, month total, projected recurring)
 - [x] Reports (/admin/reports — monthly report, month picker, CSV/PDF export; Super Admin only)
 - [x] Settings + service management (general settings, service catalogue, team — pricing/team gated to Super Admin)

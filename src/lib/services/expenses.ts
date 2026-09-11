@@ -92,6 +92,21 @@ export async function getMonthToDateTotal(now: Date = new Date()): Promise<numbe
   return agg._sum.amount ?? 0;
 }
 
+/** Expense totals by category within a date range, highest first. */
+export async function getExpensesByCategory(
+  start: Date,
+  end: Date
+): Promise<{ category: string; amount: number }[]> {
+  const rows = await db.expense.groupBy({
+    by: ["category"],
+    where: { date: { gte: start, lt: end } },
+    _sum: { amount: true },
+  });
+  return rows
+    .map((r) => ({ category: r.category, amount: r._sum.amount ?? 0 }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 export interface ProjectedRecurringItem {
   id: string;
   description: string;
