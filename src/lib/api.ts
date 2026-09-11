@@ -28,6 +28,25 @@ export async function requireAdmin(): Promise<
   return { ok: true, session: { userId: session.user.id, role: session.user.role } };
 }
 
+/**
+ * Guard for founder-only actions — team management, pricing changes. Stricter
+ * than {@link requireAdmin}: OPS_MANAGER is turned away with 403.
+ */
+export async function requireSuperAdmin(): Promise<
+  { ok: true; session: AdminSession } | { ok: false; response: NextResponse }
+> {
+  const session = await auth();
+
+  if (!session?.user) {
+    return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+  if (session.user.role !== "SUPER_ADMIN") {
+    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  return { ok: true, session: { userId: session.user.id, role: session.user.role } };
+}
+
 /** Guard for `/api/worker/*` — resolves the caller's own Worker row. */
 export async function requireWorker(): Promise<
   { ok: true; userId: string; workerId: string } | { ok: false; response: NextResponse }

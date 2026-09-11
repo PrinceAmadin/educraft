@@ -2,7 +2,7 @@ import { type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { notifyAdmins } from "@/lib/services/notifications";
 import { tierProgress, type TierProgress } from "@/lib/ambassador";
-import { TIER_COMMISSION_RATE } from "@/lib/constants";
+import { getCommissionRates } from "@/lib/services/settings";
 
 export async function getAmbassadorByUserId(userId: string) {
   return db.ambassador.findUnique({ where: { userId } });
@@ -78,7 +78,7 @@ export async function getAmbassadorDashboard(ambassadorId: string): Promise<Amba
     fullName: ambassador.fullName,
     referralCode: ambassador.referralCode,
     tier: ambassador.tier,
-    rate: TIER_COMMISSION_RATE[ambassador.tier] ?? 10,
+    rate: (await getCommissionRates())[ambassador.tier],
     metrics,
     progress: tierProgress(ambassador.tier, metrics.conversions),
   };
@@ -314,7 +314,7 @@ export async function getAmbassadorProfile(ambassadorId: string) {
   return {
     profile: ambassador,
     progress: tierProgress(ambassador.tier, conversions),
-    rate: TIER_COMMISSION_RATE[ambassador.tier] ?? 10,
+    rate: (await getCommissionRates())[ambassador.tier],
   };
 }
 

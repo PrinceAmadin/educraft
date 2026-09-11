@@ -32,6 +32,8 @@ export default async function IntakeSuccessPage({
   ]);
 
   const priceKnown = project ? project.price > 0 : false;
+  const downpaymentPct =
+    project && priceKnown ? Math.round((project.downpaymentAmount / project.price) * 100) : 45;
 
   return (
     <div className="mx-auto flex max-w-lg flex-col items-center px-4 py-16 text-center sm:py-20">
@@ -53,7 +55,7 @@ export default async function IntakeSuccessPage({
             <p className="font-semibold text-foreground">Payment instructions</p>
             {priceKnown ? (
               <p className="mt-1 text-muted-foreground">
-                Pay the 45% downpayment of{" "}
+                Pay the {downpaymentPct}% downpayment of{" "}
                 <span className="font-mono font-semibold text-foreground">
                   {formatNaira(project.downpaymentAmount)}
                 </span>{" "}

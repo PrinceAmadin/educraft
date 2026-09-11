@@ -2,8 +2,8 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { getCommissionRates } from "@/lib/services/settings";
 import { computePrice, computeSplit } from "@/lib/pricing";
-import { TIER_COMMISSION_RATE } from "@/lib/constants";
 import { resolveTemplate } from "@/lib/intake-templates";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
 
@@ -18,6 +18,7 @@ export interface PublicService {
   intakeFormTemplate: string;
   description: string | null;
   expressDeliverySurcharge: number | null;
+  downpaymentPercentage: number;
   sortOrder: number;
   variants: { id: string; name: string; priceAddon: number }[];
 }
@@ -37,6 +38,7 @@ export async function getActiveServices(): Promise<PublicService[]> {
       intakeFormTemplate: true,
       description: true,
       expressDeliverySurcharge: true,
+      downpaymentPercentage: true,
       sortOrder: true,
       variants: {
         where: { isActive: true },
@@ -62,6 +64,7 @@ export async function getServiceByCode(serviceCode: string): Promise<PublicServi
       intakeFormTemplate: true,
       description: true,
       expressDeliverySurcharge: true,
+      downpaymentPercentage: true,
       sortOrder: true,
       variants: {
         where: { isActive: true },
@@ -109,6 +112,7 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
     basePrice: service.basePrice,
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
+    downpaymentPercentage: service.downpaymentPercentage,
   });
 
   // Referral link
@@ -124,7 +128,7 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
     });
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
-      ambassadorCommRate = TIER_COMMISSION_RATE[ambassador.tier] ?? 10;
+      ambassadorCommRate = (await getCommissionRates())[ambassador.tier];
       referralCodeUsed = code;
       ambassadorUserId = ambassador.userId;
     }

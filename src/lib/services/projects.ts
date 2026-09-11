@@ -1,6 +1,6 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { TIER_COMMISSION_RATE } from "@/lib/constants";
+import { getCommissionRates } from "@/lib/services/settings";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import {
   MAX_REVISIONS,
@@ -725,6 +725,7 @@ export async function createProjectManual(
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     override: input.priceOverride ?? null,
+    downpaymentPercentage: service.downpaymentPercentage,
   });
 
   // Referral code → ambassador link (only for a brand-new client).
@@ -741,7 +742,7 @@ export async function createProjectManual(
     });
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
-      ambassadorCommRate = TIER_COMMISSION_RATE[ambassador.tier] ?? 10;
+      ambassadorCommRate = (await getCommissionRates())[ambassador.tier];
       referralCodeUsed = referralCode;
     }
   }

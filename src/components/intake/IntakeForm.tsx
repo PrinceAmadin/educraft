@@ -24,6 +24,7 @@ interface ServiceProp {
   estimatedDays: number;
   expressDeliverySurcharge: number | null;
   pricingModel: string;
+  downpaymentPercentage: number;
 }
 
 type UniversityOption = { id: string; name: string; abbreviation: string };
@@ -164,6 +165,7 @@ export function IntakeForm({
     basePrice: service.basePrice,
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: Boolean(isExpress),
+    downpaymentPercentage: service.downpaymentPercentage,
   });
 
   async function next() {

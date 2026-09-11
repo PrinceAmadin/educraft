@@ -330,7 +330,7 @@ Update this section as you build:
 - [ ] Financial dashboard
 - [ ] Expenses tracking
 - [ ] Reports
-- [ ] Settings + service management
+- [x] Settings + service management (general settings, service catalogue, team — pricing/team gated to Super Admin)
 - [ ] Mobile optimization pass
 - [ ] Light theme pass
 - [ ] Production deployment

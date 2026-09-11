@@ -2,7 +2,7 @@ import { Prisma, type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
 import { generateReferralCode, tierProgress } from "@/lib/ambassador";
-import { TIER_COMMISSION_RATE } from "@/lib/constants";
+import { getCommissionRates } from "@/lib/services/settings";
 import type { CreateAmbassadorInput } from "@/lib/validations/ambassadors";
 
 export const AMBASSADOR_PAGE_SIZE = 20;
@@ -121,6 +121,7 @@ export async function listAmbassadors(params: {
     db.ambassador.count({ where }),
   ]);
 
+  const rates = await getCommissionRates();
   const rows: AmbassadorListRow[] = ambassadors.map((a) => {
     const m = computeMetrics(
       a.referredClients.map((c) => c._count.projects),
@@ -133,7 +134,7 @@ export async function listAmbassadors(params: {
       university: a.university?.abbreviation ?? null,
       tier: a.tier,
       status: a.status,
-      rate: TIER_COMMISSION_RATE[a.tier] ?? 10,
+      rate: rates[a.tier],
       referrals: m.referrals,
       conversions: m.conversions,
       revenueGenerated: m.revenueGenerated,

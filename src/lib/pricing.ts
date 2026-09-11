@@ -7,6 +7,8 @@ export interface PriceInputs {
   isExpressDelivery?: boolean;
   /** When set, replaces the computed total (VARIABLE / QUOTE pricing). */
   override?: number | null;
+  /** Per-service override of the downpayment split. Defaults to the global 45%. */
+  downpaymentPercentage?: number;
 }
 
 export interface PriceBreakdown {
@@ -35,7 +37,8 @@ export function computePrice(inputs: PriceInputs): PriceBreakdown {
     inputs.override != null && Number.isFinite(inputs.override) && naira(inputs.override) !== computed;
   const total = overridden ? naira(inputs.override as number) : computed;
 
-  const downpaymentAmount = naira((total * DOWNPAYMENT_PERCENTAGE) / 100);
+  const downpaymentPct = inputs.downpaymentPercentage ?? DOWNPAYMENT_PERCENTAGE;
+  const downpaymentAmount = naira((total * downpaymentPct) / 100);
   const balanceAmount = total - downpaymentAmount;
 
   return { base, variantAddon, expressSurcharge, total, downpaymentAmount, balanceAmount, overridden };
