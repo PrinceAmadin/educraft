@@ -37,6 +37,11 @@ const interTight = Inter_Tight({
 });
 
 export const metadata: Metadata = {
+  // Resolves relative asset URLs (the OG/Twitter image, if one's added later)
+  // to an absolute one. Without this Next.js warns at build time and falls
+  // back to localhost, which is never reachable by a link-preview crawler.
+  // Override with NEXT_PUBLIC_SITE_URL once a custom domain is attached.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://educraft-hq.vercel.app"),
   title: {
     default: `${BRAND_NAME} — Academic work, done properly`,
     template: `%s · ${APP_NAME}`,
