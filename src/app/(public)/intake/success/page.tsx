@@ -92,7 +92,7 @@ export default async function IntakeSuccessPage({
 
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Button asChild>
-              <Link href={`/track?id=${encodeURIComponent(project.projectId)}`}>Track your project</Link>
+              <Link href={`/track/${encodeURIComponent(project.projectId)}`}>Track your project</Link>
             </Button>
             <Button asChild variant="outline">
               <Link href="/intake">Start another project</Link>

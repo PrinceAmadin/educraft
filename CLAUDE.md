@@ -324,9 +324,9 @@ Update this section as you build:
 - [x] QA review system (queue + checklist per template + pass/revision/escalate)
 - [x] Worker portal (dashboard, assignment detail with accept/submit, earnings, profile; strictly own-data scoped)
 - [x] Ambassador portal (dashboard w/ referral link + QR, referrals, commissions, leaderboard, profile; own-data scoped)
-- [ ] Ambassador application (/apply)
-- [ ] Services page (/services)
-- [ ] Project tracker (/track)
+- [x] Ambassador application (/apply + admin review/approve/reject)
+- [x] Services page (/services)
+- [x] Project tracker (/track — public, no sensitive data)
 - [ ] Financial dashboard
 - [ ] Expenses tracking
 - [ ] Reports

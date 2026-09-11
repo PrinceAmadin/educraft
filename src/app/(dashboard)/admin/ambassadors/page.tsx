@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuMegaphone, LuSearchX, LuPlus, LuBuilding2 } from "react-icons/lu";
+import { LuMegaphone, LuSearchX, LuPlus, LuBuilding2, LuInbox } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/shared/Pagination";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -23,7 +23,7 @@ export default async function AmbassadorsListPage({
   );
   const parsed = ambassadorListParamsSchema.parse(flat);
 
-  const [{ rows, total, page, pageCount }, universities] = await Promise.all([
+  const [{ rows, total, page, pageCount }, universities, pendingApplications] = await Promise.all([
     listAmbassadors({
       university: parsed.university,
       tier: parsed.tier,
@@ -32,6 +32,7 @@ export default async function AmbassadorsListPage({
       page: parsed.page,
     }),
     db.university.findMany({ orderBy: { name: "asc" }, select: { id: true, abbreviation: true } }),
+    db.ambassadorApplication.count({ where: { status: "PENDING" } }),
   ]);
 
   const hasFilters = Boolean(parsed.university || parsed.tier || parsed.status || parsed.q);
@@ -47,7 +48,18 @@ export default async function AmbassadorsListPage({
             Campus reps who bring in clients. Referrals, conversions, and commission owed.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="outline" className="shrink-0">
+            <Link href="/admin/ambassadors/applications">
+              <LuInbox className="size-4" aria-hidden />
+              Applications
+              {pendingApplications > 0 ? (
+                <span className="ml-1 rounded-full bg-gold/20 px-1.5 text-[11px] font-semibold text-gold">
+                  {pendingApplications}
+                </span>
+              ) : null}
+            </Link>
+          </Button>
           <Button asChild size="sm" variant="outline" className="shrink-0">
             <Link href="/admin/ambassadors/schools">
               <LuBuilding2 className="size-4" aria-hidden />
