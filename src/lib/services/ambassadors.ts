@@ -153,6 +153,7 @@ const detailSelect = {
   fullName: true,
   phone: true,
   email: true,
+  userId: true,
   department: true,
   level: true,
   referralCode: true,

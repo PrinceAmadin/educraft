@@ -332,5 +332,5 @@ Update this section as you build:
 - [x] Reports (/admin/reports — monthly report, month picker, CSV/PDF export; Super Admin only)
 - [x] Settings + service management (general settings, service catalogue, team — pricing/team gated to Super Admin)
 - [x] Mobile optimization pass (audited every page against 375–1440px; fixed cramped stat grids, a QA checklist touch target, and referral-link input heights)
-- [ ] Light theme pass
+- [x] Light theme pass (token audit — no hardcoded colors outside intentional always-dark surfaces) + bug fix sweep (workers/ambassadors can now be given a portal login — previously impossible)
 - [ ] Production deployment

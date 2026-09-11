@@ -7,6 +7,7 @@ import { getAmbassadorDetail } from "@/lib/services/ambassadors";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
+import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuUsers } from "react-icons/lu";
@@ -54,11 +55,18 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
               {ambassador.ambassadorId}
             </p>
           </div>
-          <AmbassadorControls
-            ambassadorId={ambassador.id}
-            status={ambassador.status}
-            tier={ambassador.tier}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <CreateLoginControl
+              endpoint={`/api/admin/ambassadors/${ambassador.id}/login`}
+              hasLogin={Boolean(ambassador.userId)}
+              prefillEmail={ambassador.email ?? ""}
+            />
+            <AmbassadorControls
+              ambassadorId={ambassador.id}
+              status={ambassador.status}
+              tier={ambassador.tier}
+            />
+          </div>
         </div>
 
         <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-3">

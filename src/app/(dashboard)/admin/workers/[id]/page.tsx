@@ -6,6 +6,7 @@ import { LuPhone, LuMail, LuGraduationCap } from "react-icons/lu";
 import { getWorkerDetail } from "@/lib/services/workers";
 import { WorkerStatusControl } from "@/components/workers/WorkerStatusControl";
 import { WorkerProjectHistory } from "@/components/workers/WorkerProjectHistory";
+import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { formatNaira } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +49,14 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
             </h1>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">{worker.workerId}</p>
           </div>
-          <WorkerStatusControl workerId={worker.id} current={worker.status} />
+          <div className="flex flex-wrap items-center gap-2">
+            <CreateLoginControl
+              endpoint={`/api/admin/workers/${worker.id}/login`}
+              hasLogin={Boolean(worker.userId)}
+              prefillEmail={worker.email ?? ""}
+            />
+            <WorkerStatusControl workerId={worker.id} current={worker.status} />
+          </div>
         </div>
 
         <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-3">

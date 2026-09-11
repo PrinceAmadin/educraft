@@ -158,6 +158,7 @@ const workerDetailSelect = {
   fullName: true,
   phone: true,
   email: true,
+  userId: true,
   educationLevel: true,
   status: true,
   specialties: true,
