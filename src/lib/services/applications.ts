@@ -8,9 +8,48 @@ export class ApplicationError extends Error {}
 
 // ── Public submit ────────────────────────────────────────────
 
+/**
+ * Rejects a resubmission from someone already in the system — by phone,
+ * email, or bank account — the same checks the original ambassador app made
+ * against Redis, now against Postgres. Checked against both pending
+ * applications and active ambassadors so nobody doubles up mid-review either.
+ */
+async function findConflict(input: {
+  phone: string;
+  email?: string;
+  accountNumber: string;
+}): Promise<string | null> {
+  const phone = input.phone.trim();
+  const email = input.email?.trim() || null;
+  const accountNumber = input.accountNumber.trim();
+
+  const [pendingApp, ambassador] = await Promise.all([
+    db.ambassadorApplication.findFirst({
+      where: {
+        status: "PENDING",
+        OR: [{ phone }, ...(email ? [{ email }] : []), { accountNumber }],
+      },
+      select: { id: true },
+    }),
+    db.ambassador.findFirst({
+      where: {
+        OR: [{ phone }, ...(email ? [{ email }] : []), { accountNumber }],
+      },
+      select: { id: true },
+    }),
+  ]);
+
+  if (pendingApp) return "An application with this phone, email, or bank account is already pending review.";
+  if (ambassador) return "This phone, email, or bank account already belongs to an ambassador.";
+  return null;
+}
+
 export async function submitApplication(
   input: AmbassadorApplicationInput
 ): Promise<{ id: string }> {
+  const conflict = await findConflict(input);
+  if (conflict) throw new ApplicationError(conflict);
+
   let universityId: string | null = null;
   if (input.universityId) {
     const uni = await db.university.findUnique({
@@ -30,6 +69,9 @@ export async function submitApplication(
       department: input.department || null,
       level: input.level || null,
       motivation: input.motivation || null,
+      bankName: input.bankName.trim(),
+      accountNumber: input.accountNumber.trim(),
+      accountName: input.accountName.trim(),
       status: "PENDING",
     },
     select: { id: true },
@@ -56,6 +98,9 @@ export interface ApplicationRow {
   department: string | null;
   level: string | null;
   motivation: string | null;
+  bankName: string | null;
+  accountNumber: string | null;
+  accountName: string | null;
   status: "PENDING" | "APPROVED" | "REJECTED";
   createdAt: string;
   reviewNote: string | null;
@@ -79,6 +124,9 @@ export async function listApplications(
       department: true,
       level: true,
       motivation: true,
+      bankName: true,
+      accountNumber: true,
+      accountName: true,
       status: true,
       reviewNote: true,
       ambassadorId: true,
@@ -97,6 +145,9 @@ export async function listApplications(
     department: r.department,
     level: r.level,
     motivation: r.motivation,
+    bankName: r.bankName,
+    accountNumber: r.accountNumber,
+    accountName: r.accountName,
     status: r.status,
     createdAt: r.createdAt.toISOString(),
     reviewNote: r.reviewNote,
@@ -123,6 +174,9 @@ export async function approveApplication(
       universityId: true,
       department: true,
       level: true,
+      bankName: true,
+      accountNumber: true,
+      accountName: true,
     },
   });
   if (!application) throw new ApplicationError("Application not found");
@@ -151,6 +205,9 @@ export async function approveApplication(
             universityId,
             department: application.department,
             level: application.level,
+            bankName: application.bankName,
+            accountNumber: application.accountNumber,
+            accountName: application.accountName,
             referralCode: generateReferralCode(application.fullName),
             tier: "BRONZE",
             status: "Active",

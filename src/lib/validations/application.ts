@@ -16,8 +16,24 @@ export const ambassadorApplicationSchema = z
       .max(200, "Keep it under 200 characters")
       .optional()
       .or(z.literal("")),
+    // Payment details — used to pay commission, so held to the same bar as
+    // the original ambassador app: a real bank, a 10-digit account number.
+    bankName: z.string().trim().min(2, "Select or enter your bank").max(80),
+    accountNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{10}$/, "Enter a 10-digit account number"),
+    accountName: z.string().trim().min(2, "Enter the account name").max(120),
+    agreeTerms: z.boolean(),
   })
   .superRefine((v, ctx) => {
+    if (!v.agreeTerms) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["agreeTerms"],
+        message: "You must agree to the Ambassador Terms to apply",
+      });
+    }
     if (!v.universityId && !v.otherUniversity) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

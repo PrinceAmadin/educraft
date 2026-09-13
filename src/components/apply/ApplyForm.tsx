@@ -16,7 +16,7 @@ import {
   UniversityCombobox,
   type UniversityOption,
 } from "@/components/forms/UniversityCombobox";
-import { ACADEMIC_LEVELS } from "@/lib/constants";
+import { ACADEMIC_LEVELS, NIGERIAN_BANKS } from "@/lib/constants";
 import {
   ambassadorApplicationSchema,
   type AmbassadorApplicationInput,
@@ -50,6 +50,10 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
       department: "",
       level: "",
       motivation: "",
+      bankName: "",
+      accountNumber: "",
+      accountName: "",
+      agreeTerms: false,
     },
   });
 
@@ -145,6 +149,46 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
         </div>
       </FormSection>
 
+      <FormSection
+        title="Payment details"
+        description="How your commission gets paid — kept accurate to the bank record."
+      >
+        <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
+          <Field label="Bank" required htmlFor="a-bank" error={errors.bankName?.message}>
+            <Input id="a-bank" list="a-bank-list" autoComplete="off" {...register("bankName")} />
+            <datalist id="a-bank-list">
+              {NIGERIAN_BANKS.map((b) => (
+                <option key={b} value={b} />
+              ))}
+            </datalist>
+          </Field>
+          <Field
+            label="Account number"
+            required
+            htmlFor="a-acctno"
+            error={errors.accountNumber?.message}
+          >
+            <Input
+              id="a-acctno"
+              inputMode="numeric"
+              maxLength={10}
+              autoComplete="off"
+              {...register("accountNumber")}
+            />
+          </Field>
+          <Field
+            label="Account name"
+            required
+            htmlFor="a-acctname"
+            error={errors.accountName?.message}
+            hint="Must match your bank record exactly"
+            className="sm:col-span-2"
+          >
+            <Input id="a-acctname" autoComplete="off" {...register("accountName")} />
+          </Field>
+        </div>
+      </FormSection>
+
       <FormSection title="Why EduCraft">
         <Field
           label="Why do you want to be an EduCraft ambassador?"
@@ -154,6 +198,22 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
         >
           <Textarea id="a-why" rows={4} maxLength={200} {...register("motivation")} />
         </Field>
+
+        <label className="mt-5 flex items-start gap-3 rounded-xl bg-zone p-4">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 shrink-0 accent-primary"
+            {...register("agreeTerms")}
+          />
+          <span className="text-sm text-foreground">
+            I agree to represent EduCraft accurately, and understand my commission rate depends on
+            my tier and is paid to the account above after a referred client&apos;s order is
+            confirmed.
+          </span>
+        </label>
+        {errors.agreeTerms ? (
+          <p className="mt-1.5 text-xs text-danger">{errors.agreeTerms.message}</p>
+        ) : null}
       </FormSection>
 
       <div className="space-y-4">

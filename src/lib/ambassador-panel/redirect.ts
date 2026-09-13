@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { esc } from "@/lib/ambassador-panel/email";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
 import { readRoster } from "@/lib/ambassador-panel/roster";
 import { SEED_ROSTER } from "@/lib/ambassador-panel/seed-roster";
@@ -47,6 +46,15 @@ async function readProfileName(key: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function esc(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function errorPage(title: string, body: string, status: number) {

@@ -115,6 +115,11 @@ model AmbassadorApplication {
   department      String?
   level           String?
   motivation      String?
+  /// Payment details, captured at application time so approval needs no
+  /// follow-up — mirrors the fields already on Ambassador.
+  bankName        String?
+  accountNumber   String?
+  accountName     String?
   status          ApplicationStatus  @default(PENDING)
   reviewedById    String?
   reviewNote      String?

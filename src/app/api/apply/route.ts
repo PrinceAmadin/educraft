@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { submitApplication } from "@/lib/services/applications";
+import { ApplicationError, submitApplication } from "@/lib/services/applications";
 import { ambassadorApplicationSchema } from "@/lib/validations/application";
 
 /** Public — no auth. */
@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
     const result = await submitApplication(parsed.data);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    if (error instanceof ApplicationError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     console.error("[POST /api/apply]", error);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
   }

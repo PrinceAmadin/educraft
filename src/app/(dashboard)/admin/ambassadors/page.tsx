@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuMegaphone, LuSearchX, LuPlus, LuBuilding2, LuInbox, LuLink } from "react-icons/lu";
+import { LuMegaphone, LuSearchX, LuPlus, LuBuilding2, LuInbox } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Pagination } from "@/components/shared/Pagination";
@@ -45,12 +45,6 @@ export default async function AmbassadorsListPage({
         description="Campus reps who bring in clients. Referrals, conversions, and commission owed."
         actions={
           <>
-          <Button asChild size="sm" variant="outline" className="shrink-0">
-            <Link href="/admin/ambassadors/panel">
-              <LuLink className="size-4" aria-hidden />
-              Referral panel
-            </Link>
-          </Button>
           <Button asChild size="sm" variant="outline" className="shrink-0">
             <Link href="/admin/ambassadors/applications">
               <LuInbox className="size-4" aria-hidden />

@@ -79,6 +79,11 @@ export function ApplicationReview({
                   {row.department ? ` · ${row.department}` : ""}
                   {row.level ? ` · ${row.level}` : ""}
                 </p>
+                {row.bankName ? (
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    {row.bankName} · {row.accountNumber} · {row.accountName}
+                  </p>
+                ) : null}
                 {row.motivation ? (
                   <p className="mt-2 rounded-lg bg-elevated p-2 text-sm text-foreground">
                     &ldquo;{row.motivation}&rdquo;

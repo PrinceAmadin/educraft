@@ -40,6 +40,46 @@ export const TIER_COMMISSION_RATE: Record<string, number> = {
 };
 
 /** Academic levels for client profiles and intake. */
+/** Commission payout banks — shown on the ambassador application's payment step. */
+export const NIGERIAN_BANKS = [
+  "Access Bank",
+  "Citibank Nigeria",
+  "Coronation Merchant Bank",
+  "Ecobank Nigeria",
+  "FBNQuest Merchant Bank",
+  "Fidelity Bank",
+  "First Bank of Nigeria",
+  "First City Monument Bank (FCMB)",
+  "Globus Bank",
+  "Greenwich Merchant Bank",
+  "Guaranty Trust Bank (GTBank)",
+  "Jaiz Bank",
+  "Keystone Bank",
+  "Kuda Bank",
+  "Moniepoint Microfinance Bank",
+  "Nova Merchant Bank",
+  "Opay",
+  "PalmPay",
+  "Parallex Bank",
+  "Polaris Bank",
+  "PremiumTrust Bank",
+  "Providus Bank",
+  "Rand Merchant Bank",
+  "Rubies Microfinance Bank",
+  "Stanbic IBTC Bank",
+  "Standard Chartered Bank Nigeria",
+  "Sterling Bank",
+  "SunTrust Bank Nigeria",
+  "TAJ Bank",
+  "Titan Trust Bank",
+  "Union Bank of Nigeria",
+  "United Bank for Africa (UBA)",
+  "Unity Bank",
+  "VFD Microfinance Bank",
+  "Wema Bank",
+  "Zenith Bank",
+].sort();
+
 export const ACADEMIC_LEVELS = [
   "100 Level",
   "200 Level",
