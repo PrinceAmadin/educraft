@@ -48,7 +48,7 @@ export function AmbassadorsFilterBar({
   ).length;
 
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-card p-3 sm:p-4">
+    <div className="space-y-4">
       <label className="relative block">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle"
@@ -140,7 +140,7 @@ function FilterSelect({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="mb-1 block meta-label">
         {label}
       </span>
       <Select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 text-sm" aria-label={label}>

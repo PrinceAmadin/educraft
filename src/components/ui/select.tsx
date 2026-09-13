@@ -1,5 +1,6 @@
 import * as React from "react";
-import { ChevronDown } from "lucide-react";
+import { LuChevronDown } from "react-icons/lu";
+import { fieldClasses } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,17 +15,12 @@ const Select = React.forwardRef<
   <div className="relative">
     <select
       ref={ref}
-      className={cn(
-        "flex h-12 w-full appearance-none rounded-lg border border-border bg-input px-3 pr-9 text-base text-foreground transition-colors",
-        "focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
+      className={cn("flex h-12 appearance-none px-3.5 pr-9", fieldClasses, className)}
       {...props}
     >
       {children}
     </select>
-    <ChevronDown
+    <LuChevronDown
       className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-subtle"
       aria-hidden
     />

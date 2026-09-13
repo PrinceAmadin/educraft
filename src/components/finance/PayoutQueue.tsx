@@ -35,8 +35,8 @@ export function PayoutQueue({ data }: { data: PendingPayouts }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="rounded-2xl bg-zone p-4 sm:p-5">
+        <p className="meta-label">
           Total pending
         </p>
         <p className="mt-1 font-mono text-2xl font-medium tabular-nums text-foreground">
@@ -49,7 +49,7 @@ export function PayoutQueue({ data }: { data: PendingPayouts }) {
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="rounded-2xl bg-zone p-4 sm:p-5">
         <ProjectTabs tabs={tabs} />
       </div>
     </div>
@@ -117,7 +117,7 @@ function PayoutTable({
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">
-          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="mb-1 block meta-label">
             Payment date
           </span>
           <Input
@@ -128,7 +128,7 @@ function PayoutTable({
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="mb-1 block meta-label">
             Reference
           </span>
           <Input
@@ -166,7 +166,7 @@ function PayoutTable({
         {groups.map((g) => (
           <li
             key={g.id}
-            className="rounded-xl border border-border bg-card p-4 sm:flex sm:items-start sm:justify-between sm:gap-4"
+            className="surface p-4 sm:flex sm:items-start sm:justify-between sm:gap-4"
           >
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -178,7 +178,7 @@ function PayoutTable({
                 </Link>
                 <span className="font-mono text-xs text-muted-foreground">{g.code}</span>
                 {g.rate != null ? (
-                  <span className="rounded-full border border-border bg-elevated px-2 py-0.5 text-[11px] text-muted-foreground">
+                  <span className="rounded-full bg-elevated px-2 py-0.5 text-[11px] text-muted-foreground">
                     {g.rate}%
                   </span>
                 ) : null}

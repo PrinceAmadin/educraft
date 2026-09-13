@@ -25,7 +25,7 @@ export function ExpensesFilterBar() {
   const activeCount = ["category", "from", "to"].filter((k) => searchParams.get(k)).length;
 
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-card p-3 sm:p-4">
+    <div className="space-y-4">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <FilterSelect
           label="Category"
@@ -82,7 +82,7 @@ function FilterSelect({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="mb-1 block meta-label">
         {label}
       </span>
       <Select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 text-sm" aria-label={label}>
@@ -103,7 +103,7 @@ function FilterDate({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="mb-1 block meta-label">
         {label}
       </span>
       <Input

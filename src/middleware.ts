@@ -17,10 +17,10 @@ export default auth((req) => {
   const user = req.auth?.user;
   const path = nextUrl.pathname;
 
-  const isProtected =
-    path.startsWith("/admin") ||
-    path.startsWith("/worker") ||
-    path.startsWith("/ambassador");
+  // Whole path segments only — `/ambassador-panel/*` is a public page and must
+  // not be caught by the `/ambassador` portal prefix.
+  const under = (root: string) => path === root || path.startsWith(`${root}/`);
+  const isProtected = under("/admin") || under("/worker") || under("/ambassador");
 
   // Signed in and heading to /login → bounce to their own dashboard
   if (path === "/login" && user) {
@@ -38,7 +38,7 @@ export default auth((req) => {
   const allowedRoot = ROLE_ROOT[user.role];
 
   // Wrong portal for this role → send them to the right one
-  if (!allowedRoot || !path.startsWith(allowedRoot)) {
+  if (!allowedRoot || !under(allowedRoot)) {
     return NextResponse.redirect(new URL(allowedRoot ?? "/", nextUrl));
   }
 

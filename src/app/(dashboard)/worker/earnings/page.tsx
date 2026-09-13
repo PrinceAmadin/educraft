@@ -45,7 +45,7 @@ export default async function WorkerEarningsPage() {
         <>
           <ul className="space-y-3 md:hidden">
             {rows.map((r) => (
-              <li key={r.projectId} className="rounded-xl border border-border bg-card p-4">
+              <li key={r.projectId} className="surface p-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-sm font-medium text-foreground">{r.projectId}</span>
                   <StatusBadge status={r.status} short />
@@ -61,10 +61,10 @@ export default async function WorkerEarningsPage() {
             ))}
           </ul>
 
-          <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+          <div className="hidden md:block">
             <Table>
               <TableHeader>
-                <TableRow className="bg-card hover:bg-card">
+                <TableRow className="hover:bg-transparent">
                   <TableHead>Project</TableHead>
                   <TableHead>Service</TableHead>
                   <TableHead>Status</TableHead>
@@ -74,7 +74,7 @@ export default async function WorkerEarningsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <TableRow key={r.projectId} className="bg-card">
+                  <TableRow key={r.projectId}>
                     <TableCell className="font-mono text-sm font-medium text-foreground">
                       {r.projectId}
                     </TableCell>
@@ -107,8 +107,8 @@ export default async function WorkerEarningsPage() {
 
 function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+    <div className="rounded-xl bg-zone p-3 sm:p-4">
+      <p className="meta-label">{label}</p>
       <p className={`mt-1 font-mono text-lg font-medium tabular-nums ${strong ? "text-foreground" : "text-muted-foreground"}`}>
         {value}
       </p>

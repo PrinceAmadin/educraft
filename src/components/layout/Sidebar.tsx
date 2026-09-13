@@ -57,7 +57,8 @@ export function Sidebar({ role }: { role: NavRole }) {
           // Hidden on mobile — MobileNav takes over below md
           "hidden md:flex md:flex-col",
           // In-flow flex child so the content area reflows when it collapses
-          "sticky top-0 z-40 h-screen shrink-0 border-r border-border bg-card",
+          // No dividing line — the sidebar is one surface step off the page
+          "sticky top-0 z-40 h-screen shrink-0 bg-card",
           "transition-[width] duration-200 ease-out",
           collapsed ? "w-16" : "w-60"
         )}
@@ -65,7 +66,7 @@ export function Sidebar({ role }: { role: NavRole }) {
         {/* Brand */}
         <div
           className={cn(
-            "flex h-16 shrink-0 items-center border-b border-border",
+            "flex h-16 shrink-0 items-center",
             collapsed ? "justify-center px-2" : "px-4"
           )}
         >
@@ -82,13 +83,11 @@ export function Sidebar({ role }: { role: NavRole }) {
           {sections.map((section, i) => (
             <div key={section.heading ?? i} className={cn(i > 0 && "mt-6")}>
               {section.heading && !collapsed && (
-                <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-subtle">
+                <p className="mb-1.5 px-3 text-xs font-medium text-subtle">
                   {section.heading}
                 </p>
               )}
-              {section.heading && collapsed && (
-                <div className="mx-3 mb-2 h-px bg-border" aria-hidden />
-              )}
+              {section.heading && collapsed && <div className="mb-2 h-2" aria-hidden />}
               <ul className="space-y-1">
                 {section.items.map((item) => {
                   const active = isActive(pathname, item);
@@ -100,8 +99,8 @@ export function Sidebar({ role }: { role: NavRole }) {
                         "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                         collapsed && "justify-center px-0",
                         active
-                          ? "bg-primary/[0.12] text-primary"
-                          : "text-muted-foreground hover:bg-elevated hover:text-foreground"
+                          ? "bg-primary/[0.09] text-primary"
+                          : "text-muted-foreground hover:bg-zone hover:text-foreground"
                       )}
                     >
                       <item.icon className="h-[18px] w-[18px] shrink-0" />
@@ -131,7 +130,7 @@ export function Sidebar({ role }: { role: NavRole }) {
         </nav>
 
         {/* Collapse control */}
-        <div className="shrink-0 border-t border-border p-2">
+        <div className="shrink-0 p-2">
           <Button
             variant="ghost"
             size={collapsed ? "icon-sm" : "sm"}

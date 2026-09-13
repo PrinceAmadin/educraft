@@ -6,7 +6,7 @@ export default function ProjectDetailLoading() {
       <Skeleton className="h-4 w-24" />
       <Skeleton className="h-[168px] rounded-xl" />
       <Skeleton className="h-[68px] rounded-xl" />
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <div className="flex gap-3 border-b border-border pb-3">
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-6 w-20" />

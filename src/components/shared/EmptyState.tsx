@@ -3,6 +3,7 @@ import type { AppIcon } from "@/lib/icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+/** Empty region — a quiet zone band, never a dashed box. */
 export function EmptyState({
   icon: Icon,
   title,
@@ -19,17 +20,17 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center",
+        "flex flex-col items-center gap-3 rounded-2xl bg-zone px-6 py-14 text-center",
         className
       )}
     >
-      <span className="rounded-lg bg-elevated p-2.5 text-muted-foreground">
-        <Icon className="size-6" aria-hidden />
+      <span className="rounded-full bg-card p-3 text-muted-foreground shadow-soft">
+        <Icon className="size-5" aria-hidden />
       </span>
       <div>
         <p className="text-sm font-medium text-foreground">{title}</p>
         {description ? (
-          <p className="mx-auto mt-1 max-w-[42ch] text-xs text-muted-foreground">{description}</p>
+          <p className="mx-auto mt-1 max-w-[42ch] text-[13px] text-muted-foreground">{description}</p>
         ) : null}
       </div>
       {action ? (

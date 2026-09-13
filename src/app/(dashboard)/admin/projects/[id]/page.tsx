@@ -51,16 +51,15 @@ export default async function ProjectDetailPage({
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <ProjectDetailHeader project={project} />
 
       <ProjectActions
         project={{ code: project.projectId, candidate: toCandidate(project) }}
       />
 
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <ProjectTabs tabs={tabs} initial={searchParams.tab} />
-      </div>
+      {/* The tabs sit on the page — the tab track is the only line. */}
+      <ProjectTabs tabs={tabs} initial={searchParams.tab} />
     </div>
   );
 }

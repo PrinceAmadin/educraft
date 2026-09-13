@@ -27,7 +27,7 @@ export function QaStartReview({ projectCode }: { projectCode: string }) {
   }
 
   return (
-    <div className="rounded-xl border border-gold/30 bg-gold/10 p-4">
+    <div className="rounded-2xl bg-gold/10 p-4">
       <p className="text-sm font-medium text-foreground">This project is waiting for QA</p>
       <p className="mt-1 text-sm text-muted-foreground">
         Starting the review moves it to IN QA REVIEW and assigns it to you.

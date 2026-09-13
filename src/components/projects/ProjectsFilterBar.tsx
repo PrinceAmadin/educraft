@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, X } from "lucide-react";
+import { LuSearch, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -33,6 +33,7 @@ const FILTER_KEYS = [
   "flag",
 ] as const;
 
+/** Search and filters, set directly on the page — the fields carry the affordance. */
 export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -71,10 +72,10 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
   const activeCount = FILTER_KEYS.filter((k) => searchParams.get(k)).length;
 
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-card p-3 sm:p-4">
+    <div className="space-y-4">
       <label className="relative block">
-        <Search
-          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle"
+        <LuSearch
+          className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-subtle"
           aria-hidden
         />
         <Input
@@ -82,17 +83,13 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by project ID, client name, or topic"
-          className="pl-9"
+          className="pl-10"
           aria-label="Search projects"
         />
       </label>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-        <FilterSelect
-          label="Status"
-          value={searchParams.get("status") ?? ""}
-          onChange={(v) => commit({ status: v || null })}
-        >
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+        <FilterSelect label="Status" value={searchParams.get("status") ?? ""} onChange={(v) => commit({ status: v || null })}>
           <option value="">All statuses</option>
           {ALL_STATUSES.map((s) => (
             <option key={s} value={s}>
@@ -101,11 +98,7 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
           ))}
         </FilterSelect>
 
-        <FilterSelect
-          label="Service"
-          value={searchParams.get("service") ?? ""}
-          onChange={(v) => commit({ service: v || null })}
-        >
+        <FilterSelect label="Service" value={searchParams.get("service") ?? ""} onChange={(v) => commit({ service: v || null })}>
           <option value="">All services</option>
           {facets.services.map((s) => (
             <option key={s.id} value={s.id}>
@@ -127,11 +120,7 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
           ))}
         </FilterSelect>
 
-        <FilterSelect
-          label="Worker"
-          value={searchParams.get("worker") ?? ""}
-          onChange={(v) => commit({ worker: v || null })}
-        >
+        <FilterSelect label="Worker" value={searchParams.get("worker") ?? ""} onChange={(v) => commit({ worker: v || null })}>
           <option value="">All workers</option>
           <option value="unassigned">Unassigned</option>
           {facets.workers.map((w) => (
@@ -141,34 +130,22 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
           ))}
         </FilterSelect>
 
-        <FilterSelect
-          label="Payment"
-          value={searchParams.get("payment") ?? ""}
-          onChange={(v) => commit({ payment: v || null })}
-        >
+        <FilterSelect label="Payment" value={searchParams.get("payment") ?? ""} onChange={(v) => commit({ payment: v || null })}>
           <option value="">Any payment</option>
           <option value="Unpaid">Unpaid</option>
           <option value="Partial">Partial</option>
           <option value="Paid">Paid in full</option>
         </FilterSelect>
 
-        <div className="col-span-2 grid grid-cols-2 gap-2 sm:col-span-1">
-          <FilterDate
-            label="From"
-            value={searchParams.get("from") ?? ""}
-            onChange={(v) => commit({ from: v || null })}
-          />
-          <FilterDate
-            label="To"
-            value={searchParams.get("to") ?? ""}
-            onChange={(v) => commit({ to: v || null })}
-          />
+        <div className="col-span-2 grid grid-cols-2 gap-3 sm:col-span-3 lg:col-span-2">
+          <FilterDate label="From" value={searchParams.get("from") ?? ""} onChange={(v) => commit({ from: v || null })} />
+          <FilterDate label="To" value={searchParams.get("to") ?? ""} onChange={(v) => commit({ to: v || null })} />
         </div>
       </div>
 
       {activeCount > 0 ? (
         <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[13px] text-muted-foreground">
             {activeCount} filter{activeCount === 1 ? "" : "s"} active
           </p>
           <Button
@@ -179,7 +156,7 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
               router.replace(pathname, { scroll: false });
             }}
           >
-            <X className="size-4" aria-hidden />
+            <LuX className="size-4" aria-hidden />
             Clear all
           </Button>
         </div>
@@ -201,15 +178,8 @@ function FilterSelect({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
-      <Select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-11 text-sm"
-        aria-label={label}
-      >
+      <span className="meta-label mb-1.5 block">{label}</span>
+      <Select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 text-sm" aria-label={label}>
         {children}
       </Select>
     </label>
@@ -227,9 +197,7 @@ function FilterDate({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </span>
+      <span className="meta-label mb-1.5 block">{label}</span>
       <Input
         type="date"
         value={value}

@@ -1,14 +1,16 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Card — a raised surface: fill plus the soft shadow, no border.
+ * Prefer `Surface` (or no container at all) for new work; Card stays for the
+ * places that genuinely need a self-contained panel.
+ */
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn(
-        "rounded-xl border border-border bg-card text-card-foreground",
-        className
-      )}
+      className={cn("rounded-xl bg-card text-card-foreground shadow-soft", className)}
       {...props}
     />
   )

@@ -127,7 +127,7 @@ export function ActionLink({
   className,
 }: ActionLinkProps) {
   const shared =
-    "group/action relative inline-flex items-center gap-3 font-medium transition-colors duration-fast";
+    "group/action relative inline-flex shrink-0 items-center gap-3 whitespace-nowrap font-medium transition-colors duration-fast";
 
   const body =
     variant === "quiet" ? (

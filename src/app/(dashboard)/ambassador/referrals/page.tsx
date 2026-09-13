@@ -69,7 +69,7 @@ export default async function AmbassadorReferralsPage({
         <>
           <ul className="space-y-3 md:hidden">
             {rows.map((r) => (
-              <li key={r.id} className="rounded-xl border border-border bg-card p-4">
+              <li key={r.id} className="surface p-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium text-foreground">{r.clientName}</span>
                   <span
@@ -96,10 +96,10 @@ export default async function AmbassadorReferralsPage({
             ))}
           </ul>
 
-          <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+          <div className="hidden md:block">
             <table className="w-full text-sm">
               <thead className="border-b border-border">
-                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="text-left text-[13px] text-muted-foreground">
                   <th className="px-3 py-2.5">Joined</th>
                   <th className="px-3 py-2.5">Client</th>
                   <th className="px-3 py-2.5">Service</th>
@@ -110,7 +110,7 @@ export default async function AmbassadorReferralsPage({
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((r) => (
-                  <tr key={r.id} className="bg-card">
+                  <tr key={r.id}>
                     <td className="px-3 py-3 text-muted-foreground">{formatDate(r.joinedAt)}</td>
                     <td className="px-3 py-3 text-foreground">{r.clientName}</td>
                     <td className="px-3 py-3 text-muted-foreground">{r.latestService ?? "—"}</td>

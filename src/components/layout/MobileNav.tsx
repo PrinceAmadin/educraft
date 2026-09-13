@@ -8,7 +8,6 @@ import { signOut } from "next-auth/react";
 import { LogoLockup } from "@/components/shared/Logo";
 import { isActive } from "@/components/layout/Sidebar";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
   SheetContent,
@@ -36,7 +35,7 @@ export function MobileNav({ role }: { role: NavRole }) {
     <>
       <nav
         aria-label="Primary"
-        className="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-md md:hidden"
+        className="pb-safe fixed inset-x-0 bottom-0 z-40 bg-card/95 shadow-[0_-10px_30px_-18px_rgb(15_23_42/0.25)] backdrop-blur-md md:hidden"
       >
         <ul className="flex items-stretch">
           {mobile.map((item) => {
@@ -87,7 +86,7 @@ export function MobileNav({ role }: { role: NavRole }) {
 
       <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
         <SheetContent side="bottom" className="rounded-t-2xl p-0">
-          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="flex items-center justify-between px-5 pb-2 pt-5">
             <LogoLockup href={home} size="xs" tagline="WorkBase" />
             <SheetTitle className="sr-only">More navigation</SheetTitle>
           </div>
@@ -101,10 +100,10 @@ export function MobileNav({ role }: { role: NavRole }) {
                     <Link
                       href={item.href}
                       className={cn(
-                        "flex min-h-[56px] items-center gap-3 rounded-lg border border-border px-4 py-3 text-sm font-medium transition-colors",
+                        "flex min-h-[56px] items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-colors",
                         active
-                          ? "border-primary/40 bg-primary/[0.12] text-primary"
-                          : "text-foreground hover:bg-elevated"
+                          ? "bg-primary/[0.1] text-primary"
+                          : "bg-zone text-foreground hover:bg-elevated"
                       )}
                     >
                       <item.icon className="h-[18px] w-[18px] shrink-0" />
@@ -116,12 +115,10 @@ export function MobileNav({ role }: { role: NavRole }) {
             })}
           </ul>
 
-          <Separator />
-
-          <div className="pb-safe p-4">
+          <div className="pb-safe px-4 pb-4">
             <Button
-              variant="outline"
-              className="w-full justify-start gap-3 text-danger"
+              variant="ghost"
+              className="w-full justify-start gap-3 text-danger hover:bg-danger/10 hover:text-danger"
               onClick={() => signOut({ callbackUrl: "/login" })}
             >
               <LogOut className="h-[18px] w-[18px]" />

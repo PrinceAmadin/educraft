@@ -60,9 +60,9 @@ export function ClientNotes({
         rows={6}
         placeholder="Anything worth remembering about this client — preferences, payment history, sensitivities…"
         className={cn(
-          "mt-2 w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground transition-colors",
+          "mt-2 w-full rounded-lg border border-input-border bg-input p-3 text-sm text-foreground transition-colors",
           "placeholder:text-subtle",
-          "focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          "focus-visible:border-ring focus-visible:bg-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
         )}
       />
       <div className="mt-2 flex items-center gap-3">

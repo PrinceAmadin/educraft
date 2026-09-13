@@ -2,10 +2,14 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Loader2 } from "lucide-react";
-import { LuCircleAlert } from "react-icons/lu";
+import {
+  LuChevronDown as ChevronDown,
+  LuCircleAlert,
+  LuLoaderCircle as Loader2,
+} from "react-icons/lu";
 import type { ProjectStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -114,12 +118,12 @@ export function ProjectHoldControl({
               }
             }}
           >
-            <textarea
+            <Textarea
+              aria-label="Reason"
               rows={3}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Why?"
-              className="w-full rounded-lg border border-border bg-input p-2 text-sm text-foreground focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             {error ? (
               <p className="flex items-start gap-2 text-sm text-danger">

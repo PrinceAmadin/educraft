@@ -3,10 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CircleAlert, Loader2 } from "lucide-react";
+import { LuCircleAlert, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { allowedTransitions, type TransitionCandidate, type TransitionRule } from "@/lib/pipeline";
-import { cn } from "@/lib/utils";
 
 export interface ProjectActionState {
   /** The human EC-XXXXX code — used in the API path. */
@@ -14,6 +14,10 @@ export interface ProjectActionState {
   candidate: TransitionCandidate;
 }
 
+/**
+ * The next legal pipeline moves for a project, set in a quiet zone band. The
+ * state machine decides what appears here; this only renders and submits.
+ */
 export function ProjectActions({ project }: { project: ProjectActionState }) {
   const router = useRouter();
   const { code, candidate } = project;
@@ -54,21 +58,6 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
   const rules = allowedTransitions(candidate);
   const buttons: React.ReactNode[] = [];
 
-  // Payment verification lives in the Financials tab; nudge toward it when a
-  // leg is paid but unverified.
-  const paidUnverified =
-    candidate.downpaymentStatus === "Paid" || candidate.balanceStatus === "Paid";
-  if (paidUnverified) {
-    buttons.push(
-      <span
-        key="pay-hint"
-        className="text-xs text-gold"
-      >
-        A payment is awaiting verification — Financials tab.
-      </span>
-    );
-  }
-
   if (candidate.status === "REQUIREMENTS_CONFIRMED") {
     buttons.push(
       <Button key="assign" asChild size="sm">
@@ -90,26 +79,36 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
         title={blocked ?? undefined}
         onClick={() => (rule.requiresNote ? (setNoteFor(rule), setError(null)) : runTransition(rule))}
       >
-        {pending === key ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+        {pending === key ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
         {rule.action}
       </Button>
     );
   }
 
-  if (buttons.length === 0 && !error) return null;
+  // Payment verification lives in the Financials tab; nudge toward it when a
+  // leg is paid but unverified.
+  const paidUnverified = candidate.downpaymentStatus === "Paid" || candidate.balanceStatus === "Paid";
+
+  if (buttons.length === 0 && !error && !paidUnverified) return null;
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:p-4">
+    <section aria-label="Next step" className="space-y-3 rounded-2xl bg-zone p-4 sm:px-5">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          Next step
-        </span>
+        <span className="meta-label mr-2">Next step</span>
         {buttons}
+        {paidUnverified ? (
+          <Link
+            href={`/admin/projects/${code}?tab=financials`}
+            className="text-[13px] font-medium text-gold underline-offset-4 hover:underline"
+          >
+            A payment is awaiting verification — open Financials
+          </Link>
+        ) : null}
       </div>
 
       {noteFor ? (
         <form
-          className="space-y-2 rounded-lg border border-border p-3"
+          className="space-y-2.5 pt-1"
           onSubmit={(e) => {
             e.preventDefault();
             runTransition(noteFor, note.trim() || undefined);
@@ -124,18 +123,10 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
                   ? "Supervisor correction details"
                   : "Add a note"}
           </label>
-          <textarea
-            id="transition-note"
-            rows={2}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded-lg border border-border bg-input p-2 text-sm text-foreground focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+          <Textarea id="transition-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={pending !== null}>
-              {pending === `t:${noteFor.to}` ? (
-                <Loader2 className="size-4 animate-spin" aria-hidden />
-              ) : null}
+              {pending === `t:${noteFor.to}` ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
               {noteFor.action}
             </Button>
             <Button
@@ -154,12 +145,11 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
       ) : null}
 
       {error ? (
-        <p className={cn("flex items-start gap-2 text-sm text-danger")}>
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+          <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
           {error}
         </p>
       ) : null}
-    </div>
+    </section>
   );
 }
-

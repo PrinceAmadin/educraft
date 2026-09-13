@@ -5,221 +5,124 @@ description: EduCraft HQ design system and UI conventions. Use when building or 
 
 # EduCraft UI
 
-Mobile-first, dark-default, Lucide-only. **85% of users are on phones: design at 375px first, scale up second.**
+Mobile-first, **light-default**, Lucide-only. **85% of users are on phones: design at 375px first, scale up second.**
+
+Source of truth: `DATA/EDUCRAFT_UI_CONSTITUTION.md`. The one principle: **use spacing, typography, alignment and surface contrast to create hierarchy before reaching for borders.** Whitespace first → a zone (background band) → a soft shadow → a border only as a last resort, and nearly invisible.
 
 ## Colors
 
-Dark (default):
+Always use the semantic tokens — they carry both themes. Raw hex only inside `globals.css`.
 
-| Token | Hex |
-|---|---|
-| bg primary | `#0B1120` |
-| bg secondary (cards) | `#111827` |
-| bg tertiary (elevated) | `#1A2332` |
-| border | `#1E3A4F` |
-| text primary | `#F1F5F9` |
-| text secondary | `#94A3B8` |
-| accent teal | `#0D9488` |
-| accent gold | `#F59E0B` |
-| success | `#10B981` |
-| warning | `#F59E0B` |
-| danger | `#EF4444` |
+| Token | Light (default) | Dark | Use |
+|---|---|---|---|
+| `bg-background` | `#F8F9FA` | `#0B1120` | page |
+| `bg-card` | `#FFFFFF` | `#131B2E` | raised surface (with `shadow-soft`) |
+| `bg-zone` | `#F1F3F5` | between page and surface | background bands, empty states, notices |
+| `bg-elevated` | `#F1F3F5` | `#1A2540` | hover, nested fills |
+| `bg-input` / `border-input-border` | `#F5F6F4` / faint | deeper surface | field fill + edge |
+| `text-foreground` | `#0F172A` | `#F1F5F9` | primary text |
+| `text-muted-foreground` | `#475569` | slate | secondary text |
+| `text-subtle` | `#64748B` | slate | tertiary / metadata |
+| `primary` | `#0D9488` | teal | links, active, CTAs |
+| `gold` / `success` / `danger` | deepened for text | — | status |
+| `border-border` | `#E8EAED` | `#1E3048` | last resort only |
+| `shadow-soft` / `shadow-lift` | — | — | surfaces / floating layers |
 
-Light:
+## Surfaces, not boxes
 
-| Token | Hex |
-|---|---|
-| bg primary | `#FFFFFF` |
-| bg secondary | `#F8FAFC` |
-| text primary | `#0F172A` |
-| text secondary | `#475569` |
-| accent teal | `#0D9488` |
+```tsx
+import { Surface, SurfaceHeader } from "@/components/ui/surface";
 
-Use semantic Tailwind tokens (`bg-background`, `bg-card`, `text-muted-foreground`, `border-border`) so both themes come free. Only reach for a raw hex when defining the token itself.
+<Surface tone="zone">…</Surface>      // bg-zone band, no shadow — stats, pipeline, notices
+<Surface>…</Surface>                  // white + soft shadow — panels that float
+<div className="surface p-5">…</div>  // same raised surface as a class
+<div className="rounded-2xl bg-zone p-5">…</div>
+```
+
+- `Card` has **no border** (fill + `shadow-soft`). Prefer no container at all.
+- Never nest a bordered box inside another box. Never wrap a form, a table, or a row of stats in a card.
+- Dialogs, dropdowns, sheets and tooltips use `shadow-lift`, no border.
 
 ## Typography
 
-- Headings — Inter 700 (`font-sans font-bold`)
-- Body — Inter 400
-- **Data / numbers / currency / IDs — JetBrains Mono 500** (`font-mono font-medium tabular-nums`)
-- Brand wordmark — Poppins 700
-
-Every stat value, price, count, percentage, and `EC-XXXXX` ID renders in JetBrains Mono.
+- Page title: `PageHeader` (24px phones, 28px from sm). Section heading: `text-[15px] font-semibold` (or `SurfaceHeader`).
+- **Sentence case everywhere.** Uppercase only on tiny metadata (`.eyebrow`).
+- Field/stat labels: `.meta-label` (13px, medium, muted) — never uppercase, never mono.
+- **JetBrains Mono only for data**: money, counts, percentages, `EC-XXXXX` IDs (`font-mono tabular-nums`).
+- Brand: "EduCraft" is always one word on one line — "Edu" in ink, "Craft" in teal (`accent-serif` in display contexts).
 
 ## Icons — hard rule
 
-```tsx
-import { LuFileText, LuUsers, LuTrendingUp } from "react-icons/lu";
-```
-
-Only `react-icons/lu` (Lucide). **Zero emojis anywhere** — not in JSX, not in labels, toasts, empty states, or seed data. No other icon pack.
-
-## shadcn/ui imports
-
-```tsx
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
-```
-
-Missing component? Add it with the shadcn CLI — never hand-roll a parallel primitive.
-
-## Mobile-first rules
-
-- **Desktop (>=1024px):** collapsible sidebar, 240px expanded / 64px collapsed.
-- **Mobile (<1024px):** bottom navigation bar, **max 5 icons**, no sidebar, no hamburger drawer as primary nav.
-- **Tables become cards below `md`.** Never horizontally scroll a data table on a phone.
-- **Touch targets minimum 48px** (`min-h-12`) — inputs, buttons, select rows, nav items, tappable cards.
-- Prefer native `<select>` on mobile for long option lists.
-- Test every screen at **375px, 414px, 768px, 1024px**. Nothing overflows horizontally at 375px.
-- Bottom nav needs safe-area padding (`pb-[env(safe-area-inset-bottom)]`); page content needs bottom padding so it is not hidden behind the nav.
+`react-icons/lu` only. **Zero emojis anywhere** — UI, toasts, emails, seed data.
 
 ## Component patterns
 
-### StatsCard
+### Stats — data with breathing room
 
 ```tsx
-import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
-import type { IconType } from "react-icons";
+import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 
-interface StatsCardProps {
-  title: string;
-  value: string; // pre-formatted: ₦1,240,000 / 128 / 94%
-  delta?: { value: string; positive: boolean };
-  icon: IconType;
-}
-
-export function StatsCard({ title, value, delta, icon: Icon }: StatsCardProps) {
-  return (
-    <Card className="bg-card border-border">
-      <CardContent className="flex items-start justify-between gap-3 p-4 sm:p-5">
-        <div className="min-w-0">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className="mt-1 font-mono text-2xl font-medium tabular-nums text-foreground">
-            {value}
-          </p>
-          {delta && (
-            <p className={cn("mt-1 font-mono text-xs", delta.positive ? "text-emerald-500" : "text-red-500")}>
-              {delta.value}
-            </p>
-          )}
-        </div>
-        <span className="rounded-lg bg-teal-600/10 p-2 text-teal-600 dark:text-teal-400">
-          <Icon className="h-5 w-5" aria-hidden />
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
+<section className={STATS_GRID}>
+  <StatsCard label="Active projects" value="34" detail="+3 today" detailTone="success" icon={LuFolderKanban} href="/admin/projects" />
+</section>
 ```
 
-Grid: `grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4` — two-up on phones, never one-up.
+No border, no card. Two-up on phones, four-up from lg.
 
-### StatusBadge — pipeline color map
+### Pipeline — one rail
+
+`PipelineBar`: stage names on top, counts beneath, one continuous track; stages holding work are teal, empty ones quiet grey. Never eleven mini-cards.
+
+### Tables — the table is the content
+
+`Table` has a clean header row and faint dividers. **No outer container.** Below `md`, render the rows as `surface` blocks or a divided list — never a horizontally scrolling table on a phone.
+
+### Forms — no outer container
 
 ```tsx
-const STATUS_STYLES: Record<ProjectStatus, string> = {
-  NEW:                    "bg-slate-500/15 text-slate-400 border-slate-500/30",
-  DOWNPAYMENT_VERIFIED:   "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  REQUIREMENTS_CONFIRMED: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  ASSIGNED:               "bg-purple-500/15 text-purple-400 border-purple-500/30",
-  IN_PROGRESS:            "bg-teal-500/15 text-teal-400 border-teal-500/30",
-  AWAITING_CLIENT_INPUT:  "bg-yellow-500/15 text-yellow-500 border-yellow-500/30",
-  SUBMITTED:              "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
-  IN_QA_REVIEW:           "bg-orange-500/15 text-orange-400 border-orange-500/30",
-  REVISION_NEEDED:        "bg-orange-500/15 text-orange-400 border-orange-500/30",
-  APPROVED:               "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  BALANCE_VERIFIED:       "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  DELIVERED:              "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  COMPLETED:              "bg-emerald-600/20 text-emerald-300 border-emerald-600/40",
-  OVERDUE:                "bg-red-500/15 text-red-400 border-red-500/40 animate-pulse",
-  ON_HOLD:                "bg-slate-500/15 text-slate-400 border-slate-500/30",
-  CANCELLED:              "bg-slate-500/10 text-slate-500 border-slate-500/20 line-through",
-  REFUNDED:               "bg-slate-500/10 text-slate-500 border-slate-500/20 line-through",
-  DISPUTED:               "bg-red-500/15 text-red-400 border-red-500/30",
-};
+<form className="max-w-3xl space-y-12">
+  <FormSection title="Personal information" description="…">
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+      <Field label="Full name" required htmlFor="name"><Input id="name" {...register("fullName")} /></Field>
+    </div>
+  </FormSection>
+  <FormActions><Button type="submit">Save</Button></FormActions>
+</form>
 ```
 
-Render labels as Title Case with spaces (`IN_QA_REVIEW` → "In QA Review"), never the raw enum. OVERDUE pulses; CANCELLED/REFUNDED strike through.
+- `Input`, `Select`, `Textarea` share `fieldClasses`: light fill, faint edge, teal focus ring, 48px tall, `text-base`.
+- Universities: `UniversityCombobox` (type-to-filter + scroll; `allowOther` where the schema accepts free text).
+- `FormActions` sticks above the mobile bottom nav on phones.
+- React Hook Form + Zod; each step validates independently; errors inline.
 
-Deadline urgency colours: 5 days = muted, 3 days = gold, 1 day = red, passed = OVERDUE (pulsing).
+### Status badges
 
-### DataTable → mobile cards
+`StatusBadge` reads `STATUS_META` in `src/lib/status.ts` — tint fills with transparent borders. Title Case labels, never raw enums.
 
-One component, two renderings — never ship a table that only works on desktop:
+### States
 
-```tsx
-<>
-  {/* Mobile */}
-  <div className="space-y-3 md:hidden">
-    {rows.map((row) => (
-      <Card key={row.id} className="border-border bg-card">
-        <CardContent className="min-h-12 space-y-2 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-sm">{row.code}</span>
-            <StatusBadge status={row.status} />
-          </div>
-          <p className="truncate text-sm text-muted-foreground">{row.title}</p>
-        </CardContent>
-      </Card>
-    ))}
-  </div>
+Every list needs loading (`Skeleton`), error (with retry) and empty (`EmptyState` — a zone band with an icon, never a dashed box).
 
-  {/* Desktop */}
-  <Table className="hidden md:table">{/* ... */}</Table>
-</>
-```
+## Mobile-first rules
 
-Every list needs three states: `Skeleton` rows while loading, an error state with a retry action, and an `EmptyState` (icon + copy + primary action, e.g. "No projects yet"). Never a blank region.
-
-### Forms
-
-React Hook Form + Zod, one step per screen on mobile:
-
-```tsx
-const schema = z.object({ fullName: z.string().min(2, "Enter your full name") });
-type Values = z.infer<typeof schema>;
-const form = useForm<Values>({ resolver: zodResolver(schema), mode: "onBlur" });
-```
-
-- Inputs `min-h-12` and `text-base` (prevents iOS zoom); every input has a bound `FormLabel`.
-- Each step validates independently; back-navigation preserves entered data.
-- Nav buttons sticky at the bottom on mobile: `sticky bottom-0 border-t border-border bg-background/95 p-4 backdrop-blur`.
-- Progress indicator on multi-step forms; disable Next while submitting and show a spinner in the button.
-- Errors show inline via `FormMessage` — never an alert dialog for validation.
+- Desktop ≥1024px: collapsible sidebar (240/64px), no dividing line — the sidebar is one surface step off the page.
+- Mobile <768px: bottom nav, max 5 items, lifted by a soft upward shadow.
+- Touch targets ≥48px. Test at 375, 414, 768, 1024. Nothing overflows horizontally at 375px.
 
 ## Theming
 
-- Class-based dark mode (`dark` on `<html>`), dark is the default.
-- Both themes must be equally polished — check contrast, borders, and chart colours in both before calling a screen done.
-- Logo swaps with theme: dark bg → `public/images/logo/transparent_light_logo.png`; light bg → `transparent_dark_logo.png`.
-- Never hardcode `text-white` / `bg-black`; use tokens.
+Class-based; **light is the default**. Dark is multi-surface depth (page → surface → elevated), not an inversion. Logo swaps with theme. Never hardcode `text-white` / `bg-black` outside intentionally fixed surfaces (photo scrims).
 
 ## Animation
 
-Framer Motion only. Purposeful and fast: 150–500ms, spring physics.
-
-```tsx
-<motion.div
-  initial={{ opacity: 0, y: 8 }}
-  animate={{ opacity: 1, y: 0 }}
-  transition={{ type: "spring", stiffness: 300, damping: 30 }}
-/>
-```
-
-Stagger lists ~40ms. Respect `prefers-reduced-motion`. No CSS keyframe animations except the OVERDUE pulse.
+Framer Motion, 150–500ms, springs. Stagger ~40ms. Respect `prefers-reduced-motion`.
 
 ## Checklist before finishing any UI work
 
-1. Works at 375px with no horizontal overflow.
-2. Lucide icons only, zero emojis.
-3. Numbers in JetBrains Mono.
-4. Loading, error, and empty states exist.
-5. Looks right in dark **and** light.
-6. Touch targets >=48px.
-7. Any table has a mobile card rendering.
+1. No bordered box around a form, table, stat row or section; no boxes inside boxes.
+2. Works at 375px with no horizontal overflow; tables have a mobile rendering.
+3. Sentence case; mono only on data.
+4. Lucide icons only, zero emojis.
+5. Loading, error and empty states exist.
+6. Looks right in light **and** dark.
+7. Touch targets ≥48px.

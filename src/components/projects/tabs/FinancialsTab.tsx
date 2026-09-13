@@ -41,11 +41,9 @@ function Line({
   strong?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-border py-2.5 last:border-0">
+    <div className="flex items-start justify-between gap-4 py-3">
       <div>
-        <p className={cn("text-sm", strong ? "font-semibold text-foreground" : "text-foreground")}>
-          {label}
-        </p>
+        <p className={cn("text-sm", strong ? "font-semibold text-foreground" : "text-foreground")}>{label}</p>
         {children ? <div className="mt-0.5">{children}</div> : null}
       </div>
       <p
@@ -60,15 +58,23 @@ function Line({
   );
 }
 
+/**
+ * Money on a project. The total leads as a large figure; the two payment legs
+ * and the payout split follow as plain lines with faint dividers — no panels.
+ */
 export function FinancialsTab({ project }: { project: ProjectDetail }) {
   const f = financialBreakdown(project);
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-xl border border-border bg-card p-4">
-        <h3 className="text-sm font-semibold text-foreground">Price breakdown</h3>
-        <div className="mt-2">
-          <Line label="Total price" amount={f.total} strong />
+    <div className="space-y-10">
+      <section aria-labelledby="fin-price">
+        <p id="fin-price" className="meta-label">
+          Total price
+        </p>
+        <p className="mt-1 font-mono text-[2rem] font-medium leading-none tabular-nums text-foreground">
+          {formatNaira(f.total)}
+        </p>
+        <div className="mt-4 divide-y divide-border/80">
           <Line label="Downpayment (45%)" amount={f.downpaymentAmount}>
             <PaymentStatusPill status={f.downpaymentStatus} date={project.downpaymentDate} />
           </Line>
@@ -79,7 +85,7 @@ export function FinancialsTab({ project }: { project: ProjectDetail }) {
       </section>
 
       <section className="space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">Verify payments</h3>
+        <h3 className="text-[15px] font-semibold text-foreground">Verify payments</h3>
         <PaymentVerification
           projectCode={project.projectId}
           leg="downpayment"
@@ -98,21 +104,19 @@ export function FinancialsTab({ project }: { project: ProjectDetail }) {
         />
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Payout breakdown</h3>
+      <section>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-[15px] font-semibold text-foreground">Payout breakdown</h3>
           <span
             className={cn(
-              "rounded-full border px-2 py-0.5 text-xs font-medium",
-              f.payoutsDue
-                ? "border-transparent bg-success/15 text-success"
-                : "border-border bg-elevated text-muted-foreground"
+              "rounded-full px-2 py-0.5 text-xs font-medium",
+              f.payoutsDue ? "bg-success/15 text-success" : "bg-elevated text-muted-foreground"
             )}
           >
             {f.payoutsDue ? "Due now" : "Due on completion"}
           </span>
         </div>
-        <div className="mt-2">
+        <div className="mt-2 divide-y divide-border/80">
           <Line
             label={
               f.ambassadorName
@@ -139,20 +143,20 @@ export function FinancialsTab({ project }: { project: ProjectDetail }) {
           </Line>
           <Line label="EduCraft revenue" amount={f.educraftRevenue} strong />
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Payouts become due when the project reaches COMPLETED. Ambassador commission is released
+        <p className="mt-3 text-[13px] text-muted-foreground">
+          Payouts become due when the project reaches Completed. Ambassador commission is released
           when the client&apos;s downpayment is verified.
         </p>
       </section>
 
       {project.payments.length > 0 ? (
         <section>
-          <h3 className="text-sm font-semibold text-foreground">Recorded payments</h3>
-          <ul className="mt-3 divide-y divide-border rounded-lg border border-border">
+          <h3 className="text-[15px] font-semibold text-foreground">Recorded payments</h3>
+          <ul className="mt-2 divide-y divide-border/80">
             {project.payments.map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+              <li key={p.id} className="flex items-center justify-between gap-3 py-3 text-sm">
                 <div>
-                  <p className="text-foreground">
+                  <p className="text-foreground first-letter:uppercase">
                     {p.type.replace(/_/g, " ").toLowerCase()}
                     <span className="ml-2 font-mono text-xs text-muted-foreground">{p.paymentId}</span>
                   </p>

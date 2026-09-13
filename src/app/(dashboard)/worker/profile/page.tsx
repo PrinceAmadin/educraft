@@ -30,7 +30,7 @@ export default async function WorkerProfilePage() {
         </p>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold text-foreground">{profile.fullName}</h2>
           <span className="font-mono text-xs text-muted-foreground">{profile.workerId}</span>
@@ -57,7 +57,7 @@ export default async function WorkerProfilePage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Where your payouts are sent. Changes notify the finance team.
@@ -79,7 +79,7 @@ export default async function WorkerProfilePage() {
 function Item({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="meta-label">
         {label}
       </dt>
       <dd className="mt-0.5 text-foreground">{children}</dd>
@@ -90,13 +90,13 @@ function Item({ label, children }: { label: string; children: React.ReactNode })
 function TagRow({ label, tags }: { label: string; tags: string[] }) {
   return (
     <div className="mt-3 border-t border-border pt-3">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="meta-label">{label}</p>
       {tags.length > 0 ? (
         <ul className="mt-1.5 flex flex-wrap gap-1.5">
           {tags.map((t) => (
             <li
               key={t}
-              className="rounded-full border border-border bg-elevated px-2.5 py-0.5 text-xs text-foreground"
+              className="rounded-full bg-elevated px-2.5 py-0.5 text-xs text-foreground"
             >
               {t}
             </li>
@@ -111,8 +111,8 @@ function TagRow({ label, tags }: { label: string; tags: string[] }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+    <div className="rounded-xl bg-zone p-3">
+      <p className="meta-label">{label}</p>
       <p className="mt-1 font-mono text-lg font-medium tabular-nums text-foreground">{value}</p>
     </div>
   );

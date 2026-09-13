@@ -1,6 +1,11 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Table — the table IS the content, so it never sits inside a card. A clean
+ * header row, faint 1px row dividers, and a quiet hover. Headers are sentence
+ * case: the dashboard should feel calm, not shout.
+ */
 const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
@@ -38,7 +43,7 @@ const TableRow = React.forwardRef<
   <tr
     ref={ref}
     className={cn(
-      "border-b border-border transition-colors data-[state=selected]:bg-elevated",
+      "border-b border-border/80 transition-colors duration-fast hover:bg-zone/70 data-[state=selected]:bg-zone",
       className
     )}
     {...props}
@@ -53,7 +58,7 @@ const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-11 px-3 text-left align-middle text-xs font-medium uppercase tracking-wider text-muted-foreground",
+      "h-11 px-3 text-left align-middle text-[13px] font-medium text-muted-foreground",
       "[&:has([role=checkbox])]:pr-0",
       className
     )}
@@ -68,7 +73,7 @@ const TableCell = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <td
     ref={ref}
-    className={cn("px-3 py-3 align-middle text-foreground", className)}
+    className={cn("px-3 py-3.5 align-middle text-foreground", className)}
     {...props}
   />
 ));

@@ -57,14 +57,14 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
         My projects
       </Link>
 
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="font-mono text-xl font-bold tracking-tight text-foreground">
             {project.projectId}
           </h1>
           <StatusBadge status={project.status} />
           {project.revisionCount > 0 ? (
-            <span className="rounded-full border border-gold/30 bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold">
+            <span className="rounded-full bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold">
               Revision #{project.revisionCount}
             </span>
           ) : null}
@@ -108,7 +108,7 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
       </div>
 
       {showRevisionFeedback ? (
-        <div className="rounded-xl border border-danger/40 bg-danger/10 p-4">
+        <div className="rounded-2xl bg-danger/10 p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">
             <LuTriangleAlert className="size-4" aria-hidden />
             QA feedback — revision needed
@@ -120,11 +120,11 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
       <WorkerAssignmentActions projectCode={project.projectId} status={project.status} />
 
       {project.departmentOutline || project.specialInstructions ? (
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">Requirements</h2>
           {project.departmentOutline ? (
             <div className="mt-2">
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              <p className="meta-label">
                 Department outline
               </p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">
@@ -134,7 +134,7 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
           ) : null}
           {project.specialInstructions ? (
             <div className="mt-3">
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              <p className="meta-label">
                 Special instructions
               </p>
               <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">
@@ -151,7 +151,7 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
       </div>
 
       {project.qaNotes && !showRevisionFeedback ? (
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">QA feedback</h2>
           <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{project.qaNotes}</p>
         </section>
@@ -163,7 +163,7 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="meta-label">
         {label}
       </dt>
       <dd className="mt-0.5 text-foreground">{children}</dd>
@@ -181,7 +181,7 @@ function FileGroup({
   emptyHint: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="surface p-4">
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       {files.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">{emptyHint}</p>

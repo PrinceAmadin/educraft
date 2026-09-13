@@ -4,10 +4,12 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CircleAlert, Loader2, Lock } from "lucide-react";
+import { LuCircleAlert, LuLoaderCircle, LuLock } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/forms/Field";
+import { FormActions } from "@/components/forms/FormActions";
+import { FormSection } from "@/components/forms/FormSection";
 import { generalSettingsSchema, type GeneralSettingsInput } from "@/lib/validations/settings";
 import type { GeneralSettings } from "@/lib/services/settings";
 
@@ -79,13 +81,9 @@ export function GeneralSettingsForm({
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Company info</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Shown to clients on the intake confirmation and tracker.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-w-3xl space-y-12">
+      <FormSection title="Company info" description="Shown to clients on the intake confirmation and tracker.">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Company name" required htmlFor="companyName" error={errors.companyName?.message}>
             <Input id="companyName" {...register("companyName")} />
           </Field>
@@ -96,15 +94,13 @@ export function GeneralSettingsForm({
             <Input id="companyEmail" type="email" inputMode="email" {...register("companyEmail")} />
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Shown to clients as payment instructions after intake. Leave blank to send bank details on
-          WhatsApp instead.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <FormSection
+        title="Bank details"
+        description="Shown to clients as payment instructions after intake. Leave blank to send bank details on WhatsApp instead."
+      >
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Bank name" htmlFor="bankName" error={errors.bankName?.message}>
             <Input id="bankName" {...register("bankName")} />
           </Field>
@@ -115,19 +111,18 @@ export function GeneralSettingsForm({
             <Input id="accountName" {...register("accountName")} />
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-foreground">Pricing defaults</h2>
-          {!canEditPricing ? <Lock className="size-3.5 text-muted-foreground" aria-hidden /> : null}
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {canEditPricing
+      <FormSection
+        title="Pricing defaults"
+        description={
+          canEditPricing
             ? "The downpayment default pre-fills new services — each service can still override it. Commission rates apply to every ambassador immediately."
-            : "Only the founder (Super Admin) can change pricing and commission rates."}
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            : "Only the founder (Super Admin) can change pricing and commission rates."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field
             label="Default downpayment %"
             htmlFor="downpaymentPercentage"
@@ -144,7 +139,7 @@ export function GeneralSettingsForm({
             />
           </Field>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
           {TIERS.map((tier) => (
             <Field key={tier} label={`${TIER_LABEL[tier]} %`} htmlFor={`rate-${tier}`}>
               <Input
@@ -159,22 +154,22 @@ export function GeneralSettingsForm({
             </Field>
           ))}
         </div>
-      </section>
+      </FormSection>
 
       {submitError ? (
-        <p className="flex items-start gap-2 text-sm text-danger">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+          <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
           {submitError}
         </p>
       ) : null}
       {saved && !isDirty ? <p className="text-sm text-success">Settings saved.</p> : null}
 
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+      <FormActions>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+          {isSubmitting ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
           {isSubmitting ? "Saving…" : "Save settings"}
         </Button>
-      </div>
+      </FormActions>
     </form>
   );
 }

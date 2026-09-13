@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { LuArrowRight } from "react-icons/lu";
 import { PaymentQuickAction } from "@/components/projects/PaymentQuickAction";
 import {
   Table,
@@ -12,10 +12,11 @@ import {
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import {
   PAYMENT_BADGE,
-  ROW_ACCENT_CLASS,
+  ROW_ACCENT_DOT,
   paymentStanding,
   paymentStandingLabel,
   rowAccent,
+  type RowAccent,
 } from "@/lib/project-display";
 import { cn, deadlineInfo, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectListRow } from "@/lib/services/projects";
@@ -28,6 +29,10 @@ const DEADLINE_TEXT = {
   critical: "text-danger",
   overdue: "text-danger font-medium",
 } as const;
+
+function AccentDot({ accent }: { accent: RowAccent }) {
+  return <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", ROW_ACCENT_DOT[accent])} />;
+}
 
 function DeadlineCell({ row }: { row: ProjectListRow }) {
   const deadline = row.internalDeadline ?? row.clientDeadline;
@@ -42,10 +47,15 @@ function DeadlineCell({ row }: { row: ProjectListRow }) {
   );
 }
 
+/**
+ * Projects list. On desktop the table is the content — no container around
+ * it, a clean header row and faint dividers. On phones each project becomes a
+ * soft surface rather than a table row.
+ */
 export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
   return (
     <>
-      {/* Mobile: cards */}
+      {/* Mobile: surfaces */}
       <ul className="space-y-3 md:hidden">
         {rows.map((row) => {
           const accent = rowAccent(row);
@@ -57,15 +67,11 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
             <li key={row.id}>
               <Link
                 href={`/admin/projects/${row.projectId}`}
-                className={cn(
-                  "block rounded-xl border border-border bg-card p-4",
-                  "transition-colors duration-fast hover:border-border-hover",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                  ROW_ACCENT_CLASS[accent]
-                )}
+                className="surface block p-4 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-sm font-medium text-foreground">
+                  <span className="flex items-center gap-2 font-mono text-sm font-medium text-foreground">
+                    <AccentDot accent={accent} />
                     {row.projectId}
                   </span>
                   <StatusBadge status={row.status} short />
@@ -74,22 +80,20 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                 <p className="mt-2 truncate text-sm text-foreground">
                   {row.projectTitle ?? "Untitled project"}
                 </p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[13px] text-muted-foreground">
                   {row.client.fullName}
-                  {row.client.university?.abbreviation
-                    ? ` · ${row.client.university.abbreviation}`
-                    : ""}{" "}
+                  {row.client.university?.abbreviation ? ` · ${row.client.university.abbreviation}` : ""}{" "}
                   · {row.service.serviceName}
                 </p>
 
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
                   <span className="text-muted-foreground">
                     {row.worker ? row.worker.fullName : "Unassigned"}
                   </span>
                   <span className={DEADLINE_TEXT[info.urgency]}>
                     {info.daysLeft !== null ? info.label : "No deadline"}
                   </span>
-                  <span className="font-mono text-foreground">{formatNaira(row.price)}</span>
+                  <span className="font-mono tabular-nums text-foreground">{formatNaira(row.price)}</span>
                   <span
                     className={cn(
                       "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
@@ -105,11 +109,11 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
         })}
       </ul>
 
-      {/* Desktop: table */}
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      {/* Desktop: the table itself */}
+      <div className="hidden md:block">
         <Table>
           <TableHeader>
-            <TableRow className="bg-card hover:bg-card">
+            <TableRow className="hover:bg-transparent">
               <TableHead>Project</TableHead>
               <TableHead>Client</TableHead>
               <TableHead>Service</TableHead>
@@ -132,16 +136,19 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
               const standing = paymentStanding(row);
 
               return (
-                <TableRow key={row.id} className={cn("bg-card", ROW_ACCENT_CLASS[accent])}>
+                <TableRow key={row.id}>
                   <TableCell>
-                    <Link
-                      href={`/admin/projects/${row.projectId}`}
-                      className="font-mono text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
-                    >
-                      {row.projectId}
-                    </Link>
+                    <span className="flex items-center gap-2">
+                      <AccentDot accent={accent} />
+                      <Link
+                        href={`/admin/projects/${row.projectId}`}
+                        className="font-mono text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
+                      >
+                        {row.projectId}
+                      </Link>
+                    </span>
                     {row.projectTitle ? (
-                      <div className="mt-0.5 max-w-[22ch] truncate text-xs text-muted-foreground">
+                      <div className="mt-0.5 max-w-[22ch] truncate pl-3.5 text-xs text-muted-foreground">
                         {row.projectTitle}
                       </div>
                     ) : null}
@@ -149,23 +156,15 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                   <TableCell className="text-sm">
                     {row.client.fullName}
                     {row.client.university?.abbreviation ? (
-                      <div className="text-xs text-muted-foreground">
-                        {row.client.university.abbreviation}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{row.client.university.abbreviation}</div>
                     ) : null}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {row.service.serviceName}
-                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{row.service.serviceName}</TableCell>
                   <TableCell>
                     <StatusBadge status={row.status} short />
                   </TableCell>
                   <TableCell className="text-sm">
-                    {row.worker ? (
-                      row.worker.fullName
-                    ) : (
-                      <span className="text-subtle">Unassigned</span>
-                    )}
+                    {row.worker ? row.worker.fullName : <span className="text-subtle">Unassigned</span>}
                   </TableCell>
                   <TableCell className="text-sm">
                     <DeadlineCell row={row} />
@@ -196,7 +195,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                       aria-label={`Open ${row.projectId}`}
                       className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <ArrowRight className="size-4" aria-hidden />
+                      <LuArrowRight className="size-4" aria-hidden />
                     </Link>
                   </TableCell>
                 </TableRow>

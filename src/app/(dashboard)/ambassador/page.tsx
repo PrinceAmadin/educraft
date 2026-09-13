@@ -72,11 +72,11 @@ export default async function AmbassadorDashboardPage() {
         />
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">Tier progress</h2>
           {progress.eligibleForPromotion ? (
-            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               Eligible to promote
             </span>
           ) : null}

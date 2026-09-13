@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 
 export default function WorkerNotFound() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-2xl bg-zone px-6 py-16 text-center">
       <span className="rounded-lg bg-elevated p-2.5 text-muted-foreground"><LuUserX className="size-6" aria-hidden /></span>
       <p className="text-sm font-medium text-foreground">Worker not found</p>
       <p className="max-w-[42ch] text-xs text-muted-foreground">This worker ID does not exist, or the record may have been removed.</p>

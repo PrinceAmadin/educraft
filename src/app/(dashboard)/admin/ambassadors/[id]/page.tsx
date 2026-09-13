@@ -42,7 +42,7 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
       </Link>
 
       {/* Header */}
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -96,11 +96,11 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
       <ReferralLinkCard code={ambassador.referralCode} />
 
       {/* Tier progress */}
-      <section className="rounded-xl border border-border bg-card p-4">
+      <section className="surface p-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">Tier progress</h2>
           {progress.eligibleForPromotion ? (
-            <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               Eligible to promote
             </span>
           ) : null}
@@ -120,7 +120,7 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
 
       {/* Performance + commission */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">Performance</h2>
           <dl className="mt-2 space-y-2 text-sm">
             <Line label="Total referrals" value={String(metrics.referrals)} />
@@ -132,7 +132,7 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
             <Line label="Revenue generated" value={formatNaira(metrics.revenueGenerated)} strong />
           </dl>
         </section>
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">Commission</h2>
           <dl className="mt-2 space-y-2 text-sm">
             <Line label="Total earned (completed)" value={formatNaira(metrics.commissionEarned)} />
@@ -140,7 +140,7 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
             <Line label="Outstanding balance" value={formatNaira(metrics.commissionBalance)} strong />
           </dl>
           <div className="mt-3 border-t border-border pt-3">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p className="meta-label">
               Bank details
             </p>
             <dl className="mt-1.5 space-y-1.5 text-sm">
@@ -168,7 +168,7 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
             className="py-8"
           />
         ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border">
+          <ul className="divide-y divide-border/80">
             {ambassador.referredClients.map((c) => (
               <li key={c.id}>
                 <Link
@@ -204,11 +204,11 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Payout history</h2>
         {payouts.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+          <p className="rounded-2xl bg-zone px-4 py-6 text-sm text-muted-foreground">
             No commission payments recorded yet.
           </p>
         ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border">
+          <ul className="divide-y divide-border/80">
             {payouts.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                 <div>
@@ -231,7 +231,7 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
       {ambassador.projects.length > 0 ? (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-foreground">Projects</h2>
-          <ul className="divide-y divide-border rounded-xl border border-border">
+          <ul className="divide-y divide-border/80">
             {ambassador.projects.map((p) => (
               <li key={p.id}>
                 <Link
@@ -267,7 +267,7 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="flex items-center gap-1.5 meta-label">
         <Icon className="size-3" aria-hidden />
         {label}
       </dt>

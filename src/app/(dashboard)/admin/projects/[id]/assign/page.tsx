@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { getAssignmentContext } from "@/lib/services/workers";
 import { AssignWorkerScreen } from "@/components/projects/AssignWorkerScreen";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { STATUS_META } from "@/lib/status";
 import { Button } from "@/components/ui/button";
 import { deadlineInfo, formatDate } from "@/lib/utils";
@@ -36,24 +36,15 @@ export default async function AssignWorkerPage({ params }: { params: { id: strin
   const wrongStatus = project.status !== "REQUIREMENTS_CONFIRMED";
 
   return (
-    <div className="space-y-5">
-      <Link
-        href={`/admin/projects/${project.projectId}`}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        Back to {project.projectId}
-      </Link>
-
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-          Assign worker
-        </h1>
-        <p className="mt-1 font-mono text-sm text-muted-foreground">{project.projectId}</p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        back={{ href: `/admin/projects/${project.projectId}`, label: `Back to ${project.projectId}` }}
+        title="Assign worker"
+        description={<span className="font-mono">{project.projectId}</span>}
+      />
 
       {wrongStatus ? (
-        <div className="rounded-xl border border-gold/30 bg-gold/10 p-4 text-sm">
+        <div className="rounded-2xl bg-gold/10 p-5 text-sm">
           <p className="font-medium text-foreground">
             This project is {STATUS_META[project.status as keyof typeof STATUS_META]?.label ?? project.status}.
           </p>
@@ -66,28 +57,24 @@ export default async function AssignWorkerPage({ params }: { params: { id: strin
         </div>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
-        {/* Left: project summary */}
-        <aside className="space-y-3 rounded-xl border border-border bg-card p-4 lg:sticky lg:top-20 lg:self-start">
-          <h2 className="text-sm font-semibold text-foreground">Project summary</h2>
-          <dl className="space-y-2.5 text-sm">
+      <div className="grid gap-8 lg:grid-cols-[280px_1fr]">
+        {/* Left: project summary, as a quiet zone */}
+        <aside className="space-y-4 rounded-2xl bg-zone p-5 lg:sticky lg:top-20 lg:self-start">
+          <h2 className="text-[15px] font-semibold text-foreground">Project summary</h2>
+          <dl className="space-y-3 text-sm">
             <Row label="Topic" value={project.projectTitle ?? "Untitled"} />
             <Row label="Service" value={project.serviceName} />
             <Row label="Department" value={project.department} />
             <Row label="Type" value={PROJECT_TYPE_LABELS[project.projectType] ?? project.projectType} />
-            {project.chapterCount != null ? (
-              <Row label="Chapters" value={String(project.chapterCount)} />
-            ) : null}
+            {project.chapterCount != null ? <Row label="Chapters" value={String(project.chapterCount)} /> : null}
             <Row
               label="Deadline"
               value={
-                deadline
-                  ? `${formatDate(deadline)}${info.daysLeft != null ? ` · ${info.label}` : ""}`
-                  : "Not set"
+                deadline ? `${formatDate(deadline)}${info.daysLeft != null ? ` · ${info.label}` : ""}` : "Not set"
               }
             />
           </dl>
-          <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
             Workers whose specialty matches the department are shown first, then by lightest load,
             rating, and on-time rate.
           </p>
@@ -95,11 +82,9 @@ export default async function AssignWorkerPage({ params }: { params: { id: strin
 
         {/* Right: recommendations */}
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-foreground">
+          <h2 className="mb-4 text-[15px] font-semibold text-foreground">
             Recommended workers
-            <span className="ml-2 font-mono text-xs text-muted-foreground">
-              {recommendations.length}
-            </span>
+            <span className="ml-2 font-mono text-xs text-muted-foreground">{recommendations.length}</span>
           </h2>
           <AssignWorkerScreen projectCode={project.projectId} recommendations={recommendations} />
         </section>
@@ -111,9 +96,7 @@ export default async function AssignWorkerPage({ params }: { params: { id: strin
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </dt>
+      <dt className="meta-label">{label}</dt>
       <dd className="mt-0.5 text-foreground">{value}</dd>
     </div>
   );

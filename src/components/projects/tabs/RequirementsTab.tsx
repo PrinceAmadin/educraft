@@ -59,21 +59,17 @@ export function RequirementsTab({ project }: { project: ProjectDetail }) {
   const clientFiles = project.files.filter((f) => f.category === "from_client");
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
       <section>
-        <h3 className="text-sm font-semibold text-foreground">Project details</h3>
+        <h3 className="text-[15px] font-semibold text-foreground">Project details</h3>
         {present.length === 0 ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            No requirement details captured yet.
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">No requirement details captured yet.</p>
         ) : (
-          <dl className="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+          <dl className="mt-4 grid grid-cols-1 gap-x-10 gap-y-5 sm:grid-cols-2">
             {present.map((row) => (
-              <div key={row.label} className="border-b border-border pb-2">
-                <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  {row.label}
-                </dt>
-                <dd className="mt-0.5 text-sm text-foreground">{row.value}</dd>
+              <div key={row.label}>
+                <dt className="meta-label">{row.label}</dt>
+                <dd className="mt-1 text-[15px] text-foreground">{row.value}</dd>
               </div>
             ))}
           </dl>
@@ -82,15 +78,15 @@ export function RequirementsTab({ project }: { project: ProjectDetail }) {
 
       {project.specialInstructions ? (
         <section>
-          <h3 className="text-sm font-semibold text-foreground">Special instructions</h3>
-          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-elevated p-3 text-sm text-foreground">
+          <h3 className="text-[15px] font-semibold text-foreground">Special instructions</h3>
+          <p className="mt-3 whitespace-pre-wrap rounded-2xl bg-zone p-4 text-sm leading-relaxed text-foreground">
             {project.specialInstructions}
           </p>
         </section>
       ) : null}
 
       <section>
-        <h3 className="text-sm font-semibold text-foreground">Files from client</h3>
+        <h3 className="text-[15px] font-semibold text-foreground">Files from client</h3>
         <div className="mt-3">
           {clientFiles.length === 0 ? (
             <EmptyState

@@ -16,7 +16,7 @@ export default function ClientsError({
   }, [error]);
 
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card px-6 py-16 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-2xl bg-zone px-6 py-16 text-center">
       <span className="rounded-lg bg-danger/12 p-2.5 text-danger">
         <LuTriangleAlert className="size-6" aria-hidden />
       </span>

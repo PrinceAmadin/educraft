@@ -32,7 +32,7 @@ export function QaQueueTable({ rows }: { rows: QaQueueRow[] }) {
             <li key={row.id}>
               <Link
                 href={`/admin/qa/${row.projectId}`}
-                className="block rounded-xl border border-border bg-card p-4 transition-colors hover:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="block surface p-4 transition-shadow hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-sm font-medium text-foreground">
@@ -59,10 +59,10 @@ export function QaQueueTable({ rows }: { rows: QaQueueRow[] }) {
       </ul>
 
       {/* Desktop */}
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         <Table>
           <TableHeader>
-            <TableRow className="bg-card hover:bg-card">
+            <TableRow className="hover:bg-transparent">
               <TableHead>Project</TableHead>
               <TableHead>Worker</TableHead>
               <TableHead>Service</TableHead>
@@ -78,7 +78,7 @@ export function QaQueueTable({ rows }: { rows: QaQueueRow[] }) {
             {rows.map((row) => {
               const info = deadlineInfo(row.deadline);
               return (
-                <TableRow key={row.id} className="bg-card">
+                <TableRow key={row.id}>
                   <TableCell>
                     <Link
                       href={`/admin/qa/${row.projectId}`}

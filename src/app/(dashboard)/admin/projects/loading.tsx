@@ -8,7 +8,7 @@ export default function ProjectsLoading() {
         <Skeleton className="mt-2 h-4 w-80 max-w-full" />
       </div>
 
-      <div className="space-y-3 rounded-xl border border-border bg-card p-3 sm:p-4">
+      <div className="space-y-4">
         <Skeleton className="h-12 w-full" />
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -27,7 +27,7 @@ export default function ProjectsLoading() {
       </ul>
 
       {/* Desktop table skeleton */}
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         <div className="space-y-px">
           {Array.from({ length: 10 }).map((_, i) => (
             <Skeleton key={i} className="h-[52px] rounded-none" />

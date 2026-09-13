@@ -16,7 +16,11 @@ const config: Config = {
         border: token("border"),
         "border-hover": token("border-hover"),
         hairline: token("hairline"),
-        input: token("input"),
+        input: {
+          DEFAULT: token("input"),
+          border: token("input-border"),
+        },
+        zone: token("zone"),
         ring: token("ring"),
         background: token("background"),
         foreground: token("foreground"),
@@ -60,6 +64,7 @@ const config: Config = {
           ink: token("paper-ink"),
           muted: token("paper-muted"),
           line: token("paper-line"),
+          placeholder: token("paper-placeholder"),
         },
         /* Full-bleed dramatic ground for the closing section */
         ink: token("ink-deep"),
@@ -69,6 +74,14 @@ const config: Config = {
         danger: { DEFAULT: token("danger"), foreground: token("danger-foreground") },
         destructive: { DEFAULT: token("danger"), foreground: token("danger-foreground") },
         info: { DEFAULT: token("info"), foreground: token("info-foreground") },
+      },
+
+      /* Elevation — theme-aware, defined as CSS variables in globals.css.
+         `soft` lifts a surface off the page; `lift` is for floating layers
+         (menus, dialogs, sheets) that genuinely need an edge.            */
+      boxShadow: {
+        soft: "var(--shadow-soft)",
+        lift: "var(--shadow-lift)",
       },
 
       borderRadius: {
@@ -85,7 +98,9 @@ const config: Config = {
         display: ["var(--font-display)", "var(--font-inter)", "sans-serif"],
         /* Editorial accent — used only on emphasised words */
         serif: ["var(--font-instrument-serif)", "Georgia", "serif"],
-        mono: ["var(--font-jetbrains-mono)", "ui-monospace", "monospace"],
+        /* Inter sits second so it supplies the naira sign, which JetBrains
+           Mono lacks (see layout.tsx). */
+        mono: ["var(--font-jetbrains-mono)", "var(--font-inter)", "ui-monospace", "monospace"],
       },
 
       /* Fluid editorial type scale — the page architecture */
@@ -100,7 +115,7 @@ const config: Config = {
         "headline-sm": ["clamp(1.5rem, 2.6vw, 2.25rem)", { lineHeight: "1.1", letterSpacing: "-0.025em" }],
         stat: ["clamp(2.5rem, 5.5vw, 4.5rem)", { lineHeight: "0.9", letterSpacing: "-0.04em" }],
         lead: ["clamp(1.0625rem, 1.35vw, 1.3125rem)", { lineHeight: "1.6", letterSpacing: "-0.01em" }],
-        eyebrow: ["0.6875rem", { lineHeight: "1", letterSpacing: "0.2em" }],
+        eyebrow: ["0.75rem", { lineHeight: "1.2", letterSpacing: "0.12em" }],
         meta: ["0.75rem", { lineHeight: "1.5", letterSpacing: "0.02em" }],
       },
 

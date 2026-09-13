@@ -2,13 +2,22 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { useForm, FormProvider, useFormContext } from "react-hook-form";
+import { Controller, useForm, FormProvider, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CircleAlert, Loader2, Check, Search, X } from "lucide-react";
+import {
+  LuCheck as Check,
+  LuCircleAlert as CircleAlert,
+  LuLoaderCircle as Loader2,
+  LuSearch as Search,
+  LuX as X,
+} from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/forms/Field";
+import { FormActions } from "@/components/forms/FormActions";
+import { UniversityCombobox } from "@/components/forms/UniversityCombobox";
 import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/projects";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
@@ -182,10 +191,11 @@ export function NewProjectForm({
 
   return (
     <FormProvider {...form}>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-w-3xl space-y-9">
         <Stepper step={step} />
 
-        <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+        {/* Each step sits on the page; its heading organises it. */}
+        <div>
           {step === 0 && (
             <ClientStep universities={universities} clientMode={clientMode} setValue={setValue} />
           )}
@@ -197,13 +207,13 @@ export function NewProjectForm({
         </div>
 
         {submitError ? (
-          <p className="flex items-start gap-2 text-sm text-danger">
+          <p role="alert" className="flex items-start gap-2 text-sm text-danger">
             <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
             {submitError}
           </p>
         ) : null}
 
-        <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+        <FormActions className="justify-between">
           <Button type="button" variant="ghost" onClick={back} disabled={step === 0 || isSubmitting}>
             Back
           </Button>
@@ -217,7 +227,7 @@ export function NewProjectForm({
               {isSubmitting ? "Creating…" : "Create project"}
             </Button>
           )}
-        </div>
+        </FormActions>
       </form>
     </FormProvider>
   );
@@ -234,10 +244,10 @@ function Stepper({ step }: { step: number }) {
           <li key={label} className="flex flex-1 items-center gap-2">
             <span
               className={cn(
-                "flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium",
-                state === "done" && "border-primary bg-primary text-primary-foreground",
-                state === "current" && "border-primary text-primary",
-                state === "upcoming" && "border-border text-muted-foreground"
+                "flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-medium",
+                state === "done" && "bg-primary text-primary-foreground",
+                state === "current" && "bg-primary/15 text-primary",
+                state === "upcoming" && "bg-zone text-muted-foreground"
               )}
             >
               {state === "done" ? <Check className="size-3.5" aria-hidden /> : i + 1}
@@ -274,6 +284,7 @@ function ClientStep({
   const {
     register,
     watch,
+    control,
     formState: { errors },
   } = useFormContext<CreateProjectInput>();
 
@@ -281,10 +292,10 @@ function ClientStep({
   const [picked, setPicked] = React.useState<ClientHit | null>(null);
 
   return (
-    <div className="space-y-5">
-      <h2 className="text-sm font-semibold text-foreground">Client information</h2>
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Client information</h2>
 
-      <div className="flex gap-2">
+      <div role="group" aria-label="Client type" className="inline-flex w-full gap-1 rounded-xl bg-zone p-1 sm:w-auto">
         <ModeButton active={clientMode === "new"} onClick={() => setValue("clientMode", "new")}>
           New client
         </ModeButton>
@@ -322,14 +333,21 @@ function ClientStep({
             <Input id="c-email" type="email" inputMode="email" autoComplete="off" {...register("email")} />
           </Field>
           <Field label="University" required htmlFor="c-uni" error={errors.universityId?.message}>
-            <Select id="c-uni" {...register("universityId")}>
-              <option value="">Select a university</option>
-              {universities.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.abbreviation})
-                </option>
-              ))}
-            </Select>
+            <Controller
+              control={control}
+              name="universityId"
+              render={({ field }) => (
+                <UniversityCombobox
+                  id="c-uni"
+                  universities={universities}
+                  value={(field.value as string | undefined) ?? ""}
+                  onChange={(v) => field.onChange(v)}
+                  onBlur={field.onBlur}
+                  allowOther={false}
+                  invalid={!!errors.universityId}
+                />
+              )}
+            />
           </Field>
           <Field label="Faculty" htmlFor="c-faculty" error={errors.faculty?.message}>
             <Input id="c-faculty" {...register("faculty")} />
@@ -374,11 +392,10 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
-        "min-h-11 flex-1 rounded-lg border px-3 text-sm font-medium transition-colors",
-        active
-          ? "border-primary bg-primary/10 text-primary"
-          : "border-border text-muted-foreground hover:text-foreground"
+        "min-h-11 flex-1 rounded-lg px-4 text-sm font-medium transition-colors sm:flex-none",
+        active ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"
       )}
     >
       {children}
@@ -425,7 +442,7 @@ function ClientPicker({
 
   if (picked && selectedId) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-elevated p-3">
+      <div className="flex items-center justify-between gap-3 rounded-2xl bg-zone p-4">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">{picked.fullName}</p>
           <p className="truncate text-xs text-muted-foreground">
@@ -464,7 +481,7 @@ function ClientPicker({
       {loading ? (
         <p className="mt-2 text-xs text-muted-foreground">Searching…</p>
       ) : hits.length > 0 ? (
-        <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border">
+        <ul className="mt-2 divide-y divide-border/80">
           {hits.map((hit) => (
             <li key={hit.id}>
               <button
@@ -510,7 +527,7 @@ function ServiceStep({ services }: { services: ServiceOption[] }) {
 
   return (
     <div className="space-y-5">
-      <h2 className="text-sm font-semibold text-foreground">Service selection</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Service selection</h2>
 
       <Field label="Service" required htmlFor="serviceId" error={errors.serviceId?.message}>
         <Select id="serviceId" {...register("serviceId")}>
@@ -537,7 +554,7 @@ function ServiceStep({ services }: { services: ServiceOption[] }) {
       ) : null}
 
       {service ? (
-        <label className="flex items-start gap-3 rounded-lg border border-border p-3">
+        <label className="flex items-start gap-3 rounded-xl bg-zone p-3.5">
           <input
             type="checkbox"
             className="mt-0.5 size-4 shrink-0 accent-primary"
@@ -577,7 +594,7 @@ function ServiceStep({ services }: { services: ServiceOption[] }) {
       ) : null}
 
       {price ? (
-        <div className="rounded-lg border border-border bg-elevated p-3 text-sm">
+        <div className="rounded-2xl bg-zone p-4 text-sm">
           <PriceRow label="Base price" value={price.base} />
           {price.variantAddon > 0 ? <PriceRow label="Variant add-on" value={price.variantAddon} /> : null}
           {price.expressSurcharge > 0 ? (
@@ -641,7 +658,7 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
 
   return (
     <div className="space-y-5">
-      <h2 className="text-sm font-semibold text-foreground">Project details</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Project details</h2>
 
       <Field
         label="Project title"
@@ -722,12 +739,7 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
       ) : null}
 
       <Field label="Special instructions" htmlFor="specialInstructions">
-        <textarea
-          id="specialInstructions"
-          rows={4}
-          className="w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          {...register("specialInstructions")}
-        />
+        <Textarea id="specialInstructions" rows={4} {...register("specialInstructions")} />
       </Field>
 
       <Field
@@ -773,7 +785,7 @@ function ReviewStep({
 
   return (
     <div className="space-y-5">
-      <h2 className="text-sm font-semibold text-foreground">Review</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Review</h2>
 
       <ReviewGroup title="Client">
         {values.clientMode === "existing" ? (
@@ -808,7 +820,7 @@ function ReviewStep({
       </ReviewGroup>
 
       {price ? (
-        <div className="rounded-lg border border-border bg-elevated p-3 text-sm">
+        <div className="rounded-2xl bg-zone p-4 text-sm">
           <PriceRow label="Total price" value={price.total} strong />
           <PriceRow label="Downpayment (45%)" value={price.downpaymentAmount} muted />
           <PriceRow label="Balance (55%)" value={price.balanceAmount} muted />
@@ -826,17 +838,17 @@ function ReviewStep({
 function ReviewGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <h3 className="meta-label">
         {title}
       </h3>
-      <dl className="mt-1.5 divide-y divide-border rounded-lg border border-border">{children}</dl>
+      <dl className="mt-1.5 divide-y divide-border/80">{children}</dl>
     </div>
   );
 }
 
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-3 py-2 text-sm">
+    <div className="flex items-start justify-between gap-4 py-2.5 text-sm">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="max-w-[60%] whitespace-pre-wrap text-right text-foreground">{value}</dd>
     </div>

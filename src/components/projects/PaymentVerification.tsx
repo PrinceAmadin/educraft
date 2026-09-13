@@ -2,11 +2,11 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { LuCheck, LuClock, LuCircleAlert } from "react-icons/lu";
-import { Loader2 } from "lucide-react";
+import { LuCheck, LuClock, LuCircleAlert, LuLoaderCircle as Loader2 } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/forms/Field";
 import {
   Dialog,
@@ -69,7 +69,7 @@ export function PaymentVerification({
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-zone px-4 py-3.5">
       <div>
         <p className="text-sm font-medium text-foreground">
           {label}
@@ -146,13 +146,7 @@ export function PaymentVerification({
               <Input id="pv-ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Transfer / receipt reference" />
             </Field>
             <Field label="Notes" htmlFor="pv-notes">
-              <textarea
-                id="pv-notes"
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full rounded-lg border border-border bg-input p-2 text-sm text-foreground focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
+              <Textarea id="pv-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
             </Field>
 
             {error ? (

@@ -31,7 +31,7 @@ export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role);
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 bg-background/80 px-4 backdrop-blur-md md:px-6">
       {/* Mobile brand — the sidebar is hidden below md, so the logo lives here */}
       <div className="md:hidden">
         <LogoLockup href={home} size="xs" />
@@ -44,7 +44,7 @@ export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
           <input
             type="search"
             placeholder="Search projects, clients, workers…"
-            className="h-10 w-full rounded-lg border border-border bg-input pl-9 pr-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="h-10 w-full rounded-lg border border-transparent bg-card pl-9 pr-3 text-sm text-foreground shadow-soft placeholder:text-subtle transition-[border-color,box-shadow] duration-fast focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
           />
           <span className="sr-only">Search</span>
         </label>

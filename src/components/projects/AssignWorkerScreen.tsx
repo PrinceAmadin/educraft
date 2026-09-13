@@ -2,7 +2,11 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CircleAlert, Loader2, Check } from "lucide-react";
+import {
+  LuCheck as Check,
+  LuCircleAlert as CircleAlert,
+  LuLoaderCircle as Loader2,
+} from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { WorkerRecommendation } from "@/lib/services/workers";
@@ -46,7 +50,7 @@ export function AssignWorkerScreen({
 
   if (recommendations.length === 0) {
     return (
-      <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+      <p className="rounded-2xl bg-zone p-5 text-sm text-muted-foreground">
         No active workers to recommend. Add a worker first, or bring one off break.
       </p>
     );
@@ -68,7 +72,7 @@ export function AssignWorkerScreen({
         {visible.map((w) => (
           <li
             key={w.id}
-            className="rounded-xl border border-border bg-card p-4 sm:flex sm:items-start sm:justify-between sm:gap-4"
+            className="surface p-4 sm:flex sm:items-start sm:justify-between sm:gap-4 sm:p-5"
           >
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -81,7 +85,7 @@ export function AssignWorkerScreen({
                   </span>
                 ) : null}
                 {w.status === "On Break" ? (
-                  <span className="rounded-full border border-gold/30 bg-gold/10 px-2 py-0.5 text-[11px] font-medium text-gold">
+                  <span className="rounded-full bg-gold/10 px-2 py-0.5 text-[11px] font-medium text-gold">
                     On break
                   </span>
                 ) : null}

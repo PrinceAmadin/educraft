@@ -4,10 +4,13 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CircleAlert, Loader2 } from "lucide-react";
+import { LuCircleAlert, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/forms/Field";
+import { FormActions } from "@/components/forms/FormActions";
+import { FormSection } from "@/components/forms/FormSection";
 import { TagInput } from "@/components/forms/TagInput";
 import { createWorkerSchema, type CreateWorkerInput } from "@/lib/validations/workers";
 import { COMMON_SKILLS, COMMON_SPECIALTIES } from "@/lib/constants";
@@ -47,9 +50,7 @@ export function NewWorkerForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      const body = (await res.json().catch(() => null)) as
-        | { id?: string; error?: string }
-        | null;
+      const body = (await res.json().catch(() => null)) as { id?: string; error?: string } | null;
       if (!res.ok || !body?.id) {
         throw new Error(body?.error ?? "Could not add the worker.");
       }
@@ -61,10 +62,9 @@ export function NewWorkerForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Identity</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-w-3xl space-y-12">
+      <FormSection title="Identity">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Full name" required htmlFor="fullName" error={errors.fullName?.message}>
             <Input id="fullName" autoComplete="off" {...register("fullName")} />
           </Field>
@@ -92,11 +92,10 @@ export function NewWorkerForm() {
             />
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Specialties &amp; skills</h2>
-        <div className="mt-4 space-y-5">
+      <FormSection title="Specialties & skills">
+        <div className="space-y-5">
           <Field
             label="Specialties (departments)"
             htmlFor="specialties"
@@ -138,11 +137,10 @@ export function NewWorkerForm() {
             />
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <FormSection title="Bank details" description="Where payouts are sent.">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Bank name" htmlFor="bankName" error={errors.bankName?.message}>
             <Input id="bankName" {...register("bankName")} />
           </Field>
@@ -153,32 +151,27 @@ export function NewWorkerForm() {
             <Input id="accountName" {...register("accountName")} />
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <Field label="Notes" htmlFor="notes" error={errors.notes?.message}>
-          <textarea
-            id="notes"
-            rows={3}
-            className="w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            {...register("notes")}
-          />
+      <FormSection title="Notes">
+        <Field label="Internal notes" htmlFor="notes" error={errors.notes?.message}>
+          <Textarea id="notes" rows={3} {...register("notes")} />
         </Field>
-      </section>
+      </FormSection>
 
       {submitError ? (
-        <p className="flex items-start gap-2 text-sm text-danger">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+          <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
           {submitError}
         </p>
       ) : null}
 
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+      <FormActions>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+          {isSubmitting ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
           {isSubmitting ? "Adding…" : "Add worker"}
         </Button>
-      </div>
+      </FormActions>
     </form>
   );
 }

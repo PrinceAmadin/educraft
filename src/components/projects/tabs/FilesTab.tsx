@@ -32,18 +32,18 @@ export function FilesTab({ project }: { project: ProjectDetail }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {categories.map((category) => {
         const files = byCategory.get(category) ?? [];
         return (
           <section key={category}>
-            <h3 className="text-sm font-semibold text-foreground">
+            <h3 className="text-[15px] font-semibold text-foreground">
               {FILE_CATEGORY_LABELS[category] ?? category}
               <span className="ml-2 font-mono text-xs text-muted-foreground">{files.length}</span>
             </h3>
             <div className="mt-2">
               {files.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                <p className="rounded-xl bg-zone px-4 py-4 text-[13px] text-muted-foreground">
                   Nothing in this category yet.
                 </p>
               ) : (

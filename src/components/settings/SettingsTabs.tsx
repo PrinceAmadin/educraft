@@ -2,32 +2,31 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { href: "/admin/settings", label: "General" },
-  { href: "/admin/settings/services", label: "Services" },
-  { href: "/admin/settings/team", label: "Team" },
+  { key: "general", href: "/admin/settings", label: "General" },
+  { key: "services", href: "/admin/settings/services", label: "Services" },
+  { key: "team", href: "/admin/settings/team", label: "Team" },
 ] as const;
 
+/** Segmented control on a zone — the active tab lifts as a surface. */
 export function SettingsTabs({ active }: { active: "general" | "services" | "team" }) {
   return (
-    <div className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-card p-1">
-      {TABS.map((tab, i) => {
-        const key = (["general", "services", "team"] as const)[i];
-        const isActive = key === active;
+    <nav aria-label="Settings sections" className="no-scrollbar inline-flex max-w-full gap-1 overflow-x-auto rounded-xl bg-zone p-1">
+      {TABS.map((tab) => {
+        const isActive = tab.key === active;
         return (
           <Link
             key={tab.href}
             href={tab.href}
+            aria-current={isActive ? "page" : undefined}
             className={cn(
-              "min-h-11 shrink-0 rounded-md px-4 py-2 text-center text-sm font-medium leading-[1.75rem] transition-colors",
-              isActive
-                ? "bg-primary/[0.12] text-primary"
-                : "text-muted-foreground hover:bg-elevated hover:text-foreground"
+              "inline-flex min-h-11 shrink-0 items-center rounded-lg px-4 text-sm font-medium transition-colors",
+              isActive ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"
             )}
           >
             {tab.label}
           </Link>
         );
       })}
-    </div>
+    </nav>
   );
 }

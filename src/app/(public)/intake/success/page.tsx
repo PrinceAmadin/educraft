@@ -51,7 +51,7 @@ export default async function IntakeSuccessPage({
             {project.projectId}
           </p>
 
-          <div className="mt-6 w-full rounded-xl border border-border bg-card p-4 text-left text-sm">
+          <div className="mt-6 w-full surface p-4 text-left text-sm">
             <p className="font-semibold text-foreground">Payment instructions</p>
             {priceKnown ? (
               <p className="mt-1 text-muted-foreground">

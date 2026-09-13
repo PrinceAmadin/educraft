@@ -32,7 +32,7 @@ export function paymentStandingLabel(input: {
 }
 
 export const PAYMENT_BADGE: Record<PaymentStanding, string> = {
-  Unpaid: "border-border bg-elevated text-muted-foreground",
+  Unpaid: "border-transparent bg-elevated text-muted-foreground",
   Partial: "border-transparent bg-gold/15 text-gold",
   Paid: "border-transparent bg-success/15 text-success",
 };
@@ -57,6 +57,19 @@ export function rowAccent(input: {
   if (urgency === "ok") return "ok";
   return "none";
 }
+
+/**
+ * The same colour code as a small dot beside the project ID — the list keeps
+ * its meaning without drawing a coloured edge on every row.
+ */
+export const ROW_ACCENT_DOT: Record<RowAccent, string> = {
+  none: "bg-transparent",
+  ok: "bg-success/60",
+  soon: "bg-gold",
+  risk: "bg-danger",
+  waiting: "bg-info",
+  done: "bg-border-hover",
+};
 
 export const ROW_ACCENT_CLASS: Record<RowAccent, string> = {
   none: "border-l-2 border-l-transparent",

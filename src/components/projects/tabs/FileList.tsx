@@ -13,11 +13,11 @@ function humanSize(bytes: number | null): string | null {
 
 export function FileList({ files }: { files: ProjectFile[] }) {
   return (
-    <ul className="divide-y divide-border rounded-lg border border-border">
+    <ul className="divide-y divide-border/80">
       {files.map((file) => {
         const size = humanSize(file.fileSize);
         return (
-          <li key={file.id} className="flex items-center gap-3 p-3">
+          <li key={file.id} className="flex items-center gap-3 py-3">
             <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-foreground">{file.fileName}</p>

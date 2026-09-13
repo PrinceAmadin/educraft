@@ -45,7 +45,7 @@ export function AmbassadorControls({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <label className="block">
-        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="mb-1 block meta-label">
           Status
         </span>
         <Select
@@ -64,7 +64,7 @@ export function AmbassadorControls({
       </label>
 
       <label className="block">
-        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="mb-1 block meta-label">
           Tier
         </span>
         <Select

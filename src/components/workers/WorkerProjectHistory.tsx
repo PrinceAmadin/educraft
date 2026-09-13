@@ -32,7 +32,7 @@ export function WorkerProjectHistory({ projects }: { projects: WorkerDetail["pro
           <li key={p.id}>
             <Link
               href={`/admin/projects/${p.projectId}`}
-              className="block rounded-xl border border-border bg-card p-4 transition-colors duration-fast hover:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="block surface p-4 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-mono text-sm font-medium text-foreground">{p.projectId}</span>
@@ -53,10 +53,10 @@ export function WorkerProjectHistory({ projects }: { projects: WorkerDetail["pro
         ))}
       </ul>
 
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         <Table>
           <TableHeader>
-            <TableRow className="bg-card hover:bg-card">
+            <TableRow className="hover:bg-transparent">
               <TableHead>Project</TableHead>
               <TableHead>Service</TableHead>
               <TableHead>Status</TableHead>
@@ -67,7 +67,7 @@ export function WorkerProjectHistory({ projects }: { projects: WorkerDetail["pro
           </TableHeader>
           <TableBody>
             {projects.map((p) => (
-              <TableRow key={p.id} className="bg-card">
+              <TableRow key={p.id}>
                 <TableCell>
                   <Link
                     href={`/admin/projects/${p.projectId}`}

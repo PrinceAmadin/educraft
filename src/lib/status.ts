@@ -20,7 +20,7 @@ export const STATUS_META: Record<ProjectStatus, StatusMeta> = {
   NEW: {
     label: "New",
     short: "New",
-    badge: "border-border bg-elevated text-muted-foreground",
+    badge: "border-transparent bg-elevated text-muted-foreground",
   },
   DOWNPAYMENT_VERIFIED: {
     label: "Downpayment Verified",
@@ -90,17 +90,17 @@ export const STATUS_META: Record<ProjectStatus, StatusMeta> = {
   ON_HOLD: {
     label: "On Hold",
     short: "On Hold",
-    badge: "border-border bg-elevated text-muted-foreground",
+    badge: "border-transparent bg-elevated text-muted-foreground",
   },
   CANCELLED: {
     label: "Cancelled",
     short: "Cancelled",
-    badge: "border-border bg-elevated text-subtle line-through",
+    badge: "border-transparent bg-elevated text-subtle line-through",
   },
   REFUNDED: {
     label: "Refunded",
     short: "Refunded",
-    badge: "border-border bg-elevated text-subtle line-through",
+    badge: "border-transparent bg-elevated text-subtle line-through",
   },
   DISPUTED: {
     label: "Disputed",

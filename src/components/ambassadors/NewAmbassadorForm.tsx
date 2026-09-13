@@ -2,30 +2,27 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CircleAlert, Loader2 } from "lucide-react";
+import { LuCircleAlert, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Field } from "@/components/forms/Field";
+import { FormActions } from "@/components/forms/FormActions";
+import { FormSection } from "@/components/forms/FormSection";
+import { UniversityCombobox, type UniversityOption } from "@/components/forms/UniversityCombobox";
 import { ACADEMIC_LEVELS } from "@/lib/constants";
-import {
-  createAmbassadorSchema,
-  type CreateAmbassadorInput,
-} from "@/lib/validations/ambassadors";
+import { createAmbassadorSchema, type CreateAmbassadorInput } from "@/lib/validations/ambassadors";
 
-export function NewAmbassadorForm({
-  universities,
-}: {
-  universities: { id: string; name: string; abbreviation: string }[];
-}) {
+export function NewAmbassadorForm({ universities }: { universities: UniversityOption[] }) {
   const router = useRouter();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<CreateAmbassadorInput>({
     resolver: zodResolver(createAmbassadorSchema),
@@ -51,9 +48,7 @@ export function NewAmbassadorForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      const body = (await res.json().catch(() => null)) as
-        | { id?: string; error?: string }
-        | null;
+      const body = (await res.json().catch(() => null)) as { id?: string; error?: string } | null;
       if (!res.ok || !body?.id) {
         throw new Error(body?.error ?? "Could not add the ambassador.");
       }
@@ -65,28 +60,45 @@ export function NewAmbassadorForm({
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Identity</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-w-3xl space-y-12">
+      <FormSection title="Identity">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Full name" required htmlFor="fullName" error={errors.fullName?.message}>
             <Input id="fullName" autoComplete="off" {...register("fullName")} />
           </Field>
           <Field label="Phone" required htmlFor="phone" error={errors.phone?.message}>
             <Input id="phone" inputMode="tel" autoComplete="off" {...register("phone")} />
           </Field>
-          <Field label="Email" htmlFor="email" error={errors.email?.message}>
+          <Field label="Email" htmlFor="email" error={errors.email?.message} className="sm:col-span-2">
             <Input id="email" type="email" inputMode="email" autoComplete="off" {...register("email")} />
           </Field>
-          <Field label="University" required htmlFor="universityId" error={errors.universityId?.message}>
-            <Select id="universityId" {...register("universityId")}>
-              <option value="">Select a university</option>
-              {universities.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.abbreviation})
-                </option>
-              ))}
-            </Select>
+        </div>
+      </FormSection>
+
+      <FormSection title="Campus">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <Field
+            label="University"
+            required
+            htmlFor="universityId"
+            error={errors.universityId?.message}
+            className="sm:col-span-2"
+          >
+            <Controller
+              control={control}
+              name="universityId"
+              render={({ field }) => (
+                <UniversityCombobox
+                  id="universityId"
+                  universities={universities}
+                  value={field.value ?? ""}
+                  onChange={(v) => field.onChange(v)}
+                  onBlur={field.onBlur}
+                  allowOther={false}
+                  invalid={!!errors.universityId}
+                />
+              )}
+            />
           </Field>
           <Field label="Department" htmlFor="department" error={errors.department?.message}>
             <Input id="department" {...register("department")} />
@@ -102,11 +114,10 @@ export function NewAmbassadorForm({
             </Select>
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <FormSection title="Bank details" description="Where commission is paid.">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Bank name" htmlFor="bankName" error={errors.bankName?.message}>
             <Input id="bankName" {...register("bankName")} />
           </Field>
@@ -117,26 +128,26 @@ export function NewAmbassadorForm({
             <Input id="accountName" {...register("accountName")} />
           </Field>
         </div>
-      </section>
+      </FormSection>
 
-      <p className="text-xs text-muted-foreground">
-        A referral code, referral link, and ambassador ID are generated automatically. Tier starts at
+      <p className="text-[13px] text-muted-foreground">
+        A referral code, referral link and ambassador ID are generated automatically. Tier starts at
         Bronze (10%).
       </p>
 
       {submitError ? (
-        <p className="flex items-start gap-2 text-sm text-danger">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+          <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
           {submitError}
         </p>
       ) : null}
 
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+      <FormActions>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+          {isSubmitting ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
           {isSubmitting ? "Adding…" : "Add ambassador"}
         </Button>
-      </div>
+      </FormActions>
     </form>
   );
 }

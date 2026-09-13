@@ -46,7 +46,7 @@ export function WorkerStatusControl({
     <div className="space-y-1.5">
       <label
         htmlFor="worker-status"
-        className="block text-[11px] font-medium uppercase tracking-wider text-muted-foreground"
+        className="block meta-label"
       >
         Status
       </label>

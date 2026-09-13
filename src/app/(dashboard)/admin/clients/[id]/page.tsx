@@ -36,7 +36,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
       </Link>
 
       {/* Header */}
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="font-display text-xl font-bold tracking-tight text-foreground">
@@ -47,7 +47,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
           {client.referredBy ? (
             <Link
               href={`/admin/ambassadors/${client.referredBy.id}`}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-elevated px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="inline-flex items-center gap-1.5 rounded-full bg-elevated px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
               <LuMegaphone className="size-3.5" aria-hidden />
               Referred by {client.referredBy.fullName}
@@ -99,7 +99,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
       </section>
 
       {/* Notes */}
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <ClientNotes clientId={client.id} initialNotes={client.notes} />
       </section>
     </div>
@@ -117,7 +117,7 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="flex items-center gap-1.5 meta-label">
         {Icon ? <Icon className="size-3" aria-hidden /> : null}
         {label}
       </dt>
@@ -128,8 +128,8 @@ function Field({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl bg-zone p-3 sm:p-4">
+      <p className="meta-label">
         {label}
       </p>
       <p className="mt-1 font-mono text-lg font-medium tabular-nums text-foreground">{value}</p>

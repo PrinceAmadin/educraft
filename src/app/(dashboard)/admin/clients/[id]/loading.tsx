@@ -11,7 +11,7 @@ export default function ClientDetailLoading() {
         ))}
       </div>
       <Skeleton className="h-5 w-32" />
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-[53px] rounded-none" />
         ))}

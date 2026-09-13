@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
 import { Logo } from "@/components/shared/Logo";
 import { LoginForm } from "@/app/(auth)/login/login-form";
@@ -11,28 +12,26 @@ export const metadata: Metadata = {
 export default function LoginPage() {
   return (
     <div className="w-full max-w-[400px]">
-      <div className="mb-8 flex flex-col items-center text-center">
-        <Logo size="xl" priority />
-        <h1 className="mt-5 font-display text-2xl font-bold tracking-tight text-foreground">
+      <div className="mb-9">
+        {/* The split layout carries the brand on desktop; phones get a small mark */}
+        <Logo size="lg" priority className="mb-7 lg:hidden" />
+        <h1 className="font-display text-[1.75rem] font-bold leading-tight tracking-tight text-foreground">
           Welcome back
         </h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Sign in to your EduCraft WorkBase account
+        <p className="mt-2 text-[15px] text-muted-foreground">
+          Sign in to your EduCraft WorkBase account.
         </p>
       </div>
 
-      <Suspense fallback={<Skeleton className="h-[340px] w-full rounded-xl" />}>
+      <Suspense fallback={<Skeleton className="h-[260px] w-full rounded-xl" />}>
         <LoginForm />
       </Suspense>
 
-      <p className="mt-6 text-center text-sm text-muted-foreground">
+      <p className="mt-9 text-sm text-muted-foreground">
         Want to become an ambassador?{" "}
-        <a
-          href="/apply"
-          className="font-medium text-primary underline-offset-4 hover:underline"
-        >
+        <Link href="/apply" className="font-medium text-primary underline-offset-4 hover:underline">
           Apply here
-        </a>
+        </Link>
       </p>
     </div>
   );

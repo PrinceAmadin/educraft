@@ -38,6 +38,9 @@ export {
   LuArrowLeft as IconArrowLeft,
   LuChevronUp as IconChevronUp,
   LuChevronDown as IconChevronDown,
+  LuChevronsUp as IconChevronsUp,
+  LuChevronsDown as IconChevronsDown,
+  LuSearch as IconSearch,
   LuMenu as IconMenu,
   LuX as IconClose,
 

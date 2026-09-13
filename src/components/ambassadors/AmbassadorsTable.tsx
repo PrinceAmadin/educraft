@@ -21,7 +21,7 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
           <li key={row.id}>
             <Link
               href={`/admin/ambassadors/${row.id}`}
-              className="block rounded-xl border border-border bg-card p-4 transition-colors duration-fast hover:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="block surface p-4 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-foreground">{row.fullName}</span>
@@ -47,10 +47,10 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
       </ul>
 
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         <Table>
           <TableHeader>
-            <TableRow className="bg-card hover:bg-card">
+            <TableRow className="hover:bg-transparent">
               <TableHead>Ambassador</TableHead>
               <TableHead>University</TableHead>
               <TableHead className="text-right">Referrals</TableHead>
@@ -66,7 +66,7 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.id} className="bg-card">
+              <TableRow key={row.id}>
                 <TableCell>
                   <Link
                     href={`/admin/ambassadors/${row.id}`}

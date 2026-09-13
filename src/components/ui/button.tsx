@@ -12,7 +12,7 @@ const buttonVariants = cva(
         gold: "bg-gold text-gold-foreground hover:bg-gold-hover",
         destructive: "bg-danger text-danger-foreground hover:bg-danger/90",
         outline:
-          "border border-border bg-transparent hover:border-border-hover hover:bg-elevated",
+          "border border-input-border bg-card hover:border-border-hover hover:bg-elevated",
         secondary: "bg-secondary text-secondary-foreground hover:bg-elevated",
         ghost: "hover:bg-elevated hover:text-foreground",
         link: "text-primary underline-offset-4 hover:underline",

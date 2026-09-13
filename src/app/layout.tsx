@@ -4,17 +4,23 @@ import { Providers } from "@/app/providers";
 import { APP_NAME, BRAND_NAME } from "@/lib/constants";
 import "./globals.css";
 
+// Inter's `latin-ext` file carries the naira sign (U+20A6); the browser only
+// downloads it when a page actually uses one of its characters.
 const inter = Inter({
-  subsets: ["latin"],
+  subsets: ["latin", "latin-ext"],
   variable: "--font-inter",
   display: "swap",
 });
 
+// JetBrains Mono has no naira glyph. Its generated metric fallback is a local
+// Arial, which would catch every "₦" and draw it heavy beside the mono digits,
+// so it's switched off and the Tailwind mono stack hands the glyph to Inter.
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-jetbrains-mono",
   weight: ["500", "600"],
   display: "swap",
+  adjustFontFallback: false,
 });
 
 /* Editorial accent — italic only, used on single emphasised words */
@@ -71,12 +77,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // `dark` here matches next-themes' defaultTheme so the server HTML already
-    // carries it — the theme script corrects it before paint for light-mode users.
+    // Light is the default theme, so the server HTML carries no theme class —
+    // next-themes' inline script adds `dark` before paint for readers who chose it.
     <html
       lang="en"
       suppressHydrationWarning
-      className={`dark ${inter.variable} ${jetbrainsMono.variable} ${interTight.variable} ${instrumentSerif.variable}`}
+      className={`${inter.variable} ${jetbrainsMono.variable} ${interTight.variable} ${instrumentSerif.variable}`}
     >
       <body className="min-h-screen bg-background font-sans text-foreground">
         <Providers>{children}</Providers>

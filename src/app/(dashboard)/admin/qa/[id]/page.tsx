@@ -54,7 +54,7 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
         QA queue
       </Link>
 
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -63,7 +63,7 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
               </h1>
               <StatusBadge status={project.status as ProjectStatus} />
               {project.revisionCount > 0 ? (
-                <span className="rounded-full border border-gold/30 bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold">
+                <span className="rounded-full bg-gold/10 px-2 py-0.5 text-xs font-medium text-gold">
                   Revision #{project.revisionCount}
                 </span>
               ) : null}
@@ -105,7 +105,7 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
 
         {project.specialInstructions ? (
           <div className="mt-3 border-t border-border pt-3">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <p className="meta-label">
               Special instructions
             </p>
             <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">
@@ -134,7 +134,7 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
           ) : submitted ? (
             <QaStartReview projectCode={project.projectId} />
           ) : (
-            <div className="rounded-xl border border-border bg-card p-4 text-sm">
+            <div className="surface p-4 text-sm">
               <p className="font-medium text-foreground">
                 This project is {project.status.replace(/_/g, " ").toLowerCase()} — not in QA.
               </p>
@@ -155,7 +155,7 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="meta-label">
         {label}
       </dt>
       <dd className="mt-0.5 text-foreground">{children}</dd>
@@ -173,7 +173,7 @@ function FileGroup({
   emptyHint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="surface p-4">
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       {files.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">{emptyHint ?? "None."}</p>

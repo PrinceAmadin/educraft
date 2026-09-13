@@ -1,141 +1,140 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { motion, useReducedMotion } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { STATUS_META } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { PipelineSegment } from "@/types/dashboard";
 
 /**
- * The pipeline is rendered as links rather than a chart on purpose: every
- * segment is a navigation target into the filtered projects list, and a
- * Recharts bar would put that behind a canvas with no keyboard route in.
+ * The pipeline as one process rail — not eleven boxes.
  *
- * Segments are teal; the portion of a stage that is inside three days of its
- * internal deadline (or already past it) is drawn in gold on top of the teal,
- * so a stage that is quietly running late reads at a glance.
+ * Stage names run along the top, counts sit beneath, and a single continuous
+ * track runs under the whole thing. A stage holding work lights its stretch of
+ * the rail in teal and its label in teal; empty stages stay quiet grey. The
+ * share of a stage that is inside three days of its deadline is drawn in gold.
+ *
+ * Every stage is a link into the filtered projects list — a chart would put
+ * that behind a canvas with no keyboard route in. On narrow screens the rail
+ * scrolls sideways inside itself (the page never does), with the edges faded.
  */
 export interface PipelineBarProps {
   segments: PipelineSegment[];
 }
 
 export function PipelineBar({ segments }: PipelineBarProps) {
+  const reduced = useReducedMotion();
   const total = segments.reduce((sum, s) => sum + s.count, 0);
-  const max = segments.reduce((m, s) => Math.max(m, s.count), 0);
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0 p-4 sm:p-5">
-        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Project Pipeline
-        </CardTitle>
-        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+    <section aria-labelledby="pipeline-heading" className="rounded-2xl bg-zone px-4 py-5 sm:px-6 sm:py-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="pipeline-heading" className="text-[15px] font-semibold text-foreground">
+          Project pipeline
+        </h2>
+        <span className="font-mono text-[13px] tabular-nums text-muted-foreground">
           {total} in flow
         </span>
-      </CardHeader>
+      </div>
 
-      <CardContent className="p-4 pt-0 sm:p-5 sm:pt-0">
-        {/* 2 columns at 375px, 3 on larger phones, all 11 in a row on desktop */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-11">
+      <div className="no-scrollbar -mx-4 mt-5 overflow-x-auto px-4 max-lg:mask-fade-x sm:-mx-6 sm:px-6">
+        <ol className="flex min-w-[46rem] lg:min-w-0">
           {segments.map((segment, index) => {
             const meta = STATUS_META[segment.status];
-            const fill = max > 0 ? Math.max(segment.count / max, segment.count > 0 ? 0.08 : 0) : 0;
-            const atRiskFill = segment.count > 0 ? segment.atRisk / segment.count : 0;
+            const live = segment.count > 0;
+            const atRiskShare = live ? segment.atRisk / segment.count : 0;
 
             return (
-              <motion.div
-                key={segment.status}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{
-                  type: "spring",
-                  stiffness: 320,
-                  damping: 30,
-                  delay: index * 0.03,
-                }}
-              >
+              <li key={segment.status} className="min-w-0 flex-1">
                 <Link
                   href={`/admin/projects?status=${segment.status}`}
-                  aria-label={`${meta.label}: ${segment.count} project${
-                    segment.count === 1 ? "" : "s"
-                  }${segment.atRisk > 0 ? `, ${segment.atRisk} at risk` : ""}`}
-                  className={cn(
-                    "group flex min-h-[76px] flex-col justify-between rounded-lg border border-border bg-elevated p-2.5",
-                    "transition-colors duration-fast hover:border-primary/50",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  )}
+                  aria-label={`${meta.label}: ${segment.count} project${segment.count === 1 ? "" : "s"}${
+                    segment.atRisk > 0 ? `, ${segment.atRisk} at risk` : ""
+                  }`}
+                  className="group/stage flex flex-col rounded-lg px-1.5 pb-1 pt-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <span
+                    className={cn(
+                      "truncate text-[12px] font-medium transition-colors",
+                      live ? "text-primary" : "text-muted-foreground group-hover/stage:text-foreground"
+                    )}
+                  >
                     {meta.short}
                   </span>
-
-                  <span className="flex items-baseline gap-1.5">
+                  <span className="mt-1 flex items-baseline gap-1">
                     <span
                       className={cn(
-                        "font-mono text-xl font-medium tabular-nums",
-                        segment.count > 0 ? "text-foreground" : "text-subtle"
+                        "font-mono text-lg font-medium leading-none tabular-nums",
+                        live ? "text-foreground" : "text-subtle"
                       )}
                     >
                       {segment.count}
                     </span>
                     {segment.atRisk > 0 ? (
                       <span className="font-mono text-[11px] tabular-nums text-gold">
-                        {segment.atRisk} at risk
+                        {segment.atRisk}!
                       </span>
                     ) : null}
                   </span>
+                </Link>
 
-                  {/* Load bar: teal mass, gold for the at-risk share of it */}
-                  <span
-                    className="mt-1.5 block h-1.5 w-full overflow-hidden rounded-full bg-border"
-                    aria-hidden
-                  >
+                {/* This stage's stretch of the one rail. Adjacent stretches
+                    touch, so the track reads as a single line. */}
+                <span aria-hidden className="relative mt-2 block h-[3px] bg-border">
+                  {live ? (
                     <motion.span
-                      className="block h-full rounded-full bg-primary"
-                      initial={{ width: 0 }}
-                      animate={{ width: `${fill * 100}%` }}
-                      transition={{ type: "spring", stiffness: 200, damping: 30 }}
+                      className="absolute inset-y-0 left-0 block w-full bg-primary"
+                      initial={reduced ? false : { scaleX: 0 }}
+                      animate={{ scaleX: 1 }}
+                      style={{ originX: 0 }}
+                      transition={{ type: "spring", stiffness: 220, damping: 30, delay: index * 0.03 }}
                     >
-                      {atRiskFill > 0 ? (
+                      {atRiskShare > 0 ? (
                         <span
-                          className="block h-full rounded-full bg-gold"
-                          style={{ width: `${atRiskFill * 100}%` }}
+                          className="absolute inset-y-0 right-0 block bg-gold"
+                          style={{ width: `${atRiskShare * 100}%` }}
                         />
                       ) : null}
                     </motion.span>
-                  </span>
-                </Link>
-              </motion.div>
+                  ) : null}
+                </span>
+              </li>
             );
           })}
-        </div>
+        </ol>
+      </div>
 
-        {total === 0 ? (
-          <p className="mt-4 text-xs text-muted-foreground">
-            Nothing in the pipeline yet. Stages fill as projects come through intake.
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
+      {total === 0 ? (
+        <p className="mt-4 text-[13px] text-muted-foreground">
+          Nothing in the pipeline yet. Stages fill as projects come through intake.
+        </p>
+      ) : segments.some((s) => s.atRisk > 0) ? (
+        <p className="mt-4 flex items-center gap-2 text-[13px] text-muted-foreground">
+          <span aria-hidden className="h-[3px] w-4 bg-gold" />
+          Gold marks work inside three days of its deadline.
+        </p>
+      ) : null}
+    </section>
   );
 }
 
 export function PipelineBarSkeleton() {
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0 p-4 sm:p-5">
-        <Skeleton className="h-4 w-36" />
+    <div className="rounded-2xl bg-zone px-4 py-5 sm:px-6 sm:py-6">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-4 w-32" />
         <Skeleton className="h-3 w-16" />
-      </CardHeader>
-      <CardContent className="p-4 pt-0 sm:p-5 sm:pt-0">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6 lg:grid-cols-11">
-          {Array.from({ length: 11 }).map((_, i) => (
-            <Skeleton key={i} className="h-[76px] rounded-lg" />
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+      <div className="mt-5 flex gap-3 overflow-hidden">
+        {Array.from({ length: 11 }).map((_, i) => (
+          <div key={i} className="min-w-[3.5rem] flex-1 space-y-2">
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-5 w-6" />
+            <Skeleton className="h-[3px] w-full rounded-none" />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

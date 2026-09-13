@@ -20,7 +20,7 @@ export function ClientsTable({ rows }: { rows: ClientListRow[] }) {
           <li key={row.id}>
             <Link
               href={`/admin/clients/${row.id}`}
-              className="block rounded-xl border border-border bg-card p-4 transition-colors duration-fast hover:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              className="block surface p-4 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-foreground">{row.fullName}</span>
@@ -44,10 +44,10 @@ export function ClientsTable({ rows }: { rows: ClientListRow[] }) {
       </ul>
 
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         <Table>
           <TableHeader>
-            <TableRow className="bg-card hover:bg-card">
+            <TableRow className="hover:bg-transparent">
               <TableHead>Client</TableHead>
               <TableHead>University</TableHead>
               <TableHead>Department</TableHead>
@@ -61,7 +61,7 @@ export function ClientsTable({ rows }: { rows: ClientListRow[] }) {
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.id} className="bg-card">
+              <TableRow key={row.id}>
                 <TableCell>
                   <Link
                     href={`/admin/clients/${row.id}`}

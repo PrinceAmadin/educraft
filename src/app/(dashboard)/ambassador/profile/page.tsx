@@ -38,7 +38,7 @@ export default async function AmbassadorProfilePage() {
         </p>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold text-foreground">{profile.fullName}</h2>
           <span className="font-mono text-xs text-muted-foreground">{profile.ambassadorId}</span>
@@ -57,13 +57,13 @@ export default async function AmbassadorProfilePage() {
         </dl>
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-foreground">Referral code &amp; link</h2>
         <p className="mt-2 font-mono text-sm text-foreground">{profile.referralCode}</p>
         <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{link}</p>
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-foreground">Tier</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Currently <span className="font-medium text-foreground">{progress.currentLabel}</span> —{" "}
@@ -78,8 +78,8 @@ export default async function AmbassadorProfilePage() {
               key={t.tier}
               className={
                 t.tier === profile.tier
-                  ? "rounded-full border border-primary bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
-                  : "rounded-full border border-border px-2.5 py-0.5 text-xs text-muted-foreground"
+                  ? "rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+                  : "rounded-full bg-elevated px-2.5 py-0.5 text-xs text-muted-foreground"
               }
             >
               {t.label} · {t.rate}% · {t.minConversions}+
@@ -88,7 +88,7 @@ export default async function AmbassadorProfilePage() {
         </ol>
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <section className="surface p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Where your commission is paid. Saving notifies the finance team.
@@ -110,7 +110,7 @@ export default async function AmbassadorProfilePage() {
 function Item({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="meta-label">
         {label}
       </dt>
       <dd className="mt-0.5 text-foreground">{children}</dd>

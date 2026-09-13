@@ -2,9 +2,15 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CircleAlert } from "lucide-react";
-import { LuCheck, LuRotateCcw, LuTriangleAlert } from "react-icons/lu";
+import {
+  LuCheck,
+  LuCircleAlert as CircleAlert,
+  LuLoaderCircle as Loader2,
+  LuRotateCcw,
+  LuTriangleAlert,
+} from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { QaChecklist } from "@/components/qa/QaChecklist";
 import { cn } from "@/lib/utils";
 import type { QaChecklistDef } from "@/lib/qa-checklists";
@@ -64,8 +70,8 @@ export function QaReviewPanel({
   const doneCount = () => def.items.filter((i) => checklistRef.current[i.id]).length;
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-border bg-card p-4">
+    <div className="space-y-8">
+      <div className="rounded-2xl bg-zone p-4 sm:p-5">
         <QaChecklist
           projectCode={projectCode}
           def={def}
@@ -77,20 +83,20 @@ export function QaReviewPanel({
         />
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
-        <label htmlFor="qa-notes" className="text-sm font-semibold text-foreground">
+      <div>
+        <label htmlFor="qa-notes" className="text-[15px] font-semibold text-foreground">
           QA notes
         </label>
-        <p className="text-xs text-muted-foreground">
+        <p className="mt-0.5 text-[13px] text-muted-foreground">
           Shared with the worker when you request a revision.
         </p>
-        <textarea
+        <Textarea
           id="qa-notes"
           rows={5}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           disabled={pending !== null}
-          className="mt-2 w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="mt-3 text-sm"
         />
       </div>
 
@@ -102,7 +108,7 @@ export function QaReviewPanel({
       ) : null}
 
       {confirm ? (
-        <div className="rounded-xl border border-border bg-elevated p-4 text-sm">
+        <div className="rounded-2xl bg-zone p-5 text-sm">
           <p className="font-medium text-foreground">
             {confirm === "pass"
               ? `Pass this project? ${doneCount()}/${total} checklist items ticked.`

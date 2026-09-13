@@ -38,6 +38,7 @@ npm run db:migrate             # Run migrations (uses .env.local via dotenv-cli)
 npm run db:seed                # Seed database
 npm run db:studio              # Open Prisma Studio
 npm run db:generate            # Regenerate Prisma client
+npm run catalogue:sync         # Dry-run: service prices vs prisma/catalogue.ts (add -- --apply to write)
 
 # Build
 npm run build                  # Production build
@@ -60,25 +61,24 @@ npm run lint                   # Lint check
 
 ### Colors
 
-**Dark theme (default):**
-- Background primary: `#0B1120`
-- Background secondary (cards): `#111827`
-- Background tertiary (elevated): `#1A2332`
-- Border: `#1E3A4F`
-- Text primary: `#F1F5F9`
-- Text secondary: `#94A3B8`
-- Accent primary (teal): `#0D9488`
-- Accent secondary (gold): `#F59E0B`
-- Success: `#10B981`
-- Warning: `#F59E0B`
-- Danger: `#EF4444`
+Source of truth: `DATA/EDUCRAFT_UI_CONSTITUTION.md`. Tokens live in `src/app/globals.css`.
 
-**Light theme:**
-- Background primary: `#FFFFFF`
-- Background secondary: `#F8FAFC`
-- Text primary: `#0F172A`
-- Text secondary: `#475569`
-- Accent primary: `#0D9488` (same teal)
+**Light theme (default):**
+- Page: `#F8F9FA` (`bg-background`)
+- Surface: `#FFFFFF` (`bg-card` + `shadow-soft`)
+- Zone band: `#F1F3F5` (`bg-zone`)
+- Input fill: `#F5F6F4` (`bg-input`, edge `border-input-border`)
+- Text primary: `#0F172A` · secondary: `#475569` · tertiary: `#64748B`
+- Accent teal: `#0D9488` (hover `#0F766E`)
+- Border (last resort only): `#E8EAED`
+- Soft shadow: `0 12px 40px rgba(15, 23, 42, 0.06)`
+
+**Dark theme (secondary — multi-surface depth, not navy + borders):**
+- Page: `#0B1120` · Surface: `#131B2E` · Elevated: `#1A2540`
+- Text primary: `#F1F5F9` · Border: `#1E3048` (barely visible, sparingly)
+- Accent teal: `#0D9488` family · Gold: `#F59E0B`
+
+Status hues (gold, success, danger) are set deeper than their fill swatches in the light theme so they stay legible as text.
 
 ### Typography
 - Headings: Inter, 700 weight
@@ -90,7 +90,11 @@ npm run lint                   # Lint check
 - 85% of users are on mobile — mobile-first is mandatory
 - All icons from `react-icons/lu` (Lucide family) — ZERO emojis anywhere
 - All animations via Framer Motion — purposeful, fast (150–500ms), spring physics
-- Dark theme is default, light mode toggle available
+- Light theme is default, dark mode toggle available
+- **No boxes inside boxes.** Separate with spacing and type first, then a zone (`bg-zone` / `Surface tone="zone"`), then a soft shadow (`surface` / `Card`). A border is the last resort. Never wrap a form, a table or a stat row in a bordered card
+- Stats sit on the page (`StatsCard` + `STATS_GRID`); the pipeline is one rail; tables have faint row dividers and no outer container
+- Forms: no outer container — `FormSection` headings organise them; `FormActions` for the submit row; `Textarea` / `Input` / `Select` share `fieldClasses`; universities use `UniversityCombobox`
+- Page titles use `PageHeader`. Sentence case everywhere; uppercase only on tiny metadata (`.eyebrow`). Monospace only for data, money and IDs — labels use `.meta-label`
 - Desktop: collapsible sidebar (240px/64px)
 - Mobile: bottom navigation bar (5 icons max), no sidebar
 - Tables transform to card layouts on mobile
@@ -334,4 +338,7 @@ Update this section as you build:
 - [x] Mobile optimization pass (audited every page against 375–1440px; fixed cramped stat grids, a QA checklist touch target, and referral-link input heights)
 - [x] Light theme pass (token audit — no hardcoded colors outside intentional always-dark surfaces) + bug fix sweep (workers/ambassadors can now be given a portal login — previously impossible)
 - [x] Data migration script (`npm run migrate:legacy` — imports ambassadors/clients/projects from DATA/migration/*.csv, idempotent) + full end-to-end role testing (admin/worker/ambassador/public, all clean)
+- [x] Phase A UI overhaul (UI Constitution): light default, surfaces/zones instead of bordered cards, PageHeader/FormSection/FormActions/Textarea/UniversityCombobox, Command Center zones + one-rail pipeline, finance "big number first", /services search + category pills + grouped rows + /services/[code] detail, split sign-in, borderless scroll controls, CV carousel; checked at 375/414/768/1024/1440 in light and dark
+- [x] Ambassador panel port (original Redis app → /admin/ambassadors/panel, /ambassador-panel/apply|register, /EduCraftA|ECCA|ECSA redirects) — needs `REDIS_URL` + `GMAIL_APP_PASSWORD`
+- [ ] Service price sync from the flyers — drafted in `prisma/catalogue.ts`; run `npm run catalogue:sync` to review, `-- --apply` only after owner approval
 - [ ] Production deployment

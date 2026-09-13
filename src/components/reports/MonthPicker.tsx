@@ -18,7 +18,7 @@ export function MonthPicker({ month, currentMonth }: { month: string; currentMon
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-border bg-card p-1.5">
+    <div className="flex items-center gap-2 surface p-1.5">
       <Button
         size="icon-sm"
         variant="ghost"

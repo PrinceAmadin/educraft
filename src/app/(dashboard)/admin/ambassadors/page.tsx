@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuMegaphone, LuSearchX, LuPlus, LuBuilding2, LuInbox } from "react-icons/lu";
+import { LuMegaphone, LuSearchX, LuPlus, LuBuilding2, LuInbox, LuLink } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { Pagination } from "@/components/shared/Pagination";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { AmbassadorsFilterBar } from "@/components/ambassadors/AmbassadorsFilterBar";
@@ -38,17 +39,18 @@ export default async function AmbassadorsListPage({
   const hasFilters = Boolean(parsed.university || parsed.tier || parsed.status || parsed.q);
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-            Ambassadors
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Campus reps who bring in clients. Referrals, conversions, and commission owed.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <div className="space-y-7">
+      <PageHeader
+        title="Ambassadors"
+        description="Campus reps who bring in clients. Referrals, conversions, and commission owed."
+        actions={
+          <>
+          <Button asChild size="sm" variant="outline" className="shrink-0">
+            <Link href="/admin/ambassadors/panel">
+              <LuLink className="size-4" aria-hidden />
+              Referral panel
+            </Link>
+          </Button>
           <Button asChild size="sm" variant="outline" className="shrink-0">
             <Link href="/admin/ambassadors/applications">
               <LuInbox className="size-4" aria-hidden />
@@ -72,8 +74,9 @@ export default async function AmbassadorsListPage({
               Add ambassador
             </Link>
           </Button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <AmbassadorsFilterBar universities={universities} />
 

@@ -44,7 +44,7 @@ export default async function SchoolCoveragePage() {
           {covered.map((s) => {
             const fill = s.total > 0 ? Math.round((s.active / s.total) * 100) : 0;
             return (
-              <div key={s.id} className="rounded-xl border border-border bg-card p-4">
+              <div key={s.id} className="surface p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-foreground">{s.abbreviation}</p>

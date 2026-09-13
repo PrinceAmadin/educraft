@@ -66,7 +66,7 @@ export function ApplicationReview({
 
       <ul className="space-y-3">
         {rows.map((row) => (
-          <li key={row.id} className="rounded-xl border border-border bg-card p-4">
+          <li key={row.id} className="surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground">{row.fullName}</p>
@@ -193,7 +193,7 @@ export function ApplicationReview({
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Reason (optional)"
-                  className="w-full rounded-lg border border-border bg-input p-2 text-sm text-foreground focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-lg border border-input-border bg-input p-2 text-sm text-foreground focus-visible:border-ring focus-visible:bg-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
                 />
                 {error ? <p className="text-xs text-danger">{error}</p> : null}
                 <div className="flex justify-end gap-2">

@@ -4,18 +4,25 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Controller, FormProvider, useFieldArray, useForm, useFormContext } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { CircleAlert, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+  LuCircleAlert as CircleAlert,
+  LuLoaderCircle as Loader2,
+  LuPlus as Plus,
+  LuTrash2 as Trash2,
+} from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/forms/Field";
 import { TagInput } from "@/components/forms/TagInput";
+import { UniversityCombobox } from "@/components/forms/UniversityCombobox";
 import { FormProgress } from "@/components/intake/FormProgress";
 import { intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/intake";
 import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
-import { cn, formatNaira } from "@/lib/utils";
+import { formatNaira } from "@/lib/utils";
 
 interface ServiceProp {
   serviceCode: string;
@@ -208,27 +215,26 @@ export function IntakeForm({
 
   return (
     <FormProvider {...form}>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-9">
         <FormProgress steps={steps} current={step} />
 
-        <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
-          <StepContent
-            template={template}
-            stepId={stepId}
-            universities={universities}
-            service={service}
-            price={price}
-          />
-        </div>
+        {/* The step sits directly on the page — its heading organises it, not a card. */}
+        <StepContent
+          template={template}
+          stepId={stepId}
+          universities={universities}
+          service={service}
+          price={price}
+        />
 
         {submitError ? (
-          <p className="flex items-start gap-2 text-sm text-danger">
+          <p role="alert" className="flex items-start gap-2 text-sm text-danger">
             <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
             {submitError}
           </p>
         ) : null}
 
-        <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+        <div className="sticky bottom-0 -mx-4 flex items-center justify-between gap-3 bg-background/95 px-4 py-3 pb-safe shadow-[0_-12px_24px_-18px_rgb(15_23_42/0.25)] backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:p-0 sm:shadow-none sm:backdrop-blur-none">
           <Button type="button" variant="ghost" onClick={back} disabled={step === 0 || isSubmitting}>
             Back
           </Button>
@@ -358,7 +364,7 @@ function DeadlineField() {
 function ExpressField({ service }: { service: ServiceProp }) {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
-    <label className="flex items-start gap-3 rounded-lg border border-border p-3">
+    <label className="flex items-start gap-3 rounded-xl bg-zone p-3.5">
       <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" {...register("isExpressDelivery")} />
       <span className="text-sm">
         <span className="font-medium text-foreground">Express delivery</span>
@@ -372,29 +378,32 @@ function ExpressField({ service }: { service: ServiceProp }) {
   );
 }
 
+/** Type to filter or scroll the list — the intake requires a listed university. */
 function UniversitySelect({ universities }: { universities: UniversityOption[] }) {
   const {
-    register,
+    control,
     formState: { errors },
   } = useFormContext<IntakeSubmitInput>();
   return (
     <Field label="University" required htmlFor="universityId" error={errors.universityId?.message as string | undefined}>
-      <Select id="universityId" {...register("universityId")}>
-        <option value="">Select your university</option>
-        {universities.map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.name} ({u.abbreviation})
-          </option>
-        ))}
-      </Select>
+      <Controller
+        control={control}
+        name="universityId"
+        render={({ field }) => (
+          <UniversityCombobox
+            id="universityId"
+            universities={universities}
+            value={(field.value as string | undefined) ?? ""}
+            onChange={(v) => field.onChange(v)}
+            onBlur={field.onBlur}
+            allowOther={false}
+            invalid={!!errors.universityId}
+          />
+        )}
+      />
     </Field>
   );
 }
-
-const taClass = cn(
-  "w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle",
-  "focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-);
 
 // ── Academic steps ───────────────────────────────────────────
 
@@ -413,7 +422,7 @@ function PersonalStep({
 
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Your details</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Your details</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Full name" required htmlFor="fullName" error={errors.fullName?.message}>
           <Input id="fullName" autoComplete="name" {...register("fullName")} />
@@ -466,7 +475,7 @@ function FypProjectStep() {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Project</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Project</h2>
       <Field label="Project topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
@@ -513,15 +522,15 @@ function FypRequirementsStep({ service }: { service: ServiceProp }) {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Requirements</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Requirements</h2>
       <Field label="Department outline" htmlFor="departmentOutline" hint="Paste your department's outline, or describe the structure they expect">
-        <textarea id="departmentOutline" rows={4} className={taClass} {...register("departmentOutline")} />
+        <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
       </Field>
       <Field label="Proposal or existing work" htmlFor="proposalNotes" hint="Describe anything you've already written or been given">
-        <textarea id="proposalNotes" rows={3} className={taClass} {...register("proposalNotes")} />
+        <Textarea id="proposalNotes" rows={3} {...register("proposalNotes")} />
       </Field>
       <Field label="Special instructions" htmlFor="specialInstructions">
-        <textarea id="specialInstructions" rows={3} className={taClass} {...register("specialInstructions")} />
+        <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
       </Field>
       <DeadlineField />
       <ExpressField service={service} />
@@ -537,7 +546,7 @@ function FypPrelimsStep() {
   const dedication = watch("dedicationType");
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Preliminary pages</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Preliminary pages</h2>
       <p className="text-sm text-muted-foreground">
         Optional now — these help us prepare your dedication and acknowledgment pages.
       </p>
@@ -561,7 +570,7 @@ function FypPrelimsStep() {
         </Field>
       ) : null}
       <Field label="Acknowledgment" htmlFor="acknowledgmentDetails" hint="People to thank — supervisor, family, friends, sponsors">
-        <textarea id="acknowledgmentDetails" rows={3} className={taClass} {...register("acknowledgmentDetails")} />
+        <Textarea id="acknowledgmentDetails" rows={3} {...register("acknowledgmentDetails")} />
       </Field>
     </div>
   );
@@ -574,7 +583,7 @@ function SeminarStep() {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Seminar details</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Seminar details</h2>
       <Field label="Seminar topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
@@ -592,12 +601,12 @@ function SeminarRequirementsStep({ service }: { service: ServiceProp }) {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Requirements</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Requirements</h2>
       <Field label="Department outline / structure" htmlFor="departmentOutline" hint="Paste or describe what your department expects">
-        <textarea id="departmentOutline" rows={4} className={taClass} {...register("departmentOutline")} />
+        <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
       </Field>
       <Field label="Special instructions" htmlFor="specialInstructions">
-        <textarea id="specialInstructions" rows={3} className={taClass} {...register("specialInstructions")} />
+        <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
       </Field>
       <DeadlineField />
       <ExpressField service={service} />
@@ -612,7 +621,7 @@ function TermDetailsStep() {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Details</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Details</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Course title" required htmlFor="courseTitle" error={errors.courseTitle?.message as string | undefined}>
           <Input id="courseTitle" {...register("courseTitle")} />
@@ -642,7 +651,7 @@ function ItStep() {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">IT placement</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">IT placement</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Company / organisation" required htmlFor="companyName" error={errors.companyName?.message as string | undefined}>
           <Input id="companyName" {...register("companyName")} />
@@ -676,7 +685,7 @@ function CvContactStep({ universities }: { universities: UniversityOption[] }) {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Contact</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Contact</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Full name" required htmlFor="fullName" error={errors.fullName?.message}>
           <Input id="fullName" autoComplete="name" {...register("fullName")} />
@@ -705,9 +714,9 @@ function CvEducationStep() {
   const { fields, append, remove } = useFieldArray({ control, name: "education" });
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-foreground">Education</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Education</h2>
       {fields.map((f, i) => (
-        <div key={f.id} className="space-y-3 rounded-lg border border-border p-3">
+        <div key={f.id} className="space-y-3 rounded-2xl bg-zone p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">Entry {i + 1}</span>
             {fields.length > 1 ? (
@@ -745,10 +754,10 @@ function CvExperienceStep() {
   const { fields, append, remove } = useFieldArray({ control, name: "experience" });
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-foreground">Experience</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Experience</h2>
       <p className="text-sm text-muted-foreground">Jobs, internships, volunteering, leadership roles.</p>
       {fields.map((f, i) => (
-        <div key={f.id} className="space-y-3 rounded-lg border border-border p-3">
+        <div key={f.id} className="space-y-3 rounded-2xl bg-zone p-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">Entry {i + 1}</span>
             {fields.length > 1 ? (
@@ -769,7 +778,7 @@ function CvExperienceStep() {
             </Field>
           </div>
           <Field label="What you did" htmlFor={`exp-${i}-desc`}>
-            <textarea id={`exp-${i}-desc`} rows={2} className={taClass} {...register(`experience.${i}.description` as const)} />
+            <Textarea id={`exp-${i}-desc`} rows={2} {...register(`experience.${i}.description` as const)} />
           </Field>
         </div>
       ))}
@@ -785,7 +794,7 @@ function CvSkillsStep() {
   const { control } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Skills &amp; certifications</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Skills &amp; certifications</h2>
       <Field label="Skills" htmlFor="skills" hint="Type and press Enter">
         <Controller
           control={control}
@@ -818,12 +827,12 @@ function CvStyleStep() {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Style preference</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Style preference</h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {CV_STYLES.map((s) => (
           <label
             key={s.value}
-            className="flex cursor-pointer flex-col gap-1 rounded-lg border border-border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+            className="flex cursor-pointer flex-col gap-1 rounded-xl bg-zone p-3.5 text-sm ring-1 ring-transparent transition-colors has-[:checked]:bg-primary/10 has-[:checked]:ring-primary/50"
           >
             <span className="flex items-center gap-2">
               <input type="radio" value={s.value} className="size-4 accent-primary" {...register("stylePreference")} />
@@ -847,7 +856,7 @@ function PresentationStep() {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Presentation</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Presentation</h2>
       <Field label="Topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
@@ -863,7 +872,7 @@ function PresentationStep() {
         </Field>
       </div>
       <Field label="Content source" htmlFor="contentSource" hint="Do you have the content, or should we write it? Paste what you have.">
-        <textarea id="contentSource" rows={3} className={taClass} {...register("contentSource")} />
+        <Textarea id="contentSource" rows={3} {...register("contentSource")} />
       </Field>
     </div>
   );
@@ -873,7 +882,7 @@ function PresentationDesignStep() {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Design preferences</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Design preferences</h2>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Colour scheme" htmlFor="colorScheme" hint="Brand colours, school colours, or 'your choice'">
           <Input id="colorScheme" {...register("colorScheme")} />
@@ -895,7 +904,7 @@ function EditingStep() {
   } = useFormContext<IntakeSubmitInput>();
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Editing</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Editing</h2>
       <Field label="What do you need?" required htmlFor="editingType" error={errors.editingType?.message as string | undefined}>
         <Select id="editingType" {...register("editingType")}>
           <option value="">Select</option>
@@ -933,9 +942,9 @@ function FilesStep({ template, service }: { template: IntakeTemplate; service: S
 
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Instructions</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Instructions</h2>
       <Field label={label} htmlFor="specialInstructions">
-        <textarea id="specialInstructions" rows={5} className={taClass} {...register("specialInstructions")} />
+        <Textarea id="specialInstructions" rows={5} {...register("specialInstructions")} />
       </Field>
       {template !== "editing" ? <DeadlineField /> : null}
       {template === "design_presentation" ? <ExpressField service={service} /> : null}
@@ -967,9 +976,9 @@ function ReviewStep({
 
   return (
     <div className="space-y-5">
-      <h2 className="text-base font-semibold text-foreground">Review &amp; submit</h2>
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Review &amp; submit</h2>
 
-      <dl className="divide-y divide-border rounded-lg border border-border text-sm">
+      <dl className="divide-y divide-border/80 text-sm">
         <Row label="Service" value={service.serviceName} />
         <Row label="Name" value={v.fullName} />
         <Row label="Phone" value={v.phone} />
@@ -991,7 +1000,7 @@ function ReviewStep({
         {v.referralCode ? <Row label="Referral code" value={v.referralCode} /> : null}
       </dl>
 
-      <div className="rounded-lg border border-border bg-elevated p-3 text-sm">
+      <div className="rounded-2xl bg-zone p-4 text-sm">
         <div className="flex items-center justify-between">
           <span className="font-semibold text-foreground">Total price</span>
           <span className="font-mono font-semibold tabular-nums text-foreground">
@@ -1012,7 +1021,7 @@ function ReviewStep({
         ) : null}
       </div>
 
-      <div className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
+      <div className="rounded-xl bg-zone p-3.5 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">What happens next</p>
         <p className="mt-1">
           We confirm your details on WhatsApp and send payment instructions. Work begins once your
@@ -1034,7 +1043,7 @@ function ReviewStep({
 
 function Row({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-3 py-2">
+    <div className="flex items-start justify-between gap-4 py-2.5">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="max-w-[60%] text-right text-foreground">{value || "—"}</dd>
     </div>

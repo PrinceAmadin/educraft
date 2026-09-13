@@ -29,7 +29,7 @@ export function ReferralLinkCard({ code }: { code: string }) {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="surface p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-foreground">Referral link</h2>
         <span className="font-mono text-xs text-muted-foreground">{code}</span>

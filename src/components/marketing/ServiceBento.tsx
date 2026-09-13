@@ -24,7 +24,7 @@ import { listSamplesFrom } from "@/lib/work-samples";
 /** Which folders feed each cell, and where the cell sits in the grid. */
 const LAYOUT: Record<
   string,
-  { dirs: string[]; area: string; sizes: string; emphasis?: boolean }
+  { dirs: string[]; area: string; sizes: string; emphasis?: boolean; media?: "photo" | "cv" }
 > = {
   "final-year": {
     dirs: ["fyb_img"],
@@ -45,8 +45,10 @@ const LAYOUT: Record<
   },
   career: {
     dirs: ["cv_img"],
-    area: "lg:col-span-1 lg:row-span-1 min-h-[200px] sm:min-h-0 lg:min-h-[190px]",
+    area: "lg:col-span-1 lg:row-span-1 min-h-[220px] sm:min-h-0 lg:min-h-[190px]",
     sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
+    // CVs are pages, not photographs — paper ground, centred carousel.
+    media: "cv",
   },
   editing: {
     dirs: ["report_img", "fyb_img"],
@@ -122,6 +124,7 @@ export function ServiceBento() {
                   order={i}
                   sizes={config.sizes}
                   emphasis={config.emphasis}
+                  media={config.media}
                   className={config.area}
                 />
               );

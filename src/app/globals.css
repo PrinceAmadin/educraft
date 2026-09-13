@@ -3,35 +3,40 @@
 @tailwind utilities;
 
 @layer base {
-  /* ── LIGHT THEME ────────────────────────────────────────── */
+  /* ── LIGHT THEME (default) ──────────────────────────────────
+     UI Constitution palette. Hierarchy comes from spacing, type and
+     surface contrast first; `--border` is the last resort and is kept
+     nearly invisible. Status hues (gold/success/danger) are deeper than
+     their fill swatches so they stay legible when set as text.        */
   :root {
-    --background: 40 24% 97%; /* warm bone, not clinical white */
-    --foreground: 222 47% 11%;
+    --background: 210 17% 98%; /* page — #F8F9FA */
+    --foreground: 222 47% 11%; /* #0F172A */
 
-    --card: 40 20% 99%;
+    --card: 0 0% 100%; /* surface — #FFFFFF */
     --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
-    --elevated: 40 16% 94%;
+    --elevated: 210 17% 95%; /* hover + nested fills — #F1F3F5 */
+    --zone: 210 17% 95%; /* background bands — #F1F3F5 */
 
-    --primary: 175 84% 28%;
-    --primary-hover: 175 80% 23%;
+    --primary: 175 84% 32%; /* EduCraft teal — #0D9488 */
+    --primary-hover: 175 77% 26%; /* #0F766E */
     --primary-foreground: 0 0% 100%;
 
     --gold: 32 78% 38%;
     --gold-hover: 28 80% 32%;
     --gold-foreground: 0 0% 100%;
 
-    --secondary: 40 16% 94%;
+    --secondary: 210 17% 95%;
     --secondary-foreground: 222 47% 11%;
 
-    --muted: 40 16% 94%;
-    --muted-foreground: 220 12% 38%;
-    --subtle-foreground: 220 12% 42%;
+    --muted: 210 17% 95%;
+    --muted-foreground: 215 19% 35%; /* #475569 */
+    --subtle-foreground: 215 16% 47%; /* #64748B — tertiary, still legible */
 
-    --accent: 40 16% 94%;
+    --accent: 210 17% 95%;
     --accent-foreground: 222 47% 11%;
 
     --success: 160 84% 30%;
@@ -43,17 +48,23 @@
     --info: 217 85% 50%;
     --info-foreground: 0 0% 100%;
 
-    --border: 38 18% 87%;
-    --border-hover: 38 14% 76%;
+    --border: 216 12% 92%; /* #E8EAED — only when genuinely needed */
+    --border-hover: 216 12% 82%;
     --hairline: 222 30% 20%; /* used at low alpha */
-    --input: 38 18% 87%;
-    --ring: 175 84% 28%;
+    --input: 90 10% 96%; /* field fill — #F5F6F4 */
+    --input-border: 216 12% 88%;
+    --ring: 175 84% 32%;
+
+    /* Elevation. So soft the reader perceives depth without seeing a shadow. */
+    --shadow-soft: 0 12px 40px rgb(15 23 42 / 0.06);
+    --shadow-lift: 0 18px 48px -12px rgb(15 23 42 / 0.18), 0 0 0 1px rgb(15 23 42 / 0.05);
 
     /* Paper surfaces — the hero/quality compositions */
     --paper: 0 0% 100%;
     --paper-ink: 222 30% 13%;
     --paper-muted: 220 10% 48%;
     --paper-line: 222 12% 88%;
+    --paper-placeholder: 60 20% 95%; /* #F5F5F0 — image-loading ground, never black */
 
     /* Dramatic ground — stays dark in both themes */
     --ink-deep: 224 52% 5%;
@@ -61,28 +72,31 @@
     --radius: 0.5rem;
 
     /* Section grounds. The page alternates between two, never one flat fill. */
-    --ground-a: 40 24% 97%;
-    --ground-b: 40 20% 99%;
+    --ground-a: 210 17% 98%;
+    --ground-b: 0 0% 100%;
 
     /* Scene lighting — read by the WebGL workspace so the 3D belongs to
        the page instead of sitting on top of it. */
-    --scene-key: 40 30% 96%;
+    --scene-key: 210 20% 97%;
     --scene-rim: 175 84% 40%;
     --scene-ambient: 0.72;
   }
 
-  /* ── DARK THEME (default) ───────────────────────────────── */
+  /* ── DARK THEME ─────────────────────────────────────────────
+     Not an inversion. Three surface depths carry the hierarchy —
+     page, surface, elevated — so borders almost never have to.     */
   .dark {
-    --background: 223 49% 8%;
-    --foreground: 210 40% 96%;
+    --background: 223 49% 8%; /* page — #0B1120 */
+    --foreground: 210 40% 96%; /* #F1F5F9 */
 
-    --card: 221 39% 11%;
+    --card: 222 42% 13%; /* surface — #131B2E */
     --card-foreground: 210 40% 96%;
 
-    --popover: 221 39% 11%;
+    --popover: 223 42% 18%; /* elevated — #1A2540 */
     --popover-foreground: 210 40% 96%;
 
-    --elevated: 218 32% 15%;
+    --elevated: 223 42% 18%; /* #1A2540 */
+    --zone: 222 44% 10.5%; /* between page and surface */
 
     --primary: 174 72% 41%;
     --primary-hover: 175 78% 34%;
@@ -92,14 +106,14 @@
     --gold-hover: 34 92% 50%;
     --gold-foreground: 224 52% 5%;
 
-    --secondary: 218 32% 15%;
+    --secondary: 223 42% 18%;
     --secondary-foreground: 210 40% 96%;
 
-    --muted: 217 33% 17%;
+    --muted: 223 38% 16%;
     --muted-foreground: 215 20% 68%;
     --subtle-foreground: 215 16% 58%;
 
-    --accent: 218 32% 15%;
+    --accent: 223 42% 18%;
     --accent-foreground: 210 40% 96%;
 
     --success: 160 74% 45%;
@@ -111,21 +125,26 @@
     --info: 217 91% 62%;
     --info-foreground: 0 0% 100%;
 
-    --border: 206 40% 20%;
-    --border-hover: 198 42% 30%;
+    --border: 214 41% 20%; /* #1E3048 — barely visible, used sparingly */
+    --border-hover: 212 38% 29%;
     --hairline: 205 45% 82%; /* used at low alpha */
-    --input: 217 33% 17%;
+    --input: 222 40% 15%;
+    --input-border: 214 36% 22%;
     --ring: 174 72% 41%;
+
+    --shadow-soft: 0 1px 0 rgb(255 255 255 / 0.025) inset, 0 12px 40px rgb(0 0 0 / 0.22);
+    --shadow-lift: 0 18px 48px -12px rgb(0 0 0 / 0.6), 0 0 0 1px hsl(214 41% 20%);
 
     --paper: 42 28% 96%;
     --paper-ink: 222 32% 13%;
     --paper-muted: 220 10% 45%;
     --paper-line: 222 12% 87%;
+    --paper-placeholder: 60 14% 92%;
 
     --ink-deep: 224 55% 4%;
 
     --ground-a: 223 49% 8%;
-    --ground-b: 223 44% 6%;
+    --ground-b: 222 44% 10%;
 
     --scene-key: 205 40% 92%;
     --scene-rim: 174 72% 46%;
@@ -263,9 +282,27 @@
     background: hsl(var(--hairline) / 0.12);
   }
 
+  /* ── SURFACES ─────────────────────────────────────────────
+     Separation without boxes. A raised surface is a fill plus the
+     soft shadow; a zone is a background band. Neither draws a line. */
+  .surface {
+    @apply rounded-xl bg-card text-card-foreground shadow-soft;
+  }
+
+  .zone {
+    @apply rounded-2xl bg-zone;
+  }
+
   /* ── EDITORIAL METADATA ──────────────────────────────────── */
+  /* Small uppercase label — the one place uppercase is still allowed.
+     Set in the UI face; monospace is reserved for data and IDs.      */
   .eyebrow {
-    @apply font-mono text-eyebrow font-medium uppercase text-subtle;
+    @apply font-sans text-eyebrow font-medium uppercase text-subtle;
+  }
+
+  /* Field / stat label. Sentence case, calm, never shouting. */
+  .meta-label {
+    @apply text-[13px] font-medium leading-snug text-muted-foreground;
   }
 
   .index-mark {

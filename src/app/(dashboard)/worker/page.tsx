@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { LuFolderKanban, LuCircleCheck, LuWallet, LuStar, LuInbox } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerByUserId, getWorkerDashboard } from "@/lib/services/worker-portal";
-import { StatsCard } from "@/components/dashboard/StatsCard";
+import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { WorkerAssignmentList } from "@/components/worker/WorkerAssignmentList";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { firstName, formatNaira } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My work" };
@@ -27,25 +28,30 @@ export default async function WorkerDashboardPage() {
   const { name, stats, assignments } = await getWorkerDashboard(worker.id);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-          Welcome back, {firstName(name)}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Here&apos;s what needs your attention.
-        </p>
-      </div>
+    <div className="space-y-10">
+      <PageHeader title={`Welcome back, ${firstName(name)}`} description="Here's what needs your attention." />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <section aria-label="Your numbers" className={STATS_GRID}>
         <StatsCard label="Active assignments" value={String(stats.activeAssignments)} icon={LuFolderKanban} tone="primary" />
         <StatsCard label="Completed this month" value={String(stats.completedThisMonth)} icon={LuCircleCheck} tone="success" />
-        <StatsCard label="Earnings this month" value={formatNaira(stats.earningsThisMonth, { compact: true })} icon={LuWallet} tone="gold" />
-        <StatsCard label="Rating" value={stats.rating != null ? `${stats.rating.toFixed(1)}/5` : "—"} icon={LuStar} tone="primary" />
-      </div>
+        <StatsCard
+          label="Earnings this month"
+          value={formatNaira(stats.earningsThisMonth, { compact: true })}
+          icon={LuWallet}
+          tone="gold"
+        />
+        <StatsCard
+          label="Rating"
+          value={stats.rating != null ? `${stats.rating.toFixed(1)}/5` : "—"}
+          icon={LuStar}
+          tone="primary"
+        />
+      </section>
 
-      <section>
-        <h2 className="mb-3 text-sm font-semibold text-foreground">Active assignments</h2>
+      <section aria-labelledby="assignments-heading">
+        <h2 id="assignments-heading" className="mb-4 text-[15px] font-semibold text-foreground">
+          Active assignments
+        </h2>
         {assignments.length === 0 ? (
           <EmptyState
             icon={LuFolderKanban}

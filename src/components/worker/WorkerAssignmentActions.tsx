@@ -51,7 +51,7 @@ export function WorkerAssignmentActions({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="rounded-2xl bg-zone p-4">
       {status === "ASSIGNED" ? (
         <>
           <p className="text-sm text-foreground">
@@ -93,7 +93,7 @@ export function WorkerAssignmentActions({
                 rows={2}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                className="w-full rounded-lg border border-border bg-input p-2 text-sm text-foreground focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="w-full rounded-lg border border-input-border bg-input p-2 text-sm text-foreground focus-visible:border-ring focus-visible:bg-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
               />
             </Field>
             <div className="flex gap-2">

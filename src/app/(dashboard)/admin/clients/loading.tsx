@@ -8,7 +8,7 @@ export default function ClientsLoading() {
         <Skeleton className="mt-2 h-4 w-96 max-w-full" />
       </div>
       <Skeleton className="h-12 w-full max-w-md" />
-      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+      <div className="hidden md:block">
         {Array.from({ length: 10 }).map((_, i) => (
           <Skeleton key={i} className="h-[53px] rounded-none" />
         ))}

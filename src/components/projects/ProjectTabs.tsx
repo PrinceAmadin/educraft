@@ -36,7 +36,7 @@ export function ProjectTabs({ tabs, initial }: { tabs: ProjectTab[]; initial?: s
       <div
         role="tablist"
         aria-label="Project sections"
-        className="flex gap-1 overflow-x-auto border-b border-border"
+        className="no-scrollbar flex gap-1 overflow-x-auto border-b border-border"
       >
         {tabs.map((tab) => {
           const selected = tab.id === active;
@@ -70,7 +70,7 @@ export function ProjectTabs({ tabs, initial }: { tabs: ProjectTab[]; initial?: s
           id={`panel-${tab.id}`}
           aria-labelledby={`tab-${tab.id}`}
           hidden={tab.id !== active}
-          className="pt-5"
+          className="pt-6"
         >
           {tab.content}
         </div>

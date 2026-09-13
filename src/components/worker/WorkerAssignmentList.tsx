@@ -13,36 +13,39 @@ const DEADLINE_TEXT = {
   overdue: "text-danger font-medium",
 } as const;
 
+const DEADLINE_DOT = {
+  none: "bg-transparent",
+  ok: "bg-success/60",
+  soon: "bg-gold",
+  urgent: "bg-gold",
+  critical: "bg-danger",
+  overdue: "bg-danger",
+} as const;
+
+/** A worker's assignments as soft surfaces; urgency reads from a dot, not a coloured edge. */
 export function WorkerAssignmentList({ rows }: { rows: WorkerAssignmentRow[] }) {
   return (
-    <ul className="space-y-3">
+    <ul className="grid gap-3 lg:grid-cols-2">
       {rows.map((row) => {
         const info = deadlineInfo(row.deadline);
         return (
           <li key={row.id}>
             <Link
               href={`/worker/projects/${row.projectId}`}
-              className={cn(
-                "block rounded-xl border border-border bg-card p-4 transition-colors",
-                "hover:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                info.urgency === "overdue" && "border-l-2 border-l-danger",
-                (info.urgency === "urgent" || info.urgency === "critical" || info.urgency === "soon") &&
-                  "border-l-2 border-l-gold"
-              )}
+              className="surface block p-4 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-sm font-medium text-foreground">
+                <span className="flex items-center gap-2 font-mono text-sm font-medium text-foreground">
+                  <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", DEADLINE_DOT[info.urgency])} />
                   {row.projectId}
                 </span>
                 <StatusBadge status={row.status} short />
               </div>
-              <p className="mt-1 truncate text-sm text-foreground">
-                {row.projectTitle ?? row.serviceName}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <p className="mt-2 truncate text-[15px] text-foreground">{row.projectTitle ?? row.serviceName}</p>
+              <p className="mt-0.5 text-[13px] text-muted-foreground">
                 {row.serviceName} · {row.clientName}
               </p>
-              <div className="mt-3 flex items-center justify-between">
+              <div className="mt-4 flex items-center justify-between">
                 <span className={cn("text-xs", DEADLINE_TEXT[info.urgency])}>
                   {row.deadline
                     ? `${formatDate(row.deadline)}${info.daysLeft !== null ? ` · ${info.label}` : ""}`

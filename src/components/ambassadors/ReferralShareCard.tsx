@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy } from "lucide-react";
-import { LuMessageCircle } from "react-icons/lu";
+import { LuCheck, LuCopy, LuMessageCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+/** The ambassador's one tool — link, copy, WhatsApp share and QR — in a quiet zone. */
 export function ReferralShareCard({
   code,
   link,
@@ -32,30 +32,26 @@ export function ReferralShareCard({
   )}`;
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+    <section aria-labelledby="referral-heading" className="rounded-2xl bg-zone p-5 sm:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="referral-heading" className="text-[15px] font-semibold text-foreground">
           My referral link
         </h2>
         <span className="font-mono text-xs text-muted-foreground">{code}</span>
       </div>
 
-      <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center">
+      <div className="mt-4 flex flex-col gap-5 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
           <Input
             readOnly
             value={link}
             onFocus={(e) => e.currentTarget.select()}
-            className="font-mono text-sm"
+            className="bg-card font-mono text-sm"
             aria-label="Referral link"
           />
-          <div className="mt-2 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" onClick={copy}>
-              {copied ? (
-                <Check className="size-4 text-success" aria-hidden />
-              ) : (
-                <Copy className="size-4" aria-hidden />
-              )}
+              {copied ? <LuCheck className="size-4" aria-hidden /> : <LuCopy className="size-4" aria-hidden />}
               {copied ? "Copied" : "Copy link"}
             </Button>
             <Button asChild size="sm" variant="outline">
@@ -73,9 +69,9 @@ export function ReferralShareCard({
           alt={`QR code for ${link}`}
           width={112}
           height={112}
-          className="shrink-0 rounded-lg border border-border bg-white p-1"
+          className="shrink-0 self-start rounded-lg bg-white p-1.5 shadow-soft sm:self-auto"
         />
       </div>
-    </div>
+    </section>
   );
 }

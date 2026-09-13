@@ -14,3 +14,8 @@ yarn-error.log*
 next-env.d.ts
 tsconfig.tsbuildinfo
 .next-verify/
+
+# Original standalone ambassador app — hardcoded admin fallback password and
+# real ambassador names. Ported into src/lib/ambassador-panel/ instead; this
+# folder is kept locally for reference only and must never be committed.
+Educraft_Ambassador/

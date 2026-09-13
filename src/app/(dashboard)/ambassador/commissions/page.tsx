@@ -44,7 +44,7 @@ export default async function AmbassadorCommissionsPage() {
         <>
           <ul className="space-y-3 md:hidden">
             {rows.map((r) => (
-              <li key={r.projectId} className="rounded-xl border border-border bg-card p-4">
+              <li key={r.projectId} className="surface p-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-sm font-medium text-foreground">{r.projectId}</span>
                   <StatusBadge status={r.status as ProjectStatus} short />
@@ -67,10 +67,10 @@ export default async function AmbassadorCommissionsPage() {
             ))}
           </ul>
 
-          <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+          <div className="hidden md:block">
             <table className="w-full text-sm">
               <thead className="border-b border-border">
-                <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr className="text-left text-[13px] text-muted-foreground">
                   <th className="px-3 py-2.5">Project</th>
                   <th className="px-3 py-2.5">Client</th>
                   <th className="px-3 py-2.5 text-right">Rate</th>
@@ -82,7 +82,7 @@ export default async function AmbassadorCommissionsPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((r) => (
-                  <tr key={r.projectId} className="bg-card">
+                  <tr key={r.projectId}>
                     <td className="px-3 py-3 font-mono font-medium text-foreground">{r.projectId}</td>
                     <td className="px-3 py-3 text-foreground">{r.clientName}</td>
                     <td className="px-3 py-3 text-right font-mono tabular-nums">
@@ -119,8 +119,8 @@ export default async function AmbassadorCommissionsPage() {
 
 function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3 sm:p-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+    <div className="rounded-xl bg-zone p-3 sm:p-4">
+      <p className="meta-label">{label}</p>
       <p
         className={`mt-1 font-mono text-lg font-medium tabular-nums ${
           strong ? "text-foreground" : "text-muted-foreground"

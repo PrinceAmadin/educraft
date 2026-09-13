@@ -16,7 +16,7 @@ export function ProjectTracker({ result }: { result: TrackingResult }) {
         <p className="text-sm text-muted-foreground">{result.serviceName}</p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <p className="text-sm text-foreground">{result.message}</p>
         <p className="mt-2 text-xs text-muted-foreground">
           Last updated {formatDateTime(result.updatedAt)}
@@ -24,7 +24,7 @@ export function ProjectTracker({ result }: { result: TrackingResult }) {
       </div>
 
       {result.awaitingPayment ? (
-        <div className="rounded-xl border border-gold/30 bg-gold/10 p-4 text-sm">
+        <div className="rounded-2xl bg-gold/10 p-4 text-sm">
           <p className="font-medium text-foreground">
             {result.awaitingPayment === "downpayment"
               ? "Your 45% downpayment is needed to start."

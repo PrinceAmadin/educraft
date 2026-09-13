@@ -107,7 +107,7 @@ export function LogoLockup({
             Edu<span className="text-primary">Craft</span>
           </span>
           {tagline && (
-            <span className="mt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-subtle">
+            <span className="mt-1 text-xs font-medium text-subtle">
               {tagline}
             </span>
           )}

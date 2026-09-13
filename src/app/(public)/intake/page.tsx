@@ -42,7 +42,7 @@ export default async function IntakePage({
           work begins once your 45% downpayment lands.
         </p>
         {validRef ? (
-          <p className="mt-3 inline-flex rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          <p className="mt-3 inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
             Referred by {referrer?.fullName} — your code is applied automatically
           </p>
         ) : null}

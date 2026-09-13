@@ -82,7 +82,7 @@ export default async function ApplicationsPage({
       ) : (
         <ul className="space-y-3">
           {rows.map((row) => (
-            <li key={row.id} className="rounded-xl border border-border bg-card p-4">
+            <li key={row.id} className="surface p-4">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold text-foreground">{row.fullName}</span>
                 <span

@@ -6,6 +6,7 @@ import { ProjectsFilterBar } from "@/components/projects/ProjectsFilterBar";
 import { ProjectsTable } from "@/components/projects/ProjectsTable";
 import { Pagination } from "@/components/shared/Pagination";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { getFilterFacets, listProjects, PAGE_SIZE } from "@/lib/services/projects";
 import { projectListParamsSchema } from "@/lib/validations/projects";
 
@@ -59,23 +60,19 @@ export default async function ProjectsListPage({
     );
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-            Projects
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Every project across the pipeline. Filter, search, and open one to manage it.
-          </p>
-        </div>
-        <Button asChild size="sm" className="shrink-0">
-          <Link href="/admin/projects/new">
-            <LuPlus className="size-4" aria-hidden />
-            New project
-          </Link>
-        </Button>
-      </div>
+    <div className="space-y-7">
+      <PageHeader
+        title="Projects"
+        description="Every project across the pipeline. Filter, search, and open one to manage it."
+        actions={
+          <Button asChild size="sm">
+            <Link href="/admin/projects/new">
+              <LuPlus className="size-4" aria-hidden />
+              New project
+            </Link>
+          </Button>
+        }
+      />
 
       <ProjectsFilterBar facets={facets} />
 

@@ -14,7 +14,8 @@ import {
   LuLock,
 } from "react-icons/lu";
 import { auth } from "@/lib/auth";
-import { StatsCard } from "@/components/dashboard/StatsCard";
+import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { MonthPicker } from "@/components/reports/MonthPicker";
 import { ReportExportButtons } from "@/components/reports/ReportExportButtons";
 import { getMonthlyReport, resolveMonth } from "@/lib/services/reports";
@@ -31,7 +32,7 @@ export default async function ReportsPage({
   const session = await auth();
   if (session?.user?.role !== "SUPER_ADMIN") {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card px-6 py-16 text-center">
+      <div className="flex flex-col items-center gap-3 rounded-2xl bg-zone px-6 py-16 text-center">
         <span className="rounded-lg bg-elevated p-2.5 text-muted-foreground">
           <LuLock className="size-6" aria-hidden />
         </span>
@@ -49,23 +50,21 @@ export default async function ReportsPage({
   const { month: currentMonth } = resolveMonth(undefined);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Reports</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{report.monthLabel} — auto-generated from the database.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <MonthPicker month={report.month} currentMonth={currentMonth} />
-          <ReportExportButtons report={report} />
-        </div>
-      </div>
+    <div className="space-y-12">
+      <PageHeader
+        title="Reports"
+        description={`${report.monthLabel} — generated from the database.`}
+        actions={
+          <>
+            <MonthPicker month={report.month} currentMonth={currentMonth} />
+            <ReportExportButtons report={report} />
+          </>
+        }
+      />
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Revenue summary
-        </h2>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <h2 className="mb-5 text-[15px] font-semibold text-foreground">Revenue summary</h2>
+        <div className={STATS_GRID}>
           <StatsCard label="Total revenue" value={formatNaira(report.revenue.totalRevenue)} icon={LuTrendingUp} />
           <StatsCard
             label="EduCraft share"
@@ -88,17 +87,15 @@ export default async function ReportsPage({
             tone="danger"
           />
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl border border-border bg-card p-4 text-sm sm:grid-cols-2">
+        <div className="mt-8 grid grid-cols-1 gap-x-10 gap-y-3 rounded-2xl bg-zone p-5 text-sm sm:grid-cols-2">
           <BreakdownRow label="Worker payouts" value={formatNaira(report.revenue.workerPayouts)} />
           <BreakdownRow label="Ambassador commissions" value={formatNaira(report.revenue.ambassadorCommissions)} />
         </div>
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Project summary
-        </h2>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <h2 className="mb-5 text-[15px] font-semibold text-foreground">Project summary</h2>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-8 lg:grid-cols-5 lg:gap-x-10">
           <StatsCard label="Created" value={String(report.projects.created)} icon={LuFolderKanban} />
           <StatsCard label="Completed" value={String(report.projects.completed)} icon={LuCircleCheck} tone="success" />
           <StatsCard label="Cancelled" value={String(report.projects.cancelled)} icon={LuCircleX} tone="danger" />
@@ -117,10 +114,8 @@ export default async function ReportsPage({
       </section>
 
       <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          People summary
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <h2 className="mb-5 text-[15px] font-semibold text-foreground">People summary</h2>
+        <div className="grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-3">
           <StatsCard
             label="Active workers"
             value={String(report.people.activeWorkers)}

@@ -41,7 +41,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
       </Link>
 
       {/* Header */}
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="surface p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="font-display text-xl font-bold tracking-tight text-foreground">
@@ -101,7 +101,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
 
       {/* Earnings + bank */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">Earnings</h2>
           <dl className="mt-2 space-y-2 text-sm">
             <Line label="Total earned (completed)" value={formatNaira(metrics.totalEarned)} />
@@ -109,7 +109,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
             <Line label="Outstanding balance" value={formatNaira(metrics.payoutBalance)} strong />
           </dl>
         </section>
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
           <dl className="mt-2 space-y-2 text-sm">
             <Line label="Bank" value={worker.bankName || "—"} />
@@ -120,7 +120,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
       </div>
 
       {worker.notes ? (
-        <section className="rounded-xl border border-border bg-card p-4">
+        <section className="surface p-4">
           <h2 className="text-sm font-semibold text-foreground">Notes</h2>
           <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{worker.notes}</p>
         </section>
@@ -146,7 +146,7 @@ function Field({
 }) {
   return (
     <div>
-      <dt className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <dt className="flex items-center gap-1.5 meta-label">
         <Icon className="size-3" aria-hidden />
         {label}
       </dt>
@@ -158,13 +158,13 @@ function Field({
 function TagRow({ label, tags }: { label: string; tags: string[] }) {
   return (
     <div className="mt-3 border-t border-border pt-3">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="meta-label">{label}</p>
       {tags.length > 0 ? (
         <ul className="mt-1.5 flex flex-wrap gap-1.5">
           {tags.map((t) => (
             <li
               key={t}
-              className="rounded-full border border-border bg-elevated px-2.5 py-0.5 text-xs text-foreground"
+              className="rounded-full bg-elevated px-2.5 py-0.5 text-xs text-foreground"
             >
               {t}
             </li>
@@ -187,8 +187,8 @@ function Stat({
   tone?: "default" | "danger";
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-3">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+    <div className="rounded-xl bg-zone p-3">
+      <p className="meta-label">
         {label}
       </p>
       <p

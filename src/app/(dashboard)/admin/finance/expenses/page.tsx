@@ -62,13 +62,13 @@ export default async function ExpensesPage({
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-2xl bg-zone p-4">
           <p className="text-sm text-muted-foreground">Total expenses this month</p>
           <p className="mt-1 font-mono text-2xl font-medium tabular-nums text-foreground">
             {formatNaira(monthTotal)}
           </p>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-2xl bg-zone p-4">
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <LuRepeat className="size-3.5" aria-hidden />
             Projected recurring costs / month

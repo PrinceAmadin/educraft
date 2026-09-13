@@ -95,7 +95,7 @@ export function ServiceCatalogManager({
 
       {grouped.map(({ cat, rows }) => (
         <div key={cat}>
-          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
             <LuLayers className="size-3.5" aria-hidden />
             {CATEGORY_LABELS[cat] ?? cat}
           </h3>
@@ -103,7 +103,7 @@ export function ServiceCatalogManager({
           {/* Mobile cards */}
           <div className="space-y-2 md:hidden">
             {rows.map((s) => (
-              <div key={s.id} className="rounded-xl border border-border bg-card p-4">
+              <div key={s.id} className="surface p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{s.serviceName}</p>
@@ -135,10 +135,10 @@ export function ServiceCatalogManager({
           </div>
 
           {/* Desktop table */}
-          <div className="hidden overflow-x-auto rounded-xl border border-border bg-card md:block">
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr className="border-b border-border text-left text-[13px] text-muted-foreground">
                   <th className="px-4 py-2.5 font-medium">Service</th>
                   <th className="px-4 py-2.5 font-medium">Price</th>
                   <th className="px-4 py-2.5 font-medium">Downpayment</th>
@@ -370,7 +370,7 @@ function ServiceForm({
           <textarea
             id="description"
             rows={2}
-            className="w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="w-full rounded-lg border border-input-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-ring focus-visible:bg-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
             {...register("description")}
           />
         </Field>
@@ -378,7 +378,7 @@ function ServiceForm({
           <textarea
             id="deliverables"
             rows={2}
-            className="w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="w-full rounded-lg border border-input-border bg-input p-3 text-sm text-foreground placeholder:text-subtle focus-visible:border-ring focus-visible:bg-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
             {...register("deliverables")}
           />
         </Field>

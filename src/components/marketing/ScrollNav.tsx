@@ -1,129 +1,108 @@
 "use client";
 
 import * as React from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { IconChevronDown, IconChevronUp } from "@/lib/icons";
+import { useReducedMotion } from "framer-motion";
+import { IconChevronsDown, IconChevronsUp } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 /**
- * Section-to-section wayfinding.
+ * Page-end controls.
  *
- * Sections are read from the DOM (`main > section`) rather than from a hard
- * coded list of ids — the page's composition changes often, and a list that
- * has to be kept in step with it is a list that will silently fall out of step.
+ * Two borderless double chevrons with a soft teal glow — no container, no
+ * border, no page counter, no section stepping. Up goes to the top of the page
+ * and down goes to the very bottom; that is the whole job.
  *
- * Appears once the reader has committed to the page (past the first viewport)
- * so it never competes with the hero. Ends are honest: the up control is
- * disabled at the top and the down control at the last section, rather than
- * looping the reader around without warning.
+ * The glyph stays small but each control owns a 44×44 hit area. On phones the
+ * pair sits low on the right, clear of the reading column; from md up it
+ * centres on the right edge.
  *
- * Smooth scrolling is skipped under `prefers-reduced-motion` — the jump still
- * happens, it just happens instantly.
+ * Rendered only when the page is long enough to need it, and each control is
+ * disabled at the end it would take you to. Smooth scrolling is skipped under
+ * `prefers-reduced-motion` — the jump still happens, instantly.
  */
 export function ScrollNav() {
-  const [sections, setSections] = React.useState<HTMLElement[]>([]);
-  const [current, setCurrent] = React.useState(0);
-  const [visible, setVisible] = React.useState(false);
   const reduced = useReducedMotion();
+  const [state, setState] = React.useState({ needed: false, atTop: true, atBottom: false });
 
   React.useEffect(() => {
-    const found = Array.from(
-      document.querySelectorAll<HTMLElement>("main > section")
-    );
-    setSections(found);
-    if (!found.length) return;
+    let frame = 0;
 
-    // Whichever section owns the top third of the viewport is "current".
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const i = found.indexOf(entry.target as HTMLElement);
-          if (i >= 0) setCurrent(i);
-        }
-      },
-      { rootMargin: "-30% 0px -60% 0px", threshold: 0 }
-    );
-    found.forEach((s) => observer.observe(s));
+    const measure = () => {
+      frame = 0;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const y = window.scrollY;
+      setState({
+        needed: max > window.innerHeight * 0.75,
+        atTop: y < 48,
+        atBottom: y > max - 48,
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(measure);
+    };
 
-    const onScroll = () => setVisible(window.scrollY > window.innerHeight * 0.6);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
+    measure();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    // Content grows after hydration (images, client-rendered lists), which
+    // changes whether the page is long enough to need the controls at all.
+    const observer = new ResizeObserver(schedule);
+    observer.observe(document.body);
 
     return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
       observer.disconnect();
-      window.removeEventListener("scroll", onScroll);
     };
   }, []);
 
-  const goTo = (index: number) => {
-    const target = sections[index];
-    if (!target) return;
-    target.scrollIntoView({
-      behavior: reduced ? "auto" : "smooth",
-      block: "start",
-    });
-  };
+  if (!state.needed) return null;
 
-  const atStart = current <= 0;
-  const atEnd = current >= sections.length - 1;
-
-  if (sections.length < 2) return null;
+  const go = (top: number) => window.scrollTo({ top, behavior: reduced ? "auto" : "smooth" });
 
   return (
-    <AnimatePresence>
-      {visible && (
-        <motion.nav
-          aria-label="Section navigation"
-          initial={reduced ? false : { opacity: 0, y: 12, scale: 0.94 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={reduced ? undefined : { opacity: 0, y: 12, scale: 0.94 }}
-          transition={{ type: "spring", stiffness: 380, damping: 30 }}
-          className={cn(
-            "fixed z-nav flex flex-col gap-px",
-            "bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-[clamp(1rem,3vw,2.25rem)]"
-          )}
-        >
-          <ScrollButton
-            label="Previous section"
-            disabled={atStart}
-            onClick={() => goTo(current - 1)}
-          >
-            <IconChevronUp aria-hidden className="size-[18px]" />
-          </ScrollButton>
-
-          {/* Position readout — doubles as the seam between the two controls */}
-          <p
-            aria-hidden
-            className="tabular bg-card/80 px-2 py-1 text-center text-[10px] font-medium text-subtle backdrop-blur-md"
-          >
-            {String(current + 1).padStart(2, "0")}
-          </p>
-
-          <ScrollButton
-            label="Next section"
-            disabled={atEnd}
-            onClick={() => goTo(current + 1)}
-          >
-            <IconChevronDown aria-hidden className="size-[18px]" />
-          </ScrollButton>
-        </motion.nav>
+    <nav
+      aria-label="Page scroll"
+      className={cn(
+        "fixed z-nav flex flex-col gap-1",
+        "bottom-[max(1rem,env(safe-area-inset-bottom))] right-1.5 sm:right-3",
+        // On phones the pair floats over right-aligned prices and links as the
+        // page scrolls, so it carries a soft page-coloured backing (still no
+        // border). From md it sits in the empty right margin and needs none.
+        "rounded-full bg-background/80 backdrop-blur-sm",
+        "md:bottom-auto md:right-5 md:top-1/2 md:-translate-y-1/2 md:gap-3 md:bg-transparent md:backdrop-blur-none lg:right-6"
       )}
-    </AnimatePresence>
+    >
+      <ScrollControl
+        direction="up"
+        label="Scroll to top"
+        disabled={state.atTop}
+        onClick={() => go(0)}
+      />
+      <ScrollControl
+        direction="down"
+        label="Scroll to bottom"
+        disabled={state.atBottom}
+        onClick={() => go(document.documentElement.scrollHeight)}
+      />
+    </nav>
   );
 }
 
-function ScrollButton({
+function ScrollControl({
+  direction,
   label,
   disabled,
   onClick,
-  children,
 }: {
+  direction: "up" | "down";
   label: string;
   disabled: boolean;
   onClick: () => void;
-  children: React.ReactNode;
 }) {
+  const Icon = direction === "up" ? IconChevronsUp : IconChevronsDown;
+
   return (
     <button
       type="button"
@@ -131,22 +110,23 @@ function ScrollButton({
       disabled={disabled}
       aria-label={label}
       className={cn(
-        "group/scroll relative flex size-10 items-center justify-center",
-        "bg-card/80 text-muted-foreground backdrop-blur-md",
-        "ring-1 ring-inset ring-hairline/15 transition-colors duration-fast",
-        "hover:text-primary hover:ring-primary/40",
-        "focus-visible:text-primary focus-visible:ring-primary",
-        "disabled:pointer-events-none disabled:opacity-35"
+        "group/scroll flex size-11 items-center justify-center rounded-full text-primary outline-none",
+        "[filter:drop-shadow(0_0_12px_rgb(13_148_136/0.35))]",
+        "transition-[filter,opacity] duration-200 ease-out",
+        "hover:[filter:drop-shadow(0_0_20px_rgb(13_148_136/0.55))]",
+        "focus-visible:[filter:drop-shadow(0_0_20px_rgb(13_148_136/0.55))]",
+        "disabled:pointer-events-none disabled:opacity-25"
       )}
     >
-      {/* Restrained glow — a ring that blooms once on hover, no pulsing */}
-      <span
+      <Icon
         aria-hidden
-        className="pointer-events-none absolute inset-0 scale-90 bg-primary/12 opacity-0 transition-[opacity,transform] duration-normal ease-editorial group-hover/scroll:scale-100 group-hover/scroll:opacity-100"
+        className={cn(
+          "size-5 transition-transform duration-200 ease-out md:size-[22px]",
+          direction === "up"
+            ? "group-hover/scroll:-translate-y-0.5"
+            : "group-hover/scroll:translate-y-0.5"
+        )}
       />
-      <span className="relative transition-transform duration-fast ease-editorial group-hover/scroll:translate-y-px">
-        {children}
-      </span>
     </button>
   );
 }

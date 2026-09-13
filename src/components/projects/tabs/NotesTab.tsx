@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { LuCheck, LuCircleAlert } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
 
 export function NotesTab({
   projectId,
@@ -48,13 +48,14 @@ export function NotesTab({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-10">
       <section>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Internal notes</h3>
-          <span className="text-xs text-muted-foreground">Admin and ops only</span>
+          <h3 className="text-[15px] font-semibold text-foreground">Internal notes</h3>
+          <span className="text-[13px] text-muted-foreground">Admin and ops only</span>
         </div>
-        <textarea
+        <Textarea
+          aria-label="Internal notes"
           value={value}
           onChange={(e) => {
             setValue(e.target.value);
@@ -62,11 +63,7 @@ export function NotesTab({
           }}
           rows={8}
           placeholder="Context, decisions, things to watch on this project…"
-          className={cn(
-            "mt-2 w-full rounded-lg border border-border bg-input p-3 text-sm text-foreground transition-colors",
-            "placeholder:text-subtle",
-            "focus-visible:border-border-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          )}
+          className="mt-3 text-sm"
         />
         <div className="mt-2 flex items-center gap-3">
           <Button size="sm" onClick={save} disabled={saving || !dirty}>
@@ -88,9 +85,9 @@ export function NotesTab({
       </section>
 
       <section>
-        <h3 className="text-sm font-semibold text-foreground">QA feedback</h3>
+        <h3 className="text-[15px] font-semibold text-foreground">QA feedback</h3>
         {qaNotes ? (
-          <p className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-elevated p-3 text-sm text-foreground">
+          <p className="mt-3 whitespace-pre-wrap rounded-2xl bg-zone p-4 text-sm leading-relaxed text-foreground">
             {qaNotes}
           </p>
         ) : (

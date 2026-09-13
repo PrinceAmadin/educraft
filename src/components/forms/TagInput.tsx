@@ -48,7 +48,7 @@ export function TagInput({
         <ul className="flex flex-wrap gap-1.5">
           {value.map((tag) => (
             <li key={tag}>
-              <span className="inline-flex items-center gap-1 rounded-full border border-border bg-elevated py-1 pl-2.5 pr-1 text-xs text-foreground">
+              <span className="inline-flex items-center gap-1 rounded-full bg-elevated py-1 pl-2.5 pr-1 text-xs text-foreground">
                 {tag}
                 <button
                   type="button"
@@ -89,7 +89,7 @@ export function TagInput({
               type="button"
               onClick={() => add(s)}
               className={cn(
-                "rounded-full border border-dashed border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors",
+                "rounded-full bg-zone px-2.5 py-1 text-xs text-muted-foreground transition-colors",
                 "hover:border-solid hover:border-primary/50 hover:text-foreground"
               )}
             >
