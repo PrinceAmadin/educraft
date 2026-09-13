@@ -14,3 +14,10 @@ yarn-error.log*
 next-env.d.ts
 tsconfig.tsbuildinfo
 .next-verify/
+
+# Original standalone ambassador app — hardcoded admin fallback password and
+# real ambassador names. Its history was scrubbed from this repo after it was
+# committed by mistake (see git log for the filter-repo rewrite). Keep any
+# copy of it outside this repo, e.g. ~/Downloads/Educraft_Ambassador_reference/
+# — never inside a folder this .gitignore doesn't cover.
+Educraft_Ambassador/

@@ -303,6 +303,7 @@ const form = useForm({ resolver: zodResolver(schema) });
 8. **Never use dotted tab leaders** in TOC, List of Figures, List of Tables, or List of Appendices
 9. **Never use parentheses in equation numbering** — format is `3.1` not `(3.1)` (exception: publications)
 10. **Never allow tables to break across pages** unless genuinely too long for one page
+11. **Never commit `Educraft_Ambassador/`** — the old standalone app, kept for reference at `~/Downloads/Educraft_Ambassador_reference/` outside this repo. It has a hardcoded fallback admin password; it was committed once by mistake and its history had to be scrubbed with `git filter-repo` (Sept 2026). `.gitignore` covers it — don't remove that entry.
 
 ## Current Build Status
 
