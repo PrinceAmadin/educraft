@@ -1,6 +1,14 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getCommissionRates } from "@/lib/services/settings";
+import {
+  CommissionError,
+  emailCommission,
+  emailPendingCommission,
+  releaseCommission,
+  resolveAmbassadorRate,
+  upsertCommissionExpense,
+} from "@/lib/services/ambassador-commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import {
   MAX_REVISIONS,
@@ -403,12 +411,14 @@ export async function holdProject(
     throw new TransitionError(`Cannot ${to.toLowerCase()} a project that is ${project.status}`);
   }
 
-  await db.$transaction([
-    db.project.update({ where: { id: project.id }, data: { status: to } }),
-    db.projectStatusLog.create({
+  await db.$transaction(async (tx) => {
+    await tx.project.update({ where: { id: project.id }, data: { status: to } });
+    await tx.projectStatusLog.create({
       data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
-    }),
-  ]);
+    });
+    // A cancelled or refunded job earns no commission — drop it and its expense.
+    if (to === "CANCELLED" || to === "REFUNDED") await releaseCommission(tx, project.id);
+  });
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -566,6 +576,9 @@ export async function verifyPayment(
       link: "/ambassador/commissions",
     });
   }
+  // The job is now confirmed — email its ambassador if they haven't been yet
+  // (a public-intake referral, or an allocation saved without emailing).
+  if (leg === "downpayment") await emailPendingCommission(project.id);
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -728,20 +741,33 @@ export async function createProjectManual(
     downpaymentPercentage: service.downpaymentPercentage,
   });
 
-  // Referral code → ambassador link (only for a brand-new client).
+  // Ambassador allocation: picked on the form (any rate the admin sets, or
+  // their tier rate), else a referral code for a brand-new client, else none.
   let ambassadorId: string | null = null;
   let ambassadorCommRate: number | null = null;
   let referralCodeUsed: string | null = null;
+  let ambassadorName = "";
 
   const referralCode =
     input.clientMode === "new" ? (input.referralCode ?? "").trim() : "";
-  if (referralCode) {
+  if (input.ambassadorId) {
+    try {
+      const picked = await resolveAmbassadorRate(input.ambassadorId, input.ambassadorRate);
+      ambassadorId = picked.id;
+      ambassadorName = picked.fullName;
+      ambassadorCommRate = picked.rate;
+    } catch (error) {
+      if (error instanceof CommissionError) throw new TransitionError(error.message);
+      throw error;
+    }
+  } else if (referralCode) {
     const ambassador = await db.ambassador.findUnique({
       where: { referralCode },
-      select: { id: true, tier: true, status: true },
+      select: { id: true, tier: true, status: true, fullName: true },
     });
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
+      ambassadorName = ambassador.fullName;
       ambassadorCommRate = (await getCommissionRates())[ambassador.tier];
       referralCodeUsed = referralCode;
     }
@@ -770,10 +796,14 @@ export async function createProjectManual(
       if (!input.clientId) throw new TransitionError("No client selected");
       const existing = await tx.client.findUnique({
         where: { id: input.clientId },
-        select: { id: true },
+        select: { id: true, referredById: true },
       });
       if (!existing) throw new TransitionError("Selected client not found");
       clientId = existing.id;
+      // First ambassador credited for this client becomes their referrer.
+      if (ambassadorId && !existing.referredById) {
+        await tx.client.update({ where: { id: existing.id }, data: { referredById: ambassadorId } });
+      }
     } else {
       const newClient = await tx.client.create({
         data: {
@@ -825,12 +855,24 @@ export async function createProjectManual(
         ambassadorId,
         ambassadorCommRate,
         ambassadorCommission: split.ambassadorCommission,
+        ambassadorAllocatedAt: ambassadorId ? now : null,
         workerPayoutRate: 40,
         workerPayout: split.workerPayout,
         educraftRevenue: split.educraftRevenue,
       },
       select: { id: true, projectId: true },
     });
+
+    if (ambassadorId && ambassadorCommRate != null && split.ambassadorCommission != null) {
+      await upsertCommissionExpense(tx, {
+        projectDbId: project.id,
+        projectCode: project.projectId,
+        ambassadorName,
+        rate: ambassadorCommRate,
+        commission: split.ambassadorCommission,
+        date: now,
+      });
+    }
 
     await tx.projectStatusLog.create({
       data: {
@@ -844,6 +886,14 @@ export async function createProjectManual(
 
     return project;
   }, { timeout: 15_000 });
+
+  // The admin logged this job against an ambassador — email them their
+  // commission now, as the original panel's "Log" did. If not now (or the
+  // send fails), they're emailed when the downpayment is verified. A mail
+  // failure never fails project creation.
+  if (ambassadorId && input.notifyAmbassador) {
+    await emailCommission(created.id);
+  }
 
   return { id: created.id, projectId: created.projectId };
 }

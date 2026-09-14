@@ -18,9 +18,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/forms/Field";
 import { FormActions } from "@/components/forms/FormActions";
 import { UniversityCombobox } from "@/components/forms/UniversityCombobox";
+import {
+  AmbassadorPicker,
+  CommissionPreview,
+  CommissionRatePicker,
+} from "@/components/ambassadors/CommissionPickers";
+import { EmailToggle } from "@/components/projects/AmbassadorAllocation";
 import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/projects";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
-import { computePrice } from "@/lib/pricing";
+import { COMMISSION_RATES, commissionFor } from "@/lib/commission";
+import { computePrice, computeSplit } from "@/lib/pricing";
+import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
 import { cn, formatNaira } from "@/lib/utils";
 
 interface UniversityOption {
@@ -78,9 +86,11 @@ function priceFor(
 export function NewProjectForm({
   universities,
   services,
+  ambassadors,
 }: {
   universities: UniversityOption[];
   services: ServiceOption[];
+  ambassadors: AllocatableAmbassador[];
 }) {
   const router = useRouter();
   const [step, setStep] = React.useState(0);
@@ -100,6 +110,9 @@ export function NewProjectForm({
       department: "",
       level: "",
       referralCode: "",
+      ambassadorId: "",
+      ambassadorRate: undefined,
+      notifyAmbassador: true,
       serviceId: "",
       serviceVariantId: "",
       isExpressDelivery: false,
@@ -127,9 +140,9 @@ export function NewProjectForm({
       case 0:
         return clientMode === "existing"
           ? ["clientId"]
-          : ["fullName", "phone", "email", "universityId", "faculty", "department", "level", "referralCode"];
+          : ["fullName", "phone", "email", "universityId", "faculty", "department", "level"];
       case 1:
-        return ["serviceId", "serviceVariantId", "isExpressDelivery", "priceOverride"];
+        return ["serviceId", "serviceVariantId", "isExpressDelivery", "priceOverride", "ambassadorId", "ambassadorRate"];
       case 2:
         return [
           "projectTitle",
@@ -199,10 +212,15 @@ export function NewProjectForm({
           {step === 0 && (
             <ClientStep universities={universities} clientMode={clientMode} setValue={setValue} />
           )}
-          {step === 1 && <ServiceStep services={services} />}
+          {step === 1 && <ServiceStep services={services} ambassadors={ambassadors} />}
           {step === 2 && <DetailsStep service={service} />}
           {step === 3 && (
-            <ReviewStep universities={universities} services={services} values={getValues()} />
+            <ReviewStep
+              universities={universities}
+              services={services}
+              ambassadors={ambassadors}
+              values={getValues()}
+            />
           )}
         </div>
 
@@ -365,14 +383,6 @@ function ClientStep({
               ))}
             </Select>
           </Field>
-          <Field
-            label="Referral code"
-            htmlFor="c-ref"
-            error={errors.referralCode?.message}
-            hint="If an ambassador referred this client"
-          >
-            <Input id="c-ref" {...register("referralCode")} />
-          </Field>
         </div>
       )}
     </div>
@@ -510,7 +520,13 @@ function ClientPicker({
 
 // ── Step 2: Service ──────────────────────────────────────────
 
-function ServiceStep({ services }: { services: ServiceOption[] }) {
+function ServiceStep({
+  services,
+  ambassadors,
+}: {
+  services: ServiceOption[];
+  ambassadors: AllocatableAmbassador[];
+}) {
   const {
     register,
     watch,
@@ -609,7 +625,81 @@ function ServiceStep({ services }: { services: ServiceOption[] }) {
           ) : null}
         </div>
       ) : null}
+
+      {price ? <AmbassadorSection ambassadors={ambassadors} total={price.total} /> : null}
     </div>
+  );
+}
+
+/**
+ * Who referred this job — None, or an ambassador at 10/12/15% or any rate the
+ * admin sets. Their commission comes off the price and is logged as an
+ * expense when the project is created.
+ */
+function AmbassadorSection({
+  ambassadors,
+  total,
+}: {
+  ambassadors: AllocatableAmbassador[];
+  total: number;
+}) {
+  const {
+    watch,
+    setValue,
+    formState: { errors },
+  } = useFormContext<CreateProjectInput>();
+
+  const ambassadorId = watch("ambassadorId") || null;
+  const rate = watch("ambassadorRate");
+  const notify = watch("notifyAmbassador");
+  const selected = ambassadors.find((a) => a.id === ambassadorId) ?? null;
+  const effectiveRate = typeof rate === "number" ? rate : (selected?.tierRate ?? COMMISSION_RATES[0]);
+
+  return (
+    <section className="space-y-4 pt-5">
+      <div>
+        <h3 className="text-[15px] font-semibold text-foreground">Ambassador</h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Who referred this client? Their commission comes off the job price and is logged as an
+          expense.
+        </p>
+      </div>
+
+      <AmbassadorPicker
+        ambassadors={ambassadors}
+        selectedId={ambassadorId}
+        allowNone
+        onPick={(a) => {
+          setValue("ambassadorId", a?.id ?? "", { shouldDirty: true });
+          setValue("ambassadorRate", a ? a.tierRate : undefined, { shouldDirty: true });
+          setValue("notifyAmbassador", Boolean(a?.email), { shouldDirty: true });
+        }}
+      />
+
+      {selected ? (
+        <>
+          <CommissionRatePicker
+            id="new-project-rate"
+            value={effectiveRate}
+            onChange={(r) => setValue("ambassadorRate", r, { shouldValidate: true, shouldDirty: true })}
+          />
+          {errors.ambassadorRate?.message ? (
+            <p className="text-xs text-danger">{errors.ambassadorRate.message as string}</p>
+          ) : null}
+          <CommissionPreview
+            price={total}
+            workerPayout={computeSplit(total, null).workerPayout}
+            rate={effectiveRate}
+          />
+          <EmailToggle
+            ambassador={selected}
+            checked={Boolean(notify)}
+            onChange={(v) => setValue("notifyAmbassador", v)}
+            downpaymentVerified={false}
+          />
+        </>
+      ) : null}
+    </section>
   );
 }
 
@@ -763,12 +853,17 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
 function ReviewStep({
   universities,
   services,
+  ambassadors,
   values,
 }: {
   universities: UniversityOption[];
   services: ServiceOption[];
+  ambassadors: AllocatableAmbassador[];
   values: CreateProjectInput;
 }) {
+  const ambassador = ambassadors.find((a) => a.id === values.ambassadorId) ?? null;
+  const ambassadorRate =
+    ambassador ? (typeof values.ambassadorRate === "number" ? values.ambassadorRate : ambassador.tierRate) : null;
   const service = services.find((s) => s.id === values.serviceId) ?? null;
   const variant = service?.variants.find((v) => v.id === values.serviceVariantId) ?? null;
   const price = priceFor(
@@ -798,8 +893,28 @@ function ReviewStep({
             <ReviewRow label="University" value={uniName ?? "—"} />
             <ReviewRow label="Department" value={values.department || "—"} />
             <ReviewRow label="Level" value={values.level || "—"} />
-            {values.referralCode ? <ReviewRow label="Referral code" value={values.referralCode} /> : null}
           </>
+        )}
+      </ReviewGroup>
+
+      <ReviewGroup title="Ambassador">
+        {ambassador && ambassadorRate != null ? (
+          <>
+            <ReviewRow label="Referred by" value={`${ambassador.name} (${ambassador.code})`} />
+            <ReviewRow label="Commission rate" value={`${ambassadorRate}%`} />
+            <ReviewRow
+              label="Email"
+              value={
+                ambassador.email
+                  ? values.notifyAmbassador
+                    ? `Now, to ${ambassador.email}`
+                    : "When the downpayment is verified"
+                  : "No email on file"
+              }
+            />
+          </>
+        ) : (
+          <ReviewRow label="Referred by" value="None" />
         )}
       </ReviewGroup>
 
@@ -824,6 +939,24 @@ function ReviewStep({
           <PriceRow label="Total price" value={price.total} strong />
           <PriceRow label="Downpayment (45%)" value={price.downpaymentAmount} muted />
           <PriceRow label="Balance (55%)" value={price.balanceAmount} muted />
+          {ambassadorRate != null ? (
+            <>
+              <div className="my-2 h-px bg-border" />
+              <PriceRow
+                label={`Ambassador commission (${ambassadorRate}%)`}
+                value={commissionFor(price.total, ambassadorRate)}
+                muted
+              />
+              <PriceRow
+                label="EduCraft keeps after worker and commission"
+                value={
+                  price.total -
+                  computeSplit(price.total, null).workerPayout -
+                  commissionFor(price.total, ambassadorRate)
+                }
+              />
+            </>
+          ) : null}
         </div>
       ) : null}
 

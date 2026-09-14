@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ProjectStatus, ProjectType, ReferencingStyle } from "@prisma/client";
+import { commissionRateSchema } from "@/lib/validations/commission";
 
 const statusValues = Object.values(ProjectStatus) as [ProjectStatus, ...ProjectStatus[]];
 const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
@@ -95,6 +96,15 @@ export const createProjectSchema = z
     department: z.string().trim().max(120).optional().or(z.literal("")),
     level: z.string().trim().max(40).optional().or(z.literal("")),
     referralCode: z.string().trim().max(40).optional().or(z.literal("")),
+
+    // Ambassador allocation — blank = "None", no ambassador referred this job.
+    ambassadorId: z.string().optional().or(z.literal("")),
+    /** Blank = the ambassador's tier rate. */
+    ambassadorRate: z.preprocess(
+      (v) => (v === "" || v === null || v === undefined ? undefined : v),
+      commissionRateSchema.optional()
+    ),
+    notifyAmbassador: z.boolean().default(true),
 
     serviceId: z.string().min(1, "Select a service"),
     serviceVariantId: z.string().min(1).optional().or(z.literal("")),

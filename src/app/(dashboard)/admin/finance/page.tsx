@@ -93,7 +93,6 @@ export default async function FinancePage() {
         <Breakdown title="Income">
           <Row label="Total revenue" value={formatNaira(cashFlow.income.totalRevenue)} />
           <Row label="Worker payouts" value={formatNaira(cashFlow.income.workerPayouts)} muted />
-          <Row label="Ambassador commissions" value={formatNaira(cashFlow.income.ambassadorCommissions)} muted />
           <Row label="EduCraft share" value={formatNaira(cashFlow.income.educraftShare)} strong />
         </Breakdown>
 

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { LuBuilding2 } from "react-icons/lu";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
+import { db } from "@/lib/db";
 import { getSchoolCoverage } from "@/lib/services/ambassadors";
 import { formatNaira } from "@/lib/utils";
 
@@ -10,27 +11,19 @@ export const metadata: Metadata = { title: "School coverage" };
 export const dynamic = "force-dynamic";
 
 export default async function SchoolCoveragePage() {
-  const schools = await getSchoolCoverage();
+  const [schools, pendingApplications] = await Promise.all([
+    getSchoolCoverage(),
+    db.ambassadorApplication.count({ where: { status: "PENDING" } }),
+  ]);
   const covered = schools.filter((s) => s.total > 0);
 
   return (
-    <div className="space-y-5">
-      <Link
-        href="/admin/ambassadors"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        All ambassadors
-      </Link>
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-          School coverage
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Ambassador presence and revenue by university. {covered.length} of {schools.length}{" "}
-          universities have at least one ambassador.
-        </p>
-      </div>
+    <div className="space-y-7">
+      <PageHeader
+        title="Ambassadors"
+        description={`Ambassador presence and revenue by university. ${covered.length} of ${schools.length} universities have at least one ambassador.`}
+      />
+      <AmbassadorTabs active="schools" pendingApplications={pendingApplications} />
 
       {covered.length === 0 ? (
         <EmptyState

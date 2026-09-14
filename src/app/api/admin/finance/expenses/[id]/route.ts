@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSuperAdmin, serverError } from "@/lib/api";
-import { deleteExpense, ExpenseError } from "@/lib/services/expenses";
+import { deleteExpense, ExpenseError, ExpenseLockedError } from "@/lib/services/expenses";
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
   const guard = await requireSuperAdmin();
@@ -10,6 +10,9 @@ export async function DELETE(_req: Request, { params }: { params: { id: string }
     await deleteExpense(params.id);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof ExpenseLockedError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (error instanceof ExpenseError) {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }

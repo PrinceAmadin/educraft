@@ -71,9 +71,13 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
 
         <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-3">
           <Field icon={LuPhone} label="Phone">
-            <a href={`tel:${ambassador.phone}`} className="hover:text-primary">
-              {ambassador.phone}
-            </a>
+            {ambassador.phone ? (
+              <a href={`tel:${ambassador.phone}`} className="hover:text-primary">
+                {ambassador.phone}
+              </a>
+            ) : (
+              <span className="text-subtle">Not provided</span>
+            )}
           </Field>
           <Field icon={LuMail} label="Email">
             {ambassador.email ? (

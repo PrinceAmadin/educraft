@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AMBASSADOR_COMMISSION_CATEGORY } from "@/lib/commission";
 
 export const EXPENSE_CATEGORIES = [
   "Software",
@@ -9,6 +10,13 @@ export const EXPENSE_CATEGORIES = [
   "Miscellaneous",
 ] as const;
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+/**
+ * What the expenses list can be filtered by: the manual categories plus the
+ * ambassador commission the system logs when a job is allocated. That one is
+ * never offered in the "Add expense" form — it's managed from the job.
+ */
+export const EXPENSE_FILTER_CATEGORIES = [...EXPENSE_CATEGORIES, AMBASSADOR_COMMISSION_CATEGORY] as const;
 
 export const EXPENSE_FREQUENCIES = ["Monthly", "Quarterly", "Annual"] as const;
 export type ExpenseFrequency = (typeof EXPENSE_FREQUENCIES)[number];
@@ -36,7 +44,7 @@ export const createExpenseSchema = z
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
 
 export const expenseListParamsSchema = z.object({
-  category: z.enum(EXPENSE_CATEGORIES).optional().catch(undefined),
+  category: z.enum(EXPENSE_FILTER_CATEGORIES).optional().catch(undefined),
   from: dateString.optional().catch(undefined),
   to: dateString.optional().catch(undefined),
   page: z.coerce.number().int().positive().optional().catch(undefined),

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { LuInbox } from "react-icons/lu";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { db } from "@/lib/db";
 import { listApplications } from "@/lib/services/applications";
 import { ApplicationReview } from "@/components/ambassadors/ApplicationReview";
@@ -27,28 +28,19 @@ export default async function ApplicationsPage({
       ? searchParams.status
       : "PENDING";
 
-  const [rows, universities] = await Promise.all([
+  const [rows, universities, pendingApplications] = await Promise.all([
     listApplications(status),
     db.university.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, abbreviation: true } }),
+    db.ambassadorApplication.count({ where: { status: "PENDING" } }),
   ]);
 
   return (
-    <div className="space-y-5">
-      <Link
-        href="/admin/ambassadors"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        All ambassadors
-      </Link>
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
-          Ambassador applications
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Review campus applications. Approving creates an ambassador with a referral code.
-        </p>
-      </div>
+    <div className="space-y-7">
+      <PageHeader
+        title="Ambassadors"
+        description="Review campus applications from /apply. Approving creates an ambassador with a referral code."
+      />
+      <AmbassadorTabs active="applications" pendingApplications={pendingApplications} />
 
       <div className="flex gap-1.5">
         {TABS.map((t) => (

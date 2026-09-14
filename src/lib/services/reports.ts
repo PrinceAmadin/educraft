@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { AMBASSADOR_COMMISSION_CATEGORY } from "@/lib/commission";
 
 export interface MonthlyReport {
   month: string; // "2026-09"
@@ -7,7 +8,7 @@ export interface MonthlyReport {
     totalRevenue: number;
     workerPayouts: number;
     ambassadorCommissions: number;
-    /** totalRevenue - workerPayouts - ambassadorCommissions */
+    /** totalRevenue - workerPayouts. Ambassador commissions sit in `expenses`. */
     educraftShare: number;
     expenses: number;
     /** educraftShare - expenses */
@@ -80,8 +81,10 @@ export async function getMonthlyReport(rawMonth?: string): Promise<MonthlyReport
       where: { status: "Confirmed", direction: "OUTFLOW", type: "WORKER_PAYOUT", date: inRange },
       _sum: { amount: true },
     }),
-    db.payment.aggregate({
-      where: { status: "Confirmed", direction: "OUTFLOW", type: "AMBASSADOR_COMMISSION", date: inRange },
+    // Commission is counted when a job is allocated — as an expense — not when
+    // it's paid out. See services/ambassador-commission.ts.
+    db.expense.aggregate({
+      where: { category: AMBASSADOR_COMMISSION_CATEGORY, date: inRange },
       _sum: { amount: true },
     }),
     db.expense.aggregate({ where: { date: inRange }, _sum: { amount: true } }),
@@ -111,7 +114,9 @@ export async function getMonthlyReport(rawMonth?: string): Promise<MonthlyReport
   const workerPayouts = workerPayoutAgg._sum.amount ?? 0;
   const ambassadorCommissions = ambCommAgg._sum.amount ?? 0;
   const expenses = expenseAgg._sum.amount ?? 0;
-  const educraftShare = totalRevenue - workerPayouts - ambassadorCommissions;
+  // Ambassador commissions are already inside `expenses`, so they come out of
+  // profit once — through expenses — rather than a second time here.
+  const educraftShare = totalRevenue - workerPayouts;
   const netProfit = educraftShare - expenses;
 
   const completedProjectIds = [...new Set(completedLogs.map((l) => l.projectId))];

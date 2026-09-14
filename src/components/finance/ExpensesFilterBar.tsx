@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { EXPENSE_CATEGORIES } from "@/lib/validations/expenses";
+import { EXPENSE_FILTER_CATEGORIES } from "@/lib/validations/expenses";
 
 export function ExpensesFilterBar() {
   const router = useRouter();
@@ -33,7 +33,7 @@ export function ExpensesFilterBar() {
           onChange={(v) => commit({ category: v || null })}
         >
           <option value="">All categories</option>
-          {EXPENSE_CATEGORIES.map((c) => (
+          {EXPENSE_FILTER_CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>

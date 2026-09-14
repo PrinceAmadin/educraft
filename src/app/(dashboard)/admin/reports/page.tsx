@@ -89,7 +89,10 @@ export default async function ReportsPage({
         </div>
         <div className="mt-8 grid grid-cols-1 gap-x-10 gap-y-3 rounded-2xl bg-zone p-5 text-sm sm:grid-cols-2">
           <BreakdownRow label="Worker payouts" value={formatNaira(report.revenue.workerPayouts)} />
-          <BreakdownRow label="Ambassador commissions" value={formatNaira(report.revenue.ambassadorCommissions)} />
+          <BreakdownRow
+            label="Ambassador commissions (in expenses)"
+            value={formatNaira(report.revenue.ambassadorCommissions)}
+          />
         </div>
       </section>
 

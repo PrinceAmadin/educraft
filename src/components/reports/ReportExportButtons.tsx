@@ -18,7 +18,7 @@ function sections(r: MonthlyReport): { title: string; rows: [string, string][] }
       rows: [
         ["Total revenue", formatNaira(r.revenue.totalRevenue)],
         ["Worker payouts", formatNaira(r.revenue.workerPayouts)],
-        ["Ambassador commissions", formatNaira(r.revenue.ambassadorCommissions)],
+        ["Ambassador commissions (in expenses)", formatNaira(r.revenue.ambassadorCommissions)],
         ["EduCraft share", formatNaira(r.revenue.educraftShare)],
         ["Expenses", formatNaira(r.revenue.expenses)],
         ["Net profit", formatNaira(r.revenue.netProfit)],

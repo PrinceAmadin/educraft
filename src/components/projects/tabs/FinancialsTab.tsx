@@ -1,8 +1,10 @@
 import { LuCheck, LuClock } from "react-icons/lu";
 import { financialBreakdown } from "@/lib/project-display";
 import { PaymentVerification } from "@/components/projects/PaymentVerification";
+import { AmbassadorAllocation } from "@/components/projects/AmbassadorAllocation";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
+import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
 
 function PaymentStatusPill({ status, date }: { status: string; date?: Date | null }) {
   if (status === "Verified") {
@@ -62,8 +64,16 @@ function Line({
  * Money on a project. The total leads as a large figure; the two payment legs
  * and the payout split follow as plain lines with faint dividers — no panels.
  */
-export function FinancialsTab({ project }: { project: ProjectDetail }) {
+export function FinancialsTab({
+  project,
+  ambassadors,
+}: {
+  project: ProjectDetail;
+  ambassadors: AllocatableAmbassador[];
+}) {
   const f = financialBreakdown(project);
+  // Cancelled and refunded jobs earn no commission, so there's nothing to allocate.
+  const closed = project.status === "CANCELLED" || project.status === "REFUNDED";
 
   return (
     <div className="space-y-10">
@@ -125,12 +135,34 @@ export function FinancialsTab({ project }: { project: ProjectDetail }) {
             }
             amount={f.ambassadorCommission}
           >
-            {f.ambassadorName ? (
-              <span className="text-xs text-muted-foreground">
+            {f.ambassadorName && f.ambassadorCommission != null ? (
+              <span className="block text-xs text-muted-foreground">
                 {f.ambassadorCommPaid ? "Paid" : f.payoutsDue ? "Unpaid" : "Not yet due"}
+                {project.ambassadorAllocatedAt ? ` · logged ${formatDate(project.ambassadorAllocatedAt)}` : ""}
+                {project.ambassadorNotifiedAt
+                  ? ` · emailed ${formatDate(project.ambassadorNotifiedAt)}`
+                  : f.downpaymentStatus === "Verified"
+                    ? " · not emailed"
+                    : " · emailed when the downpayment is verified"}
               </span>
+            ) : f.ambassadorName ? (
+              <span className="block text-xs text-muted-foreground">Referrer — no commission on this job</span>
             ) : (
-              <span className="text-xs text-muted-foreground">No ambassador on this project</span>
+              <span className="block text-xs text-muted-foreground">No ambassador on this job</span>
+            )}
+            {closed ? null : (
+              <AmbassadorAllocation
+                projectCode={project.projectId}
+                price={project.price}
+                workerPayout={f.workerPayout ?? 0}
+                downpaymentVerified={f.downpaymentStatus === "Verified"}
+                current={{
+                  ambassadorId: project.ambassadorId,
+                  rate: project.ambassadorCommRate,
+                  paid: project.ambassadorCommPaid,
+                }}
+                ambassadors={ambassadors}
+              />
             )}
           </Line>
           <Line
@@ -144,8 +176,9 @@ export function FinancialsTab({ project }: { project: ProjectDetail }) {
           <Line label="EduCraft revenue" amount={f.educraftRevenue} strong />
         </div>
         <p className="mt-3 text-[13px] text-muted-foreground">
-          Payouts become due when the project reaches Completed. Ambassador commission is released
-          when the client&apos;s downpayment is verified.
+          An ambassador&apos;s commission comes off the job price and is logged as an expense the
+          moment the job is allocated to them. Cancelling or refunding the job removes it. Payouts
+          become due when the project reaches Completed.
         </p>
       </section>
 

@@ -66,10 +66,12 @@ export function ExpensesTable({ rows, canDelete }: { rows: ExpenseRow[]; canDele
               ) : (
                 <span />
               )}
-              {canDelete ? (
+              {canDelete && !e.projectId ? (
                 <Button size="icon-sm" variant="ghost" className="text-danger" onClick={() => setPending(e)}>
                   <Trash2 className="size-4" aria-hidden />
                 </Button>
+              ) : e.projectId ? (
+                <span className="text-xs text-muted-foreground">From a job</span>
               ) : null}
             </div>
           </div>
@@ -110,9 +112,13 @@ export function ExpensesTable({ rows, canDelete }: { rows: ExpenseRow[]; canDele
                 </td>
                 {canDelete ? (
                   <td className="px-4 py-3 text-right">
-                    <Button size="icon-sm" variant="ghost" className="text-danger" onClick={() => setPending(e)}>
-                      <Trash2 className="size-4" aria-hidden />
-                    </Button>
+                    {e.projectId ? (
+                      <span className="text-xs text-muted-foreground">From a job</span>
+                    ) : (
+                      <Button size="icon-sm" variant="ghost" className="text-danger" onClick={() => setPending(e)}>
+                        <Trash2 className="size-4" aria-hidden />
+                      </Button>
+                    )}
                   </td>
                 ) : null}
               </tr>

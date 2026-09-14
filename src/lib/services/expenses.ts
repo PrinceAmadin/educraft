@@ -14,6 +14,8 @@ export interface ExpenseRow {
   date: string;
   recurring: boolean;
   frequency: string | null;
+  /** Set when the system logged this for a job (an ambassador commission). */
+  projectId: string | null;
 }
 
 export interface ExpenseListResult {
@@ -33,6 +35,7 @@ function toRow(e: {
   date: Date;
   recurring: boolean;
   frequency: string | null;
+  projectId: string | null;
 }): ExpenseRow {
   return {
     id: e.id,
@@ -42,6 +45,7 @@ function toRow(e: {
     date: e.date.toISOString(),
     recurring: e.recurring,
     frequency: e.frequency,
+    projectId: e.projectId,
   };
 }
 
@@ -171,7 +175,16 @@ export async function createExpense(
   });
 }
 
+/** A job's ambassador commission — managed from the job, not deletable here. */
+export class ExpenseLockedError extends ExpenseError {}
+
 export async function deleteExpense(id: string): Promise<void> {
+  const expense = await db.expense.findUnique({ where: { id }, select: { projectId: true } });
+  if (expense?.projectId) {
+    throw new ExpenseLockedError(
+      "This is a job's ambassador commission — change or remove it from the job's Financials tab instead."
+    );
+  }
   try {
     await db.expense.delete({ where: { id } });
   } catch (err) {

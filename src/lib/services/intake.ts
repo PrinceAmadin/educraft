@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates } from "@/lib/services/settings";
+import { upsertCommissionExpense } from "@/lib/services/ambassador-commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { resolveTemplate } from "@/lib/intake-templates";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
@@ -120,14 +121,16 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
   let ambassadorCommRate: number | null = null;
   let referralCodeUsed: string | null = null;
   let ambassadorUserId: string | null = null;
+  let ambassadorName = "";
   const code = input.referralCode?.trim();
   if (code) {
     const ambassador = await db.ambassador.findUnique({
       where: { referralCode: code },
-      select: { id: true, tier: true, status: true, userId: true },
+      select: { id: true, tier: true, status: true, userId: true, fullName: true },
     });
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
+      ambassadorName = ambassador.fullName;
       ambassadorCommRate = (await getCommissionRates())[ambassador.tier];
       referralCodeUsed = code;
       ambassadorUserId = ambassador.userId;
@@ -263,12 +266,24 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
           ambassadorId,
           ambassadorCommRate,
           ambassadorCommission: split.ambassadorCommission,
+          ambassadorAllocatedAt: ambassadorId ? now : null,
           workerPayoutRate: 40,
           workerPayout: split.workerPayout,
           educraftRevenue: split.educraftRevenue,
         },
         select: { id: true, projectId: true },
       });
+
+      if (ambassadorId && ambassadorCommRate != null && split.ambassadorCommission != null) {
+        await upsertCommissionExpense(tx, {
+          projectDbId: project.id,
+          projectCode: project.projectId,
+          ambassadorName,
+          rate: ambassadorCommRate,
+          commission: split.ambassadorCommission,
+          date: now,
+        });
+      }
 
       await tx.projectStatusLog.create({
         data: {
@@ -300,5 +315,8 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
     });
   }
 
+  // No commission email here: anyone can submit this public form with a
+  // referral code. The ambassador is emailed once the downpayment is verified
+  // (see verifyPayment → emailPendingCommission).
   return { projectId: created.projectId };
 }

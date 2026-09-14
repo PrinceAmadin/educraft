@@ -13,12 +13,11 @@
  *                                 and a payment:{id} record
  *
  * For each approved id:
- *   - Skipped, with a reason, if there is no phone number on file (the old
- *     app's self-registration form never asked for one — a required field
- *     on Ambassador here) or no University row matches the school
- *     abbreviation. Never fabricated.
- *   - Skipped if an Ambassador already exists with the same phone — makes
- *     this safe to re-run after fixing a skipped row.
+ *   - Phone is optional: the old self-registration form never asked for one,
+ *     so a missing phone is left blank — never invented.
+ *   - Skipped, with a reason, if no University row matches the school.
+ *   - Matched to an existing Ambassador by old slot id (legacySlotId), then
+ *     phone, then email — safe to re-run.
  *   - Otherwise creates an Ambassador (fresh referral code, tier BRONZE —
  *     conversions start counting from zero in the new system) and, for the
  *     13 with a full application, a matching AmbassadorApplication row
@@ -69,6 +68,18 @@ const UNIVERSITY_OVERRIDE: Record<string, string> = {
   "058": "EUI",
   "055": "IUO",
   "057": "UNIDEL",
+};
+
+/**
+ * School spellings on profile-only records (no typed-out full name to check
+ * against). The original app's own SCHOOL table maps EUI to "Edo State
+ * University", so these are its spellings of Edo University Iyamho. "SDU" is
+ * deliberately absent — ambiguous, left for the founder.
+ */
+const SCHOOL_ALIASES: Record<string, string> = {
+  ESUI: "EUI",
+  EDSU: "EUI",
+  "EDO STATE UNIVERSITY": "EUI",
 };
 
 function generateReferralCode(fullName: string): string {
@@ -158,10 +169,10 @@ async function main() {
     const payment = paymentStr ? (JSON.parse(paymentStr) as PaymentRecord) : null;
 
     const fullName = (payment?.name || profile.name || "").trim();
-    const phone = (payment?.phone || "").trim();
+    const phone = (payment?.phone || "").trim() || null;
     const email = (payment?.email || profile.email || "").trim() || null;
-    const abbrev =
-      UNIVERSITY_OVERRIDE[id] ?? (payment?.universityAbbr || profile.school || "").trim().toUpperCase();
+    const rawSchool = (payment?.universityAbbr || profile.school || "").trim().toUpperCase();
+    const abbrev = UNIVERSITY_OVERRIDE[id] ?? SCHOOL_ALIASES[rawSchool] ?? rawSchool;
 
     legacyStats.push({
       id,
@@ -174,23 +185,27 @@ async function main() {
       skipped.push({ id, reason: "no name on file" });
       continue;
     }
-    if (!phone) {
-      skipped.push({
-        id,
-        reason: `no phone on file for "${fullName}" — the self-registration form never asked for one; get it from them and add manually`,
-      });
-      continue;
-    }
     const universityId = uniByAbbrev.get(abbrev);
     if (!universityId) {
       skipped.push({ id, reason: `no university matches "${abbrev || "(blank)"}" for "${fullName}"` });
       continue;
     }
-    // Idempotent by phone — a prior run may have created the Ambassador but
-    // been interrupted before the matching application row, so this doesn't
-    // just skip on a match; it falls through to the application check below.
-    let ambassador = await db.ambassador.findFirst({ where: { phone }, select: { id: true, ambassadorId: true } });
+    // Idempotent: match the old slot id first, then phone, then email. A match
+    // doesn't just skip — a prior run may have been interrupted before the
+    // matching application row, so it falls through to that check below.
+    const pick = { id: true, ambassadorId: true, legacySlotId: true } as const;
+    let ambassador =
+      (await db.ambassador.findUnique({ where: { legacySlotId: id }, select: pick })) ??
+      (phone ? await db.ambassador.findFirst({ where: { phone }, select: pick }) : null) ??
+      (email ? await db.ambassador.findFirst({ where: { email, legacySlotId: null }, select: pick }) : null);
     let isNew = false;
+    if (ambassador && !ambassador.legacySlotId) {
+      ambassador = await db.ambassador.update({
+        where: { id: ambassador.id },
+        data: { legacySlotId: id },
+        select: pick,
+      });
+    }
 
     if (!ambassador) {
       let referralCode = generateReferralCode(fullName);
@@ -201,6 +216,7 @@ async function main() {
       ambassador = await db.ambassador.create({
         data: {
           ambassadorId,
+          legacySlotId: id,
           fullName,
           phone,
           email,
@@ -212,12 +228,12 @@ async function main() {
           accountNumber: payment?.accountNumber?.trim() || null,
           accountName: payment?.accountName?.trim() || null,
         },
-        select: { id: true, ambassadorId: true },
+        select: pick,
       });
       isNew = true;
       imported.push(`${id} → ${ambassadorId} (${fullName}, ${referralCode})`);
     } else {
-      skipped.push({ id, reason: `already migrated as ${ambassador.ambassadorId} (phone ${phone})` });
+      skipped.push({ id, reason: `already migrated as ${ambassador.ambassadorId}` });
     }
 
     if (hasFullApplication.has(id)) {
@@ -232,7 +248,7 @@ async function main() {
         const reviewedAt = payment?.approvedAt ? new Date(payment.approvedAt) : submittedAt;
         const data: Prisma.AmbassadorApplicationCreateInput = {
           fullName,
-          phone,
+          phone: phone ?? "",
           email,
           university: { connect: { id: universityId } },
           bankName: payment?.bankName?.trim() || null,

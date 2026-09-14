@@ -3,12 +3,13 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/lib/db";
 import { NewProjectForm } from "@/components/projects/NewProjectForm";
+import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
 
 export const metadata: Metadata = { title: "New project" };
 export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
-  const [universities, services] = await Promise.all([
+  const [universities, services, ambassadors] = await Promise.all([
     db.university.findMany({
       orderBy: { name: "asc" },
       select: { id: true, name: true, abbreviation: true },
@@ -31,6 +32,7 @@ export default async function NewProjectPage() {
         },
       },
     }),
+    listAllocatableAmbassadors(),
   ]);
 
   return (
@@ -53,7 +55,7 @@ export default async function NewProjectPage() {
         </p>
       </div>
 
-      <NewProjectForm universities={universities} services={services} />
+      <NewProjectForm universities={universities} services={services} ambassadors={ambassadors} />
     </div>
   );
 }

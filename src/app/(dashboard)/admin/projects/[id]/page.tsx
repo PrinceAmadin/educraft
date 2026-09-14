@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getProjectDetail } from "@/lib/services/projects";
+import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
 import { ProjectActions } from "@/components/projects/ProjectActions";
 import { toCandidate } from "@/lib/pipeline";
@@ -29,13 +30,20 @@ export default async function ProjectDetailPage({
   params: { id: string };
   searchParams: { tab?: string };
 }) {
-  const project = await getProjectDetail(params.id);
+  const [project, ambassadors] = await Promise.all([
+    getProjectDetail(params.id),
+    listAllocatableAmbassadors(),
+  ]);
   if (!project) notFound();
 
   const tabs: ProjectTab[] = [
     { id: "requirements", label: "Requirements", content: <RequirementsTab project={project} /> },
     { id: "timeline", label: "Timeline", content: <TimelineTab project={project} /> },
-    { id: "financials", label: "Financials", content: <FinancialsTab project={project} /> },
+    {
+      id: "financials",
+      label: "Financials",
+      content: <FinancialsTab project={project} ambassadors={ambassadors} />,
+    },
     { id: "files", label: "Files", content: <FilesTab project={project} /> },
     {
       id: "notes",

@@ -359,6 +359,11 @@ model Project {
   ambassadorCommRate   Float?
   ambassadorCommission Float?
   ambassadorCommPaid   Boolean     @default(false)
+  /// When the job was allocated to its ambassador and the commission logged.
+  ambassadorAllocatedAt DateTime?
+  /// When the current ambassador was emailed about this commission. Null for
+  /// a public-intake referral until its downpayment is verified.
+  ambassadorNotifiedAt DateTime?
   workerPayoutRate     Float       @default(40)
   workerPayout         Float?
   workerPayoutPaid     Boolean     @default(false)
@@ -452,8 +457,13 @@ enum AmbassadorTier {
 model Ambassador {
   id            String         @id @default(cuid())
   ambassadorId  String         @unique // EC-A-XXXXX
+  /// Slot id from the original Ambassador Panel (e.g. "054", "ECSA-001-005")
+  /// for ambassadors migrated from it — keeps the migration idempotent and
+  /// ties a record back to its old referral link.
+  legacySlotId  String?        @unique
   fullName      String
-  phone         String
+  /// Optional: the original panel's self-registration never asked for one.
+  phone         String?
   email         String?
   universityId  String
   university    University     @relation(fields: [universityId], references: [id])
@@ -529,10 +539,14 @@ model Expense {
   recurring   Boolean  @default(false)
   frequency   String?
   approvedBy  String?
+  /// Set on system-generated expenses tied to a job — today only the
+  /// "Ambassador commission" logged when a job is allocated to an ambassador.
+  projectId   String?
   createdAt   DateTime @default(now())
 
   @@index([date])
   @@index([category])
+  @@index([projectId])
 }
 
 // ─── NOTIFICATIONS ──────────────────────────────────────
