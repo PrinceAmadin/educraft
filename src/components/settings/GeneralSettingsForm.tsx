@@ -47,6 +47,7 @@ export function GeneralSettingsForm({
       accountName: settings.accountName,
       downpaymentPercentage: settings.downpaymentPercentage,
       commissionRates: settings.commissionRates,
+      parentCommissionRate: settings.parentCommissionRate,
     },
   });
 
@@ -153,6 +154,34 @@ export function GeneralSettingsForm({
               />
             </Field>
           ))}
+        </div>
+      </FormSection>
+
+      <FormSection
+        title="Parent ambassadors"
+        description={
+          canEditPricing
+            ? "What a parent (Core) ambassador earns from a sub-ambassador's job, by default. Set a different rate for one pair from that sub-ambassador's page."
+            : "Only the founder (Super Admin) can change this rate."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <Field
+            label="Default parent commission %"
+            htmlFor="parentCommissionRate"
+            error={errors.parentCommissionRate?.message}
+          >
+            <Input
+              id="parentCommissionRate"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              disabled={!canEditPricing}
+              {...register("parentCommissionRate")}
+            />
+          </Field>
         </div>
       </FormSection>
 

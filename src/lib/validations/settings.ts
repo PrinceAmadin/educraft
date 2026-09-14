@@ -26,6 +26,8 @@ export const generalSettingsSchema = z.object({
       PLATINUM: pct.optional(),
     })
     .optional(),
+  /** Default rate a parent (Core) ambassador earns from a sub's job. */
+  parentCommissionRate: pct.optional(),
 });
 export type GeneralSettingsInput = z.infer<typeof generalSettingsSchema>;
 

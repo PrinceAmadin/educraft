@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { TrackingBoard } from "@/components/ambassadors/TrackingBoard";
+import { BroadcastButton } from "@/components/ambassadors/BroadcastButton";
 import { db } from "@/lib/db";
 import { getAmbassadorTracking } from "@/lib/services/ambassador-tracking";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
@@ -30,6 +31,7 @@ export default async function AmbassadorTrackingPage() {
       <PageHeader
         title="Ambassadors"
         description="Who is bringing in work, and what they've earned. Log a job to an ambassador to take their commission off it and email them."
+        actions={<BroadcastButton recipientCount={totals.withEmail} />}
       />
 
       <AmbassadorTabs active="tracking" pendingApplications={pendingApplications} />

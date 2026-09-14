@@ -30,6 +30,8 @@ export async function PATCH(req: NextRequest) {
           accountNumber: parsed.data.accountNumber,
           accountName: parsed.data.accountName,
         };
+  // parentCommissionRate is omitted from that object like commissionRates —
+  // pricing, so OPS_MANAGER can't touch it.
 
   try {
     await updateGeneralSettings(data);

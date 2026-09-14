@@ -85,6 +85,7 @@ export function AmbassadorPicker({
                 {a.university ? ` · ${a.university}` : ""} · {TIER_LABEL[a.tier]}{" "}
                 <span className="font-mono">{a.tierRate}%</span>
                 {a.email ? "" : " · no email"}
+                {a.parent ? ` · ${a.parent.name} gets ${a.parent.rate}% as parent` : ""}
               </span>
             </Option>
           ))
@@ -246,23 +247,40 @@ function RateButton({
 
 // ── Preview ──────────────────────────────────────────────────────────────
 
-/** Job price → minus commission (to expenses) → what EduCraft keeps. */
+/**
+ * Job price → minus commission (to expenses) → minus a parent ambassador's
+ * cut, if the ambassador has one that's activated → what EduCraft keeps.
+ */
 export function CommissionPreview({
   price,
   workerPayout,
   rate,
+  parent,
 }: {
   price: number;
   workerPayout: number;
   rate: number;
+  /** The ambassador's parent (Core), if allocating to them also pays one out. */
+  parent?: { name: string; rate: number } | null;
 }) {
   const commission = commissionFor(price, rate);
+  const parentCommission = parent ? commissionFor(price, parent.rate) : 0;
   return (
     <dl className="divide-y divide-border/80 rounded-xl bg-zone px-4">
       <Row label="Job amount" value={formatNaira(price)} />
       <Row label={`Ambassador commission (${rate}%) — to expenses`} value={`− ${formatNaira(commission)}`} />
+      {parent ? (
+        <Row
+          label={`Parent commission (${parent.rate}%, ${parent.name}) — to expenses`}
+          value={`− ${formatNaira(parentCommission)}`}
+        />
+      ) : null}
       <Row label="Worker payout" value={`− ${formatNaira(workerPayout)}`} muted />
-      <Row label="EduCraft keeps" value={formatNaira(price - workerPayout - commission)} strong />
+      <Row
+        label="EduCraft keeps"
+        value={formatNaira(price - workerPayout - commission - parentCommission)}
+        strong
+      />
     </dl>
   );
 }

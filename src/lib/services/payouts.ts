@@ -31,7 +31,16 @@ export interface PendingPayouts {
 }
 
 export async function getPendingPayouts(): Promise<PendingPayouts> {
-  const [workerProjects, ambassadorProjects] = await db.$transaction([
+  const ambassadorFields = {
+    id: true,
+    ambassadorId: true,
+    fullName: true,
+    bankName: true,
+    accountNumber: true,
+    accountName: true,
+  } satisfies Prisma.AmbassadorSelect;
+
+  const [workerProjects, ambassadorProjects, parentProjects] = await db.$transaction([
     db.project.findMany({
       where: { status: "COMPLETED", workerPayoutPaid: false, workerId: { not: null } },
       select: {
@@ -55,16 +64,19 @@ export async function getPendingPayouts(): Promise<PendingPayouts> {
         projectId: true,
         ambassadorCommission: true,
         ambassadorCommRate: true,
-        ambassador: {
-          select: {
-            id: true,
-            ambassadorId: true,
-            fullName: true,
-            bankName: true,
-            accountNumber: true,
-            accountName: true,
-          },
-        },
+        ambassador: { select: ambassadorFields },
+      },
+    }),
+    // A parent (Core) ambassador's cut from a sub's job — paid out of the
+    // same "ambassador" bucket as their own referrals, since it's still money
+    // owed to that ambassador.
+    db.project.findMany({
+      where: { status: "COMPLETED", parentCommPaid: false, parentAmbassadorId: { not: null } },
+      select: {
+        projectId: true,
+        parentCommission: true,
+        parentCommRate: true,
+        parentAmbassador: { select: ambassadorFields },
       },
     }),
   ]);
@@ -115,6 +127,31 @@ export async function getPendingPayouts(): Promise<PendingPayouts> {
     g.amount += p.ambassadorCommission ?? 0;
     if (p.ambassadorCommRate != null) g._rates.push(p.ambassadorCommRate);
     ambMap.set(p.ambassador.id, g);
+  }
+  for (const p of parentProjects) {
+    if (!p.parentAmbassador) continue;
+    const g =
+      ambMap.get(p.parentAmbassador.id) ??
+      ({
+        id: p.parentAmbassador.id,
+        code: p.parentAmbassador.ambassadorId,
+        name: p.parentAmbassador.fullName,
+        projectCodes: [],
+        amount: 0,
+        rate: null,
+        _rates: [],
+        bank: {
+          bankName: p.parentAmbassador.bankName,
+          accountNumber: p.parentAmbassador.accountNumber,
+          accountName: p.parentAmbassador.accountName,
+        },
+      } as PayoutGroup & { _rates: number[] });
+    // A project code can appear twice here — once for the ambassador's own
+    // cut, once for the parent's — so the list shows both lines.
+    g.projectCodes.push(p.projectId);
+    g.amount += p.parentCommission ?? 0;
+    if (p.parentCommRate != null) g._rates.push(p.parentCommRate);
+    ambMap.set(p.parentAmbassador.id, g);
   }
 
   const workers = [...workerMap.values()].sort((a, b) => b.amount - a.amount);
@@ -191,17 +228,28 @@ async function payAmbassador(
   ambassadorId: string,
   opts: MarkPaidOptions
 ): Promise<number> {
-  const projects = await tx.project.findMany({
-    where: { status: "COMPLETED", ambassadorCommPaid: false, ambassadorId },
-    select: { id: true, ambassadorCommission: true },
-  });
-  if (projects.length === 0) return 0;
+  const [ownProjects, parentOfProjects] = await Promise.all([
+    tx.project.findMany({
+      where: { status: "COMPLETED", ambassadorCommPaid: false, ambassadorId },
+      select: { id: true, ambassadorCommission: true },
+    }),
+    // Their cut as a parent (Core), from a sub's job — paid in the same lump
+    // sum, since it's the same recipient.
+    tx.project.findMany({
+      where: { status: "COMPLETED", parentCommPaid: false, parentAmbassadorId: ambassadorId },
+      select: { id: true, parentCommission: true },
+    }),
+  ]);
+  if (ownProjects.length === 0 && parentOfProjects.length === 0) return 0;
 
-  const amount = projects.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0);
+  const amount =
+    ownProjects.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0) +
+    parentOfProjects.reduce((s, p) => s + (p.parentCommission ?? 0), 0);
   const ambassador = await tx.ambassador.findUnique({
     where: { id: ambassadorId },
     select: { fullName: true },
   });
+  const totalCount = ownProjects.length + parentOfProjects.length;
 
   await tx.payment.create({
     data: {
@@ -215,14 +263,25 @@ async function payAmbassador(
       confirmedById: opts.confirmedById,
       status: "Confirmed",
       date: opts.date ? new Date(opts.date) : new Date(),
-      notes: `Commission for ${projects.length} project${projects.length === 1 ? "" : "s"}`,
+      notes:
+        parentOfProjects.length > 0
+          ? `Commission for ${totalCount} project${totalCount === 1 ? "" : "s"} (${parentOfProjects.length} as parent ambassador)`
+          : `Commission for ${totalCount} project${totalCount === 1 ? "" : "s"}`,
     },
   });
 
-  await tx.project.updateMany({
-    where: { id: { in: projects.map((p) => p.id) } },
-    data: { ambassadorCommPaid: true },
-  });
+  if (ownProjects.length > 0) {
+    await tx.project.updateMany({
+      where: { id: { in: ownProjects.map((p) => p.id) } },
+      data: { ambassadorCommPaid: true },
+    });
+  }
+  if (parentOfProjects.length > 0) {
+    await tx.project.updateMany({
+      where: { id: { in: parentOfProjects.map((p) => p.id) } },
+      data: { parentCommPaid: true },
+    });
+  }
 
   return amount;
 }
@@ -262,12 +321,23 @@ export async function markPayouts(input: {
           ...new Set(projects.map((p) => p.workerId).filter((x): x is string => x != null)),
         ];
       } else {
-        const projects = await tx.project.findMany({
-          where: { status: "COMPLETED", ambassadorCommPaid: false, ambassadorId: { not: null } },
-          select: { ambassadorId: true },
-        });
+        const [ownProjects, parentOfProjects] = await Promise.all([
+          tx.project.findMany({
+            where: { status: "COMPLETED", ambassadorCommPaid: false, ambassadorId: { not: null } },
+            select: { ambassadorId: true },
+          }),
+          tx.project.findMany({
+            where: { status: "COMPLETED", parentCommPaid: false, parentAmbassadorId: { not: null } },
+            select: { parentAmbassadorId: true },
+          }),
+        ]);
         targets = [
-          ...new Set(projects.map((p) => p.ambassadorId).filter((x): x is string => x != null)),
+          ...new Set(
+            [
+              ...ownProjects.map((p) => p.ambassadorId),
+              ...parentOfProjects.map((p) => p.parentAmbassadorId),
+            ].filter((x): x is string => x != null)
+          ),
         ];
       }
     }

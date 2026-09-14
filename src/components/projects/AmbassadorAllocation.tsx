@@ -20,26 +20,46 @@ import { COMMISSION_RATES } from "@/lib/commission";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
 import { cn, formatNaira } from "@/lib/utils";
 
+interface EmailStatus {
+  sent: boolean;
+  to: string | null;
+  error?: string;
+}
+
 export interface AllocationResponse {
   ambassadorName: string;
   rate: number;
   commission: number;
-  email: { sent: boolean; to: string | null; error?: string } | null;
+  email: EmailStatus | null;
   emailLater: boolean;
+  parent: {
+    parentName: string;
+    rate: number;
+    commission: number;
+    email: EmailStatus | null;
+    emailLater: boolean;
+  } | null;
 }
 
 export type AllocationOutcome = { tone: "success" | "warning"; text: string };
 
-/** One line telling the admin what happened: logged, emailed or not, and why. */
+function describeLeg(name: string, amount: number, rate: number, email: EmailStatus | null, later: boolean) {
+  const logged = `${formatNaira(amount)} (${rate}%) for ${name}`;
+  const laterText = later ? " — emailed once the downpayment is verified" : "";
+  if (!email) return { text: `${logged}${laterText || " (no email sent)"}`, warned: false };
+  if (email.sent) return { text: `${logged}, emailed ${email.to}`, warned: false };
+  return { text: `${logged}, but the email failed (${email.error ?? "unknown error"})${laterText}`, warned: true };
+}
+
+/** One line telling the admin what happened: logged, emailed or not, and why — for both legs. */
 export function describeAllocation(body: AllocationResponse): AllocationOutcome {
-  const logged = `Logged ${formatNaira(body.commission)} (${body.rate}%) for ${body.ambassadorName}`;
-  const later = body.emailLater ? " They'll be emailed once the downpayment is verified." : "";
-  if (!body.email) return { tone: "success", text: `${logged}.${later || " No email sent."}` };
-  if (body.email.sent) return { tone: "success", text: `${logged} and emailed ${body.email.to}.` };
-  return {
-    tone: "warning",
-    text: `${logged}, but the email didn't send: ${body.email.error ?? "unknown error"}.${later}`,
-  };
+  const main = describeLeg(body.ambassadorName, body.commission, body.rate, body.email, body.emailLater);
+  const parent = body.parent
+    ? describeLeg(body.parent.parentName, body.parent.commission, body.parent.rate, body.parent.email, body.parent.emailLater)
+    : null;
+
+  const text = parent ? `Logged ${main.text}. Parent: ${parent.text}.` : `Logged ${main.text}.`;
+  return { tone: main.warned || parent?.warned ? "warning" : "success", text };
 }
 
 /** POST /api/admin/projects/[code]/ambassador — shared by every allocate surface. */
@@ -168,7 +188,7 @@ export function AmbassadorAllocation({
             {selected ? (
               <>
                 <CommissionRatePicker value={rate} onChange={setRate} id="alloc-rate" />
-                <CommissionPreview price={price} workerPayout={workerPayout} rate={rate} />
+                <CommissionPreview price={price} workerPayout={workerPayout} rate={rate} parent={selected.parent} />
                 <EmailToggle
                   ambassador={selected}
                   checked={notify}

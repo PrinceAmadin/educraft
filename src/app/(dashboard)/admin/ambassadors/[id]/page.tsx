@@ -3,10 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuBuilding2 } from "react-icons/lu";
-import { getAmbassadorDetail } from "@/lib/services/ambassadors";
+import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
+import { getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
+import { ParentAssignment, SubAmbassadorsList } from "@/components/ambassadors/ParentAssignment";
+import { MessageAmbassadorButton } from "@/components/ambassadors/MessageAmbassadorButton";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -29,7 +32,11 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
   const data = await getAmbassadorDetail(params.id);
   if (!data) notFound();
 
-  const { ambassador, metrics, progress, payouts } = data;
+  const { ambassador, metrics, progress, payouts, parentCommission } = data;
+  const [parentCandidates, defaultParentRate] = await Promise.all([
+    listParentCandidates(ambassador.id),
+    getDefaultParentCommissionRate(),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -56,6 +63,11 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <MessageAmbassadorButton
+              ambassadorId={ambassador.id}
+              ambassadorName={ambassador.fullName}
+              hasEmail={Boolean(ambassador.email)}
+            />
             <CreateLoginControl
               endpoint={`/api/admin/ambassadors/${ambassador.id}/login`}
               hasLogin={Boolean(ambassador.userId)}
@@ -98,6 +110,15 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
       </div>
 
       <ReferralLinkCard code={ambassador.referralCode} />
+
+      <ParentAssignment
+        ambassadorId={ambassador.id}
+        current={ambassador.parent}
+        currentRate={ambassador.parentCommRate}
+        candidates={parentCandidates}
+        defaultRate={defaultParentRate}
+      />
+      <SubAmbassadorsList subs={ambassador.children} parentCommission={parentCommission} />
 
       {/* Tier progress */}
       <section className="surface p-4">

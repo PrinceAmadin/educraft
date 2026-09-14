@@ -4,11 +4,15 @@ import { getCommissionRates } from "@/lib/services/settings";
 import {
   CommissionError,
   emailCommission,
+  emailParentCommission,
   emailPendingCommission,
   releaseCommission,
   resolveAmbassadorRate,
+  resolveParentCommission,
   upsertCommissionExpense,
+  upsertParentCommissionExpense,
 } from "@/lib/services/ambassador-commission";
+import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import {
   MAX_REVISIONS,
@@ -774,6 +778,8 @@ export async function createProjectManual(
   }
 
   const split = computeSplit(price.total, ambassadorCommRate);
+  const parentInfo = ambassadorId ? await resolveParentCommission(ambassadorId) : null;
+  const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
   const now = new Date();
   const clientDeadline = input.clientDeadline ? new Date(input.clientDeadline) : null;
@@ -856,9 +862,12 @@ export async function createProjectManual(
         ambassadorCommRate,
         ambassadorCommission: split.ambassadorCommission,
         ambassadorAllocatedAt: ambassadorId ? now : null,
+        parentAmbassadorId: parentInfo?.id ?? null,
+        parentCommRate: parentInfo?.rate ?? null,
+        parentCommission,
         workerPayoutRate: 40,
         workerPayout: split.workerPayout,
-        educraftRevenue: split.educraftRevenue,
+        educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
       },
       select: { id: true, projectId: true },
     });
@@ -870,6 +879,17 @@ export async function createProjectManual(
         ambassadorName,
         rate: ambassadorCommRate,
         commission: split.ambassadorCommission,
+        date: now,
+      });
+    }
+    if (parentInfo && parentCommission != null) {
+      await upsertParentCommissionExpense(tx, {
+        projectDbId: project.id,
+        projectCode: project.projectId,
+        parentName: parentInfo.fullName,
+        subName: ambassadorName,
+        rate: parentInfo.rate,
+        commission: parentCommission,
         date: now,
       });
     }
@@ -887,12 +907,13 @@ export async function createProjectManual(
     return project;
   }, { timeout: 15_000 });
 
-  // The admin logged this job against an ambassador — email them their
-  // commission now, as the original panel's "Log" did. If not now (or the
-  // send fails), they're emailed when the downpayment is verified. A mail
-  // failure never fails project creation.
+  // The admin logged this job against an ambassador — email them (and their
+  // parent, if one earns a cut too) their commission now, as the original
+  // panel's "Log" did. If not now (or the send fails), they're emailed when
+  // the downpayment is verified. A mail failure never fails project creation.
   if (ambassadorId && input.notifyAmbassador) {
     await emailCommission(created.id);
+    if (parentInfo) await emailParentCommission(created.id);
   }
 
   return { id: created.id, projectId: created.projectId };

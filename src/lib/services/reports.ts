@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { AMBASSADOR_COMMISSION_CATEGORY } from "@/lib/commission";
+import { AMBASSADOR_COMMISSION_CATEGORY, PARENT_COMMISSION_CATEGORY } from "@/lib/commission";
 
 export interface MonthlyReport {
   month: string; // "2026-09"
@@ -82,9 +82,13 @@ export async function getMonthlyReport(rawMonth?: string): Promise<MonthlyReport
       _sum: { amount: true },
     }),
     // Commission is counted when a job is allocated — as an expense — not when
-    // it's paid out. See services/ambassador-commission.ts.
+    // it's paid out. See services/ambassador-commission.ts. Includes both the
+    // ambassador's own cut and any parent (Core) ambassador's cut.
     db.expense.aggregate({
-      where: { category: AMBASSADOR_COMMISSION_CATEGORY, date: inRange },
+      where: {
+        category: { in: [AMBASSADOR_COMMISSION_CATEGORY, PARENT_COMMISSION_CATEGORY] },
+        date: inRange,
+      },
       _sum: { amount: true },
     }),
     db.expense.aggregate({ where: { date: inRange }, _sum: { amount: true } }),

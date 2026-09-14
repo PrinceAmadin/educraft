@@ -3,7 +3,13 @@ import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
 import { generateReferralCode, tierProgress } from "@/lib/ambassador";
 import { getCommissionRates } from "@/lib/services/settings";
+import {
+  MAX_SUB_AMBASSADORS,
+  PARENT_ACTIVATION_TIERS,
+  isValidParentRate,
+} from "@/lib/commission";
 import type { CreateAmbassadorInput } from "@/lib/validations/ambassadors";
+import type { SetParentInput } from "@/lib/validations/commission";
 
 export const AMBASSADOR_PAGE_SIZE = 20;
 
@@ -163,6 +169,13 @@ const detailSelect = {
   accountNumber: true,
   accountName: true,
   createdAt: true,
+  parentId: true,
+  parentCommRate: true,
+  parent: { select: { id: true, ambassadorId: true, fullName: true, tier: true } },
+  children: {
+    orderBy: { fullName: "asc" },
+    select: { id: true, ambassadorId: true, fullName: true, tier: true, parentCommRate: true },
+  },
   university: { select: { name: true, abbreviation: true } },
   referredClients: {
     orderBy: { createdAt: "desc" },
@@ -191,6 +204,52 @@ const detailSelect = {
 
 export type AmbassadorDetail = Prisma.AmbassadorGetPayload<{ select: typeof detailSelect }>;
 
+export interface ParentCommissionSummary {
+  totalEarned: number;
+  totalPaid: number;
+  balance: number;
+  /** Per sub-ambassador, how much they've generated for this parent. */
+  bySub: { id: string; ambassadorId: string; fullName: string; amount: number }[];
+}
+
+/** What this ambassador has earned as a parent, from their subs' completed jobs. */
+async function getParentCommissionSummary(ambassadorId: string): Promise<ParentCommissionSummary> {
+  const projects = await db.project.findMany({
+    where: { parentAmbassadorId: ambassadorId, parentCommission: { not: null } },
+    select: {
+      status: true,
+      parentCommission: true,
+      parentCommPaid: true,
+      ambassador: { select: { id: true, ambassadorId: true, fullName: true } },
+    },
+  });
+  const completed = projects.filter((p) => p.status === "COMPLETED");
+  const totalEarned = completed.reduce((s, p) => s + (p.parentCommission ?? 0), 0);
+  const totalPaid = completed
+    .filter((p) => p.parentCommPaid)
+    .reduce((s, p) => s + (p.parentCommission ?? 0), 0);
+
+  const bySubMap = new Map<string, { id: string; ambassadorId: string; fullName: string; amount: number }>();
+  for (const p of completed) {
+    if (!p.ambassador) continue;
+    const row = bySubMap.get(p.ambassador.id) ?? {
+      id: p.ambassador.id,
+      ambassadorId: p.ambassador.ambassadorId,
+      fullName: p.ambassador.fullName,
+      amount: 0,
+    };
+    row.amount += p.parentCommission ?? 0;
+    bySubMap.set(p.ambassador.id, row);
+  }
+
+  return {
+    totalEarned,
+    totalPaid,
+    balance: totalEarned - totalPaid,
+    bySub: [...bySubMap.values()].sort((a, b) => b.amount - a.amount),
+  };
+}
+
 export async function getAmbassadorDetail(id: string) {
   const ambassador = await db.ambassador.findUnique({ where: { id }, select: detailSelect });
   if (!ambassador) return null;
@@ -200,22 +259,133 @@ export async function getAmbassadorDetail(id: string) {
     ambassador.projects
   );
 
-  const payouts = await db.payment.findMany({
-    where: {
-      type: "AMBASSADOR_COMMISSION",
-      direction: "OUTFLOW",
-      project: { ambassadorId: ambassador.id },
-    },
-    orderBy: { date: "desc" },
-    select: { id: true, paymentId: true, amount: true, reference: true, status: true, date: true },
-  });
+  const [payouts, parentCommission] = await Promise.all([
+    db.payment.findMany({
+      where: {
+        type: "AMBASSADOR_COMMISSION",
+        direction: "OUTFLOW",
+        project: { ambassadorId: ambassador.id },
+      },
+      orderBy: { date: "desc" },
+      select: { id: true, paymentId: true, amount: true, reference: true, status: true, date: true },
+    }),
+    ambassador.children.length > 0 ? getParentCommissionSummary(ambassador.id) : Promise.resolve(null),
+  ]);
 
   return {
     ambassador,
     metrics,
     progress: tierProgress(ambassador.tier, metrics.conversions),
     payouts,
+    parentCommission,
   };
+}
+
+// ── Parent / sub-ambassador hierarchy ───────────────────────────────────
+
+export class AmbassadorHierarchyError extends Error {}
+
+export interface ParentCandidate {
+  id: string;
+  code: string;
+  name: string;
+  tier: AmbassadorTier;
+  childrenCount: number;
+  /** False (and disabled in the picker) once they already have 5 subs. */
+  hasRoom: boolean;
+  /** Parent-commission only pays out once they reach Silver+ (CLAUDE.md). */
+  activated: boolean;
+}
+
+/**
+ * Who this ambassador could be linked under: not themselves, not already a
+ * sub-ambassador themselves (max 1 level deep), not suspended/terminated.
+ * Full ones are still listed — greyed out — so the admin sees why.
+ */
+export async function listParentCandidates(excludeId: string): Promise<ParentCandidate[]> {
+  const rows = await db.ambassador.findMany({
+    where: { id: { not: excludeId }, parentId: null, status: { notIn: ["Suspended", "Terminated"] } },
+    orderBy: { fullName: "asc" },
+    select: {
+      id: true,
+      ambassadorId: true,
+      fullName: true,
+      tier: true,
+      _count: { select: { children: true } },
+    },
+  });
+  return rows.map((a) => ({
+    id: a.id,
+    code: a.ambassadorId,
+    name: a.fullName,
+    tier: a.tier,
+    childrenCount: a._count.children,
+    hasRoom: a._count.children < MAX_SUB_AMBASSADORS,
+    activated: (PARENT_ACTIVATION_TIERS as readonly string[]).includes(a.tier),
+  }));
+}
+
+/**
+ * Link (or unlink) `childId` under a parent. Enforces: no self-parenting, one
+ * level deep (a parent can't itself have a parent; a child can't already have
+ * subs of its own), and max {@link MAX_SUB_AMBASSADORS} per parent. The rate
+ * — 0 allowed, linked but unpaid — lives on the child; omitted means the
+ * global default in Settings applies at allocation time, live.
+ */
+export async function setAmbassadorParent(childId: string, input: SetParentInput) {
+  const child = await db.ambassador.findUnique({
+    where: { id: childId },
+    select: { id: true, fullName: true, parentId: true, _count: { select: { children: true } } },
+  });
+  if (!child) throw new AmbassadorHierarchyError("Ambassador not found");
+
+  if (input.parentId === null) {
+    await db.ambassador.update({ where: { id: childId }, data: { parentId: null, parentCommRate: null } });
+    return;
+  }
+
+  if (input.parentId === childId) {
+    throw new AmbassadorHierarchyError("An ambassador can't be their own parent.");
+  }
+  if (input.rate != null && !isValidParentRate(input.rate)) {
+    throw new AmbassadorHierarchyError("Enter a valid commission rate.");
+  }
+  if (child._count.children > 0) {
+    throw new AmbassadorHierarchyError(
+      `${child.fullName} already has sub-ambassadors of their own — the hierarchy is only one level deep.`
+    );
+  }
+
+  const parent = await db.ambassador.findUnique({
+    where: { id: input.parentId },
+    select: {
+      id: true,
+      fullName: true,
+      parentId: true,
+      status: true,
+      _count: { select: { children: true } },
+    },
+  });
+  if (!parent) throw new AmbassadorHierarchyError("Parent ambassador not found");
+  if (["Suspended", "Terminated"].includes(parent.status)) {
+    throw new AmbassadorHierarchyError(`${parent.fullName} is ${parent.status.toLowerCase()}.`);
+  }
+  if (parent.parentId) {
+    throw new AmbassadorHierarchyError(
+      `${parent.fullName} is a sub-ambassador themselves — the hierarchy is only one level deep.`
+    );
+  }
+  const existingChildren = parent._count.children - (child.parentId === parent.id ? 1 : 0);
+  if (existingChildren >= MAX_SUB_AMBASSADORS) {
+    throw new AmbassadorHierarchyError(
+      `${parent.fullName} already has ${MAX_SUB_AMBASSADORS} sub-ambassadors — the maximum.`
+    );
+  }
+
+  await db.ambassador.update({
+    where: { id: childId },
+    data: { parentId: parent.id, parentCommRate: input.rate ?? null },
+  });
 }
 
 // ── Schools coverage ─────────────────────────────────────────

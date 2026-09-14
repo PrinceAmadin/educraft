@@ -355,7 +355,7 @@ model Project {
 
   // ── Commission & payout ──
   ambassadorId         String?
-  ambassador           Ambassador? @relation(fields: [ambassadorId], references: [id])
+  ambassador           Ambassador? @relation("ProjectAmbassador", fields: [ambassadorId], references: [id])
   ambassadorCommRate   Float?
   ambassadorCommission Float?
   ambassadorCommPaid   Boolean     @default(false)
@@ -364,6 +364,17 @@ model Project {
   /// When the current ambassador was emailed about this commission. Null for
   /// a public-intake referral until its downpayment is verified.
   ambassadorNotifiedAt DateTime?
+  /// The ambassador's parent (Core), when the ambassador is a Sub at the time
+  /// of allocation and the parent has reached Silver. Independent of
+  /// ambassadorId so removing/changing the ambassador clears both together.
+  parentAmbassadorId   String?
+  parentAmbassador     Ambassador? @relation("ProjectParentAmbassador", fields: [parentAmbassadorId], references: [id])
+  parentCommRate       Float?
+  parentCommission     Float?
+  parentCommPaid       Boolean     @default(false)
+  /// When the parent was emailed about this commission. Same deferred-until-
+  /// verified rule as ambassadorNotifiedAt.
+  parentNotifiedAt     DateTime?
   workerPayoutRate     Float       @default(40)
   workerPayout         Float?
   workerPayoutPaid     Boolean     @default(false)
@@ -380,6 +391,7 @@ model Project {
   @@index([clientId])
   @@index([workerId])
   @@index([ambassadorId])
+  @@index([parentAmbassadorId])
   @@index([serviceId])
   @@index([internalDeadline])
   @@index([createdAt])
@@ -481,11 +493,24 @@ model Ambassador {
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id])
 
-  referredClients Client[]
-  projects        Project[]
+  /// Parent-child ambassador chain (CLAUDE.md: max 1 level deep, max 5 subs,
+  /// parent must reach Silver to activate). The rate a parent earns from a
+  /// child's jobs lives on the CHILD, since it's set when the admin links
+  /// them: null = the global default in Settings.
+  parentId       String?
+  parent         Ambassador?  @relation("AmbassadorParentChild", fields: [parentId], references: [id])
+  children       Ambassador[] @relation("AmbassadorParentChild")
+  parentCommRate Float?
+
+  referredClients      Client[]
+  projects             Project[] @relation("ProjectAmbassador")
+  /// Jobs this ambassador earns a parent-commission on, referred by one of
+  /// their sub-ambassadors.
+  subReferredProjects  Project[] @relation("ProjectParentAmbassador")
 
   @@index([universityId])
   @@index([status])
+  @@index([parentId])
 }
 
 // ─── PAYMENTS ───────────────────────────────────────────

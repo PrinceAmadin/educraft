@@ -690,6 +690,7 @@ function AmbassadorSection({
             price={total}
             workerPayout={computeSplit(total, null).workerPayout}
             rate={effectiveRate}
+            parent={selected.parent}
           />
           <EmailToggle
             ambassador={selected}
@@ -912,6 +913,12 @@ function ReviewStep({
                   : "No email on file"
               }
             />
+            {ambassador.parent ? (
+              <ReviewRow
+                label="Parent commission"
+                value={`${ambassador.parent.rate}% to ${ambassador.parent.name}`}
+              />
+            ) : null}
           </>
         ) : (
           <ReviewRow label="Referred by" value="None" />
@@ -947,12 +954,20 @@ function ReviewStep({
                 value={commissionFor(price.total, ambassadorRate)}
                 muted
               />
+              {ambassador?.parent ? (
+                <PriceRow
+                  label={`Parent commission (${ambassador.parent.rate}%)`}
+                  value={commissionFor(price.total, ambassador.parent.rate)}
+                  muted
+                />
+              ) : null}
               <PriceRow
                 label="EduCraft keeps after worker and commission"
                 value={
                   price.total -
                   computeSplit(price.total, null).workerPayout -
-                  commissionFor(price.total, ambassadorRate)
+                  commissionFor(price.total, ambassadorRate) -
+                  (ambassador?.parent ? commissionFor(price.total, ambassador.parent.rate) : 0)
                 }
               />
             </>

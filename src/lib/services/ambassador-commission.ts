@@ -4,13 +4,16 @@ import {
   AMBASSADOR_COMMISSION_CATEGORY,
   MAX_COMMISSION_RATE,
   MIN_COMMISSION_RATE,
+  PARENT_ACTIVATION_TIERS,
+  PARENT_COMMISSION_CATEGORY,
   commissionFor,
   isValidCommissionRate,
 } from "@/lib/commission";
 import { commissionEmail } from "@/lib/emails/commission";
+import { parentCommissionEmail } from "@/lib/emails/parent-commission";
 import { sendMail } from "@/lib/mailer";
 import { notifyUsers } from "@/lib/services/notifications";
-import { getCommissionRates } from "@/lib/services/settings";
+import { getCommissionRates, getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { formatNaira } from "@/lib/utils";
 
 /**
@@ -25,9 +28,13 @@ import { formatNaira } from "@/lib/utils";
  *     did. A referral that arrives through the public intake form is emailed
  *     only once its downpayment is verified, so a stray form submission never
  *     tells an ambassador they've earned money.
- * Cancelling or refunding the job releases the commission and its expense.
- * Paying the commission out later (Payouts) records the cash leaving but does
- * not deduct it a second time — the expense already did.
+ *   - if that ambassador has a parent (Core) who has reached Silver, the
+ *     parent's own cut — a second, independent rate, admin-set — comes off
+ *     the same job, is logged as its own expense, and the parent is emailed
+ *     too, on the same deferred-until-verified rule.
+ * Cancelling or refunding the job releases both commissions and their
+ * expenses. Paying a commission out later (Payouts) records the cash leaving
+ * but does not deduct it a second time — the expense already did.
  */
 
 export class CommissionError extends Error {}
@@ -68,11 +75,70 @@ export async function resolveAmbassadorRate(
   return { id: ambassador.id, fullName: ambassador.fullName, rate: resolved };
 }
 
+export interface ResolvedParent {
+  id: string;
+  fullName: string;
+  rate: number;
+}
+
+/**
+ * The ambassador's parent (Core), if one is linked, active, and has reached
+ * Silver — CLAUDE.md's "requires Silver tier to activate". Returns null
+ * otherwise; allocation just proceeds without a parent commission, never an
+ * error, since the child ambassador is still perfectly valid on their own.
+ */
+export async function resolveParentCommission(childId: string): Promise<ResolvedParent | null> {
+  const child = await db.ambassador.findUnique({
+    where: { id: childId },
+    select: {
+      parentCommRate: true,
+      parent: { select: { id: true, fullName: true, tier: true, status: true } },
+    },
+  });
+  const parent = child?.parent;
+  if (!parent) return null;
+  if (INACTIVE_STATUSES.includes(parent.status)) return null;
+  if (!(PARENT_ACTIVATION_TIERS as readonly string[]).includes(parent.tier)) return null;
+
+  const rate = child.parentCommRate ?? (await getDefaultParentCommissionRate());
+  if (rate <= 0) return null;
+  return { id: parent.id, fullName: parent.fullName, rate };
+}
+
 function workerPayoutOf(project: { price: number; workerPayout: number | null; workerPayoutRate: number }) {
   return project.workerPayout ?? Math.round((project.price * (project.workerPayoutRate || 40)) / 100);
 }
 
 // ── Expense bookkeeping ──────────────────────────────────────────────────
+
+async function upsertExpense(
+  tx: Tx,
+  entry: { projectDbId: string; category: string; description: string; amount: number; date: Date }
+): Promise<void> {
+  const existing = await tx.expense.findFirst({
+    where: { projectId: entry.projectDbId, category: entry.category },
+    select: { id: true },
+  });
+  if (existing) {
+    // Keep the original date: the commission belongs to the month the job was
+    // first allocated, even if it's later moved to another ambassador.
+    await tx.expense.update({
+      where: { id: existing.id },
+      data: { description: entry.description, amount: entry.amount },
+    });
+    return;
+  }
+  await tx.expense.create({
+    data: {
+      category: entry.category,
+      description: entry.description,
+      amount: entry.amount,
+      date: entry.date,
+      recurring: false,
+      projectId: entry.projectDbId,
+    },
+  });
+}
 
 export async function upsertCommissionExpense(
   tx: Tx,
@@ -85,31 +151,33 @@ export async function upsertCommissionExpense(
     date: Date;
   }
 ): Promise<void> {
-  const description = `${entry.ambassadorName} — ${entry.rate}% of ${entry.projectCode}`;
-  const existing = await tx.expense.findFirst({
-    where: { projectId: entry.projectDbId, category: AMBASSADOR_COMMISSION_CATEGORY },
-    select: { id: true },
+  await upsertExpense(tx, {
+    projectDbId: entry.projectDbId,
+    category: AMBASSADOR_COMMISSION_CATEGORY,
+    description: `${entry.ambassadorName} — ${entry.rate}% of ${entry.projectCode}`,
+    amount: entry.commission,
+    date: entry.date,
   });
+}
 
-  if (existing) {
-    // Keep the original date: the commission belongs to the month the job was
-    // first allocated, even if it's later moved to another ambassador.
-    await tx.expense.update({
-      where: { id: existing.id },
-      data: { description, amount: entry.commission },
-    });
-    return;
+export async function upsertParentCommissionExpense(
+  tx: Tx,
+  entry: {
+    projectDbId: string;
+    projectCode: string;
+    parentName: string;
+    subName: string;
+    rate: number;
+    commission: number;
+    date: Date;
   }
-
-  await tx.expense.create({
-    data: {
-      category: AMBASSADOR_COMMISSION_CATEGORY,
-      description,
-      amount: entry.commission,
-      date: entry.date,
-      recurring: false,
-      projectId: entry.projectDbId,
-    },
+): Promise<void> {
+  await upsertExpense(tx, {
+    projectDbId: entry.projectDbId,
+    category: PARENT_COMMISSION_CATEGORY,
+    description: `${entry.parentName} — ${entry.rate}% of ${entry.projectCode} (parent of ${entry.subName})`,
+    amount: entry.commission,
+    date: entry.date,
   });
 }
 
@@ -119,10 +187,16 @@ async function removeCommissionExpense(tx: Tx, projectDbId: string): Promise<voi
   });
 }
 
+async function removeParentCommissionExpense(tx: Tx, projectDbId: string): Promise<void> {
+  await tx.expense.deleteMany({
+    where: { projectId: projectDbId, category: PARENT_COMMISSION_CATEGORY },
+  });
+}
+
 /**
- * A cancelled or refunded job earns no commission: clear it off the job and
- * delete its expense. The ambassador stays linked as the referrer. Called
- * inside the status-change transaction.
+ * A cancelled or refunded job earns no commission: clear both legs off the
+ * job and delete their expenses. The ambassador stays linked as the referrer.
+ * Called inside the status-change transaction.
  */
 export async function releaseCommission(tx: Tx, projectDbId: string): Promise<void> {
   const project = await tx.project.findUnique({
@@ -133,20 +207,34 @@ export async function releaseCommission(tx: Tx, projectDbId: string): Promise<vo
       workerPayoutRate: true,
       ambassadorCommission: true,
       ambassadorCommPaid: true,
+      parentCommission: true,
+      parentCommPaid: true,
     },
   });
-  if (!project || project.ambassadorCommPaid || project.ambassadorCommission == null) return;
+  if (!project) return;
+
+  const releaseAmbassador = project.ambassadorCommission != null && !project.ambassadorCommPaid;
+  const releaseParent = project.parentCommission != null && !project.parentCommPaid;
+  if (!releaseAmbassador && !releaseParent) return;
 
   await tx.project.update({
     where: { id: projectDbId },
     data: {
-      ambassadorCommRate: null,
-      ambassadorCommission: null,
-      ambassadorAllocatedAt: null,
-      educraftRevenue: project.price - workerPayoutOf(project),
+      ...(releaseAmbassador
+        ? { ambassadorCommRate: null, ambassadorCommission: null, ambassadorAllocatedAt: null }
+        : {}),
+      ...(releaseParent
+        ? { parentAmbassadorId: null, parentCommRate: null, parentCommission: null, parentNotifiedAt: null }
+        : {}),
+      educraftRevenue:
+        project.price -
+        workerPayoutOf(project) -
+        (releaseAmbassador ? 0 : (project.ambassadorCommission ?? 0)) -
+        (releaseParent ? 0 : (project.parentCommission ?? 0)),
     },
   });
-  await removeCommissionExpense(tx, projectDbId);
+  if (releaseAmbassador) await removeCommissionExpense(tx, projectDbId);
+  if (releaseParent) await removeParentCommissionExpense(tx, projectDbId);
 }
 
 // ── Email ────────────────────────────────────────────────────────────────
@@ -219,20 +307,108 @@ export async function emailCommission(
 }
 
 /**
- * The downpayment on a referred job was just verified — if its ambassador
- * hasn't been emailed yet (a public-intake referral, an earlier send that
- * failed, or an allocation saved without emailing), email them now.
+ * Emails the parent (Core) ambassador about the commission they earned from
+ * a sub's job. Same shape as {@link emailCommission}, stamping
+ * `parentNotifiedAt` instead. Never throws.
+ */
+export async function emailParentCommission(
+  projectDbId: string,
+  { inApp = true }: { inApp?: boolean } = {}
+): Promise<CommissionEmailStatus | null> {
+  try {
+    const project = await db.project.findUnique({
+      where: { id: projectDbId },
+      select: {
+        projectId: true,
+        price: true,
+        projectTitle: true,
+        parentCommRate: true,
+        parentCommission: true,
+        service: { select: { serviceName: true } },
+        ambassador: { select: { fullName: true } },
+        parentAmbassador: { select: { fullName: true, email: true, userId: true } },
+      },
+    });
+    if (
+      !project?.parentAmbassador ||
+      !project.ambassador ||
+      project.parentCommission == null ||
+      project.parentCommRate == null
+    ) {
+      return null;
+    }
+    const parent = project.parentAmbassador;
+    const rate = project.parentCommRate;
+    const commission = project.parentCommission;
+
+    if (inApp && parent.userId) {
+      await notifyUsers([parent.userId], {
+        title: "New parent commission",
+        message: `${formatNaira(commission)} (${rate}%) on ${project.projectId}, via ${project.ambassador.fullName}.`,
+        type: "success",
+        link: "/ambassador/commissions",
+      }).catch(() => {});
+    }
+
+    if (!parent.email) return { sent: false, to: null, error: "No email address on file" };
+
+    const title = project.projectTitle?.trim();
+    const message = parentCommissionEmail({
+      parentName: parent.fullName,
+      subName: project.ambassador.fullName,
+      projectCode: project.projectId,
+      jobDescription: title ? `${project.service.serviceName} — ${title}` : project.service.serviceName,
+      jobAmount: project.price,
+      rate,
+      commission,
+    });
+    const result = await sendMail({ to: parent.email, ...message });
+    if (result.ok) {
+      await db.project.update({ where: { id: projectDbId }, data: { parentNotifiedAt: new Date() } });
+    }
+    return { sent: result.ok, to: parent.email, error: result.error };
+  } catch (error) {
+    console.error("[emailParentCommission]", error);
+    return { sent: false, to: null, error: "Could not send the email" };
+  }
+}
+
+/**
+ * The downpayment on a referred job was just verified — email the ambassador
+ * and, if there is one, the parent, whichever of them hasn't been emailed yet
+ * (a public-intake referral, an earlier send that failed, or an allocation
+ * saved without emailing).
  */
 export async function emailPendingCommission(projectDbId: string): Promise<void> {
   const project = await db.project.findUnique({
     where: { id: projectDbId },
-    select: { ambassadorId: true, ambassadorCommission: true, ambassadorNotifiedAt: true },
+    select: {
+      ambassadorId: true,
+      ambassadorCommission: true,
+      ambassadorNotifiedAt: true,
+      parentAmbassadorId: true,
+      parentCommission: true,
+      parentNotifiedAt: true,
+    },
   });
-  if (!project?.ambassadorId || project.ambassadorCommission == null || project.ambassadorNotifiedAt) return;
-  await emailCommission(projectDbId, { inApp: false });
+  if (!project) return;
+  if (project.ambassadorId && project.ambassadorCommission != null && !project.ambassadorNotifiedAt) {
+    await emailCommission(projectDbId, { inApp: false });
+  }
+  if (project.parentAmbassadorId && project.parentCommission != null && !project.parentNotifiedAt) {
+    await emailParentCommission(projectDbId, { inApp: false });
+  }
 }
 
 // ── Allocate / remove ────────────────────────────────────────────────────
+
+export interface ParentAllocation {
+  parentName: string;
+  rate: number;
+  commission: number;
+  email: CommissionEmailStatus | null;
+  emailLater: boolean;
+}
 
 export interface AllocationResult {
   ambassadorName: string;
@@ -241,6 +417,8 @@ export interface AllocationResult {
   email: CommissionEmailStatus | null;
   /** Not emailed now; they will be once the downpayment is verified. */
   emailLater: boolean;
+  /** Set when the ambassador has an activated parent — their cut, off the same job. */
+  parent: ParentAllocation | null;
 }
 
 async function loadProject(idOrCode: string) {
@@ -256,12 +434,13 @@ async function loadProject(idOrCode: string) {
       ambassadorId: true,
       ambassadorCommPaid: true,
       ambassadorNotifiedAt: true,
+      parentCommPaid: true,
       downpaymentStatus: true,
       client: { select: { id: true, referredById: true } },
     },
   });
   if (!project) throw new CommissionError("Project not found");
-  if (project.ambassadorCommPaid) {
+  if (project.ambassadorCommPaid || project.parentCommPaid) {
     throw new CommissionError(
       "This job's commission has already been paid out, so its ambassador can't be changed."
     );
@@ -283,6 +462,8 @@ export async function allocateAmbassador(input: {
   const ambassador = await resolveAmbassadorRate(input.ambassadorId, input.rate);
   const commission = commissionFor(project.price, ambassador.rate);
   const sameAmbassador = project.ambassadorId === ambassador.id;
+  const parentInfo = await resolveParentCommission(ambassador.id);
+  const parentCommission = parentInfo ? commissionFor(project.price, parentInfo.rate) : null;
   const now = new Date();
 
   await db.$transaction(async (tx) => {
@@ -292,10 +473,14 @@ export async function allocateAmbassador(input: {
         ambassadorId: ambassador.id,
         ambassadorCommRate: ambassador.rate,
         ambassadorCommission: commission,
-        educraftRevenue: project.price - workerPayoutOf(project) - commission,
+        educraftRevenue: project.price - workerPayoutOf(project) - commission - (parentCommission ?? 0),
         ambassadorAllocatedAt: now,
         // A new ambassador hasn't been told yet; the same one keeps their stamp.
         ambassadorNotifiedAt: sameAmbassador ? project.ambassadorNotifiedAt : null,
+        parentAmbassadorId: parentInfo?.id ?? null,
+        parentCommRate: parentInfo?.rate ?? null,
+        parentCommission,
+        parentNotifiedAt: null,
       },
     });
 
@@ -316,15 +501,41 @@ export async function allocateAmbassador(input: {
       commission,
       date: now,
     });
+
+    if (parentInfo && parentCommission != null) {
+      await upsertParentCommissionExpense(tx, {
+        projectDbId: project.id,
+        projectCode: project.projectId,
+        parentName: parentInfo.fullName,
+        subName: ambassador.fullName,
+        rate: parentInfo.rate,
+        commission: parentCommission,
+        date: now,
+      });
+    } else {
+      await removeParentCommissionExpense(tx, project.id);
+    }
   });
 
   const email = input.notify ? await emailCommission(project.id) : null;
   const emailLater = !email?.sent && project.downpaymentStatus !== "Verified";
 
-  return { ambassadorName: ambassador.fullName, rate: ambassador.rate, commission, email, emailLater };
+  let parent: ParentAllocation | null = null;
+  if (parentInfo && parentCommission != null) {
+    const parentEmail = input.notify ? await emailParentCommission(project.id) : null;
+    parent = {
+      parentName: parentInfo.fullName,
+      rate: parentInfo.rate,
+      commission: parentCommission,
+      email: parentEmail,
+      emailLater: !parentEmail?.sent && project.downpaymentStatus !== "Verified",
+    };
+  }
+
+  return { ambassadorName: ambassador.fullName, rate: ambassador.rate, commission, email, emailLater, parent };
 }
 
-/** "None" — no ambassador referred this job. */
+/** "None" — no ambassador referred this job. Clears any parent commission too. */
 export async function removeAllocation(projectIdOrCode: string): Promise<void> {
   const project = await loadProject(projectIdOrCode);
 
@@ -337,10 +548,15 @@ export async function removeAllocation(projectIdOrCode: string): Promise<void> {
         ambassadorCommission: null,
         ambassadorAllocatedAt: null,
         ambassadorNotifiedAt: null,
+        parentAmbassadorId: null,
+        parentCommRate: null,
+        parentCommission: null,
+        parentNotifiedAt: null,
         educraftRevenue: project.price - workerPayoutOf(project),
       },
     });
     await removeCommissionExpense(tx, project.id);
+    await removeParentCommissionExpense(tx, project.id);
   });
 }
 
@@ -355,10 +571,12 @@ export interface AllocatableAmbassador {
   /** Default rate for their tier, from Settings. */
   tierRate: number;
   email: string | null;
+  /** Their parent (Core), when linked, active, Silver+, and rated above 0. */
+  parent: { id: string; name: string; rate: number } | null;
 }
 
 export async function listAllocatableAmbassadors(): Promise<AllocatableAmbassador[]> {
-  const [rows, rates] = await Promise.all([
+  const [rows, rates, defaultParentRate] = await Promise.all([
     db.ambassador.findMany({
       where: { status: { notIn: INACTIVE_STATUSES } },
       orderBy: { fullName: "asc" },
@@ -368,18 +586,32 @@ export async function listAllocatableAmbassadors(): Promise<AllocatableAmbassado
         fullName: true,
         tier: true,
         email: true,
+        parentCommRate: true,
+        parent: { select: { id: true, fullName: true, tier: true, status: true } },
         university: { select: { abbreviation: true } },
       },
     }),
     getCommissionRates(),
+    getDefaultParentCommissionRate(),
   ]);
-  return rows.map((a) => ({
-    id: a.id,
-    code: a.ambassadorId,
-    name: a.fullName,
-    university: a.university?.abbreviation ?? null,
-    tier: a.tier,
-    tierRate: rates[a.tier],
-    email: a.email,
-  }));
+  return rows.map((a) => {
+    const parentQualifies =
+      a.parent != null &&
+      !INACTIVE_STATUSES.includes(a.parent.status) &&
+      (PARENT_ACTIVATION_TIERS as readonly string[]).includes(a.parent.tier);
+    const parentRate = parentQualifies ? (a.parentCommRate ?? defaultParentRate) : 0;
+    return {
+      id: a.id,
+      code: a.ambassadorId,
+      name: a.fullName,
+      university: a.university?.abbreviation ?? null,
+      tier: a.tier,
+      tierRate: rates[a.tier],
+      email: a.email,
+      parent:
+        parentQualifies && parentRate > 0 && a.parent
+          ? { id: a.parent.id, name: a.parent.fullName, rate: parentRate }
+          : null,
+    };
+  });
 }

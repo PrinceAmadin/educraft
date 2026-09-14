@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AMBASSADOR_COMMISSION_CATEGORY } from "@/lib/commission";
+import { AMBASSADOR_COMMISSION_CATEGORY, PARENT_COMMISSION_CATEGORY } from "@/lib/commission";
 
 export const EXPENSE_CATEGORIES = [
   "Software",
@@ -13,10 +13,15 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 
 /**
  * What the expenses list can be filtered by: the manual categories plus the
- * ambassador commission the system logs when a job is allocated. That one is
- * never offered in the "Add expense" form — it's managed from the job.
+ * two the system logs when a job is allocated — the ambassador's own
+ * commission and, when they have one, their parent's. Neither is ever
+ * offered in the "Add expense" form — they're managed from the job.
  */
-export const EXPENSE_FILTER_CATEGORIES = [...EXPENSE_CATEGORIES, AMBASSADOR_COMMISSION_CATEGORY] as const;
+export const EXPENSE_FILTER_CATEGORIES = [
+  ...EXPENSE_CATEGORIES,
+  AMBASSADOR_COMMISSION_CATEGORY,
+  PARENT_COMMISSION_CATEGORY,
+] as const;
 
 export const EXPENSE_FREQUENCIES = ["Monthly", "Quarterly", "Annual"] as const;
 export type ExpenseFrequency = (typeof EXPENSE_FREQUENCIES)[number];

@@ -1,6 +1,7 @@
 import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { DOWNPAYMENT_PERCENTAGE, TIER_COMMISSION_RATE } from "@/lib/constants";
+import { DEFAULT_PARENT_COMMISSION_RATE } from "@/lib/commission";
 import type { GeneralSettingsInput } from "@/lib/validations/settings";
 
 /** Setting keys this module owns. Everything else lives in its own service. */
@@ -16,6 +17,7 @@ const KEYS = {
   rateSilver: "commission_rate_silver",
   rateGold: "commission_rate_gold",
   ratePlatinum: "commission_rate_platinum",
+  parentCommissionRate: "parent_commission_rate",
 } as const;
 
 const RATE_KEY_BY_TIER: Record<AmbassadorTier, string> = {
@@ -46,6 +48,19 @@ export interface GeneralSettings {
   /** Prefilled as the default for newly-created services, not a live override. */
   downpaymentPercentage: number;
   commissionRates: Record<AmbassadorTier, number>;
+  /** Default parent-ambassador rate — an admin can override it per sub-ambassador. */
+  parentCommissionRate: number;
+}
+
+/**
+ * The live default rate a parent (Core) ambassador earns from a sub's job,
+ * when the pair has no per-relationship override. Falls back to
+ * DEFAULT_PARENT_COMMISSION_RATE when unset.
+ */
+export async function getDefaultParentCommissionRate(): Promise<number> {
+  const row = await db.setting.findUnique({ where: { key: KEYS.parentCommissionRate } });
+  const n = row ? Number(row.value) : NaN;
+  return Number.isFinite(n) ? n : DEFAULT_PARENT_COMMISSION_RATE;
 }
 
 async function readAll(): Promise<Record<string, string | undefined>> {
@@ -91,6 +106,7 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
       GOLD: num(s[KEYS.rateGold], TIER_COMMISSION_RATE.GOLD),
       PLATINUM: num(s[KEYS.ratePlatinum], TIER_COMMISSION_RATE.PLATINUM),
     },
+    parentCommissionRate: num(s[KEYS.parentCommissionRate], DEFAULT_PARENT_COMMISSION_RATE),
   };
 }
 
@@ -122,6 +138,8 @@ export async function updateGeneralSettings(input: GeneralSettingsInput): Promis
     if (input.commissionRates.PLATINUM !== undefined)
       writes.push({ key: KEYS.ratePlatinum, value: String(input.commissionRates.PLATINUM) });
   }
+  if (input.parentCommissionRate !== undefined)
+    writes.push({ key: KEYS.parentCommissionRate, value: String(input.parentCommissionRate) });
 
   if (writes.length === 0) return;
 

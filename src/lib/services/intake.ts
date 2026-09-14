@@ -3,7 +3,12 @@ import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates } from "@/lib/services/settings";
-import { upsertCommissionExpense } from "@/lib/services/ambassador-commission";
+import {
+  resolveParentCommission,
+  upsertCommissionExpense,
+  upsertParentCommissionExpense,
+} from "@/lib/services/ambassador-commission";
+import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { resolveTemplate } from "@/lib/intake-templates";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
@@ -138,6 +143,8 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
   }
 
   const split = computeSplit(price.total, ambassadorCommRate);
+  const parentInfo = ambassadorId ? await resolveParentCommission(ambassadorId) : null;
+  const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
   const now = new Date();
   const clientDeadline = input.clientDeadline ? new Date(input.clientDeadline) : null;
@@ -267,9 +274,12 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
           ambassadorCommRate,
           ambassadorCommission: split.ambassadorCommission,
           ambassadorAllocatedAt: ambassadorId ? now : null,
+          parentAmbassadorId: parentInfo?.id ?? null,
+          parentCommRate: parentInfo?.rate ?? null,
+          parentCommission,
           workerPayoutRate: 40,
           workerPayout: split.workerPayout,
-          educraftRevenue: split.educraftRevenue,
+          educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
         },
         select: { id: true, projectId: true },
       });
@@ -281,6 +291,17 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
           ambassadorName,
           rate: ambassadorCommRate,
           commission: split.ambassadorCommission,
+          date: now,
+        });
+      }
+      if (parentInfo && parentCommission != null) {
+        await upsertParentCommissionExpense(tx, {
+          projectDbId: project.id,
+          projectCode: project.projectId,
+          parentName: parentInfo.fullName,
+          subName: ambassadorName,
+          rate: parentInfo.rate,
+          commission: parentCommission,
           date: now,
         });
       }

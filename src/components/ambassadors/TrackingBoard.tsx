@@ -439,7 +439,12 @@ function LogJobDialog({
             {job ? (
               <>
                 <CommissionRatePicker value={rate} onChange={setRate} id="log-rate" />
-                <CommissionPreview price={job.price} workerPayout={job.workerPayout} rate={rate} />
+                <CommissionPreview
+                  price={job.price}
+                  workerPayout={job.workerPayout}
+                  rate={rate}
+                  parent={ambassador.parent}
+                />
                 <EmailToggle
                   ambassador={ambassador}
                   checked={notify}
