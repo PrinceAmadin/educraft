@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LuCircleCheck } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { PayWithPaystackButton } from "@/components/track/PayWithPaystackButton";
 import { db } from "@/lib/db";
 import { getCompanyBankDetails } from "@/lib/settings";
 import { formatNaira } from "@/lib/utils";
@@ -60,7 +61,8 @@ export default async function IntakeSuccessPage({
                   {formatNaira(project.downpaymentAmount)}
                 </span>{" "}
                 to begin. Balance of {formatNaira(project.price - project.downpaymentAmount)} after
-                approval.
+                approval. You&apos;ll be redirected to Paystack automatically — stay on this page if you&apos;d
+                rather pay by bank transfer instead.
               </p>
             ) : (
               <p className="mt-1 text-muted-foreground">
@@ -70,20 +72,34 @@ export default async function IntakeSuccessPage({
             )}
 
             {priceKnown ? (
-              <dl className="mt-3 space-y-1.5">
-                {bank.complete ? (
-                  <>
-                    <PayRow label="Bank" value={bank.bankName!} />
-                    <PayRow label="Account number" value={bank.accountNumber!} mono />
-                    <PayRow label="Account name" value={bank.accountName!} />
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    We&apos;ll send bank details on WhatsApp shortly.
-                  </p>
-                )}
-                <PayRow label="Reference" value={project.projectId} mono />
-              </dl>
+              <>
+                <div className="mt-3">
+                  <PayWithPaystackButton
+                    projectId={project.projectId}
+                    leg="downpayment"
+                    label={`Pay ${formatNaira(project.downpaymentAmount)} with Paystack`}
+                    autoStart
+                  />
+                </div>
+
+                <p className="mt-3 text-center text-xs text-muted-foreground">
+                  or pay by bank transfer
+                </p>
+                <dl className="mt-2 space-y-1.5">
+                  {bank.complete ? (
+                    <>
+                      <PayRow label="Bank" value={bank.bankName!} />
+                      <PayRow label="Account number" value={bank.accountNumber!} mono />
+                      <PayRow label="Account name" value={bank.accountName!} />
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      We&apos;ll send bank details on WhatsApp shortly.
+                    </p>
+                  )}
+                  <PayRow label="Reference" value={project.projectId} mono />
+                </dl>
+              </>
             ) : null}
 
             <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">

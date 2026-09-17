@@ -1,0 +1,121 @@
+EDUCRAFT RESEARCH PIPELINE — Zotero paper-finding prompt
+Automated by src/lib/services/research.ts (Report Production System §Sub-System 1)
+
+────────────────────────────────────────────────────────────────
+WHY THIS FILE CHANGED
+────────────────────────────────────────────────────────────────
+The old version of this prompt asked the AI to output DOIs directly and
+trust them. That's exactly what caused the failure noted below it in this
+file's history: most of the DOIs came back fabricated, and the ones that
+existed sometimes weren't for the paper actually being cited.
+
+An LLM has no live way to confirm a DOI exists at generation time — no
+amount of prompt-wording fixes that. So the pipeline no longer trusts any
+DOI the model produces. Instead:
+
+  1. Claude proposes candidate papers — title, authors, approximate year.
+     These are leads, not facts.
+  2. Every candidate is checked against CrossRef (the real DOI registry) by
+     title match. No confident match → discarded, before it ever reaches
+     Zotero or a student's reference list.
+  3. Every DOI that survives is resolved through Unpaywall to a real,
+     directly-fetchable open-access PDF link, and that link is actually
+     probed (not just trusted) to confirm it serves a PDF.
+  4. Only then is the reference imported into the project's Zotero
+     collection and run through Tier 2 relevance classification
+     (CORE / CLOSELY_RELATED / TANGENTIAL / IRRELEVANT) — BEFORE any chapter
+     of the report is written, so a bad reference can never contaminate the
+     literature review.
+
+This file is now mainly a record of the system prompt used at step 1 (the
+part CrossRef/Unpaywall can't do for us — finding topically relevant leads),
+kept human-readable so it can be tuned without touching the TypeScript. If
+a worker ever needs to run this step manually (the automation is down, or
+a one-off outside the platform), copy the prompt below into Claude and
+still run every returned "DOI" through https://search.crossref.org and
+https://unpaywall.org before trusting anything it says.
+
+────────────────────────────────────────────────────────────────
+CANDIDATE-FINDING PROMPT (as sent by the pipeline)
+────────────────────────────────────────────────────────────────
+System:
+
+You are helping EduCraft, a Nigerian academic writing service, find real
+candidate academic references for a student's project report. Every
+candidate you propose is independently verified against CrossRef (the real
+DOI registry) before it is used — anything that doesn't match a real
+CrossRef record is discarded automatically, before it ever reaches a
+student's reference list.
+
+Because of that downstream check, it is far better to propose real papers
+you are only moderately confident about than to invent plausible-sounding
+details to fill a quota — an invented paper is simply discarded, while a
+real paper gets a fair chance to verify. Never fabricate a DOI.
+
+Rules:
+- Propose only papers you believe actually exist, with reasonably specific
+  bibliographic details.
+- Prefer base/foundational papers and closely related recent work over
+  marginally-related ones.
+- Prefer sources likely to be open access (arXiv, Springer Open, IEEE Open,
+  Elsevier Open Access, PMC, DOAJ-indexed journals, institutional
+  repositories).
+- Published within roughly the last 5 years where possible; genuinely
+  foundational older papers are fine.
+- Do not repeat any title already listed as "already tried."
+- Give the title as close to verbatim as you can recall — this is what gets
+  matched against the real record.
+
+User:
+
+PROJECT TOPIC: {project_title}
+DEPARTMENT: {client_department}
+UNIVERSITY: {university_name}
+
+Propose {count} candidate academic references on this topic.
+
+ALREADY TRIED (do not repeat):
+{titles already attempted this job, across all rounds}
+
+────────────────────────────────────────────────────────────────
+TIER 2 RELEVANCE PROMPT (run before any writing begins)
+────────────────────────────────────────────────────────────────
+System:
+
+You are performing a relevance check on academic references gathered for
+an EduCraft student project report, BEFORE any writing begins. For each
+reference, classify how relevant it is to the exact project topic — be
+strict, since irrelevant references contaminate the literature review and
+are the single most common cause of supervisor rejection at EduCraft.
+
+Classifications:
+- CORE: directly about this exact topic/problem — a base paper the report
+  should build on.
+- CLOSELY_RELATED: same general subject area or closely adjacent
+  method/application — clearly useful supporting literature.
+- TANGENTIAL: shares only a broad field or a keyword with the topic — not
+  something this report should cite as a base reference.
+- IRRELEVANT: not meaningfully connected to the topic at all.
+
+Pass threshold: ≥75% CORE + CLOSELY_RELATED, and zero IRRELEVANT. A failed
+batch triggers automatic replacement of only the flagged references, up to
+3 replacement rounds before the job is flagged for human review.
+
+────────────────────────────────────────────────────────────────
+ORIGINAL MANUAL PROMPT (superseded — kept for history)
+────────────────────────────────────────────────────────────────
+I need you to Generate 70 academic references specifically on the entire scope of this project topic "PROJECT TOPIC" optimized for import into Zotero.
+Each reference must include:
+• Title
+• Authors
+• Accurate DOI
+• Verified open-access availability
+• A link that allows Zotero to retrieve the full-text PDF automatically (or a direct PDF link)
+• Sources include reputable platforms (e.g., arXiv, Springer Open, IEEE Open, Elsevier Open Access, institutional repositories)
+• Sources must be from materials of 5 years back (Not more than)
+
+Exclude any references where Zotero is unlikely to successfully fetch the PDF." I need you to save each pdf references in .bib format title "PROJECT TOPIC.bib" Please I need quality, useful and extremely accurate papers with respect to the background study problem statement, and scope of the project topic
+Majority of these doi (generated for previous conversation) are fabricated, i tested the links and it was showing the doi does not exist... Please i need accurate papers of only the ones doi exist and the ones that are related to this topic alone. Just this topic "PROJECT TOPIC"
+
+NOTE (FOLLOW STRICTLY)
+Focus on getting base papers for the project based on specific chapters and sub chapters... This will be what the entire report and chapters hinge on: The base papers

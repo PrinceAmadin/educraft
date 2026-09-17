@@ -1,12 +1,16 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
+import { notifyAdmins } from "@/lib/services/notifications";
 import {
   workerMetrics,
   WORKER_ACTIVE_STATUSES,
   type WorkerProjectFacts,
 } from "@/lib/worker-metrics";
-import type { CreateWorkerInput } from "@/lib/validations/workers";
+import type { CreateWorkerInput, UpdateWorkerInput, SelfUpdateWorkerInput } from "@/lib/validations/workers";
+
+/** Statuses that mean "this worker's login should work." Everything else blocks sign-in. */
+const LOGIN_ELIGIBLE_STATUSES = new Set(["Active", "On Break"]);
 
 export const WORKER_PAGE_SIZE = 20;
 
@@ -170,6 +174,9 @@ const workerDetailSelect = {
   accountName: true,
   notes: true,
   createdAt: true,
+  updatedAt: true,
+  updatedByRole: true,
+  updatedBy: { select: { displayName: true, email: true } },
   projects: {
     orderBy: { createdAt: "desc" },
     select: {
@@ -255,10 +262,80 @@ export async function createWorker(input: CreateWorkerInput) {
   throw new TransitionError("Could not allocate a worker id — try again");
 }
 
-export async function updateWorkerStatus(id: string, status: string) {
-  const worker = await db.worker.findUnique({ where: { id }, select: { id: true } });
+/**
+ * General admin edit — corrects any field on a worker's record, including
+ * status. When they have a portal login, a status change syncs User.isActive
+ * to match (Suspended/Terminated blocks sign-in the same way a pending
+ * application does; Active/On Break restores it) — without this, a suspended
+ * worker's login kept working regardless of their status.
+ */
+export async function updateWorker(id: string, input: UpdateWorkerInput, changedById: string) {
+  const worker = await db.worker.findUnique({ where: { id }, select: { id: true, userId: true } });
   if (!worker) throw new TransitionError("Worker not found");
-  return db.worker.update({ where: { id }, data: { status }, select: { status: true } });
+
+  const data: Prisma.WorkerUncheckedUpdateInput = { updatedById: changedById, updatedByRole: "admin" };
+  if (input.fullName !== undefined) data.fullName = input.fullName;
+  if (input.phone !== undefined) data.phone = input.phone;
+  if (input.email !== undefined) data.email = input.email || null;
+  if (input.educationLevel !== undefined) data.educationLevel = input.educationLevel || null;
+  if (input.specialties !== undefined) data.specialties = input.specialties;
+  if (input.skills !== undefined) data.skills = input.skills;
+  if (input.status !== undefined) data.status = input.status;
+  if (input.maxConcurrentProjects !== undefined) data.maxConcurrentProjects = input.maxConcurrentProjects;
+  if (input.bankName !== undefined) data.bankName = input.bankName || null;
+  if (input.accountNumber !== undefined) data.accountNumber = input.accountNumber || null;
+  if (input.accountName !== undefined) data.accountName = input.accountName || null;
+  if (input.notes !== undefined) data.notes = input.notes || null;
+
+  const writes: Prisma.PrismaPromise<unknown>[] = [
+    db.worker.update({ where: { id }, data, select: { id: true } }),
+  ];
+  if (worker.userId && input.status !== undefined) {
+    writes.push(
+      db.user.update({
+        where: { id: worker.userId },
+        data: { isActive: LOGIN_ELIGIBLE_STATUSES.has(input.status) },
+      })
+    );
+  }
+  await db.$transaction(writes);
+
+  return getWorkerDetail(id);
+}
+
+/**
+ * Self-edit — a worker correcting their own intake info. Scoped to the
+ * caller's own workerId by every route that calls this (never trusts an id
+ * from the request body), so Worker A can never reach Worker B's record.
+ */
+export async function updateOwnWorkerProfile(
+  workerId: string,
+  userId: string,
+  input: SelfUpdateWorkerInput
+) {
+  const data: Prisma.WorkerUncheckedUpdateInput = { updatedById: userId, updatedByRole: "worker" };
+  if (input.phone !== undefined) data.phone = input.phone;
+  if (input.email !== undefined) data.email = input.email || null;
+  if (input.educationLevel !== undefined) data.educationLevel = input.educationLevel || null;
+  if (input.specialties !== undefined) data.specialties = input.specialties;
+  if (input.skills !== undefined) data.skills = input.skills;
+  const bankChanged =
+    input.bankName !== undefined || input.accountNumber !== undefined || input.accountName !== undefined;
+  if (input.bankName !== undefined) data.bankName = input.bankName || null;
+  if (input.accountNumber !== undefined) data.accountNumber = input.accountNumber || null;
+  if (input.accountName !== undefined) data.accountName = input.accountName || null;
+
+  const updated = await db.worker.update({ where: { id: workerId }, data, select: { id: true, fullName: true } });
+
+  if (bankChanged) {
+    await notifyAdmins({
+      title: "Worker bank details updated",
+      message: `${updated.fullName} changed their payout bank details.`,
+      type: "info",
+    });
+  }
+
+  return updated;
 }
 
 // ── Assignment recommendations ───────────────────────────────

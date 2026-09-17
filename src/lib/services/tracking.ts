@@ -65,6 +65,8 @@ export interface TrackingResult {
   updatedAt: string;
   /** Shown only when a payment step is what's blocking progress. */
   awaitingPayment: "downpayment" | "balance" | null;
+  /** Naira amount for {@link awaitingPayment}'s leg — null when nothing is due. */
+  awaitingAmount: number | null;
 }
 
 /** Public lookup by the human EC-XXXXX code only. No sensitive fields. */
@@ -78,17 +80,22 @@ export async function getPublicTracking(code: string): Promise<TrackingResult | 
       status: true,
       updatedAt: true,
       downpaymentStatus: true,
+      downpaymentAmount: true,
       balanceStatus: true,
+      balanceAmount: true,
       service: { select: { serviceName: true } },
     },
   });
   if (!project) return null;
 
   let awaitingPayment: TrackingResult["awaitingPayment"] = null;
+  let awaitingAmount: number | null = null;
   if (project.status === "NEW" && project.downpaymentStatus !== "Verified") {
     awaitingPayment = "downpayment";
+    awaitingAmount = project.downpaymentAmount;
   } else if (project.status === "APPROVED" && project.balanceStatus !== "Verified") {
     awaitingPayment = "balance";
+    awaitingAmount = project.balanceAmount;
   }
 
   return {
@@ -100,5 +107,6 @@ export async function getPublicTracking(code: string): Promise<TrackingResult | 
     message: MESSAGES[project.status] ?? "Your project is being processed.",
     updatedAt: project.updatedAt.toISOString(),
     awaitingPayment,
+    awaitingAmount,
   };
 }

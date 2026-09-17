@@ -1,6 +1,7 @@
 import { LuCheck } from "react-icons/lu";
 import { TRACK_MILESTONES } from "@/lib/services/tracking";
-import { cn, formatDateTime } from "@/lib/utils";
+import { PayWithPaystackButton } from "@/components/track/PayWithPaystackButton";
+import { cn, formatDateTime, formatNaira } from "@/lib/utils";
 import type { TrackingResult } from "@/lib/services/tracking";
 
 export function ProjectTracker({ result }: { result: TrackingResult }) {
@@ -30,8 +31,19 @@ export function ProjectTracker({ result }: { result: TrackingResult }) {
               ? "Your 45% downpayment is needed to start."
               : "Your balance payment is needed to unlock delivery."}
           </p>
-          <p className="mt-1 text-muted-foreground">
-            Payment details were sent on WhatsApp. Reach us on 07063421088 if you need them again.
+
+          {result.awaitingAmount ? (
+            <div className="mt-3">
+              <PayWithPaystackButton
+                projectId={result.projectId}
+                leg={result.awaitingPayment}
+                label={`Pay ${formatNaira(result.awaitingAmount)} with Paystack`}
+              />
+            </div>
+          ) : null}
+
+          <p className="mt-3 text-muted-foreground">
+            Or reach us on 07063421088 for bank transfer details.
           </p>
         </div>
       ) : null}

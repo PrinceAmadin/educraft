@@ -1,7 +1,6 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { transitionProject, TransitionError } from "@/lib/services/projects";
-import { notifyAdmins } from "@/lib/services/notifications";
 import {
   workerMetrics,
   WORKER_ACTIVE_STATUSES,
@@ -337,6 +336,9 @@ export async function getWorkerProfile(workerId: string) {
       bankName: true,
       accountNumber: true,
       accountName: true,
+      updatedAt: true,
+      updatedByRole: true,
+      updatedBy: { select: { displayName: true, email: true } },
       projects: { select: factSelect },
     },
   });
@@ -347,25 +349,3 @@ export async function getWorkerProfile(workerId: string) {
   return { profile, metrics };
 }
 
-export async function updateWorkerBank(
-  workerId: string,
-  input: { bankName?: string; accountNumber?: string; accountName?: string }
-) {
-  const result = await db.worker.update({
-    where: { id: workerId },
-    data: {
-      bankName: input.bankName?.trim() || null,
-      accountNumber: input.accountNumber?.trim() || null,
-      accountName: input.accountName?.trim() || null,
-    },
-    select: { fullName: true, bankName: true, accountNumber: true, accountName: true },
-  });
-
-  await notifyAdmins({
-    title: "Worker bank details updated",
-    message: `${result.fullName} changed their payout bank details.`,
-    type: "info",
-  });
-
-  return result;
-}

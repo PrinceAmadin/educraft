@@ -3,7 +3,9 @@ import { LuInbox } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerByUserId, getWorkerProfile } from "@/lib/services/worker-portal";
 import { WorkerBankForm } from "@/components/worker/WorkerBankForm";
+import { WorkerIntakeForm } from "@/components/worker/WorkerIntakeForm";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { formatDateTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My profile" };
 export const dynamic = "force-dynamic";
@@ -26,7 +28,8 @@ export default async function WorkerProfilePage() {
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">My profile</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Contact an admin to change your name, specialties, or availability.
+          Update your contact info, education, and skills below. Contact an admin to change your name,
+          status, or capacity.
         </p>
       </div>
 
@@ -34,16 +37,30 @@ export default async function WorkerProfilePage() {
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold text-foreground">{profile.fullName}</h2>
           <span className="font-mono text-xs text-muted-foreground">{profile.workerId}</span>
+          <span className="rounded-full bg-elevated px-2 py-0.5 text-xs text-muted-foreground">
+            {profile.status}
+          </span>
         </div>
-        <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border pt-3 text-sm sm:grid-cols-3">
-          <Item label="Phone">{profile.phone}</Item>
-          <Item label="Email">{profile.email || "—"}</Item>
-          <Item label="Education">{profile.educationLevel || "—"}</Item>
-          <Item label="Status">{profile.status}</Item>
-          <Item label="Max concurrent">{String(profile.maxConcurrentProjects)}</Item>
-        </dl>
-        <TagRow label="Specialties" tags={profile.specialties} />
-        <TagRow label="Skills" tags={profile.skills} />
+        <div className="mt-4 border-t border-border pt-4">
+          <WorkerIntakeForm
+            initial={{
+              phone: profile.phone,
+              email: profile.email,
+              educationLevel: profile.educationLevel,
+              specialties: profile.specialties,
+              skills: profile.skills,
+            }}
+          />
+        </div>
+        {profile.updatedBy ? (
+          <p className="mt-3 border-t border-border pt-3 text-xs text-subtle">
+            Last updated by {profile.updatedByRole === "admin" ? "an admin" : "you"}
+            {profile.updatedByRole === "admin" && profile.updatedBy.displayName
+              ? ` (${profile.updatedBy.displayName})`
+              : ""}{" "}
+            · {formatDateTime(profile.updatedAt)}
+          </p>
+        ) : null}
       </section>
 
       <section>
@@ -72,39 +89,6 @@ export default async function WorkerProfilePage() {
           />
         </div>
       </section>
-    </div>
-  );
-}
-
-function Item({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <dt className="meta-label">
-        {label}
-      </dt>
-      <dd className="mt-0.5 text-foreground">{children}</dd>
-    </div>
-  );
-}
-
-function TagRow({ label, tags }: { label: string; tags: string[] }) {
-  return (
-    <div className="mt-3 border-t border-border pt-3">
-      <p className="meta-label">{label}</p>
-      {tags.length > 0 ? (
-        <ul className="mt-1.5 flex flex-wrap gap-1.5">
-          {tags.map((t) => (
-            <li
-              key={t}
-              className="rounded-full bg-elevated px-2.5 py-0.5 text-xs text-foreground"
-            >
-              {t}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-1 text-sm text-subtle">None recorded</p>
-      )}
     </div>
   );
 }

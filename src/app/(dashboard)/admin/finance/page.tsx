@@ -11,6 +11,7 @@ import {
   getCashFlowBreakdown,
   getOutstandingBalances,
   getBusinessIntelligence,
+  getPaymentMethodBreakdown,
 } from "@/lib/services/finance-dashboard";
 import { cn, formatNaira } from "@/lib/utils";
 
@@ -39,7 +40,7 @@ function changeTone(pct: number | null) {
  * equal cards competing for attention.
  */
 export default async function FinancePage() {
-  const [revenueCards, daily, weekly, monthly, cashFlow, outstanding, bi] = await Promise.all([
+  const [revenueCards, daily, weekly, monthly, cashFlow, outstanding, bi, paymentMethods] = await Promise.all([
     getRevenueCards(),
     getRevenueSeries("daily"),
     getRevenueSeries("weekly"),
@@ -47,6 +48,7 @@ export default async function FinancePage() {
     getCashFlowBreakdown(),
     getOutstandingBalances(),
     getBusinessIntelligence(),
+    getPaymentMethodBreakdown(),
   ]);
 
   const month = revenueCards.thisMonth;
@@ -152,6 +154,26 @@ export default async function FinancePage() {
             href="/admin/finance/payouts"
           />
         </div>
+      </section>
+
+      {/* ── Payment methods ── */}
+      <section aria-labelledby="methods-heading">
+        <div className="flex items-center justify-between gap-2">
+          <h2 id="methods-heading" className="text-[15px] font-semibold text-foreground">
+            Payment methods this month
+          </h2>
+          <Link
+            href="/admin/finance/reconciliation"
+            className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline"
+          >
+            Paystack reconciliation
+            <LuArrowRight className="size-3" aria-hidden />
+          </Link>
+        </div>
+        <RevenueBarChart
+          data={paymentMethods.map((m) => ({ label: m.method, value: m.amount }))}
+          emptyLabel="No confirmed payments this month yet"
+        />
       </section>
 
       {/* ── Business intelligence ── */}

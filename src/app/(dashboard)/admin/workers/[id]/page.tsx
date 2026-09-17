@@ -7,7 +7,8 @@ import { getWorkerDetail } from "@/lib/services/workers";
 import { WorkerStatusControl } from "@/components/workers/WorkerStatusControl";
 import { WorkerProjectHistory } from "@/components/workers/WorkerProjectHistory";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
-import { formatNaira } from "@/lib/utils";
+import { EditWorkerDialog } from "@/components/workers/EditWorkerDialog";
+import { formatDateTime, formatNaira } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +38,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
       >
         <ArrowLeft className="size-4" aria-hidden />
-        All workers
+        Manage Workers
       </Link>
 
       {/* Header */}
@@ -50,6 +51,22 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">{worker.workerId}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <EditWorkerDialog
+              worker={{
+                id: worker.id,
+                fullName: worker.fullName,
+                phone: worker.phone,
+                email: worker.email,
+                educationLevel: worker.educationLevel,
+                specialties: worker.specialties,
+                skills: worker.skills,
+                maxConcurrentProjects: worker.maxConcurrentProjects,
+                bankName: worker.bankName,
+                accountNumber: worker.accountNumber,
+                accountName: worker.accountName,
+                notes: worker.notes,
+              }}
+            />
             <CreateLoginControl
               endpoint={`/api/admin/workers/${worker.id}/login`}
               hasLogin={Boolean(worker.userId)}
@@ -78,6 +95,14 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
             {worker.educationLevel || <span className="text-subtle">—</span>}
           </Field>
         </dl>
+
+        {worker.updatedBy ? (
+          <p className="mt-3 text-xs text-subtle">
+            Last updated by {worker.updatedByRole === "worker" ? "the worker" : "an admin"}
+            {worker.updatedBy.displayName ? ` (${worker.updatedBy.displayName})` : ""} ·{" "}
+            {formatDateTime(worker.updatedAt)}
+          </p>
+        ) : null}
 
         <TagRow label="Specialties" tags={worker.specialties} />
         <TagRow label="Skills" tags={worker.skills} />

@@ -10,11 +10,17 @@ import { formatNaira } from "@/lib/utils";
  */
 const RANK_OPACITY = [1, 0.8, 0.64, 0.5, 0.38, 0.26];
 
-export function RevenueBarChart({ data }: { data: { label: string; value: number }[] }) {
+export function RevenueBarChart({
+  data,
+  emptyLabel = "No completed projects yet",
+}: {
+  data: { label: string; value: number }[];
+  emptyLabel?: string;
+}) {
   if (data.length === 0) {
     return (
       <div className="mt-3 flex h-48 items-center justify-center rounded-2xl bg-zone text-sm text-muted-foreground">
-        No completed projects yet
+        {emptyLabel}
       </div>
     );
   }

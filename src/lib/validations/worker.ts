@@ -7,9 +7,3 @@ export const submitWorkSchema = z.object({
 });
 
 export type SubmitWorkInput = z.infer<typeof submitWorkSchema>;
-
-export const workerBankSchema = z.object({
-  bankName: z.string().trim().max(80).optional().or(z.literal("")),
-  accountNumber: z.string().trim().max(20).optional().or(z.literal("")),
-  accountName: z.string().trim().max(120).optional().or(z.literal("")),
-});

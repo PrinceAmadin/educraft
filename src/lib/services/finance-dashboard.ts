@@ -224,6 +224,33 @@ export async function getOutstandingBalances(): Promise<OutstandingBalances> {
   };
 }
 
+// ── 4b. Payment method breakdown (this month) ────────────────────────
+
+export interface PaymentMethodRow {
+  method: string;
+  amount: number;
+}
+
+export async function getPaymentMethodBreakdown(now: Date = new Date()): Promise<PaymentMethodRow[]> {
+  const monthStart = startOfMonth(now);
+  const monthEnd = addMonths(monthStart, 1);
+
+  const rows = await db.payment.groupBy({
+    by: ["paymentMethod"],
+    where: {
+      status: "Confirmed",
+      direction: "INFLOW",
+      type: { in: [...INFLOW_TYPES] },
+      date: { gte: monthStart, lt: monthEnd },
+    },
+    _sum: { amount: true },
+  });
+
+  return rows
+    .map((r) => ({ method: r.paymentMethod ?? "Unspecified", amount: r._sum.amount ?? 0 }))
+    .sort((a, b) => b.amount - a.amount);
+}
+
 // ── 5. Business intelligence (lifetime, from completed projects) ────
 
 export interface RevenueByServiceRow {

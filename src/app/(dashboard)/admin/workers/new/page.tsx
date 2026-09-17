@@ -13,7 +13,7 @@ export default function NewWorkerPage() {
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
       >
         <ArrowLeft className="size-4" aria-hidden />
-        All workers
+        Manage Workers
       </Link>
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Add worker</h1>

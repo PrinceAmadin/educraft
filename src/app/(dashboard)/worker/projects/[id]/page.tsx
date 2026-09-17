@@ -6,6 +6,7 @@ import { LuFile, LuDownload, LuTriangleAlert } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerAssignment, getWorkerByUserId } from "@/lib/services/worker-portal";
 import { WorkerAssignmentActions } from "@/components/worker/WorkerAssignmentActions";
+import { ResearchPanel } from "@/components/worker/ResearchPanel";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuInbox } from "react-icons/lu";
@@ -118,6 +119,8 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
       ) : null}
 
       <WorkerAssignmentActions projectCode={project.projectId} status={project.status} />
+
+      <ResearchPanel projectCode={project.projectId} />
 
       {project.departmentOutline || project.specialInstructions ? (
         <section className="surface p-4">
