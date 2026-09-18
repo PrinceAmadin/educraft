@@ -398,7 +398,7 @@ function LogJobDialog({
                       aria-label="Search jobs"
                     />
                   </label>
-                  <div role="listbox" aria-label="Open jobs" className="max-h-56 overflow-y-auto rounded-xl bg-zone p-1">
+                  <div role="listbox" aria-label="Open jobs" className="max-h-56 overflow-y-auto overflow-x-hidden rounded-xl bg-zone p-1">
                     {jobs.length === 0 ? (
                       <p className="px-3 py-6 text-center text-sm text-muted-foreground">No job matches.</p>
                     ) : (

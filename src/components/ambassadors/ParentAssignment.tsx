@@ -145,7 +145,7 @@ export function ParentAssignment({
               />
             </label>
 
-            <div role="listbox" aria-label="Parent ambassador" className="max-h-64 overflow-y-auto rounded-xl bg-zone p-1">
+            <div role="listbox" aria-label="Parent ambassador" className="max-h-64 overflow-y-auto overflow-x-hidden rounded-xl bg-zone p-1">
               <button
                 type="button"
                 role="option"

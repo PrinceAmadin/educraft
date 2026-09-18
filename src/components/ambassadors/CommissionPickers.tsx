@@ -67,7 +67,7 @@ export function AmbassadorPicker({
         />
       </label>
 
-      <div role="listbox" aria-label={label} className="max-h-64 overflow-y-auto rounded-xl bg-zone p-1">
+      <div role="listbox" aria-label={label} className="max-h-64 overflow-y-auto overflow-x-hidden rounded-xl bg-zone p-1">
         {allowNone && !needle ? (
           <Option active={selectedId === null} onClick={() => onPick(null)}>
             <span className="block text-sm font-medium text-foreground">None</span>
