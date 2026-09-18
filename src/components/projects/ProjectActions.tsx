@@ -77,7 +77,11 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
         variant={rule.to === "REVISION_NEEDED" || rule.to === "SUPERVISOR_CORRECTIONS" ? "outline" : "default"}
         disabled={pending !== null || blocked !== null}
         title={blocked ?? undefined}
-        onClick={() => (rule.requiresNote ? (setNoteFor(rule), setError(null)) : runTransition(rule))}
+        onClick={() =>
+          rule.requiresNote || (rule.to === "REQUIREMENTS_CONFIRMED" && !candidate.hasRequirementDetail)
+            ? (setNoteFor(rule), setError(null))
+            : runTransition(rule)
+        }
       >
         {pending === key ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
         {rule.action}
@@ -131,7 +135,9 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
                 ? "What needs to change?"
                 : noteFor.to === "SUPERVISOR_CORRECTIONS"
                   ? "Supervisor correction details"
-                  : "Add a note"}
+                  : noteFor.to === "REQUIREMENTS_CONFIRMED" && !candidate.hasRequirementDetail
+                    ? "This project has no brief yet — add instructions for the worker before it can be assigned"
+                    : "Add a note"}
           </label>
           <Textarea id="transition-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="flex gap-2">

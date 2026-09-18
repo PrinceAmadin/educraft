@@ -54,13 +54,12 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
     {
       to: "REQUIREMENTS_CONFIRMED",
       action: "Confirm requirements",
-      guard: (p) => {
-        if (!p.projectTitle || !p.serviceId) return "Project needs a title and a service";
-        if (!p.hasRequirementDetail && p.workerFileCount === 0) {
-          return "Add instructions, an outline, or a file before confirming";
-        }
-        return null;
-      },
+      // Missing brief detail is no longer a dead end here — the UI prompts
+      // for a note and the service layer saves it as the project's
+      // instructions instead of just logging it, so there's always a way
+      // through. Only a genuinely broken project record (no title/service)
+      // stays blocked.
+      guard: (p) => (!p.projectTitle || !p.serviceId ? "Project needs a title and a service" : null),
     },
   ],
   REQUIREMENTS_CONFIRMED: [
