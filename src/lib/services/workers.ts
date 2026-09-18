@@ -303,6 +303,22 @@ export async function updateWorker(id: string, input: UpdateWorkerInput, changed
   return getWorkerDetail(id);
 }
 
+export interface WorkerCurrentAssignment {
+  id: string;
+  projectId: string;
+  projectTitle: string | null;
+  status: string;
+}
+
+/** Projects currently pointing at this worker — what has to move before the worker can be deleted. */
+export async function getWorkerCurrentAssignments(workerId: string): Promise<WorkerCurrentAssignment[]> {
+  return db.project.findMany({
+    where: { workerId },
+    select: { id: true, projectId: true, projectTitle: true, status: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 /**
  * Deletes a worker record outright — for test/dummy workers or a genuine
  * mistake, as opposed to Suspended/Terminated which keeps the record (and its
