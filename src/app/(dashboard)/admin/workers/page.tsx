@@ -6,6 +6,7 @@ import { Pagination } from "@/components/shared/Pagination";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { WorkersFilterBar } from "@/components/workers/WorkersFilterBar";
 import { WorkersTable } from "@/components/workers/WorkersTable";
+import { WorkerRegistrationLinkCard } from "@/components/workers/WorkerRegistrationLinkCard";
 import { getWorkerSpecialties, listWorkers, WORKER_PAGE_SIZE } from "@/lib/services/workers";
 import { countPendingWorkerApplications } from "@/lib/services/worker-applications";
 import { workerListParamsSchema } from "@/lib/validations/workers";
@@ -68,6 +69,8 @@ export default async function WorkersListPage({
           </Button>
         </div>
       </div>
+
+      <WorkerRegistrationLinkCard />
 
       <WorkersFilterBar specialties={specialties} />
 

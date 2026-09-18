@@ -104,13 +104,21 @@ function useRowActions(row: ProjectListRow) {
         onSelect: () => post("unassign"),
       });
     }
-  } else if (["NEW", "DOWNPAYMENT_VERIFIED"].includes(row.status)) {
+  } else if (row.status === "NEW") {
     assignGroup.push({
       key: "assign-hint",
-      label: "Assign worker",
+      label: "Assign worker (needs downpayment verified)",
       icon: LuUserPlus,
-      disabled: true,
-      hint: "Confirm requirements first",
+      href: `/admin/projects/${row.projectId}?tab=financials`,
+      hint: "Verify the downpayment first — opens the Financials tab",
+    });
+  } else if (row.status === "DOWNPAYMENT_VERIFIED") {
+    assignGroup.push({
+      key: "assign-hint",
+      label: "Confirm requirements to assign",
+      icon: LuUserPlus,
+      href: `/admin/projects/${row.projectId}`,
+      hint: "Opens the project — confirm requirements there, then Assign worker appears",
     });
   }
   if (assignGroup.length > 0) groups.push(assignGroup);

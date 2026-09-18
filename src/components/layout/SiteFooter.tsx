@@ -28,6 +28,7 @@ const GROUPS = [
     links: [
       { label: "How it works", href: "/#how-it-works" },
       { label: "Become an ambassador", href: "/apply" },
+      { label: "Work with us", href: "/apply/worker" },
       { label: "Track a project", href: "/track" },
       { label: "Sign in", href: "/login" },
     ],
