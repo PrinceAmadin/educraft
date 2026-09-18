@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { emailPendingCommission } from "@/lib/services/ambassador-commission";
+import { IntakeError, submitIntake } from "@/lib/services/intake";
+import { resolveTemplate } from "@/lib/intake-templates";
+import { computePrice } from "@/lib/pricing";
+import type { IntakeSubmitInput } from "@/lib/validations/intake";
 import {
   callbackBaseUrl,
   initializeTransaction,
@@ -127,6 +131,97 @@ export async function initializePaystackPayment(
 }
 
 // ─────────────────────────────────────────────────────────────
+// Pay-first public intake — payment happens before a Client/Project exists.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Starts a Paystack transaction for a not-yet-submitted intake form. Nothing
+ * is written to Client/Project here — the validated payload is staged in
+ * PendingIntake and only replayed into submitIntake() once the webhook
+ * confirms payment, so an abandoned checkout leaves no project behind.
+ */
+export async function initializeIntakePayment(
+  input: IntakeSubmitInput
+): Promise<InitializePaystackPaymentResult> {
+  const service = await db.service.findFirst({
+    where: { serviceCode: input.serviceCode, isActive: true },
+    select: {
+      basePrice: true,
+      intakeFormTemplate: true,
+      expressDeliverySurcharge: true,
+      downpaymentPercentage: true,
+    },
+  });
+  if (!service) throw new PaystackPaymentError("That service is no longer available");
+
+  const template = resolveTemplate(service.intakeFormTemplate);
+  if (!template || template !== input.template) {
+    throw new PaystackPaymentError("This form does not match the selected service");
+  }
+
+  const price = computePrice({
+    basePrice: service.basePrice,
+    expressSurcharge: service.expressDeliverySurcharge ?? 0,
+    isExpressDelivery: input.isExpressDelivery,
+    downpaymentPercentage: service.downpaymentPercentage,
+  });
+  if (!(price.downpaymentAmount > 0)) {
+    throw new PaystackPaymentError("This service doesn't have a fixed price yet — use the regular submit flow");
+  }
+
+  const reference = `INTAKE-${crypto.randomUUID()}`;
+  const pending = await db.pendingIntake.create({
+    data: {
+      serviceCode: input.serviceCode,
+      template: input.template,
+      payload: input as unknown as Prisma.InputJsonValue,
+      reference,
+    },
+    select: { id: true },
+  });
+
+  const email = input.email?.trim() || `${pending.id}@no-email.educraft.ng`;
+
+  let authorizationUrl: string;
+  try {
+    const tx = await initializeTransaction({
+      email,
+      amountNaira: price.downpaymentAmount,
+      reference,
+      callbackUrl: `${callbackBaseUrl()}/intake/success?ref=${encodeURIComponent(reference)}`,
+      metadata: { pendingIntakeId: pending.id },
+    });
+    authorizationUrl = tx.authorizationUrl;
+  } catch (error) {
+    await db.pendingIntake.update({ where: { id: pending.id }, data: { status: "FAILED" } });
+    if (error instanceof PaystackError) throw new PaystackPaymentError(error.message);
+    throw error;
+  }
+
+  return { authorizationUrl };
+}
+
+export type PendingIntakeStatus =
+  | { state: "pending" }
+  | { state: "consumed"; projectCode: string }
+  | { state: "failed" }
+  | { state: "not_found" };
+
+/** Polled by /intake/success while the webhook is still catching up with the redirect. */
+export async function getPendingIntakeStatus(reference: string): Promise<PendingIntakeStatus> {
+  const pending = await db.pendingIntake.findUnique({
+    where: { reference },
+    select: { status: true, resultProjectCode: true },
+  });
+  if (!pending) return { state: "not_found" };
+  if (pending.status === "CONSUMED" && pending.resultProjectCode) {
+    return { state: "consumed", projectCode: pending.resultProjectCode };
+  }
+  if (pending.status === "FAILED") return { state: "failed" };
+  return { state: "pending" };
+}
+
+// ─────────────────────────────────────────────────────────────
 // B3 — webhook handling
 // ─────────────────────────────────────────────────────────────
 
@@ -143,14 +238,27 @@ export type CreditReferenceResult =
 
 /**
  * Verifies one Paystack reference server-to-server and, if it actually
- * succeeded, credits the matching Payment/Project — the same crediting logic
- * whether it's triggered by a webhook delivery or an admin's manual
- * reconciliation "Sync" click. Never trusts a caller-supplied status; always
- * re-checks with Paystack directly.
+ * succeeded, credits the matching record — the same crediting logic whether
+ * it's triggered by a webhook delivery or an admin's manual reconciliation
+ * "Sync" click. Never trusts a caller-supplied status; always re-checks with
+ * Paystack directly. Branches early on metadata shape: a pay-first intake
+ * reference has no Project/Payment row yet (the webhook itself creates them),
+ * so it can't go through the existing Payment-row lookup below.
  */
 async function creditReference(reference: string): Promise<CreditReferenceResult> {
   const verified: PaystackTransactionData = await verifyTransaction(reference);
+  const metadata = verified.metadata ?? {};
 
+  if (typeof metadata.pendingIntakeId === "string") {
+    return creditPendingIntake(reference, metadata.pendingIntakeId, verified);
+  }
+  return creditProjectPayment(reference, verified);
+}
+
+async function creditProjectPayment(
+  reference: string,
+  verified: PaystackTransactionData
+): Promise<CreditReferenceResult> {
   const payment = await db.payment.findFirst({ where: { reference } });
   if (!payment) return { status: "no_local_record" };
   if (payment.status === "Confirmed") return { status: "already_confirmed" };
@@ -250,6 +358,118 @@ async function creditReference(reference: string): Promise<CreditReferenceResult
     });
   }
   if (leg === "downpayment") await emailPendingCommission(project.id);
+
+  return { status: "confirmed" };
+}
+
+/**
+ * The pay-first counterpart to creditProjectPayment: no Client/Project exists
+ * yet, so a confirmed payment both creates them (via submitIntake, the same
+ * path the old direct-submit flow used) and marks the downpayment verified in
+ * one go, rather than landing a new project at NEW/Unpaid for someone to
+ * chase up.
+ */
+async function creditPendingIntake(
+  reference: string,
+  pendingIntakeId: string,
+  verified: PaystackTransactionData
+): Promise<CreditReferenceResult> {
+  const pending = await db.pendingIntake.findUnique({ where: { id: pendingIntakeId } });
+  if (!pending || pending.reference !== reference) return { status: "no_local_record" };
+  if (pending.status === "CONSUMED") return { status: "already_confirmed" };
+
+  if (verified.status !== "success") {
+    if (pending.status === "PENDING") {
+      await db.pendingIntake.update({ where: { id: pendingIntakeId }, data: { status: "FAILED" } });
+    }
+    return { status: "not_successful", paystackStatus: verified.status };
+  }
+
+  // A previous webhook delivery may have already created the project and
+  // simply failed to flip the row to CONSUMED before crashing/timing out —
+  // don't create a second project for the same payment.
+  if (pending.resultProjectCode) return { status: "already_confirmed" };
+
+  let created: { projectId: string };
+  try {
+    created = await submitIntake(pending.payload as unknown as IntakeSubmitInput);
+  } catch (error) {
+    console.error(`[paystack] submitIntake failed for pending intake ${pendingIntakeId}`, error);
+    if (error instanceof IntakeError) {
+      await db.pendingIntake.update({ where: { id: pendingIntakeId }, data: { status: "FAILED" } });
+      return { status: "missing_metadata" };
+    }
+    throw error;
+  }
+
+  const project = await db.project.findUnique({
+    where: { projectId: created.projectId },
+    select: { id: true, projectId: true, downpaymentAmount: true, ambassador: { select: { userId: true } } },
+  });
+  if (!project) return { status: "no_local_record" };
+
+  const amountNaira = verified.amount / 100;
+  if (amountNaira < project.downpaymentAmount - 1) {
+    console.error(
+      `[paystack] short payment on ${reference}: expected ${project.downpaymentAmount}, Paystack confirmed ${amountNaira}`
+    );
+  }
+  const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
+
+  await db.$transaction([
+    db.project.update({
+      where: { id: project.id },
+      data: {
+        downpaymentStatus: "Verified",
+        downpaymentDate: paidOn,
+        downpaymentReference: reference,
+        status: "DOWNPAYMENT_VERIFIED",
+      },
+    }),
+    db.payment.create({
+      data: {
+        paymentId: await nextId("PAYMENT"),
+        type: "CLIENT_DOWNPAYMENT",
+        direction: "INFLOW",
+        projectId: project.id,
+        personRole: "Client",
+        amount: project.downpaymentAmount,
+        paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
+        reference,
+        status: "Confirmed",
+        date: paidOn,
+      },
+    }),
+    db.projectStatusLog.create({
+      data: {
+        projectId: project.id,
+        fromStatus: "NEW",
+        toStatus: "DOWNPAYMENT_VERIFIED",
+        notes: `Downpayment verified via Paystack (${reference}) — project created on payment success`,
+      },
+    }),
+    db.pendingIntake.update({
+      where: { id: pendingIntakeId },
+      data: { status: "CONSUMED", consumedAt: paidOn, resultProjectCode: project.projectId },
+    }),
+  ]);
+
+  await notifyAdmins({
+    title: "Downpayment received",
+    message: `Paystack confirmed the downpayment for ${project.projectId} — new project created.`,
+    type: "success",
+    link: `/admin/projects/${project.projectId}`,
+  });
+
+  if (project.ambassador?.userId) {
+    await notifyUsers([project.ambassador.userId], {
+      title: "Referral converted",
+      message: `A client you referred paid their downpayment on ${project.projectId}.`,
+      type: "success",
+      link: "/ambassador/commissions",
+    });
+  }
+  await emailPendingCommission(project.id);
 
   return { status: "confirmed" };
 }

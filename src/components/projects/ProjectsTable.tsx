@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LuArrowRight } from "react-icons/lu";
-import { PaymentQuickAction } from "@/components/projects/PaymentQuickAction";
+import { ProjectRowMenu, ProjectRowMenuButton } from "@/components/projects/ProjectRowMenu";
 import {
   Table,
   TableBody,
@@ -64,10 +64,15 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
           const standing = paymentStanding(row);
 
           return (
-            <li key={row.id}>
+            <li key={row.id} className="relative">
+              {/* Three-dot trigger sits outside the Link (sibling, higher z-index) so it
+                  never nests an interactive button inside an anchor. */}
+              <div className="absolute right-3 top-3 z-10">
+                <ProjectRowMenuButton row={row} />
+              </div>
               <Link
                 href={`/admin/projects/${row.projectId}`}
-                className="surface block p-4 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="surface block p-4 pr-12 transition-shadow duration-fast hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-2 font-mono text-sm font-medium text-foreground">
@@ -136,7 +141,8 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
               const standing = paymentStanding(row);
 
               return (
-                <TableRow key={row.id}>
+                <ProjectRowMenu key={row.id} row={row}>
+                <TableRow>
                   <TableCell>
                     <span className="flex items-center gap-2">
                       <AccentDot accent={accent} />
@@ -183,11 +189,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <PaymentQuickAction
-                      projectCode={row.projectId}
-                      downpaymentStatus={row.downpaymentStatus}
-                      balanceStatus={row.balanceStatus}
-                    />
+                    <ProjectRowMenuButton row={row} />
                   </TableCell>
                   <TableCell>
                     <Link
@@ -199,6 +201,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                     </Link>
                   </TableCell>
                 </TableRow>
+                </ProjectRowMenu>
               );
             })}
           </TableBody>

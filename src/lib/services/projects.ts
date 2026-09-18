@@ -633,17 +633,38 @@ interface AssignWorkerOptions {
   changedById: string;
 }
 
+/** Statuses where a worker is already active on the project — swapping here is a handoff, not a first assignment. */
+export const REASSIGNABLE_IN_FLIGHT_STATUSES: ProjectStatus[] = [
+  "IN_PROGRESS",
+  "AWAITING_CLIENT_INPUT",
+  "REVISION_NEEDED",
+];
+
+/**
+ * Assigns a worker. Handles both the first assignment (REQUIREMENTS_CONFIRMED
+ * → ASSIGNED, unchanged from before) and reassigning an already-assigned
+ * project to someone else — pipeline status stays put for a reassignment, so
+ * swapping workers mid-project doesn't rewind progress or lose revision
+ * context. The previous worker (if any) is notified they've been taken off it.
+ */
 export async function assignWorker(
   idOrCode: string,
   { workerId, changedById }: AssignWorkerOptions
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
-    select: { id: true, status: true },
+    select: { id: true, projectId: true, status: true, workerId: true },
   });
   if (!project) throw new TransitionError("Project not found");
-  if (project.status !== "REQUIREMENTS_CONFIRMED") {
-    throw new TransitionError("Workers are assigned once requirements are confirmed");
+
+  const isFirstAssignment = project.status === "REQUIREMENTS_CONFIRMED";
+  const isReassignment =
+    project.status === "ASSIGNED" || REASSIGNABLE_IN_FLIGHT_STATUSES.includes(project.status);
+  if (!isFirstAssignment && !isReassignment) {
+    throw new TransitionError("This project can't be assigned a worker right now");
+  }
+  if (project.workerId === workerId) {
+    throw new TransitionError("This worker is already assigned");
   }
 
   const worker = await db.worker.findUnique({
@@ -652,33 +673,102 @@ export async function assignWorker(
   });
   if (!worker) throw new TransitionError("Worker not found");
 
+  const previousWorker = project.workerId
+    ? await db.worker.findUnique({ where: { id: project.workerId }, select: { userId: true } })
+    : null;
+
   const now = new Date();
+  const data: Prisma.ProjectUncheckedUpdateInput = { workerId, assignedDate: now };
+  if (isFirstAssignment) {
+    data.status = "ASSIGNED";
+    data.workerAccepted = false;
+  } else if (project.status === "ASSIGNED") {
+    // Original worker hadn't accepted yet — the new one still needs to.
+    data.workerAccepted = false;
+  } else {
+    // Work is already underway — treat a manual reassignment as an immediate handoff.
+    data.workerAccepted = true;
+    data.workerAcceptedDate = now;
+  }
+
   await db.$transaction([
-    db.project.update({
-      where: { id: project.id },
-      data: { workerId, assignedDate: now, status: "ASSIGNED", workerAccepted: false },
-    }),
+    db.project.update({ where: { id: project.id }, data }),
     db.projectStatusLog.create({
       data: {
         projectId: project.id,
-        fromStatus: "REQUIREMENTS_CONFIRMED",
-        toStatus: "ASSIGNED",
+        fromStatus: project.status,
+        toStatus: (data.status as ProjectStatus | undefined) ?? project.status,
         changedById,
-        notes: "Worker assigned",
+        notes: isFirstAssignment ? "Worker assigned" : "Worker reassigned",
       },
     }),
   ]);
 
-  const full = await db.project.findUnique({
-    where: { id: project.id },
-    select: { projectId: true },
-  });
   await notifyUsers([worker.userId], {
-    title: "New project assigned",
-    message: `${full?.projectId ?? "A project"} has been assigned to you — accept it to start.`,
+    title: isFirstAssignment ? "New project assigned" : "Project reassigned to you",
+    message: isFirstAssignment
+      ? `${project.projectId} has been assigned to you — accept it to start.`
+      : `${project.projectId} has been reassigned to you.`,
     type: "info",
     link: "/worker/projects",
   });
+  if (previousWorker?.userId) {
+    await notifyUsers([previousWorker.userId], {
+      title: "Reassigned off a project",
+      message: `${project.projectId} has been reassigned to another worker.`,
+      type: "warning",
+      link: "/worker/projects",
+    });
+  }
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+/**
+ * Removes an assignment — only while it's still unaccepted (status ASSIGNED).
+ * Once a worker has accepted and started, use assignWorker to hand it to
+ * someone else instead of leaving the project in a worker-less in-progress state.
+ */
+export async function unassignWorker(idOrCode: string, changedById: string): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true, projectId: true, status: true, workerId: true },
+  });
+  if (!project) throw new TransitionError("Project not found");
+  if (project.status !== "ASSIGNED") {
+    throw new TransitionError("Only an unaccepted assignment can be removed");
+  }
+
+  const worker = project.workerId
+    ? await db.worker.findUnique({ where: { id: project.workerId }, select: { userId: true } })
+    : null;
+
+  await db.$transaction([
+    db.project.update({
+      where: { id: project.id },
+      data: { workerId: null, assignedDate: null, workerAccepted: false, status: "REQUIREMENTS_CONFIRMED" },
+    }),
+    db.projectStatusLog.create({
+      data: {
+        projectId: project.id,
+        fromStatus: "ASSIGNED",
+        toStatus: "REQUIREMENTS_CONFIRMED",
+        changedById,
+        notes: "Assignment removed",
+      },
+    }),
+  ]);
+
+  if (worker?.userId) {
+    await notifyUsers([worker.userId], {
+      title: "Assignment removed",
+      message: `You are no longer assigned to ${project.projectId}.`,
+      type: "warning",
+      link: "/worker/projects",
+    });
+  }
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");

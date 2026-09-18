@@ -751,3 +751,26 @@ model Reference {
   @@index([projectId])
   @@index([doi])
 }
+
+// ─── PENDING INTAKE (pay-first public intake) ───────────
+// Holds a validated intake submission that hasn't paid yet. Nothing in
+// Client/Project is created until the downpayment actually succeeds — so an
+// abandoned checkout leaves no trace beyond this row, instead of a NEW/Unpaid
+// project nobody ever follows up on.
+
+model PendingIntake {
+  id                String    @id @default(cuid())
+  serviceCode       String
+  template          String
+  /// The full validated IntakeSubmitInput, replayed into submitIntake() once payment clears.
+  payload           Json
+  /// The Paystack transaction reference for this attempt.
+  reference         String    @unique
+  status            String    @default("PENDING") // PENDING, CONSUMED, FAILED
+  /// Set once the webhook has created the real Client + Project.
+  resultProjectCode String?
+  createdAt         DateTime  @default(now())
+  consumedAt        DateTime?
+
+  @@index([status])
+}

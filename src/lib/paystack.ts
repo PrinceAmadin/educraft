@@ -13,8 +13,20 @@ function secretKey(): string {
   return key;
 }
 
+/**
+ * Vercel sets these automatically on every deployment — preferring them over
+ * a manually-maintained env var means production and every preview deploy
+ * always redirect back to themselves, never to whatever localhost the site
+ * happened to be built from. PAYSTACK_CALLBACK_BASE_URL still wins if set
+ * explicitly (e.g. a custom domain Vercel doesn't know about yet).
+ */
 export function callbackBaseUrl(): string {
-  return process.env.PAYSTACK_CALLBACK_BASE_URL || "http://localhost:3000";
+  if (process.env.PAYSTACK_CALLBACK_BASE_URL) return process.env.PAYSTACK_CALLBACK_BASE_URL;
+  if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  }
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return "http://localhost:3000";
 }
 
 export interface InitializeTransactionInput {

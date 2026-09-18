@@ -175,6 +175,12 @@ export function IntakeForm({
     downpaymentPercentage: service.downpaymentPercentage,
   });
 
+  // Variable-priced services (amount confirmed on WhatsApp, not upfront) have
+  // no fixed downpayment to charge before submission — they keep the old
+  // submit-then-arrange-payment flow. Everything else is pay-first: the form
+  // only becomes a real project once the Paystack downpayment clears.
+  const variablePrice = service.pricingModel === "VARIABLE" && service.basePrice === 0;
+
   async function next() {
     setSubmitError(null);
     const fields = STEP_FIELDS[template][stepId] ?? [];
@@ -193,21 +199,47 @@ export function IntakeForm({
 
   const onSubmit = async (data: IntakeSubmitInput) => {
     setSubmitError(null);
+
+    // Variable-priced services: no fixed amount to charge upfront, so this
+    // still submits straight away and arranges payment on WhatsApp.
+    if (variablePrice) {
+      try {
+        const res = await fetch("/api/intake", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        const body = (await res.json().catch(() => null)) as
+          | { projectId?: string; error?: string }
+          | null;
+        if (!res.ok || !body?.projectId) {
+          throw new Error(body?.error ?? "Could not submit. Please try again.");
+        }
+        router.push(`/intake/success?p=${encodeURIComponent(body.projectId)}`);
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Could not submit. Please try again.");
+      }
+      return;
+    }
+
+    // Everything else: pay first. Nothing is submitted yet — Paystack's
+    // webhook creates the project once the downpayment actually clears, and
+    // the redirect lands back here to poll for that.
     try {
-      const res = await fetch("/api/intake", {
+      const res = await fetch("/api/intake/initialize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
       const body = (await res.json().catch(() => null)) as
-        | { projectId?: string; error?: string }
+        | { authorizationUrl?: string; error?: string }
         | null;
-      if (!res.ok || !body?.projectId) {
-        throw new Error(body?.error ?? "Could not submit. Please try again.");
+      if (!res.ok || !body?.authorizationUrl) {
+        throw new Error(body?.error ?? "Could not start payment. Please try again.");
       }
-      router.push(`/intake/success?p=${encodeURIComponent(body.projectId)}`);
+      window.location.href = body.authorizationUrl;
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Could not submit. Please try again.");
+      setSubmitError(err instanceof Error ? err.message : "Could not start payment. Please try again.");
     }
   };
 
@@ -241,7 +273,13 @@ export function IntakeForm({
           {isReview ? (
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              {isSubmitting ? "Submitting…" : "Submit project"}
+              {isSubmitting
+                ? variablePrice
+                  ? "Submitting…"
+                  : "Redirecting to Paystack…"
+                : variablePrice
+                  ? "Submit project"
+                  : `Pay ${formatNaira(price.downpaymentAmount)} to submit`}
             </Button>
           ) : (
             <Button type="button" onClick={next}>
@@ -1024,16 +1062,17 @@ function ReviewStep({
       <div className="rounded-xl bg-zone p-3.5 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">What happens next</p>
         <p className="mt-1">
-          We confirm your details on WhatsApp and send payment instructions. Work begins once your
-          downpayment is verified. Track progress any time with your project ID.
+          {variablePrice
+            ? "We confirm your details on WhatsApp and send payment instructions. Work begins once your downpayment is verified. Track progress any time with your project ID."
+            : "You'll be taken to Paystack to pay the downpayment. Your project is only created once payment succeeds — you won't need to submit again. Track progress any time with your project ID."}
         </p>
       </div>
 
       <label className="flex items-start gap-3 text-sm">
         <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" {...register("agreeTerms")} />
         <span>
-          I agree to EduCraft&apos;s terms: 45% downpayment to begin, balance on approval, and up to
-          3 rounds of revisions within scope.
+          I agree to EduCraft&apos;s terms: {variablePrice ? "a" : "45%"} downpayment to begin, balance on
+          approval, and up to 3 rounds of revisions within scope.
         </span>
       </label>
       {errors.agreeTerms ? <p className="text-xs text-danger">{errors.agreeTerms.message as string}</p> : null}

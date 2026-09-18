@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LuCircleCheck } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { PayWithPaystackButton } from "@/components/track/PayWithPaystackButton";
+import { IntakeFinalizing } from "@/components/intake/IntakeFinalizing";
 import { db } from "@/lib/db";
 import { getCompanyBankDetails } from "@/lib/settings";
 import { formatNaira } from "@/lib/utils";
@@ -13,9 +14,16 @@ export const dynamic = "force-dynamic";
 export default async function IntakeSuccessPage({
   searchParams,
 }: {
-  searchParams: { p?: string };
+  searchParams: { p?: string; ref?: string };
 }) {
   const projectId = searchParams.p?.trim();
+  const reference = searchParams.ref?.trim();
+
+  // Pay-first flow: Paystack's redirect can beat the webhook here — poll
+  // until the project actually exists instead of assuming ?p= is already set.
+  if (!projectId && reference) {
+    return <IntakeFinalizing reference={reference} />;
+  }
 
   const [project, bank] = await Promise.all([
     projectId
@@ -25,6 +33,7 @@ export default async function IntakeSuccessPage({
             projectId: true,
             price: true,
             downpaymentAmount: true,
+            downpaymentStatus: true,
             service: { select: { serviceName: true, pricingModel: true } },
           },
         })
@@ -35,6 +44,9 @@ export default async function IntakeSuccessPage({
   const priceKnown = project ? project.price > 0 : false;
   const downpaymentPct =
     project && priceKnown ? Math.round((project.downpaymentAmount / project.price) * 100) : 45;
+  // Pay-first intakes arrive here with the downpayment already verified —
+  // nothing left to collect, so skip straight to "you're all set".
+  const downpaymentAlreadyPaid = project?.downpaymentStatus === "Verified";
 
   return (
     <div className="mx-auto flex max-w-lg flex-col items-center px-4 py-16 text-center sm:py-20">
@@ -53,8 +65,15 @@ export default async function IntakeSuccessPage({
           </p>
 
           <div className="mt-6 w-full surface p-4 text-left text-sm">
-            <p className="font-semibold text-foreground">Payment instructions</p>
-            {priceKnown ? (
+            <p className="font-semibold text-foreground">
+              {downpaymentAlreadyPaid ? "Downpayment received" : "Payment instructions"}
+            </p>
+            {downpaymentAlreadyPaid ? (
+              <p className="mt-1 text-muted-foreground">
+                Your {formatNaira(project.downpaymentAmount)} downpayment is confirmed. Balance of{" "}
+                {formatNaira(project.price - project.downpaymentAmount)} is due after approval.
+              </p>
+            ) : priceKnown ? (
               <p className="mt-1 text-muted-foreground">
                 Pay the {downpaymentPct}% downpayment of{" "}
                 <span className="font-mono font-semibold text-foreground">
@@ -71,7 +90,7 @@ export default async function IntakeSuccessPage({
               </p>
             )}
 
-            {priceKnown ? (
+            {priceKnown && !downpaymentAlreadyPaid ? (
               <>
                 <div className="mt-3">
                   <PayWithPaystackButton

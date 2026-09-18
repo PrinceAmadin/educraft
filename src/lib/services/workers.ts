@@ -371,6 +371,7 @@ export interface AssignmentContext {
     internalDeadline: Date | null;
     clientDeadline: Date | null;
     serviceName: string;
+    currentWorker: { id: string; fullName: string } | null;
   };
   recommendations: WorkerRecommendation[];
 }
@@ -394,6 +395,7 @@ export async function getAssignmentContext(idOrCode: string): Promise<Assignment
       clientDeadline: true,
       service: { select: { serviceName: true } },
       client: { select: { department: true } },
+      worker: { select: { id: true, fullName: true } },
     },
   });
   if (!project) return null;
@@ -401,7 +403,10 @@ export async function getAssignmentContext(idOrCode: string): Promise<Assignment
   const department = project.client.department;
 
   const workers = await db.worker.findMany({
-    where: { status: { in: ["Active", "On Break"] } },
+    where: {
+      status: { in: ["Active", "On Break"] },
+      ...(project.worker ? { id: { not: project.worker.id } } : {}),
+    },
     select: {
       id: true,
       workerId: true,
@@ -460,6 +465,7 @@ export async function getAssignmentContext(idOrCode: string): Promise<Assignment
       internalDeadline: project.internalDeadline,
       clientDeadline: project.clientDeadline,
       serviceName: project.service.serviceName,
+      currentWorker: project.worker,
     },
     recommendations,
   };

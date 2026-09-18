@@ -89,13 +89,23 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
   // leg is paid but unverified.
   const paidUnverified = candidate.downpaymentStatus === "Paid" || candidate.balanceStatus === "Paid";
 
-  if (buttons.length === 0 && !error && !paidUnverified) return null;
+  // NEW with no downpayment yet has no button at all (verification is
+  // external) — say so instead of leaving the page silent about why nothing
+  // can be assigned yet.
+  const waitingOnDownpayment = candidate.status === "NEW" && candidate.downpaymentStatus !== "Verified";
+
+  if (buttons.length === 0 && !error && !paidUnverified && !waitingOnDownpayment) return null;
 
   return (
     <section aria-label="Next step" className="space-y-3 rounded-2xl bg-zone p-4 sm:px-5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="meta-label mr-2">Next step</span>
         {buttons}
+        {waitingOnDownpayment && !paidUnverified ? (
+          <span className="text-[13px] text-muted-foreground">
+            Waiting on the client&apos;s downpayment — nothing to assign until it&apos;s verified.
+          </span>
+        ) : null}
         {paidUnverified ? (
           <Link
             href={`/admin/projects/${code}?tab=financials`}
