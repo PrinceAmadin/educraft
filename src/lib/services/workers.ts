@@ -304,6 +304,37 @@ export async function updateWorker(id: string, input: UpdateWorkerInput, changed
 }
 
 /**
+ * Deletes a worker record outright — for test/dummy workers or a genuine
+ * mistake, as opposed to Suspended/Terminated which keeps the record (and its
+ * project history) but blocks login. Blocked while the worker is currently
+ * assigned to any project, since Project.workerId points at this row and
+ * dropping it out from under an in-flight assignment would orphan the work —
+ * reassign or remove the assignment first. The linked login (if any) is
+ * deactivated rather than deleted, since WorkerApplication and other records
+ * reference the User row and a stale, permanently-inactive account is
+ * harmless where deleting it would not be.
+ */
+export async function deleteWorker(id: string): Promise<void> {
+  const worker = await db.worker.findUnique({
+    where: { id },
+    select: { id: true, userId: true, _count: { select: { projects: true } } },
+  });
+  if (!worker) throw new TransitionError("Worker not found");
+
+  if (worker._count.projects > 0) {
+    throw new TransitionError(
+      `This worker is currently assigned to ${worker._count.projects} project(s) — reassign or remove those first`
+    );
+  }
+
+  const writes: Prisma.PrismaPromise<unknown>[] = [db.worker.delete({ where: { id } })];
+  if (worker.userId) {
+    writes.push(db.user.update({ where: { id: worker.userId }, data: { isActive: false } }));
+  }
+  await db.$transaction(writes);
+}
+
+/**
  * Self-edit — a worker correcting their own intake info. Scoped to the
  * caller's own workerId by every route that calls this (never trusts an id
  * from the request body), so Worker A can never reach Worker B's record.

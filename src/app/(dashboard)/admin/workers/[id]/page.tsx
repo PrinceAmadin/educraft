@@ -3,11 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuGraduationCap } from "react-icons/lu";
+import { auth } from "@/lib/auth";
 import { getWorkerDetail } from "@/lib/services/workers";
 import { WorkerStatusControl } from "@/components/workers/WorkerStatusControl";
 import { WorkerProjectHistory } from "@/components/workers/WorkerProjectHistory";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { EditWorkerDialog } from "@/components/workers/EditWorkerDialog";
+import { DeleteWorkerButton } from "@/components/workers/DeleteWorkerButton";
 import { formatDateTime, formatNaira } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +28,11 @@ function pct(v: number | null) {
 }
 
 export default async function WorkerDetailPage({ params }: { params: { id: string } }) {
-  const data = await getWorkerDetail(params.id);
+  const [data, session] = await Promise.all([getWorkerDetail(params.id), auth()]);
   if (!data) notFound();
 
   const { worker, metrics } = data;
+  const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
   return (
     <div className="space-y-5">
@@ -73,6 +76,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
               prefillEmail={worker.email ?? ""}
             />
             <WorkerStatusControl workerId={worker.id} current={worker.status} />
+            {isSuperAdmin ? <DeleteWorkerButton workerId={worker.id} fullName={worker.fullName} /> : null}
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { badRequest, requireAdmin, serverError } from "@/lib/api";
-import { getWorkerDetail, updateWorker } from "@/lib/services/workers";
+import { badRequest, requireAdmin, requireSuperAdmin, serverError } from "@/lib/api";
+import { deleteWorker, getWorkerDetail, updateWorker } from "@/lib/services/workers";
 import { TransitionError } from "@/lib/services/projects";
 import { updateWorkerSchema } from "@/lib/validations/workers";
 
@@ -40,5 +40,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
     return serverError("PATCH /api/admin/workers/[id]", error);
+  }
+}
+
+/** Delete is Super Admin only — matches the "no delete" restriction on Ops Manager. */
+export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const guard = await requireSuperAdmin();
+  if (!guard.ok) return guard.response;
+
+  try {
+    await deleteWorker(params.id);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    if (error instanceof TransitionError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    return serverError("DELETE /api/admin/workers/[id]", error);
   }
 }
