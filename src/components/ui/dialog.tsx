@@ -19,7 +19,12 @@ function DialogContent({
       <DialogPrimitive.Overlay className="fixed inset-0 z-modal bg-slate-950/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
       <DialogPrimitive.Content
         className={cn(
-          "fixed left-1/2 top-1/2 z-modal grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overflow-x-hidden rounded-2xl bg-card p-5 shadow-lift sm:p-6",
+          // Grid items default to min-width: auto, so a child with long
+          // unbreakable content (a title, an id) would otherwise force the
+          // column — and the dialog's visible content — wider than the box
+          // itself instead of wrapping/truncating. [&>*]:min-w-0 lets every
+          // direct child shrink to the dialog's actual width.
+          "fixed left-1/2 top-1/2 z-modal grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overflow-x-hidden rounded-2xl bg-card p-5 shadow-lift sm:p-6 [&>*]:min-w-0",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className
         )}
