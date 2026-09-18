@@ -10,6 +10,12 @@ EduCraft provides academic writing (final year projects, seminar reports, term p
 **Contact:** 07063421088 | educraft611@gmail.com
 **Brand tagline:** "EduCraft — Providing Affordable Academic Services"
 
+## Deployment policy
+
+**Push directly to `main` (production) at the end of every session — not a feature branch.** The app has no real users yet; the founder is the only person using it, so production and preview are the same thing right now, and a feature branch just adds a manual merge step for no benefit. Don't ask before pushing to `main` under this policy — it's standing authorization, not a one-off.
+
+This reverses once the app goes live to real users — the founder will say explicitly when that happens. From that point, go back to feature branches / PRs for review before touching `main`.
+
 ## Tech Stack
 
 | Layer | Technology |
