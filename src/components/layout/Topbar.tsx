@@ -1,7 +1,8 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
-import { LogOut, Search, Settings, User } from "lucide-react";
+import { LogOut, RefreshCw, Search, Settings, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
@@ -25,6 +26,31 @@ interface TopbarProps {
   name: string;
   email: string;
   roleLabel: string;
+}
+
+/**
+ * A full reload rather than router.refresh(): the point is picking up a new
+ * deploy (new JS bundles, not just fresh server data), which a soft
+ * client-side refresh can't do.
+ */
+function RefreshButton() {
+  const [spinning, setSpinning] = React.useState(false);
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className="text-muted-foreground"
+      aria-label="Refresh"
+      title="Refresh"
+      onClick={() => {
+        setSpinning(true);
+        window.location.reload();
+      }}
+    >
+      <RefreshCw className={`h-[18px] w-[18px] ${spinning ? "animate-spin" : ""}`} />
+    </Button>
+  );
 }
 
 export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
@@ -62,6 +88,8 @@ export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
             <Search className="h-[18px] w-[18px]" />
           </Link>
         </Button>
+
+        <RefreshButton />
 
         <ThemeToggle />
 
