@@ -16,6 +16,10 @@ EduCraft provides academic writing (final year projects, seminar reports, term p
 
 This reverses once the app goes live to real users — the founder will say explicitly when that happens. From that point, go back to feature branches / PRs for review before touching `main`.
 
+## AI usage tracking
+
+Every Claude call made through `src/lib/anthropic.ts` is logged to `AiUsageLog` (pass `usage: {...}` to attribute it) and shown at `/admin/finance/ai-usage`. Costs convert USD to naira at `USD_NGN_RATE` (env var, default 1500) — change it in Vercel and redeploy, no code edit; the rate is stored per row at log time, so old rows keep theirs. Model prices live in `src/lib/ai-usage-log.ts`. Anthropic has no credit-balance API, so the balance is entered manually (super admin) and HQ subtracts logged spend from it.
+
 ## Tech Stack
 
 | Layer | Technology |

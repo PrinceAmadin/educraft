@@ -157,6 +157,10 @@ export function AiBalanceCard({ balance, canEdit }: { balance: BalanceData; canE
           <Button type="submit" disabled={saving || value === ""}>
             {saving ? "Saving…" : "Save balance"}
           </Button>
+          <p className="w-full text-xs text-muted-foreground">
+            Enter only the API credit balance for this HQ workspace. Claude Code and Claude.ai usage are tracked
+            separately in the Anthropic Console.
+          </p>
           {error ? <p className="w-full text-sm text-danger">{error}</p> : null}
         </form>
       ) : null}
