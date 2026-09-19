@@ -3,7 +3,7 @@ import https from "https";
 import { NextRequest, NextResponse } from "next/server";
 
 // TEMPORARY experiment — measures how deep a function can call itself on Vercel. Deleted after use.
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const sig = () =>
   crypto.createHmac("sha256", process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "").update("hop-test").digest("hex");
@@ -27,6 +27,11 @@ export async function GET(req: NextRequest) {
   const max = Number(q.get("max") ?? 8);
   const mode = q.get("mode") ?? "fetch";
   const seenId = req.headers.get("x-vercel-id");
+  const sleepSec = Number(q.get("sleep") ?? 0);
+  if (sleepSec > 0) {
+    await new Promise((r) => setTimeout(r, sleepSec * 1000));
+    return NextResponse.json({ sleptSeconds: sleepSec });
+  }
   if (depth >= max) return NextResponse.json({ reachedDepth: depth, seenId });
 
   const base = `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
