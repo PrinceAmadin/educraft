@@ -53,6 +53,23 @@ export async function deleteCollection(collectionKey: string): Promise<void> {
   });
 }
 
+/**
+ * Permanently deletes items by key (children such as linked-PDF attachments
+ * go with their parent). Zotero caps a delete at 50 keys and requires the
+ * current library version, so this batches and re-reads the version each time.
+ */
+export async function deleteItems(itemKeys: string[]): Promise<void> {
+  for (let i = 0; i < itemKeys.length; i += 50) {
+    const batch = itemKeys.slice(i, i + 50);
+    const head = await zoteroFetchRaw("/items?limit=1&format=keys");
+    const version = head.headers.get("last-modified-version");
+    await zoteroFetchRaw(`/items?itemKey=${batch.join(",")}`, {
+      method: "DELETE",
+      headers: version ? { "If-Unmodified-Since-Version": version } : {},
+    });
+  }
+}
+
 /** Creates one collection and returns its key. */
 export async function createCollection(name: string): Promise<string> {
   const json = await zoteroFetch("/collections", {
@@ -71,6 +88,8 @@ export interface ZoteroItemInput {
   year: number | null;
   journal: string | null;
   abstract: string | null;
+  /** Shown as a Zotero tag, e.g. "Open Access — PDF" / "Reference Only — Paywalled". */
+  tags?: string[];
 }
 
 function parseAuthors(authors: string): { creatorType: "author"; firstName: string; lastName: string }[] {
@@ -105,6 +124,7 @@ export async function importItems(
     DOI: item.doi,
     url: `https://doi.org/${item.doi}`,
     collections: [collectionKey],
+    tags: (item.tags ?? []).map((tag) => ({ tag })),
   }));
 
   const json = await zoteroFetch("/items", {

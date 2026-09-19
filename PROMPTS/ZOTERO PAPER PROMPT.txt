@@ -11,32 +11,58 @@ existed sometimes weren't for the paper actually being cited.
 
 An LLM has no live way to confirm a DOI exists at generation time — no
 amount of prompt-wording fixes that. So the pipeline no longer trusts any
-DOI the model produces. Instead:
+DOI the model produces.
 
-  1. Claude proposes candidate papers — title, authors, approximate year.
-     These are leads, not facts.
-  2. Every candidate is checked against CrossRef (the real DOI registry) by
-     title match. No confident match → discarded, before it ever reaches
-     Zotero or a student's reference list.
-  3. Every DOI that survives is resolved through Unpaywall to a real,
-     directly-fetchable open-access PDF link, and that link is actually
-     probed (not just trusted) to confirm it serves a PDF.
-  4. Only then is the reference imported into the project's Zotero
-     collection and run through Tier 2 relevance classification
-     (CORE / CLOSELY_RELATED / TANGENTIAL / IRRELEVANT) — BEFORE any chapter
-     of the report is written, so a bad reference can never contaminate the
-     literature review.
+REDESIGN (Sept 2026) — why the first automated version only found ~6 papers
+A live test showed the real bottleneck: when Claude is asked to recall exact
+paper titles, most of them don't exist. 25 recalled titles on an SME
+cybersecurity topic → 1 real CrossRef match (4%), the same rate as the
+6-of-190 production run. The open-access-only rule then threw away most of
+what little survived. The pipeline now works like this:
 
-This file is now mainly a record of the system prompt used at step 1 (the
-part CrossRef/Unpaywall can't do for us — finding topically relevant leads),
-kept human-readable so it can be tuned without touching the TypeScript. If
-a worker ever needs to run this step manually (the automation is down, or
-a one-off outside the platform), copy the prompt below into Claude and
-still run every returned "DOI" through https://search.crossref.org and
-https://unpaywall.org before trusting anything it says.
+  1. Claude writes academic SEARCH QUERIES for the topic (~10 up front,
+     more later if needed, ~1 in 5 marked "foundational").
+  2. Each query is run against OpenAlex (a real 250M-work index, sourced
+     largely from CrossRef). Every hit is a real published work with a DOI
+     before it ever becomes a candidate — nothing to fabricate. Recent
+     queries = last 7 years by relevance; foundational = any year by
+     citation count.
+  3. Only if searching runs dry: Claude recalls specific titles (the prompt
+     below), each checked against CrossRef — top 5 results, fuzzy title
+     match ≥ 70%, or ≥ 55% when first-author surname AND year (±1) agree; a
+     match whose author and year BOTH contradict the proposal is rejected
+     as a different paper.
+  4. Two delivery tracks — open-access status no longer decides survival:
+       A. OPEN ACCESS — Unpaywall/OpenAlex PDF actually probed for PDF
+          bytes → Zotero item with linked PDF, uploaded to Drive.
+       B. PAYWALLED — kept as reference-only (metadata + abstract) →
+          Zotero item tagged "Reference Only — Paywalled", listed with its
+          DOI in the "Paywalled References — Access via your university
+          library" Google Doc in the same Drive folder.
+  5. Tier 2 relevance classification on both tracks, BEFORE any writing.
+     TANGENTIAL/IRRELEVANT are dropped, so the final set is 100% CORE +
+     CLOSELY_RELATED (inside the ≥75% / zero-IRRELEVANT rule). Replacement
+     rounds (up to 3) run only if the kept count is below target.
+
+Live dry run after the redesign, same topic: 100 candidates → 49 relevant
+references in one round (10 CORE; 12 with PDF, 37 paywalled), target 40.
+
+This file is a human-readable record of the prompts, so they can be tuned
+without touching the TypeScript (src/lib/services/research.ts is the source
+of truth). If a worker ever runs this manually, prefer searching Google
+Scholar / OpenAlex with queries like step 1's over asking an AI for titles,
+and check every DOI at https://search.crossref.org before trusting it.
 
 ────────────────────────────────────────────────────────────────
-CANDIDATE-FINDING PROMPT (as sent by the pipeline)
+SEARCH-QUERY PROMPT (primary — step 1)
+────────────────────────────────────────────────────────────────
+Claude writes short keyword queries (3–7 words) covering the core topic,
+key concepts, methods/tools, application domain, local context, and
+relevant standards/frameworks; about 1 in 5 marked "foundational". See
+generateSearchQueries() in src/lib/services/research.ts for the exact text.
+
+────────────────────────────────────────────────────────────────
+TITLE-RECALL PROMPT (fallback only — step 3)
 ────────────────────────────────────────────────────────────────
 System:
 
@@ -57,14 +83,17 @@ Rules:
   bibliographic details.
 - Prefer base/foundational papers and closely related recent work over
   marginally-related ones.
-- Prefer sources likely to be open access (arXiv, Springer Open, IEEE Open,
-  Elsevier Open Access, PMC, DOAJ-indexed journals, institutional
-  repositories).
+- Prefer well-cited papers in reputable journals and conference
+  proceedings. Paywalled papers are fine — being open access is a bonus,
+  not a requirement.
 - Published within roughly the last 5 years where possible; genuinely
   foundational older papers are fine.
 - Do not repeat any title already listed as "already tried."
 - Give the title as close to verbatim as you can recall — this is what gets
   matched against the real record.
+- Give authors as "Surname, Initial; Surname, Initial" with the first
+  author first, and the publication year — they're used to confirm the
+  match when the title is recalled imperfectly.
 
 User:
 
@@ -97,9 +126,12 @@ Classifications:
   something this report should cite as a base reference.
 - IRRELEVANT: not meaningfully connected to the topic at all.
 
-Pass threshold: ≥75% CORE + CLOSELY_RELATED, and zero IRRELEVANT. A failed
-batch triggers automatic replacement of only the flagged references, up to
-3 replacement rounds before the job is flagged for human review.
+Pass rule: TANGENTIAL and IRRELEVANT references are always dropped, so the
+kept set is 100% CORE + CLOSELY_RELATED (inside the ≥75% / zero-IRRELEVANT
+standard). If fewer than the target remain, up to 3 replacement rounds
+search for more. After that, 10+ relevant references passes with a
+below-target note; fewer than 10 is flagged for human review. Fewer than
+10 CORE passes with a warning.
 
 ────────────────────────────────────────────────────────────────
 ORIGINAL MANUAL PROMPT (superseded — kept for history)

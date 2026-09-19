@@ -108,24 +108,28 @@ export async function uploadPdfToFolder(
   fileName: string,
   pdfUrl: string
 ): Promise<string | null> {
-  let pdfRes: Response;
+  let bytes: Buffer;
   try {
-    pdfRes = await fetch(pdfUrl, { headers: { Accept: "application/pdf" } });
+    const pdfRes = await fetch(pdfUrl, {
+      headers: { Accept: "application/pdf" },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!pdfRes.ok) {
+      console.error("[google-drive] PDF fetch not ok", pdfUrl, pdfRes.status);
+      return null;
+    }
+    bytes = Buffer.from(await pdfRes.arrayBuffer());
   } catch (error) {
     console.error("[google-drive] PDF fetch threw", pdfUrl, error);
     return null;
   }
-  if (!pdfRes.ok) {
-    console.error("[google-drive] PDF fetch not ok", pdfUrl, pdfRes.status);
-    return null;
-  }
-  const contentType = pdfRes.headers.get("content-type") ?? "";
-  if (!contentType.includes("pdf")) {
-    console.error("[google-drive] URL did not serve a PDF", pdfUrl, contentType);
+  // Judge by the bytes, not the header — some hosts serve real PDFs as
+  // application/octet-stream, others serve an HTML login page labelled PDF.
+  if (bytes.subarray(0, 5).toString("latin1") !== "%PDF-") {
+    console.error("[google-drive] URL did not serve a PDF", pdfUrl);
     return null;
   }
 
-  const bytes = Buffer.from(await pdfRes.arrayBuffer());
   const boundary = `educraft-${crypto.randomBytes(8).toString("hex")}`;
   const metadata = JSON.stringify({ name: fileName, parents: [folderId] });
 
@@ -149,4 +153,39 @@ export async function uploadPdfToFolder(
   }
   const json = await res.json().catch(() => null);
   return json?.id ?? null;
+}
+
+/**
+ * Creates a Google Doc in the folder from HTML (Drive converts it on upload).
+ * It inherits the folder's anyone-with-the-link view permission.
+ */
+export async function createDocInFolder(
+  folderId: string,
+  name: string,
+  html: string
+): Promise<{ id: string; webViewLink: string }> {
+  const boundary = `educraft-${crypto.randomBytes(8).toString("hex")}`;
+  const metadata = JSON.stringify({
+    name,
+    parents: [folderId],
+    mimeType: "application/vnd.google-apps.document",
+  });
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n`),
+    Buffer.from(html, "utf8"),
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
+
+  const token = await getAccessToken();
+  const res = await fetch(`${DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,webViewLink`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${boundary}` },
+    body,
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.id) {
+    throw new GoogleDriveError(`Could not create the Google Doc (${res.status})`);
+  }
+  return { id: json.id, webViewLink: json.webViewLink };
 }

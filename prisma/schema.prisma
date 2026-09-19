@@ -677,6 +677,10 @@ model ResearchJob {
 
   zoteroCollectionKey String?
   driveFolderLink     String?
+  /// Google Doc in the same Drive folder listing kept references with no
+  /// downloadable PDF (paywalled), with DOI links for library access.
+  paywalledDocId   String?
+  paywalledDocLink String?
 
   corePercent           Float?
   closelyRelatedPercent Float?
@@ -684,6 +688,17 @@ model ResearchJob {
   /// Last-verified-by-CrossRef titles this job has already tried, so
   /// replacement rounds don't re-propose the same rejected candidates.
   triedTitles String[] @default([])
+  /// Set when Claude stops producing new candidates during a round-0 top-up,
+  /// so the pipeline moves on instead of re-requesting forever.
+  candidatesExhausted Boolean @default(false)
+
+  /// Search queries Claude wrote for this job, run against OpenAlex in order.
+  /// "[foundational] " prefix = no date filter, sorted by citation count.
+  searchQueries   String[] @default([])
+  /// Index of the next query in searchQueries to run.
+  searchCursor    Int      @default(0)
+  /// Set when Claude can't come up with any new queries — falls back to recall.
+  queriesExhausted Boolean @default(false)
 
   errorMessage String?
 
@@ -698,10 +713,18 @@ model ResearchJob {
 enum ReferenceStatus {
   CANDIDATE // proposed by Claude, not yet checked against CrossRef
   DOI_REJECTED // CrossRef found no confident match — dropped
-  NO_OA_PDF // CrossRef confirmed it, but Unpaywall found no fetchable PDF — dropped
+  NO_OA_PDF // legacy: pre-two-track jobs dropped paywalled papers here. No longer produced — paywalled papers are now kept as reference-only (see ReferenceAccess)
   IMPORTED // verified + has an OA PDF + imported into Zotero
   REPLACED // was IMPORTED but Tier 2 flagged it and it was swapped out
   KEPT // passed Tier 2 — part of the final verified set
+}
+
+/// Which delivery track a CrossRef-verified reference is on. Both tracks are
+/// imported, classified, and cited identically — this only decides whether
+/// the client gets a PDF in Drive or a DOI link in the paywalled-refs doc.
+enum ReferenceAccess {
+  OPEN_ACCESS // Unpaywall found a PDF that actually serves PDF bytes
+  PAYWALLED // real and verified, but no free PDF — reference-only
 }
 
 enum ReferenceClassification {
@@ -732,6 +755,8 @@ model Reference {
   abstract String?
 
   pdfUrl String? // Unpaywall open-access location
+  /// Null until the open-access check has run for this reference.
+  access ReferenceAccess?
 
   zoteroItemKey String?
   driveFileId   String?
