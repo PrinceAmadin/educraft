@@ -74,29 +74,34 @@ export async function scheduleResearchStep(jobId: string, delaySeconds = 0): Pro
     method: "POST",
     headers,
     body: JSON.stringify({ jobId, delaySeconds }),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(20_000),
   });
-  if (!res.ok) throw new Error(`Could not schedule the next research step (${res.status})`);
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 120);
+    throw new Error(`HTTP ${res.status}${detail ? ` ${detail}` : ""}`);
+  }
 }
 
-/** Schedules the next step, retrying once; if it still fails the chain is marked broken so a Resume can restart it. */
+/** Schedules the next step, retrying with backoff; if it still fails the chain is marked broken so a Resume can restart it. */
 async function chain(jobId: string, delaySeconds = 0): Promise<void> {
-  try {
-    await scheduleResearchStep(jobId, delaySeconds);
-  } catch {
-    await sleep(2000);
+  const backoffMs = [2000, 5000];
+  let reason = "unknown";
+  for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
     try {
       await scheduleResearchStep(jobId, delaySeconds);
+      return;
     } catch (error) {
-      console.error("[research runner] could not schedule the next step", jobId, error);
-      await db.researchJob
-        .updateMany({
-          where: { id: jobId },
-          data: { lastError: "The background run was interrupted. Press Resume to carry on." },
-        })
-        .catch(() => {});
+      reason = error instanceof Error ? error.message : String(error);
+      if (attempt < backoffMs.length) await sleep(backoffMs[attempt]);
     }
   }
+  console.error("[research runner] could not schedule the next step", jobId, reason);
+  await db.researchJob
+    .updateMany({
+      where: { id: jobId },
+      data: { lockedUntil: null, lastError: `The background run was interrupted (${reason}). Press Resume to carry on.` },
+    })
+    .catch(() => {});
 }
 
 /** Runs exactly one step under the lease, then schedules the next. */
