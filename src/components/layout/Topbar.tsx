@@ -6,6 +6,7 @@ import { LogOut, RefreshCw, Search, Settings, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
+import { AiBalanceIndicator } from "@/components/layout/AiBalanceIndicator";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +93,8 @@ export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
         <RefreshButton />
 
         <ThemeToggle />
+
+        {role === "admin" ? <AiBalanceIndicator /> : null}
 
         <NotificationBell />
 

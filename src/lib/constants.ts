@@ -7,6 +7,7 @@ import {
   Megaphone,
   ClipboardCheck,
   Wallet,
+  Zap,
   BarChart3,
   Settings,
   Link2,
@@ -178,6 +179,7 @@ export const ADMIN_NAV: NavSection[] = [
     heading: "Business",
     items: [
       { label: "Finance", href: "/admin/finance", icon: Wallet, matchNested: true },
+      { label: "AI usage", href: "/admin/finance/ai-usage", icon: Zap },
       { label: "Reports", href: "/admin/reports", icon: BarChart3 },
       { label: "Settings", href: "/admin/settings", icon: Settings, matchNested: true },
     ],
