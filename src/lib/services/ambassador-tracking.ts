@@ -22,6 +22,8 @@ export interface TrackingRow {
   tier: AmbassadorTier;
   status: string;
   email: string | null;
+  /** Unsubscribed from the Monday summary email (their own choice). */
+  weeklyEmailOptOut: boolean;
   legacySlotId: string | null;
   /** Everything: old Redis counter plus tracked clicks. */
   clicks: number;
@@ -119,6 +121,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
         ambassadorId: true,
         fullName: true,
         email: true,
+        weeklyEmailOptOut: true,
         tier: true,
         status: true,
         legacySlotId: true,
@@ -187,6 +190,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
       tier: a.tier,
       status: a.status,
       email: a.email,
+      weeklyEmailOptOut: a.weeklyEmailOptOut,
       legacySlotId: a.legacySlotId,
       clicks:
         (clicks && a.legacySlotId ? (clicks.get(a.legacySlotId) ?? 0) : 0) + (trackedBy.get(a.id) ?? 0),

@@ -162,6 +162,7 @@ export function TrackingBoard({
                           <span className="font-mono">{row.code}</span>
                           {row.university ? ` · ${row.university}` : ""}
                           {row.email ? "" : " · no email"}
+                          {row.email && row.weeklyEmailOptOut ? " · weekly summary off" : ""}
                         </span>
                       </Link>
                       <Button
@@ -253,6 +254,9 @@ export function TrackingBoard({
                           ) : (
                             <span className="text-muted-foreground">None</span>
                           )}
+                          {row.email && row.weeklyEmailOptOut ? (
+                            <div className="text-xs text-gold">Weekly summary off</div>
+                          ) : null}
                         </TableCell>
                         <TableCell className="space-x-2 whitespace-nowrap text-right">
                           <Button asChild size="sm" variant="ghost">

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { LuPhone, LuMail, LuBuilding2 } from "react-icons/lu";
+import { LuPhone, LuMail, LuBuilding2, LuBellRing } from "react-icons/lu";
 import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
 import { getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
@@ -89,7 +89,7 @@ export default async function AmbassadorDetailPage({
           </div>
         </div>
 
-        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-3">
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <Field icon={LuPhone} label="Phone">
             {ambassador.phone ? (
               <a href={`tel:${ambassador.phone}`} className="hover:text-primary">
@@ -107,6 +107,14 @@ export default async function AmbassadorDetailPage({
             ) : (
               <span className="text-subtle">Not provided</span>
             )}
+          </Field>
+          <Field icon={LuBellRing} label="Weekly summary email">
+            <WeeklySummaryStatus
+              hasEmail={Boolean(ambassador.email)}
+              hasSlot={Boolean(ambassador.legacySlotId)}
+              optedOut={ambassador.weeklyEmailOptOut}
+              active={ambassador.status === "Active"}
+            />
           </Field>
           <Field icon={LuBuilding2} label="University">
             {ambassador.university?.name ?? "—"}
@@ -319,6 +327,46 @@ export default async function AmbassadorDetailPage({
       </>
       )}
     </div>
+  );
+}
+
+/**
+ * Read-only: whether the Monday summary reaches this ambassador, and if not,
+ * why. It is the ambassador's own choice, so admins see it but do not flip it.
+ */
+function WeeklySummaryStatus({
+  hasEmail,
+  hasSlot,
+  optedOut,
+  active,
+}: {
+  hasEmail: boolean;
+  hasSlot: boolean;
+  optedOut: boolean;
+  active: boolean;
+}) {
+  if (optedOut) {
+    return (
+      <>
+        <span className="text-gold">Off</span>
+        <span className="block text-xs text-muted-foreground">They unsubscribed</span>
+      </>
+    );
+  }
+  const blocker = !active ? "Not active" : !hasEmail ? "No email on file" : !hasSlot ? "No link assigned yet" : null;
+  if (blocker) {
+    return (
+      <>
+        <span className="text-muted-foreground">Not sent</span>
+        <span className="block text-xs text-muted-foreground">{blocker}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="text-success">On</span>
+      <span className="block text-xs text-muted-foreground">Every Monday morning</span>
+    </>
   );
 }
 

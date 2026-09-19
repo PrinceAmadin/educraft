@@ -160,6 +160,8 @@ const detailSelect = {
   phone: true,
   email: true,
   userId: true,
+  legacySlotId: true,
+  weeklyEmailOptOut: true,
   department: true,
   level: true,
   referralCode: true,
