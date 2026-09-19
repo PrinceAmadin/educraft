@@ -51,7 +51,8 @@ export const intakeSubmitSchema = z
     // Personal / contact
     fullName: z.string().trim().min(2, "Enter your full name").max(120),
     phone: phoneSchema,
-    email: z.string().trim().email("Enter a valid email").max(160).optional().or(z.literal("")),
+    // Required: it is where the client's dashboard sign-in code is sent.
+    email: z.string().trim().min(1, "Enter your email, we send your sign-in code there").email("Enter a valid email").max(160),
     linkedin: z.string().trim().max(200).optional().or(z.literal("")),
     address: z.string().trim().max(300).optional().or(z.literal("")),
     universityId: z.string().optional().or(z.literal("")),

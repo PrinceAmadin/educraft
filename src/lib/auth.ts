@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { authConfig } from "@/lib/auth.config";
+import { verifyPassword } from "@/lib/services/client-otp";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -29,11 +30,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           include: {
             workerProfile: { select: { fullName: true } },
             ambassadorProfile: { select: { fullName: true } },
-            clientProfile: { select: { fullName: true } },
+            clientProfiles: { select: { fullName: true }, take: 1 },
           },
         });
 
         if (!user || !user.isActive) return null;
+        // Clients use the client-password provider below (Client ID + their own password).
+        if (user.role === "CLIENT") return null;
 
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
@@ -44,7 +47,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           user.displayName ??
           user.workerProfile?.fullName ??
           user.ambassadorProfile?.fullName ??
-          user.clientProfile?.fullName ??
+          user.clientProfiles[0]?.fullName ??
           user.email.split("@")[0];
 
         return {
@@ -53,6 +56,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name,
           role: user.role,
         };
+      },
+    }),
+    // Clients: Client ID + the password they set (once, with an emailed code).
+    Credentials({
+      id: "client-password",
+      name: "Client password",
+      credentials: {
+        clientId: { label: "Client ID", type: "text" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(raw, request) {
+        const parsed = z
+          .object({ clientId: z.string().min(1).max(40), password: z.string().min(1).max(200) })
+          .safeParse(raw);
+        if (!parsed.success) return null;
+
+        const forwarded = request?.headers?.get("x-forwarded-for")?.split(",")[0]?.trim();
+        const ip = forwarded || request?.headers?.get("x-real-ip") || "unknown";
+
+        const client = await verifyPassword({ clientIdInput: parsed.data.clientId, password: parsed.data.password, ip });
+        if (!client) return null;
+        return { id: client.userId, email: client.email, name: client.name, role: "CLIENT" };
       },
     }),
   ],
@@ -68,12 +93,14 @@ export function homeForRole(role: string | undefined) {
       return "/worker";
     case "AMBASSADOR":
       return "/ambassador";
+    case "CLIENT":
+      return "/client";
     default:
       return "/";
   }
 }
 
-export type NavRoleFromUser = "admin" | "worker" | "ambassador";
+export type NavRoleFromUser = "admin" | "worker" | "ambassador" | "client";
 
 export function navRoleForUser(role: string | undefined): NavRoleFromUser {
   switch (role) {
@@ -81,6 +108,8 @@ export function navRoleForUser(role: string | undefined): NavRoleFromUser {
       return "worker";
     case "AMBASSADOR":
       return "ambassador";
+    case "CLIENT":
+      return "client";
     default:
       return "admin";
   }

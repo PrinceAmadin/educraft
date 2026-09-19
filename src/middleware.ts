@@ -10,6 +10,7 @@ const ROLE_ROOT: Record<string, string> = {
   OPS_MANAGER: "/admin",
   WORKER: "/worker",
   AMBASSADOR: "/ambassador",
+  CLIENT: "/client",
 };
 
 export default auth((req) => {
@@ -20,17 +21,27 @@ export default auth((req) => {
   // Whole path segments only — `/ambassador-panel/*` is a public page and must
   // not be caught by the `/ambassador` portal prefix.
   const under = (root: string) => path === root || path.startsWith(`${root}/`);
-  const isProtected = under("/admin") || under("/worker") || under("/ambassador");
+  // /client/login is the clients' public sign-in; the rest of /client is theirs alone.
+  const isClientLogin = path === "/client/login";
+  const isProtected = under("/admin") || under("/worker") || under("/ambassador") || (under("/client") && !isClientLogin);
 
-  // Signed in and heading to /login → bounce to their own dashboard
-  if (path === "/login" && user) {
+  // Client sessions last 14 days from sign-in (a client's projects are private).
+  const CLIENT_SESSION_MS = 14 * 24 * 3_600_000;
+  const clientExpired =
+    user?.role === "CLIENT" && (!user.loginAt || Date.now() - user.loginAt > CLIENT_SESSION_MS);
+  if (clientExpired && under("/client") && !isClientLogin) {
+    return NextResponse.redirect(new URL("/client/login", nextUrl));
+  }
+
+  // Signed in and heading to a sign-in page → bounce to their own dashboard
+  if ((path === "/login" || isClientLogin) && user && !clientExpired) {
     return NextResponse.redirect(new URL(ROLE_ROOT[user.role] ?? "/", nextUrl));
   }
 
   if (!isProtected) return NextResponse.next();
 
   if (!user) {
-    const login = new URL("/login", nextUrl);
+    const login = new URL(under("/client") ? "/client/login" : "/login", nextUrl);
     login.searchParams.set("callbackUrl", path);
     return NextResponse.redirect(login);
   }

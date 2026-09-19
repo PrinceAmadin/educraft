@@ -468,7 +468,7 @@ function PersonalStep({
         <Field label="Phone (WhatsApp)" required htmlFor="phone" error={errors.phone?.message}>
           <Input id="phone" inputMode="tel" autoComplete="tel" {...register("phone")} />
         </Field>
-        <Field label="Email" htmlFor="email" error={errors.email?.message}>
+        <Field label="Email" required htmlFor="email" error={errors.email?.message} hint="We email your dashboard sign-in code here">
           <Input id="email" type="email" inputMode="email" autoComplete="email" {...register("email")} />
         </Field>
         <UniversitySelect universities={universities} />
@@ -731,7 +731,7 @@ function CvContactStep({ universities }: { universities: UniversityOption[] }) {
         <Field label="Phone (WhatsApp)" required htmlFor="phone" error={errors.phone?.message}>
           <Input id="phone" inputMode="tel" {...register("phone")} />
         </Field>
-        <Field label="Email" htmlFor="email" error={errors.email?.message}>
+        <Field label="Email" required htmlFor="email" error={errors.email?.message} hint="We email your dashboard sign-in code here">
           <Input id="email" type="email" inputMode="email" {...register("email")} />
         </Field>
         <Field label="LinkedIn" htmlFor="linkedin" hint="Profile URL or handle">

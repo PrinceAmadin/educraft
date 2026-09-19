@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { clientIdsForUser } from "@/lib/services/client-otp";
 
 const ADMIN_ROLES = ["SUPER_ADMIN", "OPS_MANAGER"];
 
@@ -105,4 +106,35 @@ export function badRequest(message: string, details?: unknown) {
 export function serverError(tag: string, error: unknown) {
   console.error(`[${tag}]`, error);
   return NextResponse.json({ error: "Something went wrong. Try again." }, { status: 500 });
+}
+
+const CLIENT_SESSION_MS = 14 * 24 * 3_600_000;
+
+export interface ClientScope {
+  userId: string;
+  /** The Client rows this person owns. EVERY client-portal query must filter by these. */
+  clientIds: string[];
+}
+
+/**
+ * The signed-in client and what they own, or null (no session, not a client, or
+ * the 14-day session has run out). Use this in client-portal server components.
+ */
+export async function getClientScope(): Promise<ClientScope | null> {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "CLIENT") return null;
+  if (!session.user.loginAt || Date.now() - session.user.loginAt > CLIENT_SESSION_MS) return null;
+  const clientIds = await clientIdsForUser(session.user.id);
+  return { userId: session.user.id, clientIds };
+}
+
+/** Guard for `/api/client/*`: 401 without a valid client session. */
+export async function requireClient(): Promise<
+  { ok: true; scope: ClientScope } | { ok: false; response: NextResponse }
+> {
+  const scope = await getClientScope();
+  if (!scope) {
+    return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+  return { ok: true, scope };
 }

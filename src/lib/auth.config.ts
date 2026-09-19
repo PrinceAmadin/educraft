@@ -23,15 +23,19 @@ export const authConfig = {
     jwt({ token, user }) {
       if (user) {
         token.id = user.id as string;
-        token.role = (user as { role?: string }).role ?? "CLIENT";
+        // Fail closed: a sign-in that somehow has no role gets an empty role,
+        // which no route or API accepts. (It used to default to CLIENT.)
+        token.role = (user as { role?: string }).role ?? "";
         token.name = user.name ?? null;
+        token.loginAt = Date.now();
       }
       return token;
     },
     session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
-        session.user.role = token.role as string;
+        session.user.role = (token.role as string) ?? "";
+        session.user.loginAt = (token.loginAt as number | undefined) ?? 0;
       }
       return session;
     },

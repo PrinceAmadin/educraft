@@ -1,3 +1,4 @@
+import { realEmail } from "@/lib/client-email";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { TransitionError } from "@/lib/services/projects";
@@ -218,4 +219,32 @@ export async function searchClientsForPicker(q: string) {
         university: r.university?.abbreviation ?? null,
       }))
     );
+}
+
+export class ClientEmailError extends Error {}
+
+/**
+ * Sets the address a client's sign-in code is sent to. Refuses an address that
+ * belongs to a team (admin/worker/ambassador) account, since the two must never
+ * be mixed. If the client was already linked to a sign-in user under their old
+ * address, the link is dropped so the new address starts a clean sign-in.
+ */
+export async function updateClientEmail(id: string, rawEmail: string) {
+  const email = realEmail(rawEmail);
+  if (!email) throw new ClientEmailError("Enter a real email address.");
+
+  const client = await db.client.findUnique({ where: { id }, select: { id: true, userId: true, user: { select: { email: true } } } });
+  if (!client) throw new ClientEmailError("Client not found");
+
+  const owner = await db.user.findUnique({ where: { email }, select: { role: true } });
+  if (owner && owner.role !== "CLIENT") {
+    throw new ClientEmailError("That address belongs to a team account, so it cannot be used for client sign-in.");
+  }
+
+  const unlink = client.userId && client.user?.email !== email;
+  return db.client.update({
+    where: { id },
+    data: { email, ...(unlink ? { userId: null } : {}) },
+    select: { id: true, email: true },
+  });
 }

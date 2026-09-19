@@ -51,7 +51,9 @@ model User {
 
   workerProfile     Worker?
   ambassadorProfile Ambassador?
-  clientProfile     Client?
+  /// One person can own several Client rows (intake creates a new one each
+  /// time); they are all linked to the same User the first time it signs in.
+  clientProfiles    Client[]
 
   notifications     Notification[]
   statusChanges     ProjectStatusLog[] @relation("ChangedBy")
@@ -202,7 +204,7 @@ model Client {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
-  userId String? @unique
+  userId String?
   user   User?   @relation(fields: [userId], references: [id])
 
   projects Project[]
@@ -210,6 +212,8 @@ model Client {
   @@index([universityId])
   @@index([referredById])
   @@index([phone])
+  @@index([userId])
+  loginCodes ClientLoginCode[]
 }
 
 // ─── SERVICES ───────────────────────────────────────────
@@ -993,4 +997,36 @@ model ClickEvent {
   // Serves the duplicate-vs-return lookup (newest event for this visitor on this link).
   @@index([slotCode, ipHash, timestamp])
   @@index([ambassadorId, isTestClick, archivedAt])
+}
+
+
+// ─── CLIENT SIGN-IN (Client ID + emailed code) ──────────
+// The Client ID only says WHICH client; proof is a 6-digit code sent to the
+// email stored on that client. Codes are stored hashed, expire, are single
+// use and lock after too many wrong tries.
+
+model ClientLoginCode {
+  id        String    @id @default(cuid())
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  /// HMAC of the code (never the code itself).
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  ipHash    String?
+  createdAt DateTime  @default(now())
+
+  @@index([clientId, createdAt])
+}
+
+/// Per-IP request/verify counts for the client sign-in, so a stranger cannot
+/// hammer it (or mail-bomb an address) whether or not the ID exists.
+model ClientLoginAttempt {
+  id        String   @id @default(cuid())
+  ipHash    String
+  kind      String // "request" | "verify"
+  createdAt DateTime @default(now())
+
+  @@index([ipHash, kind, createdAt])
 }

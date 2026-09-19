@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuBuilding2, LuMegaphone } from "react-icons/lu";
 import { getClientDetail } from "@/lib/services/clients";
+import { ClientEmailEditor } from "@/components/clients/ClientEmailEditor";
 import { ClientNotes } from "@/components/clients/ClientNotes";
 import { ClientProjectHistory } from "@/components/clients/ClientProjectHistory";
 import { formatDate, formatNaira } from "@/lib/utils";
@@ -62,13 +63,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
             </a>
           </Field>
           <Field icon={LuMail} label="Email">
-            {client.email ? (
-              <a href={`mailto:${client.email}`} className="hover:text-primary">
-                {client.email}
-              </a>
-            ) : (
-              <span className="text-subtle">Not provided</span>
-            )}
+            <ClientEmailEditor clientId={client.id} email={client.email} />
           </Field>
           <Field icon={LuBuilding2} label="University">
             {client.university?.name ?? "—"}

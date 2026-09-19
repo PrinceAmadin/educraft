@@ -237,7 +237,14 @@ export const AMBASSADOR_MOBILE_NAV: NavItem[] = [
   { label: "Profile", href: "/ambassador/profile", icon: User },
 ];
 
-export type NavRole = "admin" | "worker" | "ambassador";
+/** The client's own dashboard is built separately; this is just its entry point in the shell. */
+export const CLIENT_NAV: NavSection[] = [
+  { items: [{ label: "Home", href: "/client", icon: LayoutDashboard }] },
+];
+
+export const CLIENT_MOBILE_NAV: NavItem[] = [{ label: "Home", href: "/client", icon: LayoutDashboard }];
+
+export type NavRole = "admin" | "worker" | "ambassador" | "client";
 
 export function navForRole(role: NavRole) {
   switch (role) {
@@ -245,6 +252,8 @@ export function navForRole(role: NavRole) {
       return { sections: WORKER_NAV, mobile: WORKER_MOBILE_NAV, home: "/worker" };
     case "ambassador":
       return { sections: AMBASSADOR_NAV, mobile: AMBASSADOR_MOBILE_NAV, home: "/ambassador" };
+    case "client":
+      return { sections: CLIENT_NAV, mobile: CLIENT_MOBILE_NAV, home: "/client" };
     default:
       return { sections: ADMIN_NAV, mobile: ADMIN_MOBILE_NAV, home: "/admin" };
   }
