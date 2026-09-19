@@ -65,7 +65,7 @@ export interface AmbassadorTracking {
 }
 
 /** One mGet for every old slot link, capped so a slow Redis can't stall the page. */
-async function readClicks(slotIds: string[]): Promise<Map<string, number> | null> {
+export async function readClicks(slotIds: string[]): Promise<Map<string, number> | null> {
   if (!redisConfigured() || slotIds.length === 0) return null;
   // The old app keyed general slots zero-padded ("006"), but a hand-typed
   // link may have counted under "6" — read both and add them up.

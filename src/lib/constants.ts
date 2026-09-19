@@ -11,7 +11,7 @@ import {
   BookCheck,
   BarChart3,
   Settings,
-  Link2,
+  MousePointerClick,
   Trophy,
   User,
   MoreHorizontal,
@@ -203,7 +203,7 @@ export const AMBASSADOR_NAV: NavSection[] = [
   {
     items: [
       { label: "Dashboard", href: "/ambassador", icon: LayoutDashboard },
-      { label: "Referrals", href: "/ambassador/referrals", icon: Link2 },
+      { label: "My link", href: "/ambassador/link", icon: MousePointerClick },
       { label: "Commissions", href: "/ambassador/commissions", icon: Wallet },
       { label: "Leaderboard", href: "/ambassador/leaderboard", icon: Trophy },
       { label: "Profile", href: "/ambassador/profile", icon: User },
@@ -232,7 +232,7 @@ export const WORKER_MOBILE_NAV: NavItem[] = [
 
 export const AMBASSADOR_MOBILE_NAV: NavItem[] = [
   { label: "Home", href: "/ambassador", icon: LayoutDashboard },
-  { label: "Referrals", href: "/ambassador/referrals", icon: Link2 },
+  { label: "My link", href: "/ambassador/link", icon: MousePointerClick },
   { label: "Commissions", href: "/ambassador/commissions", icon: Wallet },
   { label: "Profile", href: "/ambassador/profile", icon: User },
 ];
