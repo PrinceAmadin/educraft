@@ -8,14 +8,27 @@ import { UAParser } from "ua-parser-js";
  * headers instead, see geo-headers.ts).
  */
 
-// The ONE place an IP becomes a stored identifier. Falls back to AUTH_SECRET so
-// there is never a public default salt; the raw IP itself is never stored.
+// The ONE place a visitor becomes a stored identifier. Falls back to AUTH_SECRET
+// so there is never a public default salt; the raw IP is never stored.
 function salt(): string {
   return process.env.IP_HASH_SALT || process.env.AUTH_SECRET || "educraft-click-salt";
 }
 
-export function hashIp(ip: string): string {
-  return crypto.createHmac("sha256", salt()).update(ip).digest("hex");
+/**
+ * Anonymous visitor key: IP + user-agent + language, HMAC'd.
+ *
+ * IP alone (Traqly's original) is wrong for EduCraft: a whole campus shares
+ * one Wi-Fi address and mobile carriers put thousands of phones behind one
+ * (CGNAT), so different students would collapse into one "visitor" and count
+ * as duplicates. Adding the user-agent and language keeps different phones on
+ * one network distinct, while the same phone still matches itself. (The
+ * `ipHash` column name is kept; it now holds this visitor key.)
+ */
+export function hashVisitor(ip: string, userAgent: string, acceptLanguage: string): string {
+  return crypto
+    .createHmac("sha256", salt())
+    .update(`${ip}|${userAgent}|${acceptLanguage}`)
+    .digest("hex");
 }
 
 const BOT_UA_PATTERNS = [

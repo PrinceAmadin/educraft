@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { readGeo } from "@/lib/click-tracking/geo-headers";
 import {
   classifyReferrer,
-  hashIp,
+  hashVisitor,
   isBotUserAgent,
   isHeadless,
   parseBrowser,
@@ -54,7 +54,7 @@ export async function recordClick({ slotCode, headers, isTestClick = false }: Re
   }
 
   const geo = readGeo(headers);
-  const ipHash = hashIp(rawIp);
+  const ipHash = hashVisitor(rawIp, ua, headers.get("accept-language") ?? "");
   const id = crypto.randomUUID();
 
   // Explicit casts: in an INSERT ... SELECT, untyped NULL parameters would
