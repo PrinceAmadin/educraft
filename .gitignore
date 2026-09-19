@@ -21,3 +21,6 @@ tsconfig.tsbuildinfo
 # copy of it outside this repo, e.g. ~/Downloads/Educraft_Ambassador_reference/
 # — never inside a folder this .gitignore doesn't cover.
 Educraft_Ambassador/
+
+# Traqly source copy (reference only, never commit; pull analytics into src/ instead)
+/Traqly/
