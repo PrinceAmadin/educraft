@@ -34,6 +34,34 @@ export { watDayStart };
 
 const DEAD_PROJECT_STATUSES = ["CANCELLED", "REFUNDED"];
 
+// ── Own performance (private to the ambassador) ──────────────
+
+export interface OwnPerformance {
+  /** HQ projects credited to this ambassador (cancelled/refunded excluded). */
+  orders: number;
+  /** Unique visitors tracked on their link (this counting period). */
+  uniqueVisitors: number;
+  /** orders / uniqueVisitors as a percentage, 1 decimal. null until they have visitors. */
+  conversion: number | null;
+}
+
+/**
+ * Orders and conversion are business data: an ambassador sees their OWN only
+ * (My Link and Earnings). They are deliberately absent from the leaderboard,
+ * which every ambassador can read. Admin views can pass any ambassadorId.
+ */
+export async function getOwnPerformance(ambassadorId: string): Promise<OwnPerformance> {
+  const [orders, uniqueVisitors] = await Promise.all([
+    db.project.count({ where: { ambassadorId, status: { notIn: DEAD_PROJECT_STATUSES as never[] } } }),
+    db.clickEvent.count({ where: { ...isClick(ambassadorId), quality: "UNIQUE" } }),
+  ]);
+  return {
+    orders,
+    uniqueVisitors,
+    conversion: uniqueVisitors > 0 ? Math.round((orders / uniqueVisitors) * 1000) / 10 : null,
+  };
+}
+
 // ── Link ─────────────────────────────────────────────────────
 
 export interface AmbassadorLink {
@@ -79,6 +107,8 @@ export interface OverviewData {
   totalClicks: number;
   /** HQ projects allocated to this ambassador (cancelled/refunded excluded). */
   orders: number;
+  /** orders / unique visitors, %. null until they have visitors. */
+  conversion: number | null;
   trend: TrendPoint[];
   /** First tracked click, for "tracking since". */
   trackingSince: Date | null;
@@ -91,12 +121,12 @@ export async function getOverview(ambassadorId: string, slotCode: string): Promi
   const weekStart = new Date(todayStart.getTime() - 6 * DAY_MS);
   const where = isClick(ambassadorId);
 
-  const [clicksToday, uniqueThisWeek, trackedClicks, first, orders, trendRows, legacy] = await Promise.all([
+  const [clicksToday, uniqueThisWeek, trackedClicks, first, perf, trendRows, legacy] = await Promise.all([
     db.clickEvent.count({ where: { ...where, timestamp: { gte: todayStart } } }),
     db.clickEvent.count({ where: { ...where, quality: "UNIQUE", timestamp: { gte: weekStart } } }),
     db.clickEvent.count({ where }),
     db.clickEvent.findFirst({ where: { ambassadorId, ...REAL }, orderBy: { timestamp: "asc" }, select: { timestamp: true } }),
-    db.project.count({ where: { ambassadorId, status: { notIn: DEAD_PROJECT_STATUSES as never[] } } }),
+    getOwnPerformance(ambassadorId),
     db.$queryRaw<{ d: string; total: number; uniq: number }[]>`
       SELECT
         to_char((("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE ${NIGERIA_TZ}::text)::date, 'YYYY-MM-DD') AS d,
@@ -130,7 +160,8 @@ export async function getOverview(ambassadorId: string, slotCode: string): Promi
     trackedClicks,
     legacyClicks,
     totalClicks: trackedClicks + (legacyClicks ?? 0),
-    orders,
+    orders: perf.orders,
+    conversion: perf.conversion,
     trend,
     trackingSince: first?.timestamp ?? null,
   };

@@ -46,7 +46,13 @@ export function OverviewPanel({ data }: { data: OverviewData }) {
         <StatsCard label="Clicks today" value={n(data.clicksToday)} detail="Since midnight, Nigerian time" icon={LuMousePointerClick} />
         <StatsCard label="Unique this week" value={n(data.uniqueThisWeek)} detail="Different people, last 7 days" icon={LuUserCheck} tone="success" />
         <StatsCard label="Total clicks" value={n(data.totalClicks)} detail={legacyNote} icon={LuSparkles} />
-        <StatsCard label="Orders logged" value={n(data.orders)} detail="Jobs credited to you" icon={LuShoppingBag} tone="gold" />
+        <StatsCard
+          label="Orders logged"
+          value={n(data.orders)}
+          detail={data.conversion === null ? "Jobs credited to you" : `${data.conversion}% of your unique visitors`}
+          icon={LuShoppingBag}
+          tone="gold"
+        />
       </section>
       <section aria-labelledby="trend-h">
         <SectionTitle hint="Clicks and unique visitors per day, Nigerian time">

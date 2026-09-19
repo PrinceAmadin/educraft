@@ -224,68 +224,6 @@ export async function getAmbassadorCommissions(
   return { totalEarned, totalPaid, balance: totalEarned - totalPaid, rows };
 }
 
-// ── Leaderboard ──────────────────────────────────────────────
-
-export interface LeaderboardRow {
-  rank: number;
-  name: string;
-  university: string | null;
-  conversions: number;
-  isMe: boolean;
-}
-
-export interface Leaderboard {
-  top: LeaderboardRow[];
-  me: { rank: number; conversions: number; inTop: boolean } | null;
-}
-
-export async function getLeaderboard(ambassadorId: string): Promise<Leaderboard> {
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-
-  // A monthly conversion = a project placed this month by a referred client.
-  const grouped = await db.project.groupBy({
-    by: ["ambassadorId"],
-    where: { ambassadorId: { not: null }, createdAt: { gte: monthStart } },
-    _count: { _all: true },
-  });
-
-  const ids = grouped
-    .map((g) => g.ambassadorId)
-    .filter((x): x is string => x != null);
-  const ambassadors = await db.ambassador.findMany({
-    where: { id: { in: ids } },
-    select: { id: true, fullName: true, university: { select: { abbreviation: true } } },
-  });
-  const byId = new Map(ambassadors.map((a) => [a.id, a]));
-
-  const ranked = grouped
-    .map((g) => ({
-      id: g.ambassadorId as string,
-      conversions: g._count._all,
-      name: byId.get(g.ambassadorId as string)?.fullName ?? "Unknown",
-      university: byId.get(g.ambassadorId as string)?.university?.abbreviation ?? null,
-    }))
-    .sort((a, b) => b.conversions - a.conversions);
-
-  const top: LeaderboardRow[] = ranked.slice(0, 10).map((r, i) => ({
-    rank: i + 1,
-    name: r.name,
-    university: r.university,
-    conversions: r.conversions,
-    isMe: r.id === ambassadorId,
-  }));
-
-  const myIndex = ranked.findIndex((r) => r.id === ambassadorId);
-  const me =
-    myIndex >= 0
-      ? { rank: myIndex + 1, conversions: ranked[myIndex].conversions, inTop: myIndex < 10 }
-      : null;
-
-  return { top, me };
-}
-
 // ── Profile ──────────────────────────────────────────────────
 
 export async function getAmbassadorProfile(ambassadorId: string) {

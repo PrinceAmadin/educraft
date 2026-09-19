@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { LuInbox, LuWallet } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getAmbassadorByUserId, getAmbassadorCommissions } from "@/lib/services/ambassador-portal";
+import { getOwnPerformance } from "@/lib/services/ambassador-analytics";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { formatDate, formatNaira } from "@/lib/utils";
@@ -17,7 +18,10 @@ export default async function AmbassadorCommissionsPage() {
     return <EmptyState icon={LuInbox} title="No ambassador profile" description="Contact an admin." />;
   }
 
-  const { totalEarned, totalPaid, balance, rows } = await getAmbassadorCommissions(ambassador.id);
+  const [{ totalEarned, totalPaid, balance, rows }, perf] = await Promise.all([
+    getAmbassadorCommissions(ambassador.id),
+    getOwnPerformance(ambassador.id),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -32,6 +36,13 @@ export default async function AmbassadorCommissionsPage() {
         <Stat label="Total earned" value={formatNaira(totalEarned)} />
         <Stat label="Total paid" value={formatNaira(totalPaid)} />
         <Stat label="Balance" value={formatNaira(balance)} strong />
+      </div>
+
+      {/* Private to you: never shown on the leaderboard. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Stat label="Orders" value={perf.orders.toLocaleString("en-NG")} />
+        <Stat label="Unique visitors" value={perf.uniqueVisitors.toLocaleString("en-NG")} />
+        <Stat label="Conversion" value={perf.conversion === null ? "-" : `${perf.conversion}%`} />
       </div>
 
       {rows.length === 0 ? (

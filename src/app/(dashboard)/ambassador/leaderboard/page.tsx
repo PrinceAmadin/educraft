@@ -1,77 +1,84 @@
 import type { Metadata } from "next";
 import { LuInbox, LuTrophy } from "react-icons/lu";
 import { auth } from "@/lib/auth";
-import { getAmbassadorByUserId, getLeaderboard } from "@/lib/services/ambassador-portal";
+import { getAmbassadorByUserId } from "@/lib/services/ambassador-portal";
+import { getClickLeaderboard } from "@/lib/services/ambassador-leaderboard";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { cn } from "@/lib/utils";
+import {
+  PERIODS,
+  PeriodTabs,
+  Podium,
+  ago,
+  parsePeriod,
+} from "@/components/ambassador-analytics/LeaderboardParts";
+import { RankedList } from "@/components/ambassador-analytics/RankedList";
 
 export const metadata: Metadata = { title: "Leaderboard" };
-export const dynamic = "force-dynamic";
 
-export default async function AmbassadorLeaderboardPage() {
+/**
+ * Click leaderboard. Every ambassador sees every other ambassador's name and
+ * stats on purpose: the competition is the point. Contact details are never
+ * part of the data.
+ *
+ * Deliberately NOT `dynamic = "force-dynamic"`: that also bypasses the
+ * 5-minute ranking cache. The page is dynamic anyway (it reads the session).
+ */
+export default async function AmbassadorLeaderboardPage({
+  searchParams,
+}: {
+  searchParams: { period?: string };
+}) {
   const session = await auth();
   const ambassador = session?.user ? await getAmbassadorByUserId(session.user.id) : null;
   if (!ambassador) {
     return <EmptyState icon={LuInbox} title="No ambassador profile" description="Contact an admin." />;
   }
 
-  const { top, me } = await getLeaderboard(ambassador.id);
-  const monthLabel = new Date().toLocaleDateString("en-NG", { month: "long" });
+  const period = parsePeriod(searchParams.period);
+  const { entries, generatedAt } = await getClickLeaderboard(period);
+
+  // Only people with clicks stand on the podium; everyone else is in the list.
+  const withClicks = entries.filter((e) => e.clicks > 0);
+  const podium = withClicks.slice(0, 3);
+  const rest = entries.slice(podium.length);
+  const me = entries.find((e) => e.ambassadorId === ambassador.id) ?? null;
+  const blurb = PERIODS.find((p) => p.key === period)!.blurb;
 
   return (
     <div className="space-y-8">
-      <PageHeader title="Leaderboard" description={`Top ambassadors by conversions in ${monthLabel}.`} />
+      <PageHeader title="Leaderboard" description={`${blurb}. Only unique visitors count.`} />
+
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <PeriodTabs active={period} />
+        <p className="text-xs text-muted-foreground">Updated {ago(generatedAt)}</p>
+      </div>
 
       {me ? (
         <div className="flex items-center gap-4 rounded-2xl bg-primary/10 p-5">
           <span className="font-mono text-[2rem] font-medium leading-none tabular-nums text-primary">#{me.rank}</span>
           <div>
-            <p className="text-[15px] font-medium text-foreground">Your position this month</p>
+            <p className="text-[15px] font-medium text-foreground">Your position</p>
             <p className="mt-0.5 text-[13px] text-muted-foreground">
-              {me.conversions} conversion{me.conversions === 1 ? "" : "s"} so far
-              {me.inTop ? "" : " — keep going to break into the top 10"}
+              {me.clicks > 0
+                ? `${me.clicks.toLocaleString("en-NG")} unique click${me.clicks === 1 ? "" : "s"} in this period`
+                : "No unique clicks in this period yet. Share your link to get on the board."}
             </p>
           </div>
         </div>
-      ) : (
-        <p className="rounded-2xl bg-zone p-5 text-sm text-muted-foreground">
-          No conversions yet this month. Share your link to get on the board.
-        </p>
-      )}
+      ) : null}
 
-      {top.length === 0 ? (
+      {withClicks.length === 0 ? (
         <EmptyState
           icon={LuTrophy}
-          title="No activity this month"
-          description="Conversions this month will rank ambassadors here."
+          title="No clicks yet in this period"
+          description="As soon as someone opens an ambassador link, the ranking starts here."
         />
       ) : (
-        <ol className="divide-y divide-border/80">
-          {top.map((row) => (
-            <li
-              key={`${row.rank}-${row.name}`}
-              className={cn("-mx-3 flex items-center gap-3 rounded-lg px-3 py-3.5", row.isMe && "bg-primary/5")}
-            >
-              <span
-                className={cn(
-                  "flex size-8 shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold",
-                  row.rank === 1 ? "bg-gold/20 text-gold" : row.rank <= 3 ? "bg-elevated text-foreground" : "text-muted-foreground"
-                )}
-              >
-                {row.rank}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className={cn("text-[15px]", row.isMe ? "font-semibold text-foreground" : "text-foreground")}>
-                  {row.isMe ? "You" : row.name}
-                </span>
-                {row.university ? <span className="ml-2 text-[13px] text-muted-foreground">{row.university}</span> : null}
-              </span>
-              <span className="font-mono text-[15px] font-medium tabular-nums text-foreground">{row.conversions}</span>
-            </li>
-          ))}
-        </ol>
+        <Podium top={podium} meId={ambassador.id} />
       )}
+
+      <RankedList entries={rest} meId={ambassador.id} podiumSize={podium.length} />
     </div>
   );
 }
