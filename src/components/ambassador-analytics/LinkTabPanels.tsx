@@ -33,7 +33,7 @@ function SectionTitle({ children, hint }: { children: React.ReactNode; hint?: st
 
 // ── Overview ─────────────────────────────────────────────────
 
-export function OverviewPanel({ data }: { data: OverviewData }) {
+export function OverviewPanel({ data, admin = false }: { data: OverviewData; admin?: boolean }) {
   const legacyNote =
     data.legacyClicks && data.legacyClicks > 0
       ? `Includes ${n(data.legacyClicks)} from before detailed tracking`
@@ -49,7 +49,11 @@ export function OverviewPanel({ data }: { data: OverviewData }) {
         <StatsCard
           label="Orders logged"
           value={n(data.orders)}
-          detail={data.conversion === null ? "Jobs credited to you" : `${data.conversion}% of your unique visitors`}
+          detail={
+            data.conversion === null
+              ? admin ? "Jobs credited" : "Jobs credited to you"
+              : `${data.conversion}% of ${admin ? "their" : "your"} unique visitors`
+          }
           icon={LuShoppingBag}
           tone="gold"
         />
@@ -145,7 +149,7 @@ export function AnalyticsPanel({ data }: { data: AnalyticsData }) {
       <EmptyState
         icon={LuCalendarDays}
         title="No clicks to analyse yet"
-        description="Once people open your link, you will see when they click, where they are and what phone they use."
+        description="Once people open the link, you will see when they click, where they are and what phone they use."
       />
     );
   }
@@ -182,7 +186,7 @@ const REASONS: Record<string, string> = {
   headless_browser: "Headless browser",
 };
 
-export function QualityPanel({ data }: { data: QualityData }) {
+export function QualityPanel({ data, admin = false }: { data: QualityData; admin?: boolean }) {
   if (data.recorded === 0) {
     return (
       <EmptyState icon={LuShieldCheck} title="Nothing recorded yet" description="Quality checks appear once your link gets its first visits." />
@@ -205,7 +209,7 @@ export function QualityPanel({ data }: { data: QualityData }) {
           </p>
         </div>
         <p className="max-w-md pb-2 text-sm text-muted-foreground">
-          The share of your {n(data.recorded)} recorded visits that were a new, real person. Higher is better.
+          The share of {admin ? "their" : "your"} {n(data.recorded)} recorded visits that were a new, real person. Higher is better.
         </p>
       </section>
 
@@ -257,13 +261,17 @@ export function QualityPanel({ data }: { data: QualityData }) {
 
 // ── History ──────────────────────────────────────────────────
 
-export function HistoryPanel({ periods }: { periods: HistoryPeriod[] }) {
+export function HistoryPanel({ periods, admin = false }: { periods: HistoryPeriod[]; admin?: boolean }) {
   if (periods.length === 0) {
     return (
       <EmptyState
         icon={LuHistory}
         title="No past periods"
-        description="When EduCraft resets your count, the clicks before it are kept here as a closed period."
+        description={
+          admin
+            ? "Use Reset click count to close the current period. The clicks before it are kept here."
+            : "When EduCraft resets your count, the clicks before it are kept here as a closed period."
+        }
       />
     );
   }

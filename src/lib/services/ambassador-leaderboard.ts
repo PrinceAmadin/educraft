@@ -23,6 +23,8 @@ import { watDayStart } from "@/lib/click-tracking/peak-hours";
 export type LeaderboardPeriod = "daily" | "weekly" | "all";
 
 export const LEADERBOARD_CACHE_SECONDS = 300;
+/** Revalidate this tag to refresh the board immediately (e.g. after a reset). */
+export const LEADERBOARD_CACHE_TAG = "ambassador-leaderboard";
 const DAY_MS = 86_400_000;
 
 export interface LeaderboardEntry {
@@ -90,4 +92,5 @@ async function computeLeaderboard(period: LeaderboardPeriod): Promise<Leaderboar
 export const getClickLeaderboard = (period: LeaderboardPeriod) =>
   unstable_cache(() => computeLeaderboard(period), ["ambassador-click-leaderboard", period], {
     revalidate: LEADERBOARD_CACHE_SECONDS,
+    tags: [LEADERBOARD_CACHE_TAG],
   })();

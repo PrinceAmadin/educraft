@@ -12,6 +12,7 @@ import { ParentAssignment, SubAmbassadorsList } from "@/components/ambassadors/P
 import { MessageAmbassadorButton } from "@/components/ambassadors/MessageAmbassadorButton";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { StatusBadge } from "@/components/projects/StatusBadge";
+import { AdminAnalytics } from "@/components/ambassador-analytics/AdminAnalytics";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuUsers } from "react-icons/lu";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
@@ -28,11 +29,18 @@ export async function generateMetadata({
   return { title: data ? data.ambassador.fullName : "Ambassador not found" };
 }
 
-export default async function AmbassadorDetailPage({ params }: { params: { id: string } }) {
+export default async function AmbassadorDetailPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams: { view?: string; tab?: string; from?: string; to?: string };
+}) {
   const data = await getAmbassadorDetail(params.id);
   if (!data) notFound();
 
   const { ambassador, metrics, progress, payouts, parentCommission } = data;
+  const view = searchParams.view === "analytics" ? "analytics" : "profile";
   const [parentCandidates, defaultParentRate] = await Promise.all([
     listParentCandidates(ambassador.id),
     getDefaultParentCommissionRate(),
@@ -109,6 +117,37 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
         </dl>
       </div>
 
+      <nav aria-label="Ambassador sections" className="inline-flex gap-1 rounded-xl bg-zone p-1">
+        {[
+          { key: "profile", label: "Profile", href: `/admin/ambassadors/${ambassador.id}` },
+          { key: "analytics", label: "Link analytics", href: `/admin/ambassadors/${ambassador.id}?view=analytics` },
+        ].map((t) => (
+          <Link
+            key={t.key}
+            href={t.href}
+            scroll={false}
+            aria-current={t.key === view ? "page" : undefined}
+            className={cn(
+              "inline-flex min-h-11 items-center rounded-lg px-4 text-sm font-medium transition-colors",
+              t.key === view ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {t.label}
+          </Link>
+        ))}
+      </nav>
+
+      {view === "analytics" ? (
+        <AdminAnalytics
+          ambassadorId={ambassador.id}
+          ambassadorName={ambassador.fullName}
+          basePath={`/admin/ambassadors/${ambassador.id}`}
+          tab={searchParams.tab}
+          from={searchParams.from}
+          to={searchParams.to}
+        />
+      ) : (
+      <>
       <ReferralLinkCard code={ambassador.referralCode} />
 
       <ParentAssignment
@@ -277,6 +316,8 @@ export default async function AmbassadorDetailPage({ params }: { params: { id: s
           </ul>
         </section>
       ) : null}
+      </>
+      )}
     </div>
   );
 }

@@ -16,7 +16,23 @@ export function parseLinkTab(v: string | undefined): LinkTab {
 }
 
 /** Segmented control on a zone, same look as the admin ambassador tabs. */
-export function LinkTabs({ active, basePath }: { active: LinkTab; basePath: string }) {
+export function LinkTabs({
+  active,
+  basePath,
+  extraParams,
+}: {
+  active: LinkTab;
+  basePath: string;
+  /** Kept on every tab link (the admin view's `view`, `from` and `to`). */
+  extraParams?: Record<string, string | undefined>;
+}) {
+  const hrefFor = (tab: LinkTab) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(extraParams ?? {})) if (v) q.set(k, v);
+    if (tab !== "overview") q.set("tab", tab);
+    const qs = q.toString();
+    return qs ? `${basePath}?${qs}` : basePath;
+  };
   return (
     <nav
       aria-label="Link analytics sections"
@@ -25,7 +41,7 @@ export function LinkTabs({ active, basePath }: { active: LinkTab; basePath: stri
       {LINK_TABS.map((t) => (
         <Link
           key={t.key}
-          href={t.key === "overview" ? basePath : `${basePath}?tab=${t.key}`}
+          href={hrefFor(t.key)}
           scroll={false}
           aria-current={t.key === active ? "page" : undefined}
           className={cn(

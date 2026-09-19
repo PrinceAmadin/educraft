@@ -57,7 +57,17 @@ const COLS = "lg:grid-cols-[8.5rem_4rem_minmax(0,1fr)_minmax(0,1fr)_5rem_5rem_mi
  * Every recorded visit, 50 per page, from /api/ambassador/link/log (which
  * scopes to the signed-in ambassador). Desktop: a table; phone: stacked rows.
  */
-export function RawLogPanel({ exportHref }: { exportHref: string }) {
+export function RawLogPanel({
+  exportHref,
+  logHref = "/api/ambassador/link/log",
+  extraQuery = "",
+}: {
+  exportHref: string;
+  /** Endpoint that returns one page of the log (session-scoped for ambassadors). */
+  logHref?: string;
+  /** Extra query string, e.g. "&from=2026-09-01&to=2026-09-19" (admin date range). */
+  extraQuery?: string;
+}) {
   const [page, setPage] = React.useState(1);
   const [data, setData] = React.useState<Page | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -67,7 +77,7 @@ export function RawLogPanel({ exportHref }: { exportHref: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/ambassador/link/log?page=${page}`, { cache: "no-store" })
+    fetch(`${logHref}?page=${page}${extraQuery}`, { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not load the log.");
         return (await r.json()) as Page;
@@ -78,7 +88,7 @@ export function RawLogPanel({ exportHref }: { exportHref: string }) {
     return () => {
       cancelled = true;
     };
-  }, [page]);
+  }, [page, logHref, extraQuery]);
 
   return (
     <div className="space-y-4">
@@ -101,7 +111,7 @@ export function RawLogPanel({ exportHref }: { exportHref: string }) {
           <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> Loading
         </div>
       ) : data && data.total === 0 ? (
-        <EmptyState icon={LuListX} title="No visits yet" description="Every time someone opens your link, it appears here." />
+        <EmptyState icon={LuListX} title="No visits yet" description="Every time someone opens the link, it appears here." />
       ) : data ? (
         <div className={cn("transition-opacity", loading && "opacity-50")}>
           <div className={`hidden gap-3 border-b border-border/60 px-1 pb-2 lg:grid ${COLS}`}>

@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { readClicks } from "@/lib/services/ambassador-tracking";
-import { getPeakHours, NIGERIA_TZ, watDayStart, type PeakHoursData } from "@/lib/click-tracking/peak-hours";
+import { getPeakHours, NIGERIA_TZ, watDayStart, type InsightVoice, type PeakHoursData } from "@/lib/click-tracking/peak-hours";
 import { getRegionName } from "@/lib/click-tracking/region-names";
 
 /**
@@ -31,6 +31,38 @@ const DAY_MS = 86_400_000;
 const WAT_OFFSET_MS = 3_600_000; // Nigeria is UTC+1 all year
 
 export { watDayStart };
+
+// ── Date range (admin view) ──────────────────────────────────
+
+/** Half-open range [from, to) in UTC instants, built from WAT calendar days. */
+export interface DateRange {
+  from: Date;
+  to: Date;
+}
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_RANGE_DAYS = 366;
+
+/**
+ * "2026-09-01" .. "2026-09-19" (inclusive, Nigerian calendar days) -> the
+ * instants that bound them. Returns undefined for a missing or invalid range so
+ * a bad query string falls back to "all time" instead of erroring.
+ */
+export function parseRange(from?: string | null, to?: string | null): DateRange | undefined {
+  if (!from || !to || !YMD.test(from) || !YMD.test(to)) return undefined;
+  const start = new Date(`${from}T00:00:00.000Z`);
+  const end = new Date(`${to}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return undefined;
+  if (end < start || (end.getTime() - start.getTime()) / DAY_MS >= MAX_RANGE_DAYS) return undefined;
+  // 00:00 WAT on `from` is 23:00 UTC the day before; `to` is inclusive, so +1 day.
+  return {
+    from: new Date(start.getTime() - WAT_OFFSET_MS),
+    to: new Date(end.getTime() + DAY_MS - WAT_OFFSET_MS),
+  };
+}
+
+const inRange = (range?: DateRange) =>
+  (range ? { timestamp: { gte: range.from, lt: range.to } } : {}) satisfies Prisma.ClickEventWhereInput;
 
 const DEAD_PROJECT_STATUSES = ["CANCELLED", "REFUNDED"];
 
@@ -218,10 +250,14 @@ function rows(
     .map((e) => ({ label: e.label, detail: e.detail ?? null, clicks: e.clicks, share: total ? Math.round((e.clicks / total) * 100) : 0 }));
 }
 
-export async function getAnalytics(ambassadorId: string): Promise<AnalyticsData> {
-  const where = isClick(ambassadorId);
+export async function getAnalytics(
+  ambassadorId: string,
+  range?: DateRange,
+  voice: InsightVoice = "you"
+): Promise<AnalyticsData> {
+  const where = { ...isClick(ambassadorId), ...inRange(range) };
   const [peak, geo, device, os, browser, source] = await Promise.all([
-    getPeakHours(ambassadorId),
+    getPeakHours(ambassadorId, range ?? 30, voice),
     // ONE grouped query drives the country -> region -> city breakdowns, so
     // the three tables always agree with each other (same as Traqly).
     db.clickEvent.groupBy({ by: ["country", "regionCode", "region", "city"], where, _count: { _all: true } }),
@@ -296,8 +332,8 @@ export interface QualityData {
   }[];
 }
 
-export async function getQuality(ambassadorId: string): Promise<QualityData> {
-  const base = { ambassadorId, ...REAL };
+export async function getQuality(ambassadorId: string, range?: DateRange): Promise<QualityData> {
+  const base = { ambassadorId, ...REAL, ...inRange(range) };
   const [groups, fraud] = await Promise.all([
     db.clickEvent.groupBy({ by: ["quality"], where: base, _count: { _all: true } }),
     db.clickEvent.findMany({
@@ -386,8 +422,8 @@ const toLogRow = (r: Prisma.ClickEventGetPayload<{ select: typeof LOG_SELECT }>)
 });
 
 /** Every recorded visit (bots and fraud included, so the Quality columns mean something). */
-export async function getRawLog(ambassadorId: string, page: number) {
-  const where = { ambassadorId, ...REAL };
+export async function getRawLog(ambassadorId: string, page: number, range?: DateRange) {
+  const where = { ambassadorId, ...REAL, ...inRange(range) };
   const pageNo = Math.max(1, Math.floor(page) || 1);
   const [total, rowsRaw] = await Promise.all([
     db.clickEvent.count({ where }),
@@ -409,12 +445,33 @@ export async function getRawLog(ambassadorId: string, page: number) {
 
 /** All rows for the CSV export, newest first, capped so one request stays bounded. */
 export const EXPORT_ROW_CAP = 50_000;
-export async function getExportRows(ambassadorId: string): Promise<RawLogRow[]> {
+export async function getExportRows(ambassadorId: string, range?: DateRange): Promise<RawLogRow[]> {
   const r = await db.clickEvent.findMany({
-    where: { ambassadorId, ...REAL },
+    where: { ambassadorId, ...REAL, ...inRange(range) },
     orderBy: { timestamp: "desc" },
     take: EXPORT_ROW_CAP,
     select: LOG_SELECT,
   });
   return r.map(toLogRow);
+}
+
+/** Rows a reset would archive (every live row, bots included). */
+export const countLiveClicks = (ambassadorId: string) =>
+  db.clickEvent.count({ where: { ambassadorId, archivedAt: null } });
+
+// ── Reset (admin only) ───────────────────────────────────────
+
+/**
+ * Closes the current counting period: every live click is stamped with the same
+ * `archivedAt` and moves to History. NOTHING is deleted; the numbers simply
+ * restart from zero (this also restarts the ambassador's leaderboard count).
+ * Callers must be admins; this function does not check.
+ */
+export async function resetClickCount(ambassadorId: string): Promise<{ archived: number }> {
+  const stamp = new Date();
+  const { count } = await db.clickEvent.updateMany({
+    where: { ambassadorId, archivedAt: null },
+    data: { archivedAt: stamp },
+  });
+  return { archived: count };
 }

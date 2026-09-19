@@ -68,7 +68,7 @@ interface RawBucket { day_index: number; hour: number; clicks: number }
  * Clicks bucketed by weekday and hour in WAT. Counts real visits only: not
  * test clicks, not archived (reset) clicks, not bots.
  */
-async function fetchBuckets(ambassadorId: string, since: Date): Promise<RawBucket[]> {
+async function fetchBuckets(ambassadorId: string, since: Date, until?: Date): Promise<RawBucket[]> {
   return db.$queryRaw<RawBucket[]>`
     SELECT
       EXTRACT(DOW  FROM ("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE ${NIGERIA_TZ}::text)::int AS day_index,
@@ -77,6 +77,7 @@ async function fetchBuckets(ambassadorId: string, since: Date): Promise<RawBucke
     FROM "ClickEvent"
     WHERE "ambassadorId" = ${ambassadorId}::text
       AND "timestamp" >= ${since.toISOString()}::timestamp
+      AND (${until ? until.toISOString() : null}::timestamp IS NULL OR "timestamp" < ${until ? until.toISOString() : null}::timestamp)
       AND "isTestClick" = false
       AND "archivedAt" IS NULL
       AND "isFraud" = false
@@ -87,12 +88,16 @@ async function fetchBuckets(ambassadorId: string, since: Date): Promise<RawBucke
 
 const emptyHourly = (): HourBucket[] => Array.from({ length: 24 }, (_, hour) => ({ hour, clicks: 0 }));
 
+export type InsightVoice = "you" | "they";
+
 function buildInsight(
   hourly: HourBucket[],
   peakHour: number | null,
   peakDay: string | null,
   total: number,
-  days: number
+  periodText: string,
+  showDay: boolean,
+  voice: InsightVoice
 ): { insight: string | null; share: number } {
   if (peakHour === null || total === 0) return { insight: null, share: 0 };
 
@@ -102,24 +107,42 @@ function buildInsight(
   const share = Math.round((windowClicks / total) * 100);
 
   const range = formatWindow(window[0], window[2]);
-  const period = days === 1 ? "today" : `over the past ${days} days`;
-  const dayPart = peakDay && days > 1 ? ` on ${peakDay}s` : "";
+  const dayPart = peakDay && showDay ? ` on ${peakDay}s` : "";
+  const mine = voice === "you";
 
   return {
     insight:
-      `Your audience is most active around ${formatHour(peakHour)} ${NIGERIA_TZ_LABEL}${dayPart}. ` +
-      `The ${range} window brought ${share}% of your clicks ${period}. ` +
-      `Share your link in that window to reach the most people.`,
+      `${mine ? "Your" : "Their"} audience is most active around ${formatHour(peakHour)} ${NIGERIA_TZ_LABEL}${dayPart}. ` +
+      `The ${range} window brought ${share}% of ${mine ? "your" : "their"} clicks ${periodText}. ` +
+      (mine
+        ? "Share your link in that window to reach the most people."
+        : "Sharing the link in that window would reach the most people."),
     share,
   };
 }
 
-export async function getPeakHours(ambassadorId: string, days = 30): Promise<PeakHoursData> {
-  const span = Math.min(Math.max(days, 1), 90);
+export interface PeakRange { from: Date; to: Date }
+
+/**
+ * `span` is either a number of days back from now (the default 30) or an
+ * explicit range (admin date picker). With a range, the "today" line is
+ * omitted since it would not describe the selected period.
+ */
+export async function getPeakHours(
+  ambassadorId: string,
+  span: number | PeakRange = 30,
+  voice: InsightVoice = "you"
+): Promise<PeakHoursData> {
+  const range = typeof span === "number" ? null : span;
+  const days = range
+    ? Math.max(1, Math.round((range.to.getTime() - range.from.getTime()) / DAY_MS))
+    : Math.min(Math.max(span as number, 1), 90);
   const [buckets, todayBuckets] = await Promise.all([
-    fetchBuckets(ambassadorId, new Date(Date.now() - span * DAY_MS)),
+    range
+      ? fetchBuckets(ambassadorId, range.from, range.to)
+      : fetchBuckets(ambassadorId, new Date(Date.now() - days * DAY_MS)),
     // "Today" is today in Lagos (00:00 WAT), the same day "Clicks Today" counts.
-    fetchBuckets(ambassadorId, watDayStart()),
+    range ? Promise.resolve([] as RawBucket[]) : fetchBuckets(ambassadorId, watDayStart()),
   ]);
 
   const hourly = emptyHourly();
@@ -139,7 +162,15 @@ export async function getPeakHours(ambassadorId: string, days = 30): Promise<Pea
   const peakDayBucket =
     totalClicks > 0 ? daily.reduce((best, d) => (d.clicks > best.clicks ? d : best), daily[0]) : null;
   const peakDay = peakDayBucket && peakDayBucket.clicks > 0 ? peakDayBucket.day : null;
-  const { insight, share } = buildInsight(hourly, peakHour, peakDay, totalClicks, span);
+  const { insight, share } = buildInsight(
+    hourly,
+    peakHour,
+    peakDay,
+    totalClicks,
+    range ? "in the selected period" : `over the past ${days} days`,
+    days > 1,
+    voice
+  );
 
   // "Today it was 8 o'clock", computed the same way over one day.
   const todayHourly = emptyHourly();
@@ -150,7 +181,7 @@ export async function getPeakHours(ambassadorId: string, days = 30): Promise<Pea
 
   return {
     timezoneLabel: NIGERIA_TZ_LABEL,
-    days: span,
+    days,
     totalClicks,
     hourly,
     daily,
