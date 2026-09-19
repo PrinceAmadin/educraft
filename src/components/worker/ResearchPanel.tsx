@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { PHASES, estimateEta, formatEta, phaseForStatus, type PhaseKey } from "@/lib/research-eta";
 
 interface ReferenceRow {
   id: string;
@@ -31,6 +32,7 @@ interface ReferenceRow {
   pdfUrl: string | null;
   driveFileId: string | null;
   citedByCount: number | null;
+  round: number;
 }
 
 interface ResearchJobData {
@@ -38,6 +40,8 @@ interface ResearchJobData {
   status: string;
   targetCount: number;
   replacementRound: number;
+  searchQueries: string[];
+  searchCursor: number;
   corePercent: number | null;
   closelyRelatedPercent: number | null;
   driveFolderLink: string | null;
@@ -157,9 +161,14 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const [resetOpen, setResetOpen] = React.useState(false);
   const [resetting, setResetting] = React.useState(false);
   const stopRef = React.useRef(false);
+  // Latest job status, and how long a step of each phase has actually taken
+  // on this connection — the time estimate learns from these.
+  const statusRef = React.useRef<string | null>(null);
+  const [observed, setObserved] = React.useState<Partial<Record<PhaseKey, number>>>({});
 
   const load = React.useCallback(async () => {
     const data = await fetchJson(`/api/worker/projects/${projectCode}/research`);
+    statusRef.current = data.job?.status ?? null;
     setJob(data.job ?? null);
     return data.job as ResearchJobData | null;
   }, [projectCode]);
@@ -183,9 +192,15 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
         // eslint-disable-next-line no-constant-condition
         while (true) {
           if (stopRef.current) return;
+          const phase = statusRef.current ? phaseForStatus(statusRef.current) : null;
+          const startedAt = Date.now();
           const result = await fetchJson(`/api/worker/projects/${projectCode}/research/step`, {
             method: "POST",
           });
+          if (phase) {
+            const took = (Date.now() - startedAt) / 1000;
+            setObserved((prev) => ({ ...prev, [phase]: prev[phase] == null ? took : prev[phase]! * 0.6 + took * 0.4 }));
+          }
           await load();
           if (result.done) break;
         }
@@ -197,6 +212,47 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
     },
     [job, projectCode, load]
   );
+
+  // While the job runs: keep a phone's screen awake (a sleeping phone pauses
+  // the page and the job with it) and warn before the page is closed.
+  React.useEffect(() => {
+    if (!running) return;
+    let lock: { release: () => Promise<void> } | null = null;
+    const acquire = async () => {
+      try {
+        const wl = (navigator as unknown as { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } }).wakeLock;
+        if (wl && document.visibilityState === "visible") lock = await wl.request("screen");
+      } catch {
+        /* not supported or denied — the job still runs */
+      }
+    };
+    void acquire();
+    const onVisible = () => void acquire();
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      void lock?.release().catch(() => {});
+    };
+  }, [running]);
+
+  const eta = job ? estimateEta(job, observed) : null;
+  const remainingLabel = eta ? formatEta(eta.remainingSeconds) : null;
+
+  // The browser tab shows the countdown, so it's visible from other tabs.
+  React.useEffect(() => {
+    if (!running || !remainingLabel) return;
+    const original = document.title;
+    document.title = `Researching · ${remainingLabel} left`;
+    return () => {
+      document.title = original;
+    };
+  }, [running, remainingLabel]);
 
   async function resetAndRun() {
     setResetting(true);
@@ -282,25 +338,46 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
         </div>
       ) : !isTerminal ? (
         <div className="mt-2">
-          <p className="text-sm text-foreground">
-            {STATUS_LABEL[job.status] ?? "Working…"}
-            {job.replacementRound > 0 ? ` (replacement round ${job.replacementRound})` : ""}
-          </p>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <p className="text-sm font-medium text-foreground">
+              {eta ? `Step ${eta.phaseNumber} of ${PHASES.length} · ` : ""}
+              {STATUS_LABEL[job.status] ?? "Working…"}
+              {job.replacementRound > 0 ? ` (search round ${job.replacementRound + 1})` : ""}
+            </p>
+            {remainingLabel ? (
+              <p className="font-mono text-sm tabular-nums text-foreground">
+                {running ? `${remainingLabel} left` : `${remainingLabel} to go`}
+              </p>
+            ) : null}
+          </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-elevated">
             <div
-              className={cn("h-full rounded-full bg-primary transition-all", running && "animate-pulse")}
+              className={cn("h-full rounded-full bg-primary transition-all duration-500", running && "animate-pulse")}
               style={{
-                width:
-                  refs.length > 0
-                    ? `${Math.min(100, Math.round((refs.filter((r) => r.status !== "CANDIDATE").length / Math.max(refs.length, job.targetCount)) * 100))}%`
-                    : "8%",
+                width: eta
+                  ? `${Math.max(4, Math.min(98, Math.round((1 - eta.remainingSeconds / eta.totalSeconds) * 100)))}%`
+                  : "8%",
               }}
             />
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             {refs.length > 0
-              ? `${refs.length} paper${refs.length === 1 ? "" : "s"} found (${openAccess} with PDF, ${paywalled} paywalled) · ${kept.length} kept`
+              ? `${refs.length} paper${refs.length === 1 ? "" : "s"} found (${openAccess} with PDF, ${paywalled} paywalled) · ${kept.length} kept so far`
               : "Getting started…"}
+          </p>
+          <p className="mt-3 rounded-xl bg-zone p-3 text-xs text-muted-foreground">
+            {running ? (
+              <>
+                Usually takes around 8 minutes in total. You can switch to another tab or app while it works,
+                and the time left shows on this browser tab. <strong className="text-foreground">Keep this
+                page open</strong> — closing it or locking the phone pauses the search until you press Resume.
+                {job.replacementRound === 0
+                  ? " If too few papers pass the relevance check, a second search round adds about 3 minutes."
+                  : ""}
+              </>
+            ) : (
+              <>Paused. Press Resume and it carries on from exactly where it stopped, nothing is lost.</>
+            )}
           </p>
           {!running ? (
             <div className="mt-3 flex flex-wrap gap-2">
