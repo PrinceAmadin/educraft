@@ -49,6 +49,8 @@ export async function sendMail(message: {
   subject: string;
   html: string;
   text: string;
+  /** Extra headers, e.g. List-Unsubscribe for the weekly summary. */
+  headers?: Record<string, string>;
 }): Promise<MailResult> {
   if (!mailerConfigured()) {
     return { ok: false, error: "Email isn't set up — GMAIL_APP_PASSWORD is missing or not 16 characters." };
@@ -60,6 +62,7 @@ export async function sendMail(message: {
       subject: message.subject,
       html: message.html,
       text: message.text,
+      ...(message.headers ? { headers: message.headers } : {}),
     });
     return { ok: true };
   } catch (error) {

@@ -35,7 +35,8 @@ function hasValidCronSecret(req: NextRequest): boolean {
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
-  const dashboardUrl = `${callbackBaseUrl()}/ambassador`;
+  const siteUrl = callbackBaseUrl();
+  const dashboardUrl = `${siteUrl}/ambassador`;
 
   try {
     // ── Preview: HTML in the browser, never sends ──────────────
@@ -43,7 +44,7 @@ export async function GET(req: NextRequest) {
       const guard = await requireAdmin();
       if (!guard.ok) return guard.response;
 
-      const { reports, label } = await buildWeeklyReports();
+      const { reports, label, optedOut } = await buildWeeklyReports();
       const want = q.get("ambassador");
       const pick =
         (want && reports.find((r) => r.ambassadorId === want || r.slotCode === want)) ||
@@ -54,10 +55,12 @@ export async function GET(req: NextRequest) {
           { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } }
         );
       }
-      const mail = ambassadorWeeklyEmail(pick, { dashboardUrl });
+      // The real unsubscribe link would change a real ambassador's setting if
+      // clicked while previewing, so the preview link is inert.
+      const mail = ambassadorWeeklyEmail(pick, { dashboardUrl, unsubscribeUrl: "#preview-link-disabled" });
       const banner =
         `<div style="font:13px/1.5 Inter,Arial,sans-serif;background:#FEF3C7;color:#78350F;padding:10px 16px;text-align:center">` +
-        `Preview only, nothing was sent. Week ${label} · ${reports.length} would receive it · Subject: ${mail.subject.replace(/</g, "&lt;")}</div>`;
+        `Preview only, nothing was sent. Week ${label} · ${reports.length} would receive it (${optedOut} unsubscribed) · Subject: ${mail.subject.replace(/</g, "&lt;")}</div>`;
       return new NextResponse(mail.html.replace(/<body[^>]*>/, (m) => m + banner), {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
@@ -91,6 +94,7 @@ export async function GET(req: NextRequest) {
       dry,
       force: q.get("force") === "true" && cron,
       dashboardUrl,
+      siteUrl,
       send: sendMail,
     });
     console.log("[weekly-report]", JSON.stringify({ ...result, failures: result.failures.length }));

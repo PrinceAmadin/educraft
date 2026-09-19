@@ -243,6 +243,7 @@ export async function getAmbassadorProfile(ambassadorId: string) {
       bankName: true,
       accountNumber: true,
       accountName: true,
+      weeklyEmailOptOut: true,
       university: { select: { name: true, abbreviation: true } },
       referredClients: { select: { _count: { select: { projects: true } } } },
     },

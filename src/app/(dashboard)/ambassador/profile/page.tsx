@@ -4,6 +4,7 @@ import { LuInbox } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getAmbassadorByUserId, getAmbassadorProfile } from "@/lib/services/ambassador-portal";
 import { AmbassadorBankForm } from "@/components/ambassadors/AmbassadorBankForm";
+import { WeeklyEmailToggle } from "@/components/ambassadors/WeeklyEmailToggle";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { referralLink, TIER_LADDER } from "@/lib/ambassador";
@@ -86,6 +87,11 @@ export default async function AmbassadorProfilePage() {
             </li>
           ))}
         </ol>
+      </section>
+
+      <section className="surface p-4 sm:p-5">
+        <h2 className="mb-3 text-sm font-semibold text-foreground">Email preferences</h2>
+        <WeeklyEmailToggle initialOn={!profile.weeklyEmailOptOut} hasEmail={Boolean(profile.email)} />
       </section>
 
       <section className="surface p-4 sm:p-5">

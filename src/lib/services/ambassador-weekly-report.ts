@@ -2,6 +2,11 @@ import { db } from "@/lib/db";
 import { watDayStart } from "@/lib/click-tracking/peak-hours";
 import { ambassadorWeeklyEmail } from "@/lib/emails/ambassador-weekly";
 import type { MailResult } from "@/lib/mailer";
+import {
+  makeUnsubscribeToken,
+  weeklyUnsubscribeApiUrl,
+  weeklyUnsubscribePageUrl,
+} from "@/lib/unsubscribe";
 
 /**
  * Weekly ambassador summary: last week's link performance, emailed every
@@ -76,7 +81,7 @@ export async function buildWeeklyReports(range: WeekRange = previousWeek()) {
   const [ambassadors, unique, total, countries, devices] = await Promise.all([
     db.ambassador.findMany({
       where: { status: "Active" },
-      select: { id: true, fullName: true, email: true, legacySlotId: true },
+      select: { id: true, fullName: true, email: true, legacySlotId: true, weeklyEmailOptOut: true },
     }),
     db.clickEvent.groupBy({ by: ["ambassadorId"], where: { ...where, quality: "UNIQUE" }, _count: { _all: true } }),
     db.clickEvent.groupBy({ by: ["ambassadorId"], where: { ...where, quality: { in: [...COUNTED] } }, _count: { _all: true } }),
@@ -107,8 +112,10 @@ export async function buildWeeklyReports(range: WeekRange = previousWeek()) {
   const label = weekLabel(range);
 
   const reports: WeeklyReport[] = ambassadors
-    // Only people we can email and who have a link to track.
-    .filter((a) => a.email && a.legacySlotId)
+    // Only people we can email, who have a link to track, and who have not
+    // unsubscribed from this summary. (Opted-out people still count in the
+    // ranking above: they are still on the leaderboard.)
+    .filter((a) => a.email && a.legacySlotId && !a.weeklyEmailOptOut)
     .map((a) => {
       const clicks = totalBy.get(a.id) ?? 0;
       const top = topCountryBy.get(a.id);
@@ -127,17 +134,26 @@ export async function buildWeeklyReports(range: WeekRange = previousWeek()) {
       };
     });
 
-  return { range, label, reports };
+  const optedOut = ambassadors.filter((a) => a.email && a.legacySlotId && a.weeklyEmailOptOut).length;
+  return { range, label, reports, optedOut };
 }
 
 // ── Running the job ──────────────────────────────────────────
 
-export type SendFn = (message: { to: string; subject: string; html: string; text: string }) => Promise<MailResult>;
+export type SendFn = (message: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  headers?: Record<string, string>;
+}) => Promise<MailResult>;
 
 export interface WeeklyRunResult {
   week: string;
   weekStart: string;
   recipients: number;
+  /** Emailable ambassadors who unsubscribed, so they are not in `recipients`. */
+  optedOut: number;
   sent: number;
   failed: number;
   failures: { ambassadorId: string; error: string }[];
@@ -155,12 +171,14 @@ export interface WeeklyRunResult {
 export async function runWeeklyReport(opts: {
   send: SendFn;
   dashboardUrl: string;
+  /** Site origin, for the unsubscribe links (https://educraft-hq.vercel.app). */
+  siteUrl: string;
   dry?: boolean;
   force?: boolean;
   now?: number;
 }): Promise<WeeklyRunResult> {
   const range = previousWeek(opts.now);
-  const { reports, label } = await buildWeeklyReports(range);
+  const { reports, label, optedOut } = await buildWeeklyReports(range);
 
   // Only report a week that click tracking covered from its first hour.
   // Otherwise a week that began before tracking would tell every ambassador
@@ -180,6 +198,7 @@ export async function runWeeklyReport(opts: {
     week: label,
     weekStart: range.from.toISOString(),
     recipients: reports.length,
+    optedOut,
     sent: 0,
     failed: 0,
     failures: [],
@@ -203,8 +222,18 @@ export async function runWeeklyReport(opts: {
     const results = await Promise.all(
       batch.map(async (r) => {
         try {
-          const mail = ambassadorWeeklyEmail(r, { dashboardUrl: opts.dashboardUrl });
-          return { r, res: await opts.send({ to: r.email, ...mail }) };
+          const token = makeUnsubscribeToken(r.ambassadorId);
+          const mail = ambassadorWeeklyEmail(r, {
+            dashboardUrl: opts.dashboardUrl,
+            unsubscribeUrl: weeklyUnsubscribePageUrl(opts.siteUrl, token),
+          });
+          // One-click unsubscribe (RFC 8058): Gmail and others show their own
+          // "Unsubscribe" button next to the sender from these two headers.
+          const headers = {
+            "List-Unsubscribe": `<${weeklyUnsubscribeApiUrl(opts.siteUrl, token)}>, <mailto:educraft611@gmail.com?subject=Unsubscribe>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          };
+          return { r, res: await opts.send({ to: r.email, ...mail, headers }) };
         } catch (e) {
           return { r, res: { ok: false, error: e instanceof Error ? e.message : String(e) } as MailResult };
         }

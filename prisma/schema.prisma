@@ -581,6 +581,10 @@ model Ambassador {
   bankName      String?
   accountNumber String?
   accountName   String?
+  /// True once they unsubscribe from the Monday link-performance summary (from
+  /// the email link or their profile). Only that email is optional: welcome and
+  /// commission emails are transactional and are unaffected.
+  weeklyEmailOptOut Boolean    @default(false)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 

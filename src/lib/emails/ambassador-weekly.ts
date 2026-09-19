@@ -9,7 +9,7 @@ import type { WeeklyReport } from "@/lib/services/ambassador-weekly-report";
  */
 export function ambassadorWeeklyEmail(
   r: WeeklyReport,
-  opts: { dashboardUrl: string }
+  opts: { dashboardUrl: string; unsubscribeUrl: string }
 ): { subject: string; html: string; text: string } {
   const first = r.name.trim().split(/\s+/)[0] || r.name;
   const quiet = r.totalClicks === 0;
@@ -54,7 +54,7 @@ export function ambassadorWeeklyEmail(
     `Open your dashboard: ${opts.dashboardUrl}`,
     "",
     "EduCraft, Academic & Technical Documentation Experts",
-    "Reply to this email if you would rather not get the weekly summary.",
+    `Stop the weekly summary: ${opts.unsubscribeUrl}`,
   ].join("\n");
 
   const cell = (s: { label: string; value: string }) => `
@@ -82,7 +82,7 @@ export function ambassadorWeeklyEmail(
     </p>`
     }
     <p style="margin:0 0 26px"><a href="${escapeHtml(opts.dashboardUrl)}" style="display:inline-block;padding:12px 22px;background:#0D9488;color:#FFFFFF;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none">Open my dashboard</a></p>
-    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.6;color:#64748B">EduCraft, Academic &amp; Technical Documentation Experts. Reply to this email if you would rather not get the weekly summary.</p>
+    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.6;color:#64748B">EduCraft, Academic &amp; Technical Documentation Experts.<br/>You get this every Monday because you are an EduCraft ambassador. <a href="${escapeHtml(opts.unsubscribeUrl)}" style="color:#64748B;text-decoration:underline">Stop the weekly summary</a></p>
   </div>
 </body></html>`;
 
