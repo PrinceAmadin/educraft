@@ -39,10 +39,22 @@ import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission
 import type { OpenJob, RecentCommission, TrackingRow } from "@/lib/services/ambassador-tracking";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
-/** Conversion is only meaningful once a link has been clicked. */
+/**
+ * True when the old Redis count could not be read for someone who has an old
+ * link. Showing 0 would be wrong (they may have hundreds), so the cells say so.
+ */
+function oldCountMissing(row: TrackingRow): boolean {
+  return row.legacyClicks === null && Boolean(row.legacySlotId);
+}
+
+function clicksLabel(row: TrackingRow): string {
+  return oldCountMissing(row) ? "—" : String(row.clicks);
+}
+
+/** Conversion is only meaningful once a link has been clicked. Jobs per click, old and new clicks together. */
 function conversion(row: TrackingRow): string {
-  if (!row.clicks) return "—";
-  return `${Math.round((row.jobs / row.clicks) * 100)}%`;
+  if (!row.clicks || oldCountMissing(row)) return "—";
+  return `${Math.round((row.jobs / row.clicks) * 1000) / 10}%`;
 }
 
 export function TrackingBoard({
@@ -85,7 +97,7 @@ export function TrackingBoard({
               Leaderboard
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Ranked by commission logged. Conversion is jobs per click on their original link.
+              Ranked by commission logged. Clicks include the old panel counts plus everything tracked since. Conversion is jobs per click.
             </p>
           </div>
           <label className="relative block w-full sm:w-72">
@@ -162,12 +174,19 @@ export function TrackingBoard({
                         Log job
                       </Button>
                     </div>
-                    <dl className="mt-2.5 grid grid-cols-4 gap-2 text-xs">
-                      <Metric label="Clicks" value={row.clicks == null ? "—" : String(row.clicks)} />
+                    <dl className="mt-2.5 grid grid-cols-5 gap-2 text-xs">
+                      <Metric label="Clicks" value={clicksLabel(row)} />
+                      <Metric label="7 days" value={String(row.weekClicks)} />
                       <Metric label="Jobs" value={String(row.jobs)} />
                       <Metric label="Conv." value={conversion(row)} />
                       <Metric label="Earned" value={formatNaira(row.commissionLogged)} />
                     </dl>
+                    <Link
+                      href={`/admin/ambassadors/${row.id}?view=analytics`}
+                      className="mt-2 inline-flex text-xs font-medium text-primary hover:underline"
+                    >
+                      Link analytics
+                    </Link>
                   </li>
                 );
               })}
@@ -182,6 +201,7 @@ export function TrackingBoard({
                     <TableHead>Ambassador</TableHead>
                     <TableHead>School</TableHead>
                     <TableHead className="text-right">Clicks</TableHead>
+                    <TableHead className="text-right">7 days</TableHead>
                     <TableHead className="text-right">Jobs</TableHead>
                     <TableHead className="text-right">Conv.</TableHead>
                     <TableHead className="text-right">Commission</TableHead>
@@ -211,8 +231,14 @@ export function TrackingBoard({
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{row.university ?? "—"}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">
-                          {row.clicks == null ? "—" : row.clicks}
+                          {clicksLabel(row)}
+                          {row.trackedClicks > 0 ? (
+                            <div className="text-xs text-muted-foreground">
+                              {oldCountMissing(row) ? `${row.trackedClicks} tracked` : `${row.uniqueClicks} unique`}
+                            </div>
+                          ) : null}
                         </TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums">{row.weekClicks}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">{row.jobs}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">{conversion(row)}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">
@@ -228,7 +254,10 @@ export function TrackingBoard({
                             <span className="text-muted-foreground">None</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="space-x-2 whitespace-nowrap text-right">
+                          <Button asChild size="sm" variant="ghost">
+                            <Link href={`/admin/ambassadors/${row.id}?view=analytics`}>Analytics</Link>
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"

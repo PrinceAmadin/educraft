@@ -53,8 +53,12 @@ export default async function AmbassadorTrackingPage() {
         />
         <StatsCard
           label="Link clicks"
-          value={totals.clicks == null ? "—" : String(totals.clicks)}
-          detail={totals.clicks == null ? "Click counts unavailable right now" : "On original panel links"}
+          value={totals.clicks.toLocaleString("en-NG")}
+          detail={
+            totals.legacyClicks == null
+              ? `${totals.trackedClicks.toLocaleString("en-NG")} tracked (old counts unavailable right now)`
+              : `${totals.legacyClicks.toLocaleString("en-NG")} before tracking · ${totals.trackedClicks.toLocaleString("en-NG")} tracked · ${totals.weekClicks.toLocaleString("en-NG")} in 7 days`
+          }
           icon={LuMousePointerClick}
         />
         <StatsCard

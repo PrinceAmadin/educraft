@@ -1,13 +1,14 @@
 import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
+import { watDayStart } from "@/lib/click-tracking/peak-hours";
 
 /**
  * The Tracking view — the original panel's leaderboard, rebuilt on HQ's own
  * data. Jobs and commission come from Postgres (a job counts once it has been
- * allocated to the ambassador). Link clicks still come from Redis, because the
- * old /EduCraftA/{slot} links that ambassadors already shared are counted
- * there; they're matched to an ambassador through `legacySlotId`.
+ * allocated to the ambassador). Link clicks are two sources added together:
+ * the old Redis counter (everything before detailed tracking began, matched to
+ * an ambassador through `legacySlotId`) plus the `ClickEvent` rows written since.
  */
 
 const DEAD_STATUSES = ["CANCELLED", "REFUNDED"];
@@ -22,8 +23,16 @@ export interface TrackingRow {
   status: string;
   email: string | null;
   legacySlotId: string | null;
-  /** Clicks on their original panel link; null when Redis is unreachable or they have no old link. */
-  clicks: number | null;
+  /** Everything: old Redis counter plus tracked clicks. */
+  clicks: number;
+  /** The old Redis counter alone; null when Redis is unreachable or they have no old link. */
+  legacyClicks: number | null;
+  /** Clicks recorded since detailed tracking began (this counting period). */
+  trackedClicks: number;
+  /** Unique visitors among the tracked clicks. */
+  uniqueClicks: number;
+  /** Tracked clicks in the last 7 days (WAT). */
+  weekClicks: number;
   jobs: number;
   commissionLogged: number;
   commissionPaid: number;
@@ -56,7 +65,11 @@ export interface AmbassadorTracking {
   totals: {
     jobs: number;
     commissionLogged: number;
-    clicks: number | null;
+    clicks: number;
+    /** Old counter total; null when Redis could not be read. */
+    legacyClicks: number | null;
+    trackedClicks: number;
+    weekClicks: number;
     withEmail: number;
     ambassadors: number;
   };
@@ -90,7 +103,15 @@ export async function readClicks(slotIds: string[]): Promise<Map<string, number>
 }
 
 export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
-  const [ambassadors, recentProjects, open] = await Promise.all([
+  const weekStart = new Date(watDayStart().getTime() - 6 * 86_400_000);
+  const counted = {
+    isTestClick: false,
+    archivedAt: null,
+    ambassadorId: { not: null },
+    quality: { in: ["UNIQUE", "RETURN", "DUPLICATE"] as ("UNIQUE" | "RETURN" | "DUPLICATE")[] },
+    isFraud: false,
+  };
+  const [ambassadors, recentProjects, open, trackedGroups, weekGroups] = await Promise.all([
     db.ambassador.findMany({
       where: { status: { not: "Terminated" } },
       select: {
@@ -141,7 +162,17 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
         client: { select: { fullName: true } },
       },
     }),
+    db.clickEvent.groupBy({ by: ["ambassadorId", "quality"], where: counted, _count: { _all: true } }),
+    db.clickEvent.groupBy({ by: ["ambassadorId"], where: { ...counted, timestamp: { gte: weekStart } }, _count: { _all: true } }),
   ]);
+
+  const trackedBy = new Map<string, number>();
+  const uniqueBy = new Map<string, number>();
+  for (const g of trackedGroups) {
+    trackedBy.set(g.ambassadorId!, (trackedBy.get(g.ambassadorId!) ?? 0) + g._count._all);
+    if (g.quality === "UNIQUE") uniqueBy.set(g.ambassadorId!, g._count._all);
+  }
+  const weekBy = new Map(weekGroups.map((g) => [g.ambassadorId!, g._count._all]));
 
   const clicks = await readClicks(
     ambassadors.map((a) => a.legacySlotId).filter((s): s is string => Boolean(s))
@@ -157,7 +188,12 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
       status: a.status,
       email: a.email,
       legacySlotId: a.legacySlotId,
-      clicks: clicks && a.legacySlotId ? (clicks.get(a.legacySlotId) ?? 0) : null,
+      clicks:
+        (clicks && a.legacySlotId ? (clicks.get(a.legacySlotId) ?? 0) : 0) + (trackedBy.get(a.id) ?? 0),
+      legacyClicks: clicks && a.legacySlotId ? (clicks.get(a.legacySlotId) ?? 0) : null,
+      trackedClicks: trackedBy.get(a.id) ?? 0,
+      uniqueClicks: uniqueBy.get(a.id) ?? 0,
+      weekClicks: weekBy.get(a.id) ?? 0,
       jobs: a.projects.length,
       commissionLogged: a.projects.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0),
       commissionPaid: a.projects
@@ -168,7 +204,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
       (x, y) =>
         y.commissionLogged - x.commissionLogged ||
         y.jobs - x.jobs ||
-        (y.clicks ?? 0) - (x.clicks ?? 0) ||
+        y.clicks - x.clicks ||
         x.name.localeCompare(y.name)
     );
 
@@ -177,7 +213,10 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
     totals: {
       jobs: rows.reduce((n, r) => n + r.jobs, 0),
       commissionLogged: rows.reduce((n, r) => n + r.commissionLogged, 0),
-      clicks: clicks ? [...clicks.values()].reduce((n, c) => n + c, 0) : null,
+      clicks: rows.reduce((n, r) => n + r.clicks, 0),
+      legacyClicks: clicks ? [...clicks.values()].reduce((n, c) => n + c, 0) : null,
+      trackedClicks: rows.reduce((n, r) => n + r.trackedClicks, 0),
+      weekClicks: rows.reduce((n, r) => n + r.weekClicks, 0),
       withEmail: rows.filter((r) => r.email).length,
       ambassadors: rows.length,
     },

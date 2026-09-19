@@ -49,7 +49,7 @@ export function ambassadorWeeklyEmail(
     intro,
     "",
     ...stats.map((s) => `${s.label}: ${s.value}`),
-    `Leaderboard: ${rankLine}`,
+    ...(quiet ? [] : [`Leaderboard: ${rankLine}`]),
     "",
     `Open your dashboard: ${opts.dashboardUrl}`,
     "",
@@ -73,10 +73,14 @@ export function ambassadorWeeklyEmail(
       <tr>${cell(stats[0])}${cell(stats[1])}</tr>
       <tr>${cell(stats[2])}${cell(stats[3])}</tr>
     </table>
-    <p style="margin:0 0 24px;padding:14px 16px;background:#E6F4F2;border-radius:12px;font-size:15px;color:#0F172A">
+    ${
+      quiet
+        ? ""
+        : `<p style="margin:0 0 24px;padding:14px 16px;background:#E6F4F2;border-radius:12px;font-size:15px;color:#0F172A">
       <span style="color:#475569">Leaderboard position</span><br/>
       <strong style="font-size:18px;color:#0D9488">${escapeHtml(rankLine)}</strong>
-    </p>
+    </p>`
+    }
     <p style="margin:0 0 26px"><a href="${escapeHtml(opts.dashboardUrl)}" style="display:inline-block;padding:12px 22px;background:#0D9488;color:#FFFFFF;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none">Open my dashboard</a></p>
     <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.6;color:#64748B">EduCraft, Academic &amp; Technical Documentation Experts. Reply to this email if you would rather not get the weekly summary.</p>
   </div>
