@@ -11,11 +11,13 @@ import {
   LuFolderOpen,
   LuLoaderCircle,
   LuRotateCcw,
+  LuSend,
 } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
+import { cn, formatDateTime } from "@/lib/utils";
 import { PHASES, estimateEta, formatEta } from "@/lib/research-eta";
 
 interface ReferenceRow {
@@ -33,6 +35,20 @@ interface ReferenceRow {
   driveFileId: string | null;
   citedByCount: number | null;
   round: number;
+}
+
+interface RerunState {
+  rerunsUsed: number;
+  freeRerunsLeft: number;
+  needsApproval: boolean;
+  request: {
+    id: string;
+    status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+    reason: string;
+    reviewNote: string | null;
+    approvedUntil: string | null;
+    createdAt: string;
+  } | null;
 }
 
 interface ResearchJobData {
@@ -121,38 +137,177 @@ function ReferenceItem({ r }: { r: ReferenceRow }) {
   );
 }
 
-function ResetDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  pending,
+const MIN_REASON = 15;
+
+/**
+ * "Run research again", rationed. The first re-run on a project is free; after
+ * that the worker sends a reason and a manager approves one run. This only
+ * mirrors the rule: the server enforces it, and a refused re-run deletes nothing.
+ */
+function RerunControl({
+  projectCode,
+  rerun,
+  onChanged,
+  onStarted,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onConfirm: () => void;
-  pending: boolean;
+  projectCode: string;
+  rerun: RerunState | null;
+  onChanged: () => Promise<unknown>;
+  onStarted: () => Promise<unknown>;
 }) {
+  const [dialog, setDialog] = React.useState<"confirm" | "request" | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [reason, setReason] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+
+  if (!rerun) return null;
+  const req = rerun.request;
+
+  const mode: "free" | "pending" | "approved" | "request" =
+    !rerun.needsApproval ? "free" : req?.status === "PENDING" ? "pending" : req?.status === "APPROVED" ? "approved" : "request";
+
+  async function post(path: string, body?: unknown) {
+    const res = await fetch(`/api/worker/projects/${projectCode}/research/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw Object.assign(new Error(data?.error ?? "Something went wrong"), { code: data?.code });
+    return data;
+  }
+
+  async function runNow() {
+    setBusy(true);
+    setError(null);
+    try {
+      await post("rerun");
+      setDialog(null);
+      await onStarted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      // The allowance changed under us (e.g. someone else used it) — show the real state.
+      if ((err as { code?: string }).code === "APPROVAL_REQUIRED") await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendRequest() {
+    setBusy(true);
+    setError(null);
+    try {
+      await post("rerun-request", { reason });
+      setDialog(null);
+      setReason("");
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const label =
+    mode === "pending" ? "Waiting for approval" : mode === "request" ? (req?.status === "REJECTED" ? "Request again" : "Request a re-run") : "Run research again";
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !pending && onOpenChange(v)}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Run research again?</DialogTitle>
-          <DialogDescription>
-            This clears the current references and the files saved to Drive, and starts a fresh search for
-            this project.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button type="button" disabled={pending} onClick={onConfirm}>
-            {pending ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuRotateCcw className="size-4" aria-hidden />}
-            Start over
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div className="min-w-0 space-y-1.5">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={mode === "pending"}
+        onClick={() => {
+          setError(null);
+          setDialog(mode === "request" ? "request" : "confirm");
+        }}
+      >
+        {mode === "request" ? <LuSend className="size-4" aria-hidden /> : <LuRotateCcw className="size-4" aria-hidden />}
+        {label}
+      </Button>
+
+      {mode === "pending" && req ? (
+        <p className="text-xs text-muted-foreground">
+          Sent {formatDateTime(req.createdAt)}. You&apos;ll get a notification when a manager decides.
+        </p>
+      ) : null}
+      {mode === "approved" && req?.approvedUntil ? (
+        <p className="text-xs text-muted-foreground">
+          Approved. Use it before {formatDateTime(req.approvedUntil)}, after that you&apos;ll need to ask again.
+        </p>
+      ) : null}
+      {mode === "request" && req?.status === "REJECTED" ? (
+        <p className="text-xs text-muted-foreground">
+          A manager declined your last request: <span className="text-foreground">{req.reviewNote}</span>
+        </p>
+      ) : null}
+      {mode === "request" && req?.status === "EXPIRED" ? (
+        <p className="text-xs text-muted-foreground">Your approval ran out before it was used. You can ask again.</p>
+      ) : null}
+      {mode === "request" && (!req || req.status === "EXPIRED") ? (
+        <p className="text-xs text-muted-foreground">
+          This project&apos;s free re-run is used up, so another one needs a manager&apos;s approval.
+        </p>
+      ) : null}
+
+      <Dialog open={dialog === "confirm"} onOpenChange={(v) => !busy && setDialog(v ? "confirm" : null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Run research again?</DialogTitle>
+            <DialogDescription>
+              This clears the current references and the files saved to Drive, and starts a fresh search.{" "}
+              {mode === "free"
+                ? "This is your free re-run for this project. Any after it will need a manager's approval."
+                : "This uses your approved re-run."}
+            </DialogDescription>
+          </DialogHeader>
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busy} onClick={runNow}>
+              {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuRotateCcw className="size-4" aria-hidden />}
+              Start over
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dialog === "request"} onOpenChange={(v) => !busy && setDialog(v ? "request" : null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Ask for another re-run</DialogTitle>
+            <DialogDescription>
+              Each run costs AI credits, so a manager approves extra ones. Say what was wrong with the current
+              results. Nothing is deleted until you run it.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            rows={4}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Most of the papers are about the wrong industry, the topic was changed by the supervisor."
+            aria-label="Why you need another run"
+          />
+          <p className="text-xs text-muted-foreground">
+            {reason.trim().length < MIN_REASON
+              ? `At least ${MIN_REASON} characters (${reason.trim().length} so far).`
+              : "A manager will see this."}
+          </p>
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setDialog(null)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busy || reason.trim().length < MIN_REASON} onClick={sendRequest}>
+              {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuSend className="size-4" aria-hidden />}
+              Send request
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -166,13 +321,13 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const [starting, setStarting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [showRefs, setShowRefs] = React.useState(false);
-  const [resetOpen, setResetOpen] = React.useState(false);
-  const [resetting, setResetting] = React.useState(false);
+  const [rerun, setRerun] = React.useState<RerunState | null>(null);
   const lastNudgeRef = React.useRef(0);
 
   const load = React.useCallback(async () => {
     const data = await fetchJson(`/api/worker/projects/${projectCode}/research`);
     setJob(data.job ?? null);
+    setRerun(data.rerun ?? null);
     return data.job as ResearchJobData | null;
   }, [projectCode]);
 
@@ -245,21 +400,10 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
     }
   }
 
-  async function resetAndRun() {
-    setResetting(true);
-    setError(null);
-    try {
-      await fetchJson(`/api/worker/projects/${projectCode}/research/reset`, { method: "POST" });
-      setResetOpen(false);
-      setShowRefs(false);
-      await fetchJson(`/api/worker/projects/${projectCode}/research/start`, { method: "POST" });
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reset research");
-    } finally {
-      setResetting(false);
-    }
-  }
+  const onRerunStarted = React.useCallback(async () => {
+    setShowRefs(false);
+    await load();
+  }, [load]);
 
   if (loading) {
     return (
@@ -291,10 +435,7 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const usedOldRules = refs.some((r) => r.status === "NO_OA_PDF");
 
   const startOverButton = (
-    <Button size="sm" variant="outline" disabled={resetting} onClick={() => setResetOpen(true)}>
-      <LuRotateCcw className="size-4" aria-hidden />
-      Run research again
-    </Button>
+    <RerunControl projectCode={projectCode} rerun={rerun} onChanged={load} onStarted={onRerunStarted} />
   );
 
   return (
@@ -475,7 +616,6 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
         </p>
       ) : null}
 
-      <ResetDialog open={resetOpen} onOpenChange={setResetOpen} onConfirm={resetAndRun} pending={resetting} />
     </section>
   );
 }

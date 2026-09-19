@@ -14,6 +14,7 @@ import {
   GoogleDriveError,
 } from "@/lib/google-drive";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { claimRun, getRerunState, releaseClaim } from "@/lib/services/research-runs";
 
 export class ResearchError extends Error {}
 
@@ -95,6 +96,11 @@ async function loadProjectContext(workerId: string, idOrCode: string): Promise<P
   };
 }
 
+/**
+ * Starts a project's first research job. If one exists already it's returned
+ * as-is (nothing is spent). If none exists but the project has run before —
+ * the job was deleted — this counts as a re-run and is rationed like one.
+ */
 export async function startResearchJob(
   workerId: string,
   idOrCode: string,
@@ -106,9 +112,36 @@ export async function startResearchJob(
   const existing = await db.researchJob.findUnique({ where: { projectId: project.id } });
   if (existing) return existing;
 
-  return db.researchJob.create({
-    data: { projectId: project.id, requestedById: userId, targetCount },
-  });
+  const claim = await claimRun(project.id, userId);
+  try {
+    return await db.researchJob.create({
+      data: { projectId: project.id, requestedById: userId, targetCount },
+    });
+  } catch (error) {
+    await releaseClaim(claim);
+    throw error;
+  }
+}
+
+/**
+ * Throws the current job away and starts a fresh one. Rationed: the first
+ * re-run on a project is free, later ones need an approved request (see
+ * research-runs.ts). The allowance is claimed before anything is deleted, so
+ * a refused re-run leaves the existing results untouched.
+ */
+export async function rerunResearchJob(workerId: string, idOrCode: string, userId: string, targetCount = 40) {
+  const project = await loadProjectContext(workerId, idOrCode);
+
+  const claim = await claimRun(project.id, userId);
+  try {
+    await resetResearchJob(workerId, idOrCode);
+    return await db.researchJob.create({
+      data: { projectId: project.id, requestedById: userId, targetCount },
+    });
+  } catch (error) {
+    await releaseClaim(claim);
+    throw error;
+  }
 }
 
 export async function getResearchJob(workerId: string, idOrCode: string) {
@@ -122,6 +155,24 @@ export async function getResearchJob(workerId: string, idOrCode: string) {
     where: { projectId: project.id },
     include: { references: { orderBy: [{ round: "asc" }, { createdAt: "asc" }] } },
   });
+}
+
+/** The job plus where this project stands on re-runs — everything the worker's panel needs. */
+export async function getResearchOverview(workerId: string, idOrCode: string) {
+  const project = await db.project.findFirst({
+    where: { workerId, OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true },
+  });
+  if (!project) throw new ResearchError("Assignment not found");
+
+  const [job, rerun] = await Promise.all([
+    db.researchJob.findUnique({
+      where: { projectId: project.id },
+      include: { references: { orderBy: [{ round: "asc" }, { createdAt: "asc" }] } },
+    }),
+    getRerunState(project.id),
+  ]);
+  return { job, rerun };
 }
 
 /**

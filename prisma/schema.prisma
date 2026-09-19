@@ -57,6 +57,9 @@ model User {
   statusChanges     ProjectStatusLog[] @relation("ChangedBy")
   paymentsConfirmed Payment[]          @relation("ConfirmedBy")
   researchJobsRequested ResearchJob[]  @relation("ResearchRequestedBy")
+  researchRunsStarted    ResearchRunLog[]        @relation("ResearchRunStartedBy")
+  rerunRequestsMade      ResearchRerunRequest[]  @relation("RerunRequestedBy")
+  rerunRequestsReviewed  ResearchRerunRequest[]  @relation("RerunReviewedBy")
 
   workerApplication           WorkerApplication?  @relation("WorkerApplicationUser")
   workerApplicationsReviewed  WorkerApplication[]  @relation("WorkerApplicationReviewedBy")
@@ -393,6 +396,8 @@ model Project {
   payments    Payment[]
   researchJob ResearchJob?
   references  Reference[]
+  researchRunLogs      ResearchRunLog[]
+  researchRerunRequests ResearchRerunRequest[]
 
   @@index([status])
   @@index([clientId])
@@ -834,4 +839,57 @@ model AiUsageLog {
   @@index([createdAt])
   @@index([projectId])
   @@index([workerId])
+}
+
+// ─── RESEARCH RUN CONTROL ───────────────────────────────
+// Every research run spends Claude credits, so re-running is rationed: a
+// project's first re-run is free, and from the second one a worker must give a
+// reason and a manager must approve it. The log is separate from ResearchJob
+// because a re-run deletes the old job — the count has to outlive it.
+
+enum ResearchRunKind {
+  INITIAL
+  RERUN
+}
+
+model ResearchRunLog {
+  id          String          @id @default(cuid())
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  startedById String
+  startedBy   User            @relation("ResearchRunStartedBy", fields: [startedById], references: [id])
+  kind        ResearchRunKind
+  /// The approved request this re-run consumed, if it needed one.
+  requestId   String?
+  createdAt   DateTime        @default(now())
+
+  @@index([projectId])
+}
+
+enum RerunRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  USED
+}
+
+model ResearchRerunRequest {
+  id            String             @id @default(cuid())
+  projectId     String
+  project       Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requestedById String
+  requestedBy   User               @relation("RerunRequestedBy", fields: [requestedById], references: [id])
+  reason        String
+  status        RerunRequestStatus @default(PENDING)
+  reviewedById  String?
+  reviewedBy    User?              @relation("RerunReviewedBy", fields: [reviewedById], references: [id])
+  reviewNote    String?
+  reviewedAt    DateTime?
+  /// An approval is a window, not a permanent pass — it lapses if unused.
+  approvedUntil DateTime?
+  usedAt        DateTime?
+  createdAt     DateTime           @default(now())
+
+  @@index([projectId, status])
+  @@index([status])
 }
