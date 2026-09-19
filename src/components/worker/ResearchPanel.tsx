@@ -372,10 +372,10 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
             <>
               <p className="mt-3 rounded-xl bg-zone p-3 text-xs text-muted-foreground">
                 This runs on our servers, so you <strong className="text-foreground">can close this page</strong>{" "}
-                or lock your phone and come back later. It usually takes around 10 minutes, and you&apos;ll get a
+                or lock your phone and come back later. It usually takes around 5 minutes, and you&apos;ll get a
                 notification when it&apos;s done.
                 {job.replacementRound === 0
-                  ? " If too few papers pass the relevance check, a second search round adds about 3 minutes."
+                  ? " If too few papers pass the relevance check, a second search round adds a couple of minutes."
                   : ""}
               </p>
               <div className="mt-3">{startOverButton}</div>

@@ -19,15 +19,15 @@ export const PHASES: { key: PhaseKey; label: string }[] = [
 ];
 
 /**
- * Seconds per step, from a full end-to-end run on the server-side chain
- * (100 papers, 30 steps, 614s — each step now also includes the hand-off to
- * the next one).
+ * Seconds per step, from a full run on the production deployment (100 papers,
+ * 30 steps, 255s). Steps run back-to-back inside one invocation there, so
+ * they're much faster than on a laptop.
  */
 export const DEFAULT_STEP_SECONDS: Record<PhaseKey, number> = {
-  search: 11,
-  pdfs: 18,
-  relevance: 31,
-  drive: 23,
+  search: 6,
+  pdfs: 5,
+  relevance: 20,
+  drive: 8,
 };
 
 const CANDIDATES_PER_ROUND = 100;
