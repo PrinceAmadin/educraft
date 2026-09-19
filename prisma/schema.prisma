@@ -690,6 +690,18 @@ model ResearchJob {
   triedTitles String[] @default([])
   /// Legacy — was used by the removed title-recall top-up. Unused.
   candidatesExhausted Boolean @default(false)
+
+  // ── Background execution ──
+  // The job runs on the server as a self-chaining series of steps, so it
+  // continues with every browser closed. A step takes this lease first, so two
+  // runners (a chain plus a Resume click, say) can never work the same job.
+  lockedUntil DateTime?
+  /// When a step last finished — a stale value on an unfinished job means the chain broke.
+  lastStepAt  DateTime?
+  /// Consecutive failed steps; reset on success. The chain gives up after a few.
+  failedSteps Int       @default(0)
+  /// Why the chain stopped (transient errors that ran out of retries). Cleared on resume.
+  lastError   String?
   /// Search queries Claude wrote for this job, run against OpenAlex in order.
   /// "[foundational] " prefix = no date filter, sorted by citation count.
   searchQueries   String[] @default([])

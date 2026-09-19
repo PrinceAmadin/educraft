@@ -19,12 +19,16 @@ export const PHASES: { key: PhaseKey; label: string }[] = [
   { key: "drive", label: "Saving PDFs and the reference list to Drive" },
 ];
 
-/** Seconds per step, measured on a full end-to-end run (100 papers, 30 steps, 511s). */
+/**
+ * Seconds per step, from a full end-to-end run on the server-side chain
+ * (100 papers, 30 steps, 614s — each step now also includes the hand-off to
+ * the next one).
+ */
 export const DEFAULT_STEP_SECONDS: Record<PhaseKey, number> = {
-  search: 9,
-  pdfs: 15,
-  relevance: 29,
-  drive: 17,
+  search: 11,
+  pdfs: 18,
+  relevance: 31,
+  drive: 23,
 };
 
 const CANDIDATES_PER_ROUND = 100;

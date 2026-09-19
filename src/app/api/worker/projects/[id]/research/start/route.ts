@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { badRequest, requireWorker, serverError } from "@/lib/api";
 import { ResearchError, startResearchJob } from "@/lib/services/research";
+import { scheduleResearchStep } from "@/lib/services/research-runner";
 import { startResearchBodySchema } from "@/lib/validations/research";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
@@ -25,6 +26,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       guard.userId,
       parsed.data.targetCount
     );
+    // Hand the job to the server to run on its own — the browser can close.
+    await scheduleResearchStep(job.id);
     return NextResponse.json({ job });
   } catch (error) {
     if (error instanceof ResearchError) {

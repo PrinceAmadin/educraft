@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { PHASES, estimateEta, formatEta, phaseForStatus, type PhaseKey } from "@/lib/research-eta";
+import { PHASES, estimateEta, formatEta } from "@/lib/research-eta";
 
 interface ReferenceRow {
   id: string;
@@ -47,6 +47,10 @@ interface ResearchJobData {
   driveFolderLink: string | null;
   paywalledDocLink: string | null;
   errorMessage: string | null;
+  lastError: string | null;
+  lockedUntil: string | null;
+  lastStepAt: string | null;
+  createdAt: string;
   references: ReferenceRow[];
 }
 
@@ -152,99 +156,73 @@ function ResetDialog({
   );
 }
 
+/** How long a running job can go without finishing a step before the panel restarts the background run. */
+const STALE_AFTER_MS = 150_000;
+const POLL_MS = 3000;
+
 export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const [job, setJob] = React.useState<ResearchJobData | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [running, setRunning] = React.useState(false);
+  const [starting, setStarting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [showRefs, setShowRefs] = React.useState(false);
   const [resetOpen, setResetOpen] = React.useState(false);
   const [resetting, setResetting] = React.useState(false);
-  const stopRef = React.useRef(false);
-  // Latest job status, and how long a step of each phase has actually taken
-  // on this connection — the time estimate learns from these.
-  const statusRef = React.useRef<string | null>(null);
-  const [observed, setObserved] = React.useState<Partial<Record<PhaseKey, number>>>({});
+  const lastNudgeRef = React.useRef(0);
 
   const load = React.useCallback(async () => {
     const data = await fetchJson(`/api/worker/projects/${projectCode}/research`);
-    statusRef.current = data.job?.status ?? null;
     setJob(data.job ?? null);
     return data.job as ResearchJobData | null;
   }, [projectCode]);
 
   React.useEffect(() => {
-    stopRef.current = false;
     load().finally(() => setLoading(false));
-    return () => {
-      stopRef.current = true;
-    };
   }, [load]);
 
-  const run = React.useCallback(
-    async (fresh = false) => {
-      setRunning(true);
-      setError(null);
-      try {
-        if (!job || fresh) {
-          await fetchJson(`/api/worker/projects/${projectCode}/research/start`, { method: "POST" });
-        }
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          if (stopRef.current) return;
-          const phase = statusRef.current ? phaseForStatus(statusRef.current) : null;
-          const startedAt = Date.now();
-          const result = await fetchJson(`/api/worker/projects/${projectCode}/research/step`, {
-            method: "POST",
-          });
-          if (phase) {
-            const took = (Date.now() - startedAt) / 1000;
-            setObserved((prev) => ({ ...prev, [phase]: prev[phase] == null ? took : prev[phase]! * 0.6 + took * 0.4 }));
-          }
-          await load();
-          if (result.done) break;
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Something went wrong");
-      } finally {
-        setRunning(false);
-      }
-    },
-    [job, projectCode, load]
-  );
+  const isTerminal = job?.status === "PASSED" || job?.status === "FAILED_NEEDS_REVIEW";
+  const inProgress = Boolean(job) && !isTerminal;
 
-  // While the job runs: keep a phone's screen awake (a sleeping phone pauses
-  // the page and the job with it) and warn before the page is closed.
+  // The job runs on the server. This page only watches it, so there's
+  // nothing to keep open — polling just keeps the numbers fresh while it is.
   React.useEffect(() => {
-    if (!running) return;
-    let lock: { release: () => Promise<void> } | null = null;
-    const acquire = async () => {
-      try {
-        const wl = (navigator as unknown as { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } }).wakeLock;
-        if (wl && document.visibilityState === "visible") lock = await wl.request("screen");
-      } catch {
-        /* not supported or denied — the job still runs */
-      }
-    };
-    void acquire();
-    const onVisible = () => void acquire();
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      void lock?.release().catch(() => {});
-    };
-  }, [running]);
+    if (!inProgress) return;
+    const id = window.setInterval(() => {
+      load().catch(() => {});
+    }, POLL_MS);
+    return () => window.clearInterval(id);
+  }, [inProgress, load]);
 
-  const eta = job ? estimateEta(job, observed) : null;
+  const resume = React.useCallback(async () => {
+    setError(null);
+    try {
+      await fetchJson(`/api/worker/projects/${projectCode}/research/resume`, { method: "POST" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resume");
+    }
+  }, [projectCode, load]);
+
+  // If the background run has gone quiet (a step kept failing, or a link in
+  // the chain was lost), restart it — at most once a minute. The lease on the
+  // server makes this harmless when the job is in fact still running.
+  React.useEffect(() => {
+    if (!job || !inProgress || job.lastError) return;
+    const leased = job.lockedUntil ? new Date(job.lockedUntil).getTime() > Date.now() : false;
+    const quietFor = Date.now() - new Date(job.lastStepAt ?? job.createdAt).getTime();
+    if (!leased && quietFor > STALE_AFTER_MS && Date.now() - lastNudgeRef.current > 60_000) {
+      lastNudgeRef.current = Date.now();
+      void resume();
+    }
+  }, [job, inProgress, resume]);
+
+  const stalled = Boolean(job?.lastError);
+  const running = inProgress && !stalled;
+
+  const eta = job ? estimateEta(job) : null;
   const remainingLabel = eta ? formatEta(eta.remainingSeconds) : null;
 
-  // The browser tab shows the countdown, so it's visible from other tabs.
+  // The countdown also shows on the browser tab, so it's visible from other tabs.
   React.useEffect(() => {
     if (!running || !remainingLabel) return;
     const original = document.title;
@@ -254,6 +232,19 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
     };
   }, [running, remainingLabel]);
 
+  async function start() {
+    setStarting(true);
+    setError(null);
+    try {
+      await fetchJson(`/api/worker/projects/${projectCode}/research/start`, { method: "POST" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setStarting(false);
+    }
+  }
+
   async function resetAndRun() {
     setResetting(true);
     setError(null);
@@ -261,8 +252,8 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
       await fetchJson(`/api/worker/projects/${projectCode}/research/reset`, { method: "POST" });
       setResetOpen(false);
       setShowRefs(false);
+      await fetchJson(`/api/worker/projects/${projectCode}/research/start`, { method: "POST" });
       await load();
-      void run(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not reset research");
     } finally {
@@ -283,7 +274,6 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   }
 
   const refs = job?.references ?? [];
-  const isTerminal = job?.status === "PASSED" || job?.status === "FAILED_NEEDS_REVIEW";
   const kept = refs
     .filter((r) => r.status === "KEPT")
     .sort(
@@ -301,7 +291,7 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const usedOldRules = refs.some((r) => r.status === "NO_OA_PDF");
 
   const startOverButton = (
-    <Button size="sm" variant="outline" disabled={running || resetting} onClick={() => setResetOpen(true)}>
+    <Button size="sm" variant="outline" disabled={resetting} onClick={() => setResetOpen(true)}>
       <LuRotateCcw className="size-4" aria-hidden />
       Run research again
     </Button>
@@ -319,8 +309,8 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
             Papers with a free PDF are saved to Drive; paywalled ones are kept as references with a DOI link
             the student can open through their university library.
           </p>
-          <Button size="sm" className="mt-3" disabled={running} onClick={() => run()}>
-            {running ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuBookOpen className="size-4" aria-hidden />}
+          <Button size="sm" className="mt-3" disabled={starting} onClick={start}>
+            {starting ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuBookOpen className="size-4" aria-hidden />}
             Get Research Papers
           </Button>
         </>
@@ -365,28 +355,32 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
               ? `${refs.length} paper${refs.length === 1 ? "" : "s"} found (${openAccess} with PDF, ${paywalled} paywalled) · ${kept.length} kept so far`
               : "Getting started…"}
           </p>
-          <p className="mt-3 rounded-xl bg-zone p-3 text-xs text-muted-foreground">
-            {running ? (
-              <>
-                Usually takes around 8 minutes in total. You can switch to another tab or app while it works,
-                and the time left shows on this browser tab. <strong className="text-foreground">Keep this
-                page open</strong> — closing it or locking the phone pauses the search until you press Resume.
+          {stalled ? (
+            <div className="mt-3 space-y-2">
+              <p className="flex items-start gap-2 text-sm text-danger">
+                <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                {job.lastError}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={resume}>
+                  Resume
+                </Button>
+                {startOverButton}
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="mt-3 rounded-xl bg-zone p-3 text-xs text-muted-foreground">
+                This runs on our servers, so you <strong className="text-foreground">can close this page</strong>{" "}
+                or lock your phone and come back later. It usually takes around 10 minutes, and you&apos;ll get a
+                notification when it&apos;s done.
                 {job.replacementRound === 0
                   ? " If too few papers pass the relevance check, a second search round adds about 3 minutes."
                   : ""}
-              </>
-            ) : (
-              <>Paused. Press Resume and it carries on from exactly where it stopped, nothing is lost.</>
-            )}
-          </p>
-          {!running ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => run()}>
-                Resume
-              </Button>
-              {startOverButton}
-            </div>
-          ) : null}
+              </p>
+              <div className="mt-3">{startOverButton}</div>
+            </>
+          )}
         </div>
       ) : (
         <div className="mt-2 space-y-3">
