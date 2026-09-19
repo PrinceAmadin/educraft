@@ -9,6 +9,8 @@
  * schema is enforced as a tool call.
  */
 
+import { logAiUsage, type AiUsageContext } from "@/lib/ai-usage-log";
+
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-5";
 
@@ -27,6 +29,8 @@ export interface ClaudeToolCallInput<T> {
   toolDescription: string;
   inputSchema: Record<string, unknown>;
   maxTokens?: number;
+  /** Where this call belongs, so its tokens and cost land in the AI usage log. */
+  usage?: AiUsageContext;
 }
 
 export async function callClaudeForJson<T>({
@@ -36,7 +40,9 @@ export async function callClaudeForJson<T>({
   toolDescription,
   inputSchema,
   maxTokens = 4096,
+  usage,
 }: ClaudeToolCallInput<T>): Promise<T> {
+  const startedAt = Date.now();
   const res = await fetch(ANTHROPIC_BASE_URL, {
     method: "POST",
     headers: {
@@ -55,6 +61,16 @@ export async function callClaudeForJson<T>({
   });
 
   const json = await res.json().catch(() => null);
+  if (usage) {
+    await logAiUsage({
+      ...usage,
+      model: json?.model ?? MODEL,
+      inputTokens: json?.usage?.input_tokens ?? 0,
+      outputTokens: json?.usage?.output_tokens ?? 0,
+      durationMs: Date.now() - startedAt,
+      status: res.ok ? "success" : "error",
+    });
+  }
   if (!res.ok) {
     throw new AnthropicError(json?.error?.message || `Claude API error (${res.status})`);
   }

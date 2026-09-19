@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { runResearchStep, verifyJobToken } from "@/lib/services/research-runner";
 
-// One step (plus an optional retry delay) runs inside this window.
-export const maxDuration = 60;
+// A slice works through many steps (about 3.5 minutes) inside this window.
+export const maxDuration = 300;
 
 /**
  * Internal — called by the research runner, never by a browser. It answers
@@ -13,7 +13,7 @@ export const maxDuration = 60;
  * as the job needs without any invocation waiting on the next.
  */
 export async function POST(req: NextRequest) {
-  let body: { jobId?: unknown; delaySeconds?: unknown } = {};
+  let body: { jobId?: unknown; delaySeconds?: unknown; hop?: unknown } = {};
   try {
     body = await req.json();
   } catch {
@@ -26,8 +26,10 @@ export async function POST(req: NextRequest) {
   }
   const delay = typeof body.delaySeconds === "number" && body.delaySeconds > 0 ? body.delaySeconds : 0;
 
+  const hop = typeof body.hop === "number" && body.hop >= 2 ? Math.floor(body.hop) : 2;
+
   waitUntil(
-    runResearchStep(jobId, delay).catch((error) => {
+    runResearchStep(jobId, delay, hop).catch((error) => {
       console.error("[POST /api/internal/research/step]", jobId, error);
     })
   );

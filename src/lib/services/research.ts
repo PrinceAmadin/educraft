@@ -225,6 +225,7 @@ Mark a query "foundational" when it should find older, highly-cited landmark pap
         required: ["queries"],
       },
       maxTokens: 1024,
+      usage: { projectId: ctx.id, subsystem: "research_pipeline", step: "write_search_queries" },
     });
     queries = result.queries ?? [];
   } catch (error) {
@@ -306,6 +307,7 @@ Classify every reference listed, using its exact id.`;
         required: ["classifications"],
       },
       maxTokens: 4096,
+      usage: { projectId: ctx.id, subsystem: "research_pipeline", step: "classify_references" },
     });
     return result.classifications ?? [];
   } catch (error) {

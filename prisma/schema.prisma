@@ -811,3 +811,27 @@ model PendingIntake {
 
   @@index([status])
 }
+
+// ─── AI USAGE ───────────────────────────────────────────
+// One row per Claude API call made by EduCraft's own backend. IDs are plain
+// strings (no relations) so the log survives project/worker deletion.
+model AiUsageLog {
+  id            String   @id @default(cuid())
+  projectId     String? // Project.id
+  workerId      String? // Worker.id — whoever the project was assigned to
+  subsystem     String // research_pipeline, chapter_generation, quality_gate, …
+  step          String // the specific call, e.g. write_search_queries
+  chapterNumber Int?
+  model         String
+  inputTokens   Int      @default(0)
+  outputTokens  Int      @default(0)
+  costUsd       Float    @default(0)
+  costNaira     Float    @default(0)
+  durationMs    Int      @default(0)
+  status        String   @default("success") // success | error
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([projectId])
+  @@index([workerId])
+}

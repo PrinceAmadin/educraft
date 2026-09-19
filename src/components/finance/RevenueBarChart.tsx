@@ -13,9 +13,11 @@ const RANK_OPACITY = [1, 0.8, 0.64, 0.5, 0.38, 0.26];
 export function RevenueBarChart({
   data,
   emptyLabel = "No completed projects yet",
+  valueLabel = "Revenue",
 }: {
   data: { label: string; value: number }[];
   emptyLabel?: string;
+  valueLabel?: string;
 }) {
   if (data.length === 0) {
     return (
@@ -43,14 +45,14 @@ export function RevenueBarChart({
             tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
             axisLine={false}
             tickLine={false}
-            width={110}
+            width={valueLabel === "Revenue" ? 110 : 150}
           />
           <Tooltip
             cursor={{ fill: "hsl(var(--zone))" }}
             contentStyle={CHART_TOOLTIP_STYLE}
             labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600 }}
             itemStyle={{ color: "hsl(var(--foreground))" }}
-            formatter={(value: number) => [formatNaira(value), "Revenue"]}
+            formatter={(value: number) => [formatNaira(value), valueLabel]}
           />
           <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={20}>
             {data.map((d, i) => (

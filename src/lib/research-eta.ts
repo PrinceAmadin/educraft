@@ -1,13 +1,12 @@
 /**
  * Time estimate for a running research job. Pure — no I/O — so the worker's
- * browser can recompute it after every step.
+ * browser can recompute it on every poll.
  *
  * The job is a fixed sequence of phases, and each phase does a countable
  * amount of work per step (searches run 3 at a time, PDF checks 8, relevance
  * checks 20, Drive uploads 3). So remaining time = remaining steps × how long
- * a step of that phase takes. Step durations start from what a full live run
- * measured, then the browser replaces them with the durations it actually
- * observes, so a slow connection or a slow day corrects itself.
+ * a step of that phase takes, using durations measured on full live runs.
+ * (`observed` lets a caller override them with measured values.)
  */
 
 export type PhaseKey = "search" | "pdfs" | "relevance" | "drive";
