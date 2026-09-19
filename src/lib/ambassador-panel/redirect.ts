@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
+import { recordClick } from "@/lib/click-tracking/record-click";
 import { db } from "@/lib/db";
 
 /**
@@ -12,9 +14,12 @@ import { db } from "@/lib/db";
  * Names and slots come from Postgres (`AmbassadorSlot`, edited in Manage);
  * every visit increments `clicks:{id}` in Redis and adds the id to
  * `ambassador_ids`, so the click history already collected carries over.
- * The original fired that write and forgot it, which a serverless function can
- * cut off after the redirect is sent; here it is awaited, capped at 1.5s, so a
- * slow Redis never delays the student by more than that.
+ *
+ * Each visit is also written to Postgres as a `ClickEvent` (geo, device,
+ * browser, unique-vs-duplicate quality) for the ambassador analytics. Both
+ * writes start together and are handed to `waitUntil`: the student is
+ * redirected immediately and Vercel keeps the function alive until the writes
+ * finish. Neither write can fail or delay the redirect.
  */
 
 export type ReferralKind = "ambassador" | "ecca" | "ecsa";
@@ -24,10 +29,22 @@ const EDUCRAFT_WHATSAPP = "2347063421088";
 const wa = (number: string, message: string) =>
   `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 
-async function trackClick(id: string) {
-  if (!redisConfigured()) return;
-  const write = withRedis((client) => client.multi().incr(`clicks:${id}`).sAdd("ambassador_ids", id).exec()).catch(() => {});
-  await Promise.race([write, new Promise((resolve) => setTimeout(resolve, 1500))]);
+function trackClick(id: string, req: Request): void {
+  const redisWrite = redisConfigured()
+    ? withRedis((client) => client.multi().incr(`clicks:${id}`).sAdd("ambassador_ids", id).exec()).catch(() => {})
+    : Promise.resolve();
+
+  const eventWrite = recordClick({
+    slotCode: id,
+    headers: req.headers,
+    isTestClick: new URL(req.url).searchParams.get("test") === "1",
+  }).catch((error) => {
+    console.error("[click-tracking] ClickEvent write failed:", error instanceof Error ? error.message : error);
+  });
+
+  // Not awaited: the redirect goes out immediately. `waitUntil` tells Vercel to
+  // keep the function alive until both writes finish, so nothing is lost.
+  waitUntil(Promise.all([redisWrite, eventWrite]));
 }
 
 function esc(value: unknown): string {
@@ -48,7 +65,7 @@ a{display:inline-block;margin-top:22px;color:#0D9488;font-weight:600;text-decora
   return new NextResponse(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-export async function referralResponse(kind: ReferralKind, rawId: string) {
+export async function referralResponse(kind: ReferralKind, rawId: string, req: Request) {
   const id = decodeURIComponent(rawId ?? "").trim();
   if (!id) return errorPage("Invalid link", "No ambassador ID was provided.", 400);
 
@@ -58,7 +75,7 @@ export async function referralResponse(kind: ReferralKind, rawId: string) {
     const code = id.toUpperCase();
     const core = await db.ambassadorSlot.findFirst({ where: { kind: "CORE", code }, select: { code: true, name: true } });
     if (!core) return errorPage("Link not found", "This Core Ambassador link does not exist.", 404);
-    await trackClick(core.code);
+    trackClick(core.code, req);
     return NextResponse.redirect(
       wa(
         number,
@@ -76,7 +93,7 @@ export async function referralResponse(kind: ReferralKind, rawId: string) {
       select: { code: true, name: true, vacant: true },
     });
     if (!sub) return errorPage("Link not found", "This Sub-Ambassador link does not exist.", 404);
-    await trackClick(sub.code);
+    trackClick(sub.code, req);
     const message =
       sub.vacant || !sub.name
         ? "Hi EduCraft! I'd like to place an order on the following Services:"
@@ -93,7 +110,7 @@ export async function referralResponse(kind: ReferralKind, rawId: string) {
   if (!slot) {
     return errorPage("Link not found", "This ambassador link does not exist. Please contact EduCraft.", 404);
   }
-  await trackClick(slot.code);
+  trackClick(slot.code, req);
   const message =
     slot.vacant || !slot.name
       ? "Hi EduCraft! I'd like to place an order on the following Services:"

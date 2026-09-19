@@ -59,6 +59,7 @@
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.169.0",
+    "ua-parser-js": "^2.0.10",
     "zod": "^3.23.8",
     "zustand": "^5.0.1"
   },

@@ -596,6 +596,7 @@ model Ambassador {
   children       Ambassador[] @relation("AmbassadorParentChild")
   parentCommRate Float?
 
+  clickEvents          ClickEvent[]
   referredClients      Client[]
   projects             Project[] @relation("ProjectAmbassador")
   /// Jobs this ambassador earns a parent-commission on, referred by one of
@@ -933,4 +934,59 @@ model ResearchRerunRequest {
 
   @@index([projectId, status])
   @@index([status])
+}
+
+
+// ─── LINK CLICK TRACKING ────────────────────────────────
+// Ported from Traqly's ClickEvent. One row per hit on a shared referral link
+// (/EduCraftA/{n}, /ECCA/{id}, /ECSA/{id}). The Redis `clicks:{id}` counters
+// stay as the legacy baseline; these rows hold the detail, from deploy day.
+
+enum ClickQuality {
+  UNIQUE // first click from this visitor on this link
+  RETURN // same visitor back after the dedupe window
+  DUPLICATE // same visitor again inside the dedupe window
+  BOT // crawler / headless client — kept for the Quality tab, never counted
+}
+
+model ClickEvent {
+  id             String       @id @default(cuid())
+  /// The link that was hit: "054", "ECCA-001", "ECSA-001-003". Always set, so
+  /// clicks on Core/Sub or later-vacated slots are still recorded.
+  slotCode       String
+  /// The HQ ambassador behind that slot at click time; null for a vacant slot
+  /// or a Core/Sub with no HQ record.
+  ambassadorId   String?
+  ambassador     Ambassador?  @relation(fields: [ambassadorId], references: [id], onDelete: SetNull)
+  timestamp      DateTime     @default(now())
+  /// HMAC of the visitor IP — never the IP itself.
+  ipHash         String
+  country        String?
+  city           String?
+  /// Human name ("Edo State"), resolved from regionCode at write time.
+  region         String?
+  /// ISO-3166-2 subdivision code ("ED"); the stable grouping key.
+  regionCode     String?
+  latitude       Float?
+  longitude      Float?
+  device         String?
+  os             String?
+  browser        String?
+  referrer       String?
+  referrerSource String?
+  quality        ClickQuality @default(UNIQUE)
+  isFraud        Boolean      @default(false)
+  fraudReason    String?
+  /// Recorded in full but excluded from every number (link opened with ?test=1).
+  isTestClick    Boolean      @default(false)
+  /// Set when an admin resets a count: the row is kept, it just moves to
+  /// History. Every analytics read filters archivedAt: null.
+  archivedAt     DateTime?
+
+  @@index([slotCode, timestamp])
+  @@index([ambassadorId, timestamp])
+  @@index([timestamp])
+  // Serves the duplicate-vs-return lookup (newest event for this visitor on this link).
+  @@index([slotCode, ipHash, timestamp])
+  @@index([ambassadorId, isTestClick, archivedAt])
 }

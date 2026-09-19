@@ -37,6 +37,5 @@
   ],
   "exclude": [
     "node_modules",
-    "Educraft_Ambassador"
-  ]
+    "Educraft_Ambassador", "Traqly"]
 }
