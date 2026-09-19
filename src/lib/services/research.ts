@@ -1,17 +1,11 @@
 import type { Reference, ReferenceClassification } from "@prisma/client";
 import { db } from "@/lib/db";
 import { callClaudeForJson, AnthropicError } from "@/lib/anthropic";
-import { CrossRefUnavailableError, findWorkByTitle } from "@/lib/crossref";
 import { resolveOpenAccessPdf } from "@/lib/unpaywall";
-import { fetchAbstractByDoi, searchWorks } from "@/lib/openalex";
-import {
-  createCollection,
-  deleteCollection,
-  deleteItems,
-  importItems,
-  addLinkedPdfAttachment,
-  ZoteroError,
-} from "@/lib/zotero";
+import { searchWorks } from "@/lib/openalex";
+// Legacy cleanup only — jobs run before Zotero was dropped from the pipeline
+// still have a collection and items that "Run research again" should remove.
+import { deleteCollection, deleteItems } from "@/lib/zotero";
 import {
   createDocInFolder,
   deleteFile,
@@ -24,38 +18,32 @@ import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 export class ResearchError extends Error {}
 
 /*
- * Where candidates come from — search first, recall as a fallback:
+ * OpenAlex-native pipeline:
  *
- *   1. Claude writes academic search queries for the topic, and each query is
- *      run against OpenAlex (a real index). Every hit is a real, published
- *      work with a DOI before it ever becomes a candidate — nothing to verify
- *      against fabrication.
- *   2. Only if searching runs dry does Claude recall specific paper titles,
- *      and each of those must then match a real CrossRef record (fuzzy title
- *      match, author/year cross-checked) or it's discarded. On a live test
- *      only ~4% of recalled titles existed, which is why recall is no longer
- *      the primary source.
+ *   1. Claude writes academic search queries for the topic; each is run
+ *      against OpenAlex. Every hit is a real published work that arrives with
+ *      its DOI, authors, year, journal, abstract and citation count — so there
+ *      is no separate "verify it exists" step. (Claude-recalled titles were
+ *      tried first and only ~4% of them existed.)
+ *   2. Each paper is sorted onto a delivery track. Open-access status decides
+ *      how it's delivered, never whether it's kept:
+ *        Track A — OPEN_ACCESS: a PDF that really serves PDF bytes, found via
+ *                  Unpaywall and OpenAlex's own links. Uploaded to Drive.
+ *        Track B — PAYWALLED:   no free PDF. Kept as a reference and listed with
+ *                  its DOI in the project's "Paywalled References" Google Doc.
+ *      PDF links are always probed rather than trusted: OpenAlex reports a
+ *      pdf_url for ~88% of papers but only ~18% actually download, and
+ *      Unpaywall finds ~57% more than OpenAlex's links alone.
+ *   3. Tier 2 relevance classification on both tracks, before any writing.
+ *   4. Outputs: PDFs in Drive, the paywalled-references doc, and a .bib export
+ *      generated on demand from the stored metadata (see research-bib.ts).
  *
- * After that, a paper's open-access status only decides how it's delivered,
- * not whether it's kept:
- *
- *   Track A — OPEN_ACCESS: Unpaywall found a PDF that really serves PDF bytes.
- *             Imported to Zotero with a linked PDF, uploaded to Drive.
- *   Track B — PAYWALLED:   verified but no free PDF. Imported to Zotero as
- *             metadata + abstract, listed with its DOI link in the project's
- *             "Paywalled References" Google Doc.
- *
- * Both tracks go through Tier 2 relevance classification and appear in the
- * reference list identically.
+ * No CrossRef and no Zotero — the references live in our own database.
  */
 
 // ── Tuning constants ─────────────────────────────────────────
 const CANDIDATES_PER_ROUND = 100;
-/** Round 0 may top itself up to this many rounds' worth of candidates (300) when verification attrition is high. */
-const MAX_CANDIDATE_ROUNDS = 3;
 const MAX_REPLACEMENT_ROUNDS = 3;
-/** Aim to import a little over target so Tier 2 drop-outs don't leave the job short. */
-const IMPORT_TARGET_MULTIPLIER = 1.25;
 const MIN_REPLACEMENT_CANDIDATES = 20;
 /** Below this many relevant references the job goes to an admin instead of passing. */
 const MIN_USABLE_REFERENCES = 10;
@@ -69,11 +57,7 @@ const SEARCH_QUERIES_PER_STEP = 3; // OpenAlex searches per step, run concurrent
 const RESULTS_TAKEN_PER_QUERY = 12; // new works kept from one query, most relevant first
 const FOUNDATIONAL_PREFIX = "[foundational] ";
 
-const CANDIDATE_FETCH_BATCH = 25; // recalled titles per Claude call (fallback path)
-const VERIFY_BATCH = 6; // CrossRef lookups per step…
-const VERIFY_CONCURRENCY = 3; // …at most 3 at once (CrossRef's polite-pool limit)
-const RESOLVE_BATCH = 8; // Unpaywall + OpenAlex lookups per step, run concurrently
-const IMPORT_BATCH = 25; // Zotero items per step
+const RESOLVE_BATCH = 8; // Unpaywall lookups per step, run concurrently
 const CLASSIFY_BATCH = 20; // references per Tier 2 call
 const DRIVE_BATCH = 3; // PDF downloads+uploads per step, run concurrently
 
@@ -181,91 +165,8 @@ export async function resetResearchJob(workerId: string, idOrCode: string): Prom
 
 // ── Claude calls ─────────────────────────────────────────────
 
-interface CandidatePaper {
-  title: string;
-  authors?: string;
-  year?: number;
-}
-
 function titleKey(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-async function fetchCandidates(
-  ctx: ProjectContext,
-  count: number,
-  triedTitles: string[]
-): Promise<CandidatePaper[]> {
-  const system = `You are helping EduCraft, a Nigerian academic writing service, find real candidate academic references for a student's project report. Every candidate you propose is independently verified against CrossRef (the real DOI registry) before it is used — anything that doesn't match a real CrossRef record is discarded automatically, before it ever reaches a student's reference list.
-
-Because of that downstream check, it is far better to propose real papers you are only moderately confident about than to invent plausible-sounding details to fill a quota — an invented paper is simply discarded, while a real paper gets a fair chance to verify. Never fabricate a DOI.
-
-Rules:
-- Propose only papers you believe actually exist, with reasonably specific bibliographic details.
-- Prefer base/foundational papers and closely related recent work over marginally-related ones.
-- Prefer well-cited papers in reputable journals and conference proceedings. Paywalled papers are fine — being open access is a bonus, not a requirement.
-- Published within roughly the last 5 years where possible; genuinely foundational older papers are fine.
-- Do not repeat any title already listed as "already tried."
-- Give the title as close to verbatim as you can recall — this is what gets matched against the real record.
-- Give authors as "Surname, Initial; Surname, Initial" with the first author first, and the publication year — they're used to confirm the match when the title is recalled imperfectly.`;
-
-  const user = [
-    `PROJECT TOPIC: ${ctx.topic}`,
-    `DEPARTMENT: ${ctx.department}`,
-    ctx.universityName ? `UNIVERSITY: ${ctx.universityName}` : null,
-    "",
-    `Propose ${count} candidate academic references on this topic.`,
-    triedTitles.length
-      ? `\nALREADY TRIED (do not repeat):\n${triedTitles.map((t) => `- ${t}`).join("\n")}`
-      : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  let papers: CandidatePaper[];
-  try {
-    const result = await callClaudeForJson<{ papers: CandidatePaper[] }>({
-      system,
-      user,
-      toolName: "propose_candidate_papers",
-      toolDescription: "Propose candidate academic papers for downstream verification.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          papers: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                authors: { type: "string", description: "e.g. 'Smith, J.; Doe, A.'" },
-                year: { type: "number" },
-              },
-              required: ["title"],
-            },
-          },
-        },
-        required: ["papers"],
-      },
-      maxTokens: 4096,
-    });
-    papers = result.papers ?? [];
-  } catch (error) {
-    if (error instanceof AnthropicError) throw new ResearchError(error.message);
-    throw error;
-  }
-
-  // Drop repeats of anything already tried (or repeated within this batch) —
-  // an all-repeats batch then correctly reads as "nothing new".
-  const seen = new Set(triedTitles.map(titleKey));
-  const fresh: CandidatePaper[] = [];
-  for (const p of papers) {
-    const key = p.title ? titleKey(p.title) : "";
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    fresh.push(p);
-  }
-  return fresh;
 }
 
 /**
@@ -415,17 +316,8 @@ Classify every reference listed, using its exact id.`;
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function shortTopic(title: string, max = 60): string {
-  if (title.length <= max) return title;
-  return title.slice(0, max).replace(/\s+\S*$/, "") + "…";
-}
-
 async function candidatesFetchedThisRound(jobId: string, round: number): Promise<number> {
   return db.reference.count({ where: { researchJobId: jobId, round } });
-}
-
-function importTarget(targetCount: number): number {
-  return Math.ceil(targetCount * IMPORT_TARGET_MULTIPLIER);
 }
 
 function escapeHtml(s: string): string {
@@ -453,7 +345,7 @@ function paywalledDocHtml(ctx: ProjectContext, refs: Reference[]): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
 <h1>${escapeHtml(PAYWALLED_DOC_TITLE)}</h1>
 <p><b>Project:</b> ${escapeHtml(ctx.projectId)} — ${escapeHtml(ctx.topic)}</p>
-<p>These ${refs.length} references are part of your project's reference list, but their publishers don't offer a free PDF. To read one, open its DOI link while signed in to your university library portal (or connected to campus Wi-Fi) — your library's journal subscriptions usually give full access. The open-access papers for your project are saved as PDFs in this same folder.</p>
+<p>These ${refs.length} references are part of your project's reference list, but we couldn't save a PDF of them for you. Some are free to read straight from the DOI link. For the rest, open the link while signed in to your university library portal (or connected to campus Wi-Fi) — your library's journal subscriptions usually give full access. The papers we could download are saved as PDFs in this same folder.</p>
 <ol>
 ${items}
 </ol>
@@ -501,12 +393,12 @@ export async function advanceResearchJob(jobId: string): Promise<AdvanceResult> 
   switch (job.status) {
     case "FINDING_CANDIDATES":
       return advanceFindingCandidates(job, ctx);
+    // VERIFYING_DOIS and IMPORTING_ZOTERO are legacy steps; a job left in one
+    // of them by an older run just carries on from the PDF-resolving step.
     case "VERIFYING_DOIS":
-      return advanceVerifyingDois(job);
     case "RESOLVING_PDFS":
-      return advanceResolvingAccess(job);
     case "IMPORTING_ZOTERO":
-      return advanceImportingZotero(job, ctx);
+      return advanceResolvingAccess(job);
     case "CLASSIFYING":
       return advanceClassifying(job, ctx);
     case "REPLACING":
@@ -530,46 +422,20 @@ async function moveTo(job: Job, status: Job["status"]): Promise<AdvanceResult> {
 async function advanceFindingCandidates(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
   const fetchedSoFar = await candidatesFetchedThisRound(job.id, job.replacementRound);
 
-  // How many raw candidates this round should end up with, before verification attrition.
   let roundTarget: number;
   if (job.replacementRound > 0) {
     // Replacement round: aim for enough to cover the remaining shortfall,
-    // allowing for both CrossRef and relevance drop-outs.
+    // allowing for papers the relevance check will drop.
     const kept = await db.reference.count({ where: { researchJobId: job.id, status: "KEPT" } });
     const shortfall = Math.max(job.targetCount - kept, 0);
     roundTarget =
       shortfall === 0 ? 0 : Math.min(CANDIDATES_PER_ROUND, Math.max(MIN_REPLACEMENT_CANDIDATES, shortfall * 3));
   } else {
-    // Verification only ever moves a reference's status away from CANDIDATE
-    // (DOI_REJECTED, IMPORTED, ...) — so this is true only once a full pass
-    // has happened, which is the only way advanceImportingZotero could have
-    // sent us back here for a genuine top-up.
-    const hasBeenVerified =
-      (await db.reference.count({
-        where: { researchJobId: job.id, round: 0, status: { not: "CANDIDATE" } },
-      })) > 0;
-
-    if (!hasBeenVerified) {
-      roundTarget = CANDIDATES_PER_ROUND;
-    } else {
-      // Genuine top-up — extrapolate the observed survival rate, capped so a
-      // poorly-covered topic can't loop forever.
-      const survivors = await db.reference.count({
-        where: { researchJobId: job.id, round: 0, status: { in: ["IMPORTED", "KEPT"] } },
-      });
-      const shortfall = importTarget(job.targetCount) - survivors;
-      const hardCeiling = CANDIDATES_PER_ROUND * MAX_CANDIDATE_ROUNDS;
-      if (shortfall <= 0) {
-        roundTarget = fetchedSoFar;
-      } else {
-        const survivalRate = Math.max(survivors / Math.max(fetchedSoFar, 1), 0.1);
-        roundTarget = Math.min(fetchedSoFar + Math.ceil(shortfall / survivalRate), hardCeiling);
-      }
-    }
+    roundTarget = CANDIDATES_PER_ROUND;
   }
 
   if (fetchedSoFar >= roundTarget || roundTarget === 0) {
-    return moveTo(job, "VERIFYING_DOIS");
+    return moveTo(job, "RESOLVING_PDFS");
   }
 
   // 1. Run the next unrun search queries.
@@ -588,46 +454,14 @@ async function advanceFindingCandidates(job: Job, ctx: ProjectContext): Promise<
     return { job: next, done: false };
   }
 
-  // 3. Searching has run dry — fall back to Claude recalling specific titles,
-  //    each of which must then match a real CrossRef record.
-  const batchSize = Math.min(CANDIDATE_FETCH_BATCH, roundTarget - fetchedSoFar);
-  const papers = await fetchCandidates(ctx, batchSize, job.triedTitles);
-
-  if (papers.length === 0) {
-    // Claude has nothing new to offer. Move on with what we have, and (for a
-    // round-0 top-up) remember it so the import step doesn't send us back.
-    const next = await db.researchJob.update({
-      where: { id: job.id },
-      data: { status: "VERIFYING_DOIS", ...(job.replacementRound === 0 ? { candidatesExhausted: true } : {}) },
-    });
-    return { job: next, done: false };
-  }
-
-  await db.$transaction([
-    db.reference.createMany({
-      data: papers.map((p) => ({
-        researchJobId: job.id,
-        projectId: job.projectId,
-        proposedTitle: p.title,
-        proposedYear: typeof p.year === "number" ? Math.round(p.year) : null,
-        authors: p.authors ?? null,
-        round: job.replacementRound,
-      })),
-    }),
-    db.researchJob.update({
-      where: { id: job.id },
-      data: { triedTitles: { push: papers.map((p) => p.title) } },
-    }),
-  ]);
-
-  const updated = await db.researchJob.findUniqueOrThrow({ where: { id: job.id } });
-  return { job: updated, done: false };
+  // 3. Nothing left to search with — carry on with what was found.
+  return moveTo(job, "RESOLVING_PDFS");
 }
 
 /**
- * Runs up to SEARCH_QUERIES_PER_STEP queries against OpenAlex and inserts
- * the new works as candidates that are already verified (they carry a real
- * DOI and the index's own metadata, so VERIFYING_DOIS skips them).
+ * Runs up to SEARCH_QUERIES_PER_STEP queries against OpenAlex and inserts the
+ * new works as candidates. Each already carries its real DOI and full
+ * metadata straight from the index.
  */
 async function runSearchQueries(job: Job, needed: number): Promise<AdvanceResult> {
   const batch = job.searchQueries.slice(job.searchCursor, job.searchCursor + SEARCH_QUERIES_PER_STEP);
@@ -677,6 +511,7 @@ async function runSearchQueries(job: Job, needed: number): Promise<AdvanceResult
               year: w.year,
               journal: w.journal,
               abstract: w.abstract,
+              citedByCount: w.citedByCount,
               // A hint only — RESOLVING_PDFS probes it before anything relies on it.
               pdfUrl: w.pdfUrl,
               round: job.replacementRound,
@@ -697,200 +532,51 @@ async function runSearchQueries(job: Job, needed: number): Promise<AdvanceResult
   return { job: updated, done: false };
 }
 
-async function advanceVerifyingDois(job: Job): Promise<AdvanceResult> {
-  const pending = await db.reference.findMany({
-    where: { researchJobId: job.id, status: "CANDIDATE", doi: null },
-    take: VERIFY_BATCH,
-  });
-
-  if (pending.length === 0) return moveTo(job, "RESOLVING_PDFS");
-
-  // In waves of VERIFY_CONCURRENCY — CrossRef rate-limits bursts with 429s.
-  const settled: PromiseSettledResult<Awaited<ReturnType<typeof findWorkByTitle>>>[] = [];
-  for (let i = 0; i < pending.length; i += VERIFY_CONCURRENCY) {
-    const wave = pending.slice(i, i + VERIFY_CONCURRENCY);
-    settled.push(
-      ...(await Promise.allSettled(
-        wave.map((ref) => findWorkByTitle(ref.proposedTitle, { authors: ref.authors, year: ref.proposedYear }))
-      ))
-    );
-  }
-
-  const unavailable = settled.filter((s) => s.status === "rejected");
-  if (unavailable.length === pending.length) {
-    const reason = (unavailable[0] as PromiseRejectedResult).reason;
-    if (reason instanceof CrossRefUnavailableError) {
-      throw new ResearchError("CrossRef isn't responding right now — press Resume in a minute to carry on.");
-    }
-    throw reason;
-  }
-
-  // Claude can propose the same underlying paper under two different working
-  // titles; CrossRef then resolves both to the same DOI. Track DOIs already
-  // claimed by this job — including ones assigned earlier in this batch — so
-  // a second candidate for the same paper is rejected rather than imported twice.
-  const alreadyClaimed = await db.reference.findMany({
-    where: { researchJobId: job.id, doi: { not: null }, status: { not: "DOI_REJECTED" } },
-    select: { doi: true },
-  });
-  const claimedDois = new Set(alreadyClaimed.map((r) => (r.doi as string).toLowerCase()));
-
-  const writes = pending.flatMap((ref, i) => {
-    const outcome = settled[i];
-    // Couldn't reach CrossRef for this one — leave it as a candidate to retry next step.
-    if (outcome.status === "rejected") return [];
-    const work = outcome.value;
-    if (!work || claimedDois.has(work.doi.toLowerCase())) {
-      return db.reference.update({ where: { id: ref.id }, data: { status: "DOI_REJECTED" } });
-    }
-    claimedDois.add(work.doi.toLowerCase());
-    return db.reference.update({
-      where: { id: ref.id },
-      data: {
-        doi: work.doi,
-        title: work.title,
-        authors: work.authors || ref.authors,
-        year: work.year ?? ref.proposedYear,
-        journal: work.journal,
-        abstract: work.abstract,
-      },
-    });
-  });
-  await db.$transaction(writes);
-
-  const updated = await db.researchJob.findUniqueOrThrow({ where: { id: job.id } });
-  return { job: updated, done: false };
-}
-
-/** Sorts each verified reference into Track A (open access) or Track B (paywalled) — nothing is dropped here. */
+/**
+ * Sorts each reference into Track A (open access) or Track B (paywalled) —
+ * nothing is dropped here. When none are left to sort, the round's candidates
+ * are recorded and move on to the relevance check.
+ */
 async function advanceResolvingAccess(job: Job): Promise<AdvanceResult> {
   const pending = await db.reference.findMany({
     where: { researchJobId: job.id, status: "CANDIDATE", doi: { not: null }, access: null },
     take: RESOLVE_BATCH,
   });
 
-  if (pending.length === 0) return moveTo(job, "IMPORTING_ZOTERO");
-
-  const results = await Promise.all(
-    pending.map(async (ref) => {
-      const doi = ref.doi as string;
-      const [oa, abstract] = await Promise.all([
-        // ref.pdfUrl here is OpenAlex's unverified hint (search-sourced papers) — probed like any other.
-        resolveOpenAccessPdf(doi, [ref.pdfUrl]),
-        ref.abstract ? Promise.resolve(null) : fetchAbstractByDoi(doi),
-      ]);
-      return { ref, oa, abstract };
-    })
-  );
-
-  await db.$transaction(
-    results.map(({ ref, oa, abstract }) =>
-      db.reference.update({
-        where: { id: ref.id },
-        data: {
-          access: oa.isOpenAccess && oa.pdfUrl ? "OPEN_ACCESS" : "PAYWALLED",
-          pdfUrl: oa.isOpenAccess ? oa.pdfUrl : null,
-          ...(abstract ? { abstract } : {}),
-        },
-      })
-    )
-  );
-
-  const updated = await db.researchJob.findUniqueOrThrow({ where: { id: job.id } });
-  return { job: updated, done: false };
-}
-
-async function advanceImportingZotero(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
-  let collectionKey = job.zoteroCollectionKey;
-  if (!collectionKey) {
-    try {
-      collectionKey = await createCollection(`${ctx.projectId} — ${shortTopic(ctx.topic)}`);
-    } catch (error) {
-      if (error instanceof ZoteroError) throw new ResearchError(error.message);
-      throw error;
-    }
-    await db.researchJob.update({ where: { id: job.id }, data: { zoteroCollectionKey: collectionKey } });
-  }
-
-  const pending = await db.reference.findMany({
-    where: {
-      researchJobId: job.id,
-      status: "CANDIDATE",
-      doi: { not: null },
-      access: { not: null },
-      zoteroItemKey: null,
-    },
-    take: IMPORT_BATCH,
-  });
-
   if (pending.length === 0) {
-    const importedCount = await db.reference.count({
-      where: { researchJobId: job.id, status: { in: ["IMPORTED", "KEPT"] } },
+    const recorded = await db.reference.updateMany({
+      where: { researchJobId: job.id, status: "CANDIDATE", doi: { not: null }, access: { not: null } },
+      data: { status: "IMPORTED" },
     });
-    if (importedCount === 0) {
+    const total = await db.reference.count({ where: { researchJobId: job.id, status: { in: ["IMPORTED", "KEPT"] } } });
+    if (recorded.count === 0 && total === 0) {
       const next = await db.researchJob.update({
         where: { id: job.id },
-        data: {
-          status: "FAILED_NEEDS_REVIEW",
-          errorMessage: "None of the candidate papers could be matched to a real CrossRef record.",
-        },
+        data: { status: "FAILED_NEEDS_REVIEW", errorMessage: "The search returned no papers for this topic." },
       });
       await notifyAdmins({
         title: "Research pipeline needs review",
-        message: `${ctx.projectId}: no candidate papers could be verified against CrossRef.`,
+        message: `${job.projectId}: the literature search returned no papers.`,
         type: "urgent",
-        link: `/admin/projects/${ctx.projectId}`,
+        link: `/admin/projects/${job.projectId}`,
       });
       return { job: next, done: true };
     }
-
-    // Round 0 came up short — top up with more raw candidates (bounded inside
-    // advanceFindingCandidates) rather than handing over fewer than asked for.
-    if (job.replacementRound === 0 && !job.candidatesExhausted && importedCount < importTarget(job.targetCount)) {
-      const fetchedSoFar = await candidatesFetchedThisRound(job.id, 0);
-      if (fetchedSoFar < CANDIDATES_PER_ROUND * MAX_CANDIDATE_ROUNDS) {
-        return moveTo(job, "FINDING_CANDIDATES");
-      }
-    }
-
     return moveTo(job, "CLASSIFYING");
   }
 
-  let keys: (string | null)[];
-  try {
-    keys = await importItems(
-      collectionKey,
-      pending.map((r) => ({
-        title: r.title as string,
-        authors: r.authors ?? "",
-        doi: r.doi as string,
-        year: r.year,
-        journal: r.journal,
-        abstract: r.abstract,
-        tags: [r.access === "OPEN_ACCESS" ? "Open Access — PDF" : "Reference Only — Paywalled"],
-      }))
-    );
-  } catch (error) {
-    if (error instanceof ZoteroError) throw new ResearchError(error.message);
-    throw error;
-  }
+  // ref.pdfUrl here is OpenAlex's unverified hint — probed like any other location.
+  const results = await Promise.all(pending.map((ref) => resolveOpenAccessPdf(ref.doi as string, [ref.pdfUrl])));
 
-  // A reference Zotero refused is still a CrossRef-verified reference — keep
-  // it (status IMPORTED, no item key) rather than retrying it forever.
   await db.$transaction(
-    pending.map((r, i) =>
-      db.reference.update({ where: { id: r.id }, data: { zoteroItemKey: keys[i] ?? null, status: "IMPORTED" } })
-    )
-  );
-  const missing = keys.filter((k) => !k).length;
-  if (missing > 0) console.error(`[research] Zotero rejected ${missing} item(s) for job ${job.id}`);
-
-  // Best effort — the reference keeps its pdfUrl even if the attachment fails.
-  await Promise.allSettled(
-    pending.map((r, i) =>
-      keys[i] && r.access === "OPEN_ACCESS" && r.pdfUrl
-        ? addLinkedPdfAttachment(keys[i] as string, r.pdfUrl)
-        : Promise.resolve()
+    pending.map((ref, i) =>
+      db.reference.update({
+        where: { id: ref.id },
+        data: {
+          access: results[i].isOpenAccess && results[i].pdfUrl ? "OPEN_ACCESS" : "PAYWALLED",
+          pdfUrl: results[i].isOpenAccess ? results[i].pdfUrl : null,
+        },
+      })
     )
   );
 

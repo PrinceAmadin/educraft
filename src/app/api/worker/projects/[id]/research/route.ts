@@ -8,11 +8,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   try {
     const job = await getResearchJob(guard.workerId, params.id);
-    const zoteroCollectionUrl =
-      job?.zoteroCollectionKey && process.env.ZOTERO_GROUP_ID
-        ? `https://www.zotero.org/groups/${process.env.ZOTERO_GROUP_ID}/collections/${job.zoteroCollectionKey}`
-        : null;
-    return NextResponse.json({ job, zoteroCollectionUrl });
+    return NextResponse.json({ job });
   } catch (error) {
     if (error instanceof ResearchError) {
       return NextResponse.json({ error: error.message }, { status: 404 });

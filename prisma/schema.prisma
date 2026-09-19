@@ -653,10 +653,10 @@ model Setting {
 // closed tab and the worker UI polls rather than holding a long connection.
 
 enum ResearchJobStatus {
-  FINDING_CANDIDATES // asking Claude for candidate papers on the topic
-  VERIFYING_DOIS // confirming each candidate against CrossRef
-  RESOLVING_PDFS // resolving an open-access PDF via Unpaywall
-  IMPORTING_ZOTERO // creating the collection / importing verified items
+  FINDING_CANDIDATES // Claude writes search queries; OpenAlex returns real works
+  VERIFYING_DOIS // legacy: CrossRef verification, no longer a step (kept for old rows)
+  RESOLVING_PDFS // probing for a downloadable open-access PDF (Unpaywall + OpenAlex urls)
+  IMPORTING_ZOTERO // legacy: Zotero import, no longer a step (kept for old rows)
   CLASSIFYING // Tier 2 relevance pass (CORE/CLOSELY_RELATED/TANGENTIAL/IRRELEVANT)
   REPLACING // Tier 2 failed — fetching replacements for flagged refs
   UPLOADING_DRIVE // uploading kept PDFs to Google Drive
@@ -688,16 +688,14 @@ model ResearchJob {
   /// Last-verified-by-CrossRef titles this job has already tried, so
   /// replacement rounds don't re-propose the same rejected candidates.
   triedTitles String[] @default([])
-  /// Set when Claude stops producing new candidates during a round-0 top-up,
-  /// so the pipeline moves on instead of re-requesting forever.
+  /// Legacy — was used by the removed title-recall top-up. Unused.
   candidatesExhausted Boolean @default(false)
-
   /// Search queries Claude wrote for this job, run against OpenAlex in order.
   /// "[foundational] " prefix = no date filter, sorted by citation count.
   searchQueries   String[] @default([])
   /// Index of the next query in searchQueries to run.
   searchCursor    Int      @default(0)
-  /// Set when Claude can't come up with any new queries — falls back to recall.
+  /// Set when Claude can't come up with any new queries — no more candidates to find.
   queriesExhausted Boolean @default(false)
 
   errorMessage String?
@@ -711,10 +709,10 @@ model ResearchJob {
 }
 
 enum ReferenceStatus {
-  CANDIDATE // proposed by Claude, not yet checked against CrossRef
-  DOI_REJECTED // CrossRef found no confident match — dropped
+  CANDIDATE // found by search, PDF availability not yet checked
+  DOI_REJECTED // legacy: CrossRef found no match (recall path, removed) — old rows only
   NO_OA_PDF // legacy: pre-two-track jobs dropped paywalled papers here. No longer produced — paywalled papers are now kept as reference-only (see ReferenceAccess)
-  IMPORTED // verified + has an OA PDF + imported into Zotero
+  IMPORTED // recorded with its delivery track set, awaiting the relevance check (name is legacy — no longer involves Zotero)
   REPLACED // was IMPORTED but Tier 2 flagged it and it was swapped out
   KEPT // passed Tier 2 — part of the final verified set
 }
@@ -754,10 +752,12 @@ model Reference {
   journal String?
   abstract String?
 
-  pdfUrl String? // Unpaywall open-access location
+  pdfUrl String? // a probed, working open-access PDF location (Track A only once resolved)
+  citedByCount Int?
   /// Null until the open-access check has run for this reference.
   access ReferenceAccess?
 
+  /// Legacy — only set by jobs run before Zotero was dropped from the pipeline; used to clean them up.
   zoteroItemKey String?
   driveFileId   String?
 

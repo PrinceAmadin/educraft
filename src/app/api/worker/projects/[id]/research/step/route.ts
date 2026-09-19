@@ -3,7 +3,7 @@ import { requireWorker, serverError } from "@/lib/api";
 import { ResearchError, advanceResearchJob, getResearchJob } from "@/lib/services/research";
 
 // Each step does a small bounded batch of external API calls (Claude,
-// CrossRef, Unpaywall, Zotero, or Drive) — 60s is generous headroom on
+// OpenAlex, Unpaywall, or Drive) — 60s is generous headroom on
 // Vercel Hobby's ceiling for a single one of those batches.
 export const maxDuration = 60;
 

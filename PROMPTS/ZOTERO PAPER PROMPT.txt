@@ -22,30 +22,28 @@ what little survived. The pipeline now works like this:
 
   1. Claude writes academic SEARCH QUERIES for the topic (~10 up front,
      more later if needed, ~1 in 5 marked "foundational").
-  2. Each query is run against OpenAlex (a real 250M-work index, sourced
-     largely from CrossRef). Every hit is a real published work with a DOI
-     before it ever becomes a candidate — nothing to fabricate. Recent
-     queries = last 7 years by relevance; foundational = any year by
-     citation count.
-  3. Only if searching runs dry: Claude recalls specific titles (the prompt
-     below), each checked against CrossRef — top 5 results, fuzzy title
-     match ≥ 70%, or ≥ 55% when first-author surname AND year (±1) agree; a
-     match whose author and year BOTH contradict the proposal is rejected
-     as a different paper.
-  4. Two delivery tracks — open-access status no longer decides survival:
-       A. OPEN ACCESS — Unpaywall/OpenAlex PDF actually probed for PDF
-          bytes → Zotero item with linked PDF, uploaded to Drive.
-       B. PAYWALLED — kept as reference-only (metadata + abstract) →
-          Zotero item tagged "Reference Only — Paywalled", listed with its
-          DOI in the "Paywalled References — Access via your university
-          library" Google Doc in the same Drive folder.
-  5. Tier 2 relevance classification on both tracks, BEFORE any writing.
+  2. Each query is run against OpenAlex (a free 250M-work index). Every hit
+     is a real published work that arrives with its DOI, authors, year,
+     journal, abstract and citation count — nothing to fabricate, so there
+     is no CrossRef step. Recent queries = last 7 years by relevance;
+     foundational = any year by citation count.
+  3. Two delivery tracks — open-access status no longer decides survival:
+       A. OPEN ACCESS — a PDF that really serves PDF bytes → uploaded to
+          Drive. Links come from Unpaywall AND OpenAlex and are always
+          probed: on a live test OpenAlex reported a pdf_url for 70/80
+          papers but only 14 downloaded, and Unpaywall found 8 more.
+       B. PAYWALLED — kept as reference-only (metadata + abstract), listed
+          with its DOI in the "Paywalled References — Access via your
+          university library" Google Doc in the same Drive folder.
+  4. Tier 2 relevance classification on both tracks, BEFORE any writing.
      TANGENTIAL/IRRELEVANT are dropped, so the final set is 100% CORE +
      CLOSELY_RELATED (inside the ≥75% / zero-IRRELEVANT rule). Replacement
      rounds (up to 3) run only if the kept count is below target.
+  5. No Zotero: references are stored in EduCraft's own database. "Download
+     .bib" exports them for Zotero, Mendeley, Word or LaTeX.
 
-Live dry run after the redesign, same topic: 100 candidates → 49 relevant
-references in one round (10 CORE; 12 with PDF, 37 paywalled), target 40.
+Live dry run, same topic: 100 candidates → 49 relevant references in one
+round (10 CORE; 12 with PDF, 37 paywalled), target 40.
 
 This file is a human-readable record of the prompts, so they can be tuned
 without touching the TypeScript (src/lib/services/research.ts is the source
@@ -62,7 +60,7 @@ relevant standards/frameworks; about 1 in 5 marked "foundational". See
 generateSearchQueries() in src/lib/services/research.ts for the exact text.
 
 ────────────────────────────────────────────────────────────────
-TITLE-RECALL PROMPT (fallback only — step 3)
+TITLE-RECALL PROMPT (REMOVED from the pipeline — kept for history)
 ────────────────────────────────────────────────────────────────
 System:
 

@@ -6,7 +6,7 @@ import {
   LuChevronDown,
   LuChevronUp,
   LuCircleAlert,
-  LuExternalLink,
+  LuDownload,
   LuFileText,
   LuFolderOpen,
   LuLoaderCircle,
@@ -30,6 +30,7 @@ interface ReferenceRow {
   access: "OPEN_ACCESS" | "PAYWALLED" | null;
   pdfUrl: string | null;
   driveFileId: string | null;
+  citedByCount: number | null;
 }
 
 interface ResearchJobData {
@@ -47,9 +48,9 @@ interface ResearchJobData {
 
 const STATUS_LABEL: Record<string, string> = {
   FINDING_CANDIDATES: "Searching academic databases…",
-  VERIFYING_DOIS: "Verifying papers against CrossRef…",
+  VERIFYING_DOIS: "Checking which papers have free PDFs…",
   RESOLVING_PDFS: "Checking which papers have free PDFs…",
-  IMPORTING_ZOTERO: "Importing into Zotero…",
+  IMPORTING_ZOTERO: "Checking which papers have free PDFs…",
   CLASSIFYING: "Checking relevance to the topic…",
   REPLACING: "Finding replacements for off-topic papers…",
   UPLOADING_DRIVE: "Saving PDFs and the paywalled-references list to Drive…",
@@ -89,7 +90,7 @@ function ReferenceItem({ r }: { r: ReferenceRow }) {
         </span>
       </div>
       <p className="mt-0.5 break-words text-xs text-muted-foreground">
-        {[r.authors, r.year, r.journal].filter(Boolean).join(" · ")}
+        {[r.authors, r.year, r.journal, r.citedByCount ? `${r.citedByCount} citations` : null].filter(Boolean).join(" · ")}
       </p>
       <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
         {r.doi ? (
@@ -129,8 +130,8 @@ function ResetDialog({
         <DialogHeader>
           <DialogTitle>Run research again?</DialogTitle>
           <DialogDescription>
-            This clears the current references — including their Zotero entries and the files saved to
-            Drive — and starts a fresh search for this project.
+            This clears the current references and the files saved to Drive, and starts a fresh search for
+            this project.
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-end gap-2">
@@ -149,7 +150,6 @@ function ResetDialog({
 
 export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const [job, setJob] = React.useState<ResearchJobData | null>(null);
-  const [zoteroUrl, setZoteroUrl] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [running, setRunning] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -161,7 +161,6 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const load = React.useCallback(async () => {
     const data = await fetchJson(`/api/worker/projects/${projectCode}/research`);
     setJob(data.job ?? null);
-    setZoteroUrl(data.zoteroCollectionUrl ?? null);
     return data.job as ResearchJobData | null;
   }, [projectCode]);
 
@@ -231,14 +230,18 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
   const isTerminal = job?.status === "PASSED" || job?.status === "FAILED_NEEDS_REVIEW";
   const kept = refs
     .filter((r) => r.status === "KEPT")
-    .sort((a, b) => Number(b.classification === "CORE") - Number(a.classification === "CORE"));
+    .sort(
+      (a, b) =>
+        Number(b.classification === "CORE") - Number(a.classification === "CORE") ||
+        (b.citedByCount ?? 0) - (a.citedByCount ?? 0)
+    );
   const keptWithPdf = kept.filter((r) => r.access === "OPEN_ACCESS");
   const keptPaywalled = kept.filter((r) => r.access !== "OPEN_ACCESS");
   const coreCount = kept.filter((r) => r.classification === "CORE").length;
   const drivePdfCount = kept.filter(hasDrivePdf).length;
-  const verified = refs.filter((r) => r.doi && r.status !== "DOI_REJECTED");
-  const openAccess = verified.filter((r) => r.access === "OPEN_ACCESS").length;
-  const paywalled = verified.filter((r) => r.access === "PAYWALLED").length;
+  const found = refs.filter((r) => r.doi && r.status !== "DOI_REJECTED");
+  const openAccess = found.filter((r) => r.access === "OPEN_ACCESS").length;
+  const paywalled = found.filter((r) => r.access === "PAYWALLED").length;
   const usedOldRules = refs.some((r) => r.status === "NO_OA_PDF");
 
   const startOverButton = (
@@ -296,7 +299,7 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             {refs.length > 0
-              ? `${refs.length} candidate${refs.length === 1 ? "" : "s"} looked at · ${verified.length} verified (${openAccess} with PDF, ${paywalled} paywalled) · ${kept.length} kept`
+              ? `${refs.length} paper${refs.length === 1 ? "" : "s"} found (${openAccess} with PDF, ${paywalled} paywalled) · ${kept.length} kept`
               : "Getting started…"}
           </p>
           {!running ? (
@@ -351,14 +354,12 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
                 </a>
               </Button>
             ) : null}
-            {zoteroUrl ? (
-              <Button size="sm" variant="outline" asChild>
-                <a href={zoteroUrl} target="_blank" rel="noopener noreferrer">
-                  <LuExternalLink className="size-4" aria-hidden />
-                  Open in Zotero
-                </a>
-              </Button>
-            ) : null}
+            <Button size="sm" variant="outline" asChild>
+              <a href={`/api/worker/projects/${projectCode}/research/bib`} download>
+                <LuDownload className="size-4" aria-hidden />
+                Download .bib
+              </a>
+            </Button>
             {startOverButton}
             <Button size="sm" disabled title="Coming soon — report generation is a later build phase">
               Proceed to Write Report
