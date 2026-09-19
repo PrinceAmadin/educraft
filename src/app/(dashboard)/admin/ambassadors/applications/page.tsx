@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LuInbox } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
+import { CopyLinkButton } from "@/components/ambassadors/CopyLinkButton";
 import { db } from "@/lib/db";
 import { listApplications } from "@/lib/services/applications";
 import { ApplicationReview } from "@/components/ambassadors/ApplicationReview";
@@ -38,7 +39,8 @@ export default async function ApplicationsPage({
     <div className="space-y-7">
       <PageHeader
         title="Ambassadors"
-        description="Review campus applications from /apply. Approving creates an ambassador with a referral code."
+        description="Review applications from /apply. Approving fills their slot, switches on their dashboard login and emails them their link."
+        actions={<CopyLinkButton path="/apply" label="Copy application link" />}
       />
       <AmbassadorTabs active="applications" pendingApplications={pendingApplications} />
 
@@ -89,6 +91,7 @@ export default async function ApplicationsPage({
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
+                {row.slotCode ? `EduCraftA-${row.slotCode} · ` : ""}
                 {row.university ?? "—"} · applied {formatDate(row.createdAt)}
               </p>
               {row.reviewNote ? (

@@ -5,7 +5,10 @@ export const ambassadorApplicationSchema = z
   .object({
     fullName: z.string().trim().min(2, "Enter your full name").max(120),
     phone: phoneSchema,
-    email: z.string().trim().email("Enter a valid email").max(160).optional().or(z.literal("")),
+    // Required now: it is their dashboard login.
+    email: z.string().trim().min(1, "Enter your email").email("Enter a valid email").max(160),
+    password: z.string().min(8, "At least 8 characters").max(72),
+    confirmPassword: z.string(),
     universityId: z.string().optional().or(z.literal("")),
     otherUniversity: z.string().trim().max(120).optional().or(z.literal("")),
     department: z.string().trim().max(120).optional().or(z.literal("")),
@@ -27,6 +30,9 @@ export const ambassadorApplicationSchema = z
     agreeTerms: z.boolean(),
   })
   .superRefine((v, ctx) => {
+    if (v.password !== v.confirmPassword) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmPassword"], message: "Passwords do not match" });
+    }
     if (!v.agreeTerms) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
-import { readRoster } from "@/lib/ambassador-panel/roster";
-import { SEED_ROSTER } from "@/lib/ambassador-panel/seed-roster";
-import type { Roster } from "@/lib/ambassador-panel/types";
+import { db } from "@/lib/db";
 
 /**
  * Referral links → WhatsApp, exactly as the original `api/redirect.ts`:
@@ -11,13 +9,17 @@ import type { Roster } from "@/lib/ambassador-panel/types";
  *   /ECCA/{id}          Core Ambassador recruitment link
  *   /ECSA/{id}          Sub-Ambassador client link
  *
- * Every visit increments `clicks:{id}` and adds the id to `ambassador_ids`.
+ * Names and slots come from Postgres (`AmbassadorSlot`, edited in Manage);
+ * every visit increments `clicks:{id}` in Redis and adds the id to
+ * `ambassador_ids`, so the click history already collected carries over.
  * The original fired that write and forgot it, which a serverless function can
  * cut off after the redirect is sent; here it is awaited, capped at 1.5s, so a
  * slow Redis never delays the student by more than that.
  */
 
 export type ReferralKind = "ambassador" | "ecca" | "ecsa";
+
+const EDUCRAFT_WHATSAPP = "2347063421088";
 
 const wa = (number: string, message: string) =>
   `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
@@ -26,26 +28,6 @@ async function trackClick(id: string) {
   if (!redisConfigured()) return;
   const write = withRedis((client) => client.multi().incr(`clicks:${id}`).sAdd("ambassador_ids", id).exec()).catch(() => {});
   await Promise.race([write, new Promise((resolve) => setTimeout(resolve, 1500))]);
-}
-
-async function loadRoster(): Promise<Roster> {
-  if (!redisConfigured()) return SEED_ROSTER;
-  try {
-    return await withRedis(readRoster);
-  } catch {
-    return SEED_ROSTER;
-  }
-}
-
-async function readProfileName(key: string): Promise<string | null> {
-  if (!redisConfigured()) return null;
-  try {
-    const raw = await withRedis((client) => client.get(key));
-    const name = raw ? (JSON.parse(raw) as { name?: string }).name?.trim() : "";
-    return name || null;
-  } catch {
-    return null;
-  }
 }
 
 function esc(value: unknown): string {
@@ -70,13 +52,13 @@ export async function referralResponse(kind: ReferralKind, rawId: string) {
   const id = decodeURIComponent(rawId ?? "").trim();
   if (!id) return errorPage("Invalid link", "No ambassador ID was provided.", 400);
 
-  const roster = await loadRoster();
-  const number = roster.educraft_whatsapp;
+  const number = EDUCRAFT_WHATSAPP;
 
   if (kind === "ecca") {
-    const core = roster.coreAmbassadors.find((c) => c.id === id.toUpperCase());
+    const code = id.toUpperCase();
+    const core = await db.ambassadorSlot.findFirst({ where: { kind: "CORE", code }, select: { code: true, name: true } });
     if (!core) return errorPage("Link not found", "This Core Ambassador link does not exist.", 404);
-    await trackClick(core.id);
+    await trackClick(core.code);
     return NextResponse.redirect(
       wa(
         number,
@@ -89,35 +71,31 @@ export async function referralResponse(kind: ReferralKind, rawId: string) {
   if (kind === "ecsa") {
     // The URL may arrive as "-001-001", "ECSA-001-001" or "001-001".
     const fullId = `ECSA-${id.toUpperCase().replace(/^ECSA-?/, "").replace(/^-/, "")}`;
-    const name =
-      (await readProfileName(`sub_profile:${fullId}`)) ??
-      roster.subAmbassadors.find((s) => s.id === fullId)?.name?.trim() ??
-      null;
-    if (!name) return errorPage("Link not found", "This Sub-Ambassador link does not exist.", 404);
-    await trackClick(fullId);
-    return NextResponse.redirect(
-      wa(number, `Hi EduCraft! I was referred by ${name}. I'd like to place an order on the following Services:`),
-      302
-    );
+    const sub = await db.ambassadorSlot.findFirst({
+      where: { kind: "SUB", code: fullId },
+      select: { code: true, name: true, vacant: true },
+    });
+    if (!sub) return errorPage("Link not found", "This Sub-Ambassador link does not exist.", 404);
+    await trackClick(sub.code);
+    const message =
+      sub.vacant || !sub.name
+        ? "Hi EduCraft! I'd like to place an order on the following Services:"
+        : `Hi EduCraft! I was referred by ${sub.name}. I'd like to place an order on the following Services:`;
+    return NextResponse.redirect(wa(number, message), 302);
   }
 
-  // General ambassador — an approved Redis profile wins over the roster.
-  const profileName = await readProfileName(`profile:${id}`);
-  if (profileName) {
-    await trackClick(id);
-    return NextResponse.redirect(
-      wa(number, `Hi EduCraft! I was referred by ${profileName}. I'd like to place an order on the following Services:`),
-      302
-    );
-  }
-
-  const slot = roster.slots[id];
+  // General ambassador. Old links were sometimes shared unpadded ("6").
+  const code = /^\d+$/.test(id) ? id.padStart(3, "0") : id;
+  const slot = await db.ambassadorSlot.findFirst({
+    where: { kind: "GENERAL", code },
+    select: { code: true, name: true, vacant: true },
+  });
   if (!slot) {
     return errorPage("Link not found", "This ambassador link does not exist. Please contact EduCraft.", 404);
   }
-  await trackClick(id);
+  await trackClick(slot.code);
   const message =
-    slot.status === "vacant" || !slot.name
+    slot.vacant || !slot.name
       ? "Hi EduCraft! I'd like to place an order on the following Services:"
       : `Hi EduCraft! I was referred by ${slot.name}. I'd like to place an order on the following Services:`;
   return NextResponse.redirect(wa(number, message), 302);

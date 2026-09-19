@@ -1,84 +1,38 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { LuMegaphone, LuSearchX, LuPlus } from "react-icons/lu";
-import { Button } from "@/components/ui/button";
+import { LuChartPie, LuCircleCheck, LuCircleDashed, LuLayoutGrid } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { Pagination } from "@/components/shared/Pagination";
-import { EmptyState } from "@/components/shared/EmptyState";
+import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
-import { AmbassadorsFilterBar } from "@/components/ambassadors/AmbassadorsFilterBar";
-import { AmbassadorsTable } from "@/components/ambassadors/AmbassadorsTable";
+import { RosterBoard } from "@/components/ambassadors/RosterBoard";
 import { db } from "@/lib/db";
-import { AMBASSADOR_PAGE_SIZE, listAmbassadors } from "@/lib/services/ambassadors";
-import { ambassadorListParamsSchema } from "@/lib/validations/ambassadors";
+import { listRoster, rosterStats } from "@/lib/services/ambassador-roster";
 
 export const metadata: Metadata = { title: "Ambassadors" };
 export const dynamic = "force-dynamic";
 
-export default async function AmbassadorsListPage({
-  searchParams,
-}: {
-  searchParams: Record<string, string | string[] | undefined>;
-}) {
-  const flat = Object.fromEntries(
-    Object.entries(searchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])
-  );
-  const parsed = ambassadorListParamsSchema.parse(flat);
-
-  const [{ rows, total, page, pageCount }, universities, pendingApplications] = await Promise.all([
-    listAmbassadors({
-      university: parsed.university,
-      tier: parsed.tier,
-      status: parsed.status,
-      q: parsed.q,
-      page: parsed.page,
-    }),
-    db.university.findMany({ orderBy: { name: "asc" }, select: { id: true, abbreviation: true } }),
+export default async function AmbassadorsPage() {
+  const [rows, pendingApplications] = await Promise.all([
+    listRoster("GENERAL"),
     db.ambassadorApplication.count({ where: { status: "PENDING" } }),
   ]);
-
-  const hasFilters = Boolean(parsed.university || parsed.tier || parsed.status || parsed.q);
+  const stats = rosterStats(rows);
 
   return (
     <div className="space-y-7">
       <PageHeader
         title="Ambassadors"
-        description="Campus reps who bring in clients. Referrals, conversions, and commission owed."
-        actions={
-          <Button asChild size="sm" className="shrink-0">
-            <Link href="/admin/ambassadors/new">
-              <LuPlus className="size-4" aria-hidden />
-              Add ambassador
-            </Link>
-          </Button>
-        }
+        description="Every ambassador slot, and the link each one shares with students. Copy a link and it opens WhatsApp with their name already in the message."
       />
-
       <AmbassadorTabs active="list" pendingApplications={pendingApplications} />
 
-      <AmbassadorsFilterBar universities={universities} />
+      <section className={STATS_GRID} aria-label="Slot totals">
+        <StatsCard label="Total slots" value={String(stats.total)} icon={LuLayoutGrid} />
+        <StatsCard label="Active" value={String(stats.active)} icon={LuCircleCheck} tone="success" />
+        <StatsCard label="Vacant" value={String(stats.vacant)} detail="Filled first by new applicants" icon={LuCircleDashed} tone="gold" />
+        <StatsCard label="Fill rate" value={`${stats.fillRate}%`} icon={LuChartPie} />
+      </section>
 
-      {rows.length === 0 ? (
-        hasFilters ? (
-          <EmptyState
-            icon={LuSearchX}
-            title="No ambassadors match these filters"
-            description="Try a different tier, status, or clear the filters."
-          />
-        ) : (
-          <EmptyState
-            icon={LuMegaphone}
-            title="No ambassadors yet"
-            description="Add your first ambassador to start tracking referrals and commissions."
-            action={{ label: "Add ambassador", href: "/admin/ambassadors/new" }}
-          />
-        )
-      ) : (
-        <div className="space-y-4">
-          <AmbassadorsTable rows={rows} />
-          <Pagination page={page} pageCount={pageCount} total={total} pageSize={AMBASSADOR_PAGE_SIZE} />
-        </div>
-      )}
+      <RosterBoard rows={rows} />
     </div>
   );
 }

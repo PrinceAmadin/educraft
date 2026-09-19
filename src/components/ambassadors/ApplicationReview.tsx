@@ -69,7 +69,14 @@ export function ApplicationReview({
           <li key={row.id} className="surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">{row.fullName}</p>
+                <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                  {row.fullName}
+                  {row.slotCode ? (
+                    <span className="rounded-md bg-zone px-1.5 py-0.5 font-mono text-xs font-medium text-primary">
+                      EduCraftA-{row.slotCode}
+                    </span>
+                  ) : null}
+                </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {row.phone}
                   {row.email ? ` · ${row.email}` : ""} · applied {formatDate(row.createdAt)}

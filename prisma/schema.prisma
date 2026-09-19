@@ -134,10 +134,51 @@ model AmbassadorApplication {
   reviewedAt      DateTime?
   /// Set to the Ambassador.id created on approval.
   ambassadorId    String?           @unique
+  /// General slot ("059") auto-assigned when they applied — the first vacant
+  /// slot, else the next number. Holds the slot while the application is
+  /// PENDING; cleared on rejection so it can be reassigned.
+  slotCode        String?
+  /// Their dashboard login, created inactive at submission (same as worker
+  /// applications) and switched on at approval.
+  userId          String?           @unique
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   @@index([status])
+  @@index([slotCode])
+}
+
+// ─── AMBASSADOR ROSTER ──────────────────────────────────
+
+enum RosterKind {
+  GENERAL // EduCraftA-001 …  client referral slot
+  CORE // ECCA-001 …  senior partner who recruits Subs
+  SUB // ECSA-001-001 …  recruited by a Core
+}
+
+/// The panel's roster: every numbered slot, vacant or filled, plus Core and
+/// Sub ambassadors. A filled slot links to its `Ambassador` row through
+/// `Ambassador.legacySlotId = code` — that pairing is also what the shared
+/// /EduCraftA/{code} links resolve through. `name`/`school` are the display
+/// labels the admin sees (edited freely in Manage).
+model AmbassadorSlot {
+  id         String     @id @default(cuid())
+  kind       RosterKind @default(GENERAL)
+  /// "001", "ECCA-001" or "ECSA-001-001".
+  code       String     @unique
+  name       String     @default("")
+  /// University abbreviation shown as the school chip ("EUI"); free text so
+  /// Admin, PG, Co-founders etc. work as they did in the panel.
+  school     String     @default("")
+  vacant     Boolean    @default(false)
+  /// CORE: base %. SUB: their own %.
+  percentage Float?
+  /// SUB only: the Core's code.
+  parentCode String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([kind])
 }
 
 // ─── CLIENTS ────────────────────────────────────────────

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Application received" };
 
-export default function ApplySuccessPage() {
+export default function ApplySuccessPage({ searchParams }: { searchParams: { slot?: string } }) {
+  const slot = /^\d{1,4}$/.test(searchParams.slot ?? "") ? searchParams.slot : null;
   return (
     <div className="mx-auto flex max-w-lg flex-col items-center px-4 py-16 text-center sm:py-24">
       <span className="rounded-full bg-success/12 p-3 text-success">
@@ -17,6 +18,12 @@ export default function ApplySuccessPage() {
       <p className="mt-2 text-muted-foreground">
         We&apos;ll review your application and get back to you on WhatsApp within 48 hours.
       </p>
+      {slot ? (
+        <p className="mt-4 text-sm text-muted-foreground">
+          Your slot: <span className="font-mono font-medium text-primary">EduCraftA-{slot}</span>. It becomes
+          active, with your link and dashboard login, once we approve you.
+        </p>
+      ) : null}
       <Button asChild variant="outline" className="mt-6">
         <Link href="/">Back to home</Link>
       </Button>

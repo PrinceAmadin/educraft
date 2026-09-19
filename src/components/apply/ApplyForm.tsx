@@ -26,7 +26,14 @@ import {
  * Ambassador application. No outer container — three titled sections carry the
  * organisation, and the fields themselves carry the affordance.
  */
-export function ApplyForm({ universities }: { universities: UniversityOption[] }) {
+export function ApplyForm({
+  universities,
+  slotCode,
+}: {
+  universities: UniversityOption[];
+  /** Slot auto-assigned for this visit (first vacant, else next number). */
+  slotCode: string;
+}) {
   const router = useRouter();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [uniChoice, setUniChoice] = React.useState("");
@@ -45,6 +52,8 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
       fullName: "",
       phone: "",
       email: "",
+      password: "",
+      confirmPassword: "",
       universityId: "",
       otherUniversity: "",
       department: "",
@@ -71,7 +80,8 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? "Could not submit your application.");
       }
-      router.push("/apply/success");
+      const result = (await res.json().catch(() => null)) as { slotCode?: string } | null;
+      router.push(`/apply/success?slot=${encodeURIComponent(result?.slotCode ?? slotCode)}`);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Could not submit your application.");
     }
@@ -79,6 +89,12 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-12">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-zone px-4 py-3">
+        <span className="meta-label">Your slot ID</span>
+        <span className="font-mono text-base font-medium text-primary">EduCraftA-{slotCode}</span>
+        <span className="text-xs text-muted-foreground">Assigned automatically</span>
+      </div>
+
       <FormSection title="Personal information">
         <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
           <Field label="Full name" required htmlFor="a-name" error={errors.fullName?.message}>
@@ -87,8 +103,22 @@ export function ApplyForm({ universities }: { universities: UniversityOption[] }
           <Field label="WhatsApp number" required htmlFor="a-phone" error={errors.phone?.message}>
             <Input id="a-phone" inputMode="tel" autoComplete="tel" {...register("phone")} />
           </Field>
-          <Field label="Email" htmlFor="a-email" error={errors.email?.message} className="sm:col-span-2">
+        </div>
+      </FormSection>
+
+      <FormSection
+        title="Your dashboard login"
+        description="You will use these to sign in to your own ambassador dashboard once you are approved."
+      >
+        <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
+          <Field label="Email" required htmlFor="a-email" error={errors.email?.message} className="sm:col-span-2">
             <Input id="a-email" type="email" inputMode="email" autoComplete="email" {...register("email")} />
+          </Field>
+          <Field label="Password" required htmlFor="a-password" error={errors.password?.message} hint="At least 8 characters">
+            <Input id="a-password" type="password" autoComplete="new-password" {...register("password")} />
+          </Field>
+          <Field label="Confirm password" required htmlFor="a-password2" error={errors.confirmPassword?.message}>
+            <Input id="a-password2" type="password" autoComplete="new-password" {...register("confirmPassword")} />
           </Field>
         </div>
       </FormSection>

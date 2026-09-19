@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { ApplyForm } from "@/components/apply/ApplyForm";
+import { nextGeneralCode } from "@/lib/services/ambassador-roster";
 
 export const metadata: Metadata = {
   title: "Become an ambassador",
@@ -9,10 +10,13 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ApplyPage() {
-  const universities = await db.university.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true, abbreviation: true },
-  });
+  const [universities, { code: slotCode }] = await Promise.all([
+    db.university.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, abbreviation: true },
+    }),
+    nextGeneralCode(),
+  ]);
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-10 sm:py-14">
@@ -25,7 +29,7 @@ export default async function ApplyPage() {
           commission on every project they place — 10% to start, rising to 15% as you grow.
         </p>
       </div>
-      <ApplyForm universities={universities} />
+      <ApplyForm universities={universities} slotCode={slotCode} />
     </div>
   );
 }

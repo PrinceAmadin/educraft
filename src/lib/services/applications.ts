@@ -1,7 +1,12 @@
+import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins } from "@/lib/services/notifications";
 import { generateReferralCode } from "@/lib/ambassador";
+import { nextGeneralCode } from "@/lib/services/ambassador-roster";
+import { sendMail } from "@/lib/mailer";
+import { callbackBaseUrl } from "@/lib/paystack";
+import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
 import type { AmbassadorApplicationInput } from "@/lib/validations/application";
 
 export class ApplicationError extends Error {}
@@ -23,7 +28,7 @@ async function findConflict(input: {
   const email = input.email?.trim() || null;
   const accountNumber = input.accountNumber.trim();
 
-  const [pendingApp, ambassador] = await Promise.all([
+  const [pendingApp, ambassador, user] = await Promise.all([
     db.ambassadorApplication.findFirst({
       where: {
         status: "PENDING",
@@ -37,8 +42,10 @@ async function findConflict(input: {
       },
       select: { id: true },
     }),
+    email ? db.user.findUnique({ where: { email: email.toLowerCase() }, select: { id: true } }) : null,
   ]);
 
+  if (user) return "That email is already in use.";
   if (pendingApp) return "An application with this phone, email, or bank account is already pending review.";
   if (ambassador) return "This phone, email, or bank account already belongs to an ambassador.";
   return null;
@@ -46,7 +53,7 @@ async function findConflict(input: {
 
 export async function submitApplication(
   input: AmbassadorApplicationInput
-): Promise<{ id: string }> {
+): Promise<{ id: string; slotCode: string }> {
   const conflict = await findConflict(input);
   if (conflict) throw new ApplicationError(conflict);
 
@@ -59,32 +66,54 @@ export async function submitApplication(
     universityId = uni?.id ?? null;
   }
 
-  const application = await db.ambassadorApplication.create({
-    data: {
-      fullName: input.fullName.trim(),
-      phone: input.phone.trim(),
-      email: input.email || null,
-      universityId,
-      otherUniversity: universityId ? null : input.otherUniversity || null,
-      department: input.department || null,
-      level: input.level || null,
-      motivation: input.motivation || null,
-      bankName: input.bankName.trim(),
-      accountNumber: input.accountNumber.trim(),
-      accountName: input.accountName.trim(),
-      status: "PENDING",
-    },
-    select: { id: true },
+  // The slot is picked here, not trusted from the browser: the first vacant
+  // slot (or the next number), held for this application until it is decided.
+  const { code: slotCode } = await nextGeneralCode();
+  const email = input.email.trim().toLowerCase();
+  const passwordHash = await bcrypt.hash(input.password, 12);
+
+  // Like worker applications: the login exists from the start but stays
+  // inactive (isActive: false blocks sign-in) until an admin approves.
+  const application = await db.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        email,
+        displayName: input.fullName.trim(),
+        passwordHash,
+        role: "AMBASSADOR",
+        isActive: false,
+      },
+      select: { id: true },
+    });
+    return tx.ambassadorApplication.create({
+      data: {
+        fullName: input.fullName.trim(),
+        phone: input.phone.trim(),
+        email,
+        universityId,
+        otherUniversity: universityId ? null : input.otherUniversity || null,
+        department: input.department || null,
+        level: input.level || null,
+        motivation: input.motivation || null,
+        bankName: input.bankName.trim(),
+        accountNumber: input.accountNumber.trim(),
+        accountName: input.accountName.trim(),
+        slotCode,
+        userId: user.id,
+        status: "PENDING",
+      },
+      select: { id: true },
+    });
   });
 
   await notifyAdmins({
     title: "New ambassador application",
-    message: `${input.fullName.trim()} applied to be an ambassador.`,
+    message: `${input.fullName.trim()} applied for slot ${slotCode}.`,
     type: "info",
     link: "/admin/ambassadors/applications",
   });
 
-  return application;
+  return { id: application.id, slotCode };
 }
 
 // ── Admin list ───────────────────────────────────────────────
@@ -107,6 +136,8 @@ export interface ApplicationRow {
   ambassadorId: string | null;
   /** True when approving needs the admin to pick a university. */
   needsUniversity: boolean;
+  /** The general slot held for this applicant ("059"). */
+  slotCode: string | null;
 }
 
 export async function listApplications(
@@ -130,6 +161,7 @@ export async function listApplications(
       status: true,
       reviewNote: true,
       ambassadorId: true,
+      slotCode: true,
       createdAt: true,
       universityId: true,
       university: { select: { abbreviation: true, name: true } },
@@ -153,6 +185,7 @@ export async function listApplications(
     reviewNote: r.reviewNote,
     ambassadorId: r.ambassadorId,
     needsUniversity: !r.universityId,
+    slotCode: r.slotCode,
   }));
 }
 
@@ -162,7 +195,7 @@ export async function approveApplication(
   applicationId: string,
   reviewerId: string,
   universityIdOverride?: string
-): Promise<{ ambassadorId: string; referralCode: string }> {
+): Promise<{ ambassadorId: string; referralCode: string; slotCode: string }> {
   const application = await db.ambassadorApplication.findUnique({
     where: { id: applicationId },
     select: {
@@ -177,6 +210,8 @@ export async function approveApplication(
       bankName: true,
       accountNumber: true,
       accountName: true,
+      slotCode: true,
+      userId: true,
     },
   });
   if (!application) throw new ApplicationError("Application not found");
@@ -188,31 +223,77 @@ export async function approveApplication(
   if (!universityId) {
     throw new ApplicationError("Pick a university for this ambassador before approving");
   }
-  const uni = await db.university.findUnique({ where: { id: universityId }, select: { id: true } });
+  const uni = await db.university.findUnique({
+    where: { id: universityId },
+    select: { id: true, abbreviation: true },
+  });
   if (!uni) throw new ApplicationError("That university does not exist");
+
+  // The slot held since they applied — unless someone filled it meanwhile
+  // (admin edit in Manage), in which case they get the next free one.
+  let slotCode = application.slotCode;
+  if (slotCode) {
+    const [slot, holder] = await Promise.all([
+      db.ambassadorSlot.findUnique({ where: { code: slotCode }, select: { vacant: true } }),
+      db.ambassador.findUnique({ where: { legacySlotId: slotCode }, select: { id: true } }),
+    ]);
+    if ((slot && !slot.vacant) || holder) slotCode = null;
+  }
+  if (!slotCode) slotCode = (await nextGeneralCode()).code;
+  const claimed = slotCode;
 
   const ambassadorId = await nextId("AMBASSADOR");
 
   const ambassador = await (async () => {
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        return await db.ambassador.create({
-          data: {
-            ambassadorId,
-            fullName: application.fullName,
-            phone: application.phone,
-            email: application.email,
-            universityId,
-            department: application.department,
-            level: application.level,
-            bankName: application.bankName,
-            accountNumber: application.accountNumber,
-            accountName: application.accountName,
-            referralCode: generateReferralCode(application.fullName),
-            tier: "BRONZE",
-            status: "Active",
-          },
-          select: { id: true, referralCode: true },
+        return await db.$transaction(async (tx) => {
+          const created = await tx.ambassador.create({
+            data: {
+              ambassadorId,
+              fullName: application.fullName,
+              phone: application.phone,
+              email: application.email,
+              universityId,
+              department: application.department,
+              level: application.level,
+              bankName: application.bankName,
+              accountNumber: application.accountNumber,
+              accountName: application.accountName,
+              referralCode: generateReferralCode(application.fullName),
+              legacySlotId: claimed,
+              userId: application.userId,
+              tier: "BRONZE",
+              status: "Active",
+            },
+            select: { id: true, referralCode: true },
+          });
+          // Fill (or create) the slot — its /EduCraftA/{code} link is live now.
+          await tx.ambassadorSlot.upsert({
+            where: { code: claimed },
+            create: {
+              kind: "GENERAL",
+              code: claimed,
+              name: application.fullName,
+              school: uni.abbreviation,
+              vacant: false,
+            },
+            update: { name: application.fullName, school: uni.abbreviation, vacant: false },
+          });
+          if (application.userId) {
+            await tx.user.update({ where: { id: application.userId }, data: { isActive: true } });
+          }
+          await tx.ambassadorApplication.update({
+            where: { id: applicationId },
+            data: {
+              status: "APPROVED",
+              reviewedById: reviewerId,
+              reviewedAt: new Date(),
+              ambassadorId: created.id,
+              slotCode: claimed,
+            },
+          });
+          return created;
         });
       } catch (error) {
         const isP2002 =
@@ -226,24 +307,29 @@ export async function approveApplication(
     throw new ApplicationError("Could not allocate an ambassador id — try again");
   })();
 
-  await db.ambassadorApplication.update({
-    where: { id: applicationId },
-    data: {
-      status: "APPROVED",
-      reviewedById: reviewerId,
-      reviewedAt: new Date(),
-      ambassadorId: ambassador.id,
-    },
-  });
+  // Welcome email: slot ID, their client link, and how to sign in. A failed
+  // send never undoes the approval — the admin can message them from Tracking.
+  if (application.email) {
+    const base = callbackBaseUrl();
+    const mail = ambassadorWelcomeEmail({
+      fullName: application.fullName,
+      slotCode: claimed,
+      referralLink: `${base}/EduCraftA/${claimed}`,
+      loginUrl: `${base}/login`,
+      hasLogin: Boolean(application.userId),
+    });
+    const sent = await sendMail({ to: application.email, ...mail });
+    if (!sent.ok) console.error("[approveApplication] welcome email failed:", sent.error);
+  }
 
   await notifyAdmins({
     title: "Ambassador approved",
-    message: `${application.fullName} is now an ambassador (${ambassador.referralCode}).`,
+    message: `${application.fullName} is now an ambassador (slot ${claimed}).`,
     type: "success",
     link: `/admin/ambassadors/${ambassador.id}`,
   });
 
-  return { ambassadorId: ambassador.id, referralCode: ambassador.referralCode };
+  return { ambassadorId: ambassador.id, referralCode: ambassador.referralCode, slotCode: claimed };
 }
 
 export async function rejectApplication(
@@ -253,21 +339,30 @@ export async function rejectApplication(
 ): Promise<void> {
   const application = await db.ambassadorApplication.findUnique({
     where: { id: applicationId },
-    select: { status: true },
+    select: { status: true, userId: true },
   });
   if (!application) throw new ApplicationError("Application not found");
   if (application.status !== "PENDING") {
     throw new ApplicationError("This application has already been reviewed");
   }
 
-  await db.ambassadorApplication.update({
-    where: { id: applicationId },
-    data: {
-      status: "REJECTED",
-      reviewedById: reviewerId,
-      reviewedAt: new Date(),
-      reviewNote: note?.trim() || null,
-    },
+  await db.$transaction(async (tx) => {
+    // Releases the held slot for the next applicant.
+    await tx.ambassadorApplication.update({
+      where: { id: applicationId },
+      data: {
+        status: "REJECTED",
+        reviewedById: reviewerId,
+        reviewedAt: new Date(),
+        reviewNote: note?.trim() || null,
+        slotCode: null,
+        userId: null,
+      },
+    });
+    // The login was created inactive at submission; drop it so the email is
+    // free if they apply again.
+    if (application.userId) {
+      await tx.user.deleteMany({ where: { id: application.userId, isActive: false } });
+    }
   });
 }
-
