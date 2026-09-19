@@ -59,14 +59,14 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
           <h2 id="spend-heading" className="text-[15px] font-semibold text-foreground">
             Spend
           </h2>
-          <nav aria-label="Period" className="flex gap-1 rounded-lg bg-zone p-1">
+          <nav aria-label="Period" className="grid w-full grid-cols-4 gap-1 rounded-lg bg-zone p-1 sm:flex sm:w-auto">
             {USAGE_PERIODS.map((p) => (
               <Link
                 key={p}
                 href={`?period=${p}`}
                 aria-current={p === period ? "page" : undefined}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors",
+                  "whitespace-nowrap rounded-md px-2 py-1.5 text-center text-[13px] font-medium transition-colors sm:px-3",
                   p === period ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"
                 )}
               >

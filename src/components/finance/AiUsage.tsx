@@ -260,7 +260,11 @@ export function AiWorkersTable({ rows, period }: { rows: WorkerUsageRow[]; perio
             {rows.map((r) => (
               <tr key={r.id} className="cursor-pointer transition-colors hover:bg-zone" onClick={() => show(r)}>
                 <td className="py-3 pr-3">
-                  <button className="text-left font-medium text-foreground focus-visible:underline focus-visible:outline-none" onClick={() => show(r)}>
+                  <button className="text-left font-medium text-foreground focus-visible:underline focus-visible:outline-none" onClick={(e) => {
+                      e.stopPropagation();
+                      void show(r);
+                    }}
+                  >
                     {r.name}
                   </button>
                 </td>
@@ -286,8 +290,8 @@ export function AiWorkersTable({ rows, period }: { rows: WorkerUsageRow[]; perio
       </p>
 
       <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-md">
-          <SheetTitle>{open?.name}</SheetTitle>
+        <SheetContent className="w-full overflow-y-auto p-5 pt-6 sm:max-w-md">
+          <SheetTitle className="pr-8">{open?.name}</SheetTitle>
           <SheetDescription>Claude usage this {period === "today" ? "day" : period}</SheetDescription>
           {loading || !detail ? (
             <p className="mt-6 text-sm text-muted-foreground">Loading…</p>
