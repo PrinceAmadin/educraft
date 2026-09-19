@@ -11,6 +11,8 @@ import { TimelineTab } from "@/components/projects/tabs/TimelineTab";
 import { FinancialsTab } from "@/components/projects/tabs/FinancialsTab";
 import { FilesTab } from "@/components/projects/tabs/FilesTab";
 import { NotesTab } from "@/components/projects/tabs/NotesTab";
+import { ClientUpdateTab } from "@/components/projects/tabs/ClientUpdateTab";
+import { getResearchSummary } from "@/lib/services/research-summary";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +37,7 @@ export default async function ProjectDetailPage({
     listAllocatableAmbassadors(),
   ]);
   if (!project) notFound();
+  const researchSummary = await getResearchSummary(project.id);
 
   const tabs: ProjectTab[] = [
     { id: "requirements", label: "Requirements", content: <RequirementsTab project={project} /> },
@@ -45,6 +48,17 @@ export default async function ProjectDetailPage({
       content: <FinancialsTab project={project} ambassadors={ambassadors} />,
     },
     { id: "files", label: "Files", content: <FilesTab project={project} /> },
+    {
+      id: "client-update",
+      label: "Client update",
+      content: (
+        <ClientUpdateTab
+          clientFullName={project.client.fullName}
+          projectCode={project.projectId}
+          summary={researchSummary}
+        />
+      ),
+    },
     {
       id: "notes",
       label: "Notes",
