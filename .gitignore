@@ -24,3 +24,5 @@ Educraft_Ambassador/
 
 # Traqly source copy (reference only, never commit; pull analytics into src/ instead)
 /Traqly/
+
+.vercel
