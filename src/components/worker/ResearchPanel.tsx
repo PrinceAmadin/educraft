@@ -7,7 +7,6 @@ import {
   LuChevronUp,
   LuCircleAlert,
   LuDownload,
-  LuFileText,
   LuFolderOpen,
   LuLoaderCircle,
   LuRotateCcw,
@@ -558,18 +557,10 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
                 </a>
               </Button>
             ) : null}
-            {job.paywalledDocLink ? (
-              <Button size="sm" variant="outline" asChild>
-                <a href={job.paywalledDocLink} target="_blank" rel="noopener noreferrer">
-                  <LuFileText className="size-4" aria-hidden />
-                  Paywalled references
-                </a>
-              </Button>
-            ) : null}
             <Button size="sm" variant="outline" asChild>
-              <a href={`/api/worker/projects/${projectCode}/research/bib`} download>
+              <a href={`/api/worker/projects/${projectCode}/research/references-doc`} download>
                 <LuDownload className="size-4" aria-hidden />
-                Download .bib
+                References list
               </a>
             </Button>
             {startOverButton}

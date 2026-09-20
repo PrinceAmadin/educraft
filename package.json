@@ -41,6 +41,7 @@
     "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "docx": "^9.7.1",
     "framer-motion": "^11.11.17",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",

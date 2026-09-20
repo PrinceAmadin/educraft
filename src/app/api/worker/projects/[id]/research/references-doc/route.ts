@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireWorker, serverError } from "@/lib/api";
+import { db } from "@/lib/db";
 import { ResearchError, getResearchJob } from "@/lib/services/research";
-import { buildBibtex } from "@/lib/research-bib";
+import { buildReferencesDocx } from "@/lib/research-references-doc";
 
-/** The project's kept references as a .bib file — importable into Zotero, Mendeley, Word or LaTeX. */
+/** Every kept reference as a Word document — alphabetical, de-duplicated, in the project's referencing style. */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   const guard = await requireWorker();
   if (!guard.ok) return guard.response;
@@ -15,16 +16,22 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ error: "No references to export yet" }, { status: 404 });
     }
 
-    return new NextResponse(buildBibtex(kept), {
+    const project = await db.project.findUnique({
+      where: { id: job.projectId },
+      select: { referencingStyle: true },
+    });
+    const file = await buildReferencesDocx(kept, project?.referencingStyle ?? null);
+
+    return new NextResponse(new Uint8Array(file), {
       headers: {
-        "Content-Type": "application/x-bibtex; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${params.id}-references.bib"`,
+        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Disposition": `attachment; filename="${params.id}-references.docx"`,
       },
     });
   } catch (error) {
     if (error instanceof ResearchError) {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
-    return serverError("GET /api/worker/projects/[id]/research/bib", error);
+    return serverError("GET /api/worker/projects/[id]/research/references-doc", error);
   }
 }
