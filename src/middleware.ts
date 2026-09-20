@@ -46,8 +46,11 @@ export default auth((req) => {
     return NextResponse.redirect(login);
   }
 
-  // A worker who is also an ambassador (or the reverse) may open both portals.
-  const allowedRoots = user.portals?.length ? user.portals.map((p) => `/${p}`) : [ROLE_ROOT[user.role]].filter(Boolean);
+  // A worker who is also an ambassador (or the reverse) may open both portals. The
+  // edge cannot query the database, so it lets either role into either root and the
+  // portal's own layout sends them back unless they really have that profile.
+  const allowedRoots =
+    user.role === "WORKER" || user.role === "AMBASSADOR" ? [ROLE_ROOT[user.role], "/worker", "/ambassador"] : [ROLE_ROOT[user.role]].filter(Boolean);
 
   // Wrong portal for this role → send them to their own
   if (!allowedRoots.some((root) => under(root))) {

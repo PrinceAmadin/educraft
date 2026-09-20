@@ -5,6 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuGraduationCap } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerDetail } from "@/lib/services/workers";
+import { getLinkedAmbassador } from "@/lib/services/linked-profiles";
+import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
 import { WorkerStatusControl } from "@/components/workers/WorkerStatusControl";
 import { WorkerProjectHistory } from "@/components/workers/WorkerProjectHistory";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
@@ -32,6 +34,7 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
   if (!data) notFound();
 
   const { worker, metrics } = data;
+  const linked = await getLinkedAmbassador(worker.userId);
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
   return (
@@ -52,6 +55,11 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
               {worker.fullName}
             </h1>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">{worker.workerId}</p>
+            {linked ? (
+              <div className="mt-2">
+                <LinkedProfileLink linked={linked} />
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <EditWorkerDialog

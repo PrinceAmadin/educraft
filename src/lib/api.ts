@@ -62,8 +62,11 @@ export async function requireWorker(): Promise<
   }
   const worker = await db.worker.findUnique({
     where: { userId: session.user.id },
-    select: { id: true },
+    select: { id: true, status: true },
   });
+  if (worker && worker.status !== "Active" && worker.status !== "On Break") {
+    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
   if (!worker) {
     return {
       ok: false,
@@ -86,8 +89,11 @@ export async function requireAmbassador(): Promise<
   }
   const ambassador = await db.ambassador.findUnique({
     where: { userId: session.user.id },
-    select: { id: true },
+    select: { id: true, status: true },
   });
+  if (ambassador && ambassador.status !== "Active") {
+    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
   if (!ambassador) {
     return {
       ok: false,

@@ -269,6 +269,11 @@ export async function createWorker(input: CreateWorkerInput) {
  * application does; Active/On Break restores it) — without this, a suspended
  * worker's login kept working regardless of their status.
  */
+/** The same login also holds an active ambassador profile, so it must stay able to sign in. */
+async function hasActiveAmbassador(userId: string): Promise<boolean> {
+  return (await db.ambassador.count({ where: { userId, status: "Active" } })) > 0;
+}
+
 export async function updateWorker(id: string, input: UpdateWorkerInput, changedById: string) {
   const worker = await db.worker.findUnique({ where: { id }, select: { id: true, userId: true } });
   if (!worker) throw new TransitionError("Worker not found");
@@ -291,12 +296,9 @@ export async function updateWorker(id: string, input: UpdateWorkerInput, changed
     db.worker.update({ where: { id }, data, select: { id: true } }),
   ];
   if (worker.userId && input.status !== undefined) {
-    writes.push(
-      db.user.update({
-        where: { id: worker.userId },
-        data: { isActive: LOGIN_ELIGIBLE_STATUSES.has(input.status) },
-      })
-    );
+    // One login can also be an ambassador: it only closes when no other profile keeps it open.
+    const keepsOpen = LOGIN_ELIGIBLE_STATUSES.has(input.status) || (await hasActiveAmbassador(worker.userId));
+    writes.push(db.user.update({ where: { id: worker.userId }, data: { isActive: keepsOpen } }));
   }
   await db.$transaction(writes);
 
@@ -344,7 +346,7 @@ export async function deleteWorker(id: string): Promise<void> {
   }
 
   const writes: Prisma.PrismaPromise<unknown>[] = [db.worker.delete({ where: { id } })];
-  if (worker.userId) {
+  if (worker.userId && !(await hasActiveAmbassador(worker.userId))) {
     writes.push(db.user.update({ where: { id: worker.userId }, data: { isActive: false } }));
   }
   await db.$transaction(writes);

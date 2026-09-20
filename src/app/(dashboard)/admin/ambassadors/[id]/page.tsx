@@ -5,6 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuBuilding2, LuBellRing } from "react-icons/lu";
 import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
 import { getDefaultParentCommissionRate } from "@/lib/services/settings";
+import { getLinkedWorker } from "@/lib/services/linked-profiles";
+import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
@@ -41,9 +43,10 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, progress, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, defaultParentRate] = await Promise.all([
+  const [parentCandidates, defaultParentRate, linkedWorker] = await Promise.all([
     listParentCandidates(ambassador.id),
     getDefaultParentCommissionRate(),
+    getLinkedWorker(ambassador.userId),
   ]);
 
   return (
@@ -69,6 +72,11 @@ export default async function AmbassadorDetailPage({
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">
               {ambassador.ambassadorId}
             </p>
+            {linkedWorker ? (
+              <div className="mt-2">
+                <LinkedProfileLink linked={linkedWorker} />
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <MessageAmbassadorButton

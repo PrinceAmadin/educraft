@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { auth, navRoleForUser, ROLE_LABELS } from "@/lib/auth";
+import { auth, navRoleForUser, portalsForUser, ROLE_LABELS } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import type { NavRole } from "@/lib/constants";
 
@@ -12,7 +13,22 @@ export default async function DashboardLayout({
   if (!session?.user) redirect("/login");
 
   const role = navRoleForUser(session.user.role);
-  const portals = (session.user.portals?.length ? session.user.portals : [role]) as NavRole[];
+
+  // Worker / ambassador logins can own both profiles: ask the database which, so a
+  // newly linked or approved second role appears without a fresh sign-in.
+  let portals: NavRole[] = [role];
+  if (session.user.role === "WORKER" || session.user.role === "AMBASSADOR") {
+    const profiles = await db.user.findUnique({
+      where: { id: session.user.id },
+      select: { workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
+    });
+    const found = portalsForUser(
+      session.user.role,
+      profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
+      profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false
+    ) as NavRole[];
+    if (found.length) portals = found;
+  }
 
   return (
     <DashboardShell
@@ -25,4 +41,8 @@ export default async function DashboardLayout({
       {children}
     </DashboardShell>
   );
+}
+
+function isWorkerOpen(status: string) {
+  return status === "Active" || status === "On Break";
 }

@@ -55,7 +55,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name,
           role: user.role,
-          portals: portalsForUser(user.role, Boolean(user.workerProfile), Boolean(user.ambassadorProfile)),
         };
       },
     }),
@@ -85,9 +84,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 });
 
 /**
- * The dashboards a login can open. One person can be a worker AND an ambassador
- * on the same login; the role they registered as comes first (their default).
- * Staff and clients have none of these.
+ * The dashboards a login can open, from the profiles it owns (read from the
+ * database on each dashboard load, so linking or approving a second role shows up
+ * without signing in again). One person can be a worker AND an ambassador on the
+ * same login; the role they registered as comes first (their default). Staff and
+ * clients have none of these.
  */
 export function portalsForUser(role: string, hasWorker: boolean, hasAmbassador: boolean): string[] {
   if (role !== "WORKER" && role !== "AMBASSADOR") return [];

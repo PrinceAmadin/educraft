@@ -27,7 +27,6 @@ export const authConfig = {
         // which no route or API accepts. (It used to default to CLIENT.)
         token.role = (user as { role?: string }).role ?? "";
         token.name = user.name ?? null;
-        token.portals = (user as { portals?: string[] }).portals ?? [];
         token.loginAt = Date.now();
       }
       return token;
@@ -36,7 +35,6 @@ export const authConfig = {
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = (token.role as string) ?? "";
-        session.user.portals = (token.portals as string[] | undefined) ?? [];
         session.user.loginAt = (token.loginAt as number | undefined) ?? 0;
       }
       return session;
