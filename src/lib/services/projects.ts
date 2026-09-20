@@ -311,16 +311,11 @@ export async function transitionProject(
   const data: Prisma.ProjectUpdateInput = { status: to };
   const now = new Date();
 
-  // Confirming requirements with no brief on file (a manually-created
-  // project, typically) needs the admin to actually supply one — the note
-  // box becomes the instructions themselves rather than just a log entry,
-  // so there's no separate "edit project" step required to unblock this.
-  if (to === "REQUIREMENTS_CONFIRMED" && !hasRequirementDetail) {
-    if (!note?.trim()) {
-      throw new TransitionError(
-        "Add instructions, an outline, or a file before confirming — use the note field to add them now"
-      );
-    }
+  // A brief is optional: many projects have nothing beyond the client's
+  // details, and the department's rules cover the rest at report time. If the
+  // admin does type a note here on a project with no brief, keep it as the
+  // instructions rather than only logging it.
+  if (to === "REQUIREMENTS_CONFIRMED" && !hasRequirementDetail && note?.trim()) {
     data.specialInstructions = note.trim();
   }
 

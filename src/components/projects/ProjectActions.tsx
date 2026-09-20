@@ -78,7 +78,7 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
         disabled={pending !== null || blocked !== null}
         title={blocked ?? undefined}
         onClick={() =>
-          rule.requiresNote || (rule.to === "REQUIREMENTS_CONFIRMED" && !candidate.hasRequirementDetail)
+          rule.requiresNote
             ? (setNoteFor(rule), setError(null))
             : runTransition(rule)
         }
@@ -135,9 +135,7 @@ export function ProjectActions({ project }: { project: ProjectActionState }) {
                 ? "What needs to change?"
                 : noteFor.to === "SUPERVISOR_CORRECTIONS"
                   ? "Supervisor correction details"
-                  : noteFor.to === "REQUIREMENTS_CONFIRMED" && !candidate.hasRequirementDetail
-                    ? "This project has no brief yet — add instructions for the worker before it can be assigned"
-                    : "Add a note"}
+                  : "Add a note"}
           </label>
           <Textarea id="transition-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="flex gap-2">
