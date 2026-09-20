@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuFolderKanban, LuPlus, LuSearchX } from "react-icons/lu";
+import { LuFolderKanban, LuGift, LuPlus, LuSearchX } from "react-icons/lu";
+import { auth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { ProjectsFilterBar } from "@/components/projects/ProjectsFilterBar";
 import { ProjectsTable } from "@/components/projects/ProjectsTable";
@@ -29,6 +30,7 @@ export default async function ProjectsListPage({
   searchParams: SearchParams;
 }) {
   const parsed = projectListParamsSchema.parse(firstValue(searchParams));
+  const session = await auth();
 
   const [{ rows, total, page, pageCount }, facets] = await Promise.all([
     listProjects({
@@ -65,12 +67,22 @@ export default async function ProjectsListPage({
         title="Projects"
         description="Every project across the pipeline. Filter, search, and open one to manage it."
         actions={
-          <Button asChild size="sm">
-            <Link href="/admin/projects/new">
-              <LuPlus className="size-4" aria-hidden />
-              New project
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {session?.user?.role === "SUPER_ADMIN" ? (
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/projects/probono">
+                  <LuGift className="size-4" aria-hidden />
+                  Pro bono links
+                </Link>
+              </Button>
+            ) : null}
+            <Button asChild size="sm">
+              <Link href="/admin/projects/new">
+                <LuPlus className="size-4" aria-hidden />
+                New project
+              </Link>
+            </Button>
+          </div>
         }
       />
 

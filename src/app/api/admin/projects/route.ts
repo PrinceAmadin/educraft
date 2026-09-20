@@ -17,6 +17,10 @@ export async function POST(req: NextRequest) {
   const parsed = createProjectSchema.safeParse(body);
   if (!parsed.success) return badRequest("Please check the form", parsed.error.flatten());
 
+  if (parsed.data.proBono && guard.session.role !== "SUPER_ADMIN") {
+    return NextResponse.json({ error: "Only the super admin can create pro bono projects" }, { status: 403 });
+  }
+
   try {
     const result = await createProjectManual(parsed.data, guard.session.userId);
     return NextResponse.json(result, { status: 201 });

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LuArrowLeft } from "react-icons/lu";
+import { LuArrowLeft, LuGift } from "react-icons/lu";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { ProjectHoldControl } from "@/components/projects/ProjectHoldControl";
 import { cn, deadlineInfo, formatDate, formatNaira } from "@/lib/utils";
@@ -44,6 +44,12 @@ export function ProjectDetailHeader({ project }: { project: ProjectDetail }) {
               {project.projectId}
             </h1>
             <StatusBadge status={project.status} />
+            {project.isProBono ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                <LuGift className="size-3.5" aria-hidden />
+                Pro bono
+              </span>
+            ) : null}
           </div>
           <p className="mt-1.5 text-[15px] text-foreground">
             {project.service.serviceName}
@@ -55,7 +61,7 @@ export function ProjectDetailHeader({ project }: { project: ProjectDetail }) {
         <div className="sm:text-right">
           <p className="meta-label">Project price</p>
           <p className="mt-1 font-mono text-2xl font-medium leading-none tabular-nums text-foreground">
-            {formatNaira(project.price)}
+            {project.isProBono ? "Pro bono" : formatNaira(project.price)}
           </p>
         </div>
       </div>

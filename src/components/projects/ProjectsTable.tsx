@@ -98,7 +98,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                   <span className={DEADLINE_TEXT[info.urgency]}>
                     {info.daysLeft !== null ? info.label : "No deadline"}
                   </span>
-                  <span className="font-mono tabular-nums text-foreground">{formatNaira(row.price)}</span>
+                  <span className="font-mono tabular-nums text-foreground">{row.isProBono ? "Pro bono" : formatNaira(row.price)}</span>
                   <span
                     className={cn(
                       "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
@@ -176,7 +176,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                     <DeadlineCell row={row} />
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {formatNaira(row.price)}
+                    {row.isProBono ? "Pro bono" : formatNaira(row.price)}
                   </TableCell>
                   <TableCell>
                     <span

@@ -2,6 +2,7 @@ import { LuCheck, LuClock } from "react-icons/lu";
 import { financialBreakdown } from "@/lib/project-display";
 import { PaymentVerification } from "@/components/projects/PaymentVerification";
 import { AmbassadorAllocation } from "@/components/projects/AmbassadorAllocation";
+import { MarkProBono } from "@/components/projects/MarkProBono";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
@@ -67,10 +68,32 @@ function Line({
 export function FinancialsTab({
   project,
   ambassadors,
+  canProBono = false,
 }: {
   project: ProjectDetail;
   ambassadors: AllocatableAmbassador[];
+  /** Super admin: may turn a paid project into a pro bono one. */
+  canProBono?: boolean;
 }) {
+  if (project.isProBono) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl bg-zone p-5">
+          <p className="text-[15px] font-semibold text-foreground">Pro bono project</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            No price, no payments, no commission. This job is left out of the finance dashboard.
+          </p>
+          {project.proBonoReason ? (
+            <p className="mt-3 text-sm text-foreground">
+              <span className="meta-label mr-2">Reason</span>
+              {project.proBonoReason}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   const f = financialBreakdown(project);
   // Cancelled and refunded jobs earn no commission, so there's nothing to allocate.
   const closed = project.status === "CANCELLED" || project.status === "REFUNDED";
@@ -181,6 +204,16 @@ export function FinancialsTab({
           become due when the project reaches Completed.
         </p>
       </section>
+
+      {canProBono && project.payments.length === 0 && !closed ? (
+        <section className="space-y-2">
+          <h3 className="text-[15px] font-semibold text-foreground">Pro bono</h3>
+          <p className="text-[13px] text-muted-foreground">
+            Giving this job away? It drops the price to zero and takes it out of the finance figures.
+          </p>
+          <MarkProBono projectCode={project.projectId} />
+        </section>
+      ) : null}
 
       {project.payments.length > 0 ? (
         <section>

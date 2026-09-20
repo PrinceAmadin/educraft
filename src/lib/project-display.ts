@@ -22,7 +22,9 @@ export function paymentStanding(input: {
 export function paymentStandingLabel(input: {
   downpaymentStatus: string;
   balanceStatus: string;
+  isProBono?: boolean;
 }): string {
+  if (input.isProBono) return "Pro bono";
   const standing = paymentStanding(input);
   if (standing === "Paid") return "Paid in full";
   if (standing === "Partial") {

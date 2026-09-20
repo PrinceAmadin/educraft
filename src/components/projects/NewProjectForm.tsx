@@ -87,10 +87,13 @@ export function NewProjectForm({
   universities,
   services,
   ambassadors,
+  canProBono = false,
 }: {
   universities: UniversityOption[];
   services: ServiceOption[];
   ambassadors: AllocatableAmbassador[];
+  /** Super admin only: offers the "pro bono" switch on the service step. */
+  canProBono?: boolean;
 }) {
   const router = useRouter();
   const [step, setStep] = React.useState(0);
@@ -116,6 +119,8 @@ export function NewProjectForm({
       serviceId: "",
       serviceVariantId: "",
       isExpressDelivery: false,
+      proBono: false,
+      proBonoReason: "",
       projectTitle: "",
       matricNumber: "",
       supervisorName: "",
@@ -142,7 +147,7 @@ export function NewProjectForm({
           ? ["clientId"]
           : ["fullName", "phone", "email", "universityId", "faculty", "department", "level"];
       case 1:
-        return ["serviceId", "serviceVariantId", "isExpressDelivery", "priceOverride", "ambassadorId", "ambassadorRate"];
+        return ["serviceId", "serviceVariantId", "isExpressDelivery", "priceOverride", "ambassadorId", "ambassadorRate", "proBono", "proBonoReason"];
       case 2:
         return [
           "projectTitle",
@@ -212,7 +217,9 @@ export function NewProjectForm({
           {step === 0 && (
             <ClientStep universities={universities} clientMode={clientMode} setValue={setValue} />
           )}
-          {step === 1 && <ServiceStep services={services} ambassadors={ambassadors} />}
+          {step === 1 && (
+            <ServiceStep services={services} ambassadors={ambassadors} canProBono={canProBono} />
+          )}
           {step === 2 && <DetailsStep service={service} />}
           {step === 3 && (
             <ReviewStep
@@ -523,15 +530,18 @@ function ClientPicker({
 function ServiceStep({
   services,
   ambassadors,
+  canProBono,
 }: {
   services: ServiceOption[];
   ambassadors: AllocatableAmbassador[];
+  canProBono: boolean;
 }) {
   const {
     register,
     watch,
     formState: { errors },
   } = useFormContext<CreateProjectInput>();
+  const proBono = Boolean(watch("proBono"));
 
   const serviceId = watch("serviceId");
   const variantId = watch("serviceVariantId");
@@ -569,7 +579,36 @@ function ServiceStep({
         </Field>
       ) : null}
 
-      {service ? (
+      {canProBono && service ? (
+        <div className="space-y-3">
+          <label className="flex items-start gap-3 rounded-xl bg-zone p-3.5">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+              {...register("proBono")}
+            />
+            <span className="text-sm">
+              <span className="font-medium text-foreground">Pro bono</span>
+              <span className="block text-xs text-muted-foreground">
+                Free job. No price, no payment, no commission, and it stays out of the finance dashboard.
+              </span>
+            </span>
+          </label>
+          {proBono ? (
+            <Field
+              label="Why is this pro bono?"
+              required
+              htmlFor="proBonoReason"
+              error={errors.proBonoReason?.message as string | undefined}
+              hint="Marketing, visibility, a partnership. Only admins see this."
+            >
+              <Input id="proBonoReason" {...register("proBonoReason")} />
+            </Field>
+          ) : null}
+        </div>
+      ) : null}
+
+      {service && !proBono ? (
         <label className="flex items-start gap-3 rounded-xl bg-zone p-3.5">
           <input
             type="checkbox"
@@ -587,7 +626,7 @@ function ServiceStep({
         </label>
       ) : null}
 
-      {service ? (
+      {service && !proBono ? (
         <Field
           label="Price override"
           htmlFor="priceOverride"
@@ -609,7 +648,7 @@ function ServiceStep({
         </Field>
       ) : null}
 
-      {price ? (
+      {price && !proBono ? (
         <div className="rounded-2xl bg-zone p-4 text-sm">
           <PriceRow label="Base price" value={price.base} />
           {price.variantAddon > 0 ? <PriceRow label="Variant add-on" value={price.variantAddon} /> : null}
@@ -626,7 +665,7 @@ function ServiceStep({
         </div>
       ) : null}
 
-      {price ? <AmbassadorSection ambassadors={ambassadors} total={price.total} /> : null}
+      {price && !proBono ? <AmbassadorSection ambassadors={ambassadors} total={price.total} /> : null}
     </div>
   );
 }
@@ -862,7 +901,8 @@ function ReviewStep({
   ambassadors: AllocatableAmbassador[];
   values: CreateProjectInput;
 }) {
-  const ambassador = ambassadors.find((a) => a.id === values.ambassadorId) ?? null;
+  const proBono = Boolean(values.proBono);
+  const ambassador = proBono ? null : (ambassadors.find((a) => a.id === values.ambassadorId) ?? null);
   const ambassadorRate =
     ambassador ? (typeof values.ambassadorRate === "number" ? values.ambassadorRate : ambassador.tierRate) : null;
   const service = services.find((s) => s.id === values.serviceId) ?? null;
@@ -898,6 +938,14 @@ function ReviewStep({
         )}
       </ReviewGroup>
 
+      {proBono ? (
+        <ReviewGroup title="Pro bono">
+          <ReviewRow label="Price" value="Free, no payment" />
+          <ReviewRow label="Reason" value={values.proBonoReason || "—"} />
+        </ReviewGroup>
+      ) : null}
+
+      {proBono ? null : (
       <ReviewGroup title="Ambassador">
         {ambassador && ambassadorRate != null ? (
           <>
@@ -924,6 +972,7 @@ function ReviewStep({
           <ReviewRow label="Referred by" value="None" />
         )}
       </ReviewGroup>
+      )}
 
       <ReviewGroup title="Service">
         <ReviewRow label="Service" value={service?.serviceName ?? "—"} />
@@ -941,7 +990,7 @@ function ReviewStep({
         ) : null}
       </ReviewGroup>
 
-      {price ? (
+      {price && !proBono ? (
         <div className="rounded-2xl bg-zone p-4 text-sm">
           <PriceRow label="Total price" value={price.total} strong />
           <PriceRow label="Downpayment (45%)" value={price.downpaymentAmount} muted />
@@ -976,8 +1025,9 @@ function ReviewStep({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        Creating the project opens it at NEW. Verify the downpayment from the project page to move it
-        forward.
+        {proBono
+          ? "Creating the project opens it at Downpayment verified, since there is nothing to pay."
+          : "Creating the project opens it at NEW. Verify the downpayment from the project page to move it forward."}
       </p>
     </div>
   );

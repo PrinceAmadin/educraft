@@ -110,6 +110,9 @@ export const createProjectSchema = z
     serviceVariantId: z.string().min(1).optional().or(z.literal("")),
     isExpressDelivery: z.boolean().default(false),
     priceOverride: optionalNonNegativeInt,
+    /** Free job: no price, no payment. Super admin only (enforced in the route). */
+    proBono: z.boolean().default(false),
+    proBonoReason: z.string().trim().max(300).optional().or(z.literal("")),
 
     projectTitle: z.string().trim().min(3, "Enter a project title").max(300),
 
@@ -135,6 +138,13 @@ export const createProjectSchema = z
       .or(z.literal("")),
   })
   .superRefine((val, ctx) => {
+    if (val.proBono && !val.proBonoReason?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["proBonoReason"],
+        message: "Say why this job is pro bono",
+      });
+    }
     if (val.clientMode === "existing") {
       if (!val.clientId) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["clientId"], message: "Pick a client" });

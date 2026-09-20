@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { getProjectDetail } from "@/lib/services/projects";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
@@ -32,6 +33,7 @@ export default async function ProjectDetailPage({
   params: { id: string };
   searchParams: { tab?: string };
 }) {
+  const session = await auth();
   const [project, ambassadors] = await Promise.all([
     getProjectDetail(params.id),
     listAllocatableAmbassadors(),
@@ -45,7 +47,11 @@ export default async function ProjectDetailPage({
     {
       id: "financials",
       label: "Financials",
-      content: <FinancialsTab project={project} ambassadors={ambassadors} />,
+      content: <FinancialsTab
+          project={project}
+          ambassadors={ambassadors}
+          canProBono={session?.user?.role === "SUPER_ADMIN"}
+        />,
     },
     { id: "files", label: "Files", content: <FilesTab project={project} /> },
     {

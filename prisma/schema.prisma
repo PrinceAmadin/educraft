@@ -331,6 +331,14 @@ model Project {
   status            ProjectStatus @default(NEW)
   isExpressDelivery Boolean       @default(false)
 
+  /// Pro bono job (marketing / visibility / admin's call). Price is 0, both
+  /// payment legs are pre-cleared and payouts pre-marked paid, and it is left
+  /// out of the finance dashboard's business-intelligence figures.
+  isProBono         Boolean       @default(false)
+  proBonoReason     String?
+  proBonoInviteId   String?       @unique
+  proBonoInvite     ProBonoInvite? @relation(fields: [proBonoInviteId], references: [id])
+
   // ── Academic fields ──
   projectTitle        String?
   matricNumber        String?
@@ -610,21 +618,13 @@ model Ambassador {
   /// Jobs this ambassador earns a parent-commission on, referred by one of
   /// their sub-ambassadors.
   subReferredProjects  Project[] @relation("ProjectParentAmbassador")
+  loginCodes           AmbassadorLoginCode[]
 
   @@index([universityId])
   @@index([status])
   @@index([parentId])
 }
 
-// ─── PAYMENTS ───────────────────────────────────────────
-
-  loginCodes           AmbassadorLoginCode[]
-enum PaymentType {
-  CLIENT_DOWNPAYMENT
-  CLIENT_BALANCE
-  WORKER_PAYOUT
-  AMBASSADOR_COMMISSION
-  EXPENSE
 /// One-time codes that let an EXISTING ambassador set their dashboard password
 /// (same flow as ClientLoginCode). Only ever emailed to the address on record.
 model AmbassadorLoginCode {
@@ -642,6 +642,14 @@ model AmbassadorLoginCode {
   @@index([ambassadorId, createdAt])
 }
 
+// ─── PAYMENTS ───────────────────────────────────────────
+
+enum PaymentType {
+  CLIENT_DOWNPAYMENT
+  CLIENT_BALANCE
+  WORKER_PAYOUT
+  AMBASSADOR_COMMISSION
+  EXPENSE
   REFUND
 }
 
@@ -860,6 +868,33 @@ model Reference {
   @@index([researchJobId])
   @@index([projectId])
   @@index([doi])
+}
+
+// ─── PRO BONO INVITES ───────────────────────────────────
+// One-time intake link for a free job. The first browser that opens it is
+// bound to it (deviceHash = sha256 of a random cookie value); any other device
+// is refused. Submitting the form consumes the link.
+
+model ProBonoInvite {
+  id          String    @id @default(cuid())
+  /// Unguessable URL token: /probono/{token}
+  token       String    @unique
+  serviceCode String
+  /// Who the admin meant it for — a label only, never trusted.
+  recipient   String
+  reason      String?
+  /// OPEN, USED or REVOKED
+  status      String    @default("OPEN")
+  /// sha256 of the device cookie of the first browser that opened the link.
+  deviceHash  String?
+  boundAt     DateTime?
+  usedAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  project Project?
+
+  @@index([status])
 }
 
 // ─── PENDING INTAKE (pay-first public intake) ───────────

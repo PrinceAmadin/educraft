@@ -36,6 +36,17 @@ interface ServiceProp {
 
 type UniversityOption = { id: string; name: string; abbreviation: string };
 
+/**
+ * Pro bono mode: the form posts to a one-time link instead of taking payment,
+ * and every money or referral element disappears.
+ */
+export interface ProBonoMode {
+  submitUrl: string;
+  onDone: (projectId: string) => void;
+}
+
+const ProBonoContext = React.createContext(false);
+
 const DATA_OPTIONS = [
   { value: "PRIMARY", label: "Primary (I will collect data)" },
   { value: "SECONDARY", label: "Secondary (existing data / literature)" },
@@ -98,11 +109,13 @@ export function IntakeForm({
   service,
   universities,
   initialReferralCode = "",
+  proBono,
 }: {
   template: IntakeTemplate;
   service: ServiceProp;
   universities: UniversityOption[];
   initialReferralCode?: string;
+  proBono?: ProBonoMode;
 }) {
   const router = useRouter();
   const steps = TEMPLATE_STEPS[template];
@@ -179,7 +192,7 @@ export function IntakeForm({
   // no fixed downpayment to charge before submission — they keep the old
   // submit-then-arrange-payment flow. Everything else is pay-first: the form
   // only becomes a real project once the Paystack downpayment clears.
-  const variablePrice = service.pricingModel === "VARIABLE" && service.basePrice === 0;
+  const variablePrice = !proBono && service.pricingModel === "VARIABLE" && service.basePrice === 0;
 
   async function next() {
     setSubmitError(null);
@@ -199,6 +212,28 @@ export function IntakeForm({
 
   const onSubmit = async (data: IntakeSubmitInput) => {
     setSubmitError(null);
+
+    // Pro bono link: no payment. The link itself enforces one submission from
+    // one device, so a failure here leaves it usable.
+    if (proBono) {
+      try {
+        const res = await fetch(proBono.submitUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        const body = (await res.json().catch(() => null)) as
+          | { projectId?: string; error?: string }
+          | null;
+        if (!res.ok || !body?.projectId) {
+          throw new Error(body?.error ?? "Could not submit. Please try again.");
+        }
+        proBono.onDone(body.projectId);
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Could not submit. Please try again.");
+      }
+      return;
+    }
 
     // Variable-priced services: no fixed amount to charge upfront, so this
     // still submits straight away and arranges payment on WhatsApp.
@@ -246,6 +281,7 @@ export function IntakeForm({
   const isSubmitting = form.formState.isSubmitting;
 
   return (
+    <ProBonoContext.Provider value={Boolean(proBono)}>
     <FormProvider {...form}>
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-9">
         <FormProgress steps={steps} current={step} />
@@ -273,7 +309,11 @@ export function IntakeForm({
           {isReview ? (
             <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-              {isSubmitting
+              {proBono
+                ? isSubmitting
+                  ? "Submitting…"
+                  : "Submit project"
+                : isSubmitting
                 ? variablePrice
                   ? "Submitting…"
                   : "Redirecting to Paystack…"
@@ -289,6 +329,7 @@ export function IntakeForm({
         </div>
       </form>
     </FormProvider>
+    </ProBonoContext.Provider>
   );
 }
 
@@ -364,6 +405,8 @@ function StepContent({
 
 function ReferralField() {
   const { register } = useFormContext<IntakeSubmitInput>();
+  const proBono = React.useContext(ProBonoContext);
+  if (proBono) return null;
   return (
     <Field label="Referral code" htmlFor="referralCode" hint="From an EduCraft ambassador, if you have one">
       <Input id="referralCode" {...register("referralCode")} />
@@ -401,6 +444,8 @@ function DeadlineField() {
 
 function ExpressField({ service }: { service: ServiceProp }) {
   const { register } = useFormContext<IntakeSubmitInput>();
+  const proBono = React.useContext(ProBonoContext);
+  if (proBono) return null;
   return (
     <label className="flex items-start gap-3 rounded-xl bg-zone p-3.5">
       <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" {...register("isExpressDelivery")} />
@@ -1010,7 +1055,8 @@ function ReviewStep({
     formState: { errors },
   } = useFormContext<IntakeSubmitInput>();
   const v = getValues();
-  const variablePrice = service.pricingModel === "VARIABLE" && service.basePrice === 0;
+  const proBono = React.useContext(ProBonoContext);
+  const variablePrice = !proBono && service.pricingModel === "VARIABLE" && service.basePrice === 0;
 
   return (
     <div className="space-y-5">
@@ -1032,12 +1078,13 @@ function ReviewStep({
         {template === "academic_it" && v.companyName ? <Row label="Company" value={v.companyName} /> : null}
         {template === "editing" && v.editingType ? <Row label="Service" value={v.editingType} /> : null}
         {v.clientDeadline ? <Row label="Needed by" value={v.clientDeadline} /> : null}
-        {template !== "editing" && template !== "career_cv" ? (
+        {!proBono && template !== "editing" && template !== "career_cv" ? (
           <Row label="Express delivery" value={v.isExpressDelivery ? "Yes" : "No"} />
         ) : null}
         {v.referralCode ? <Row label="Referral code" value={v.referralCode} /> : null}
       </dl>
 
+      {proBono ? null : (
       <div className="rounded-2xl bg-zone p-4 text-sm">
         <div className="flex items-center justify-between">
           <span className="font-semibold text-foreground">Total price</span>
@@ -1058,11 +1105,14 @@ function ReviewStep({
           </>
         ) : null}
       </div>
+      )}
 
       <div className="rounded-xl bg-zone p-3.5 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">What happens next</p>
         <p className="mt-1">
-          {variablePrice
+          {proBono
+            ? "There is nothing to pay. Once you submit, your project goes straight to our team. This link works once, so check your details before you send. Track progress any time with your project ID."
+            : variablePrice
             ? "We confirm your details on WhatsApp and send payment instructions. Work begins once your downpayment is verified. Track progress any time with your project ID."
             : "You'll be taken to Paystack to pay the downpayment. Your project is only created once payment succeeds — you won't need to submit again. Track progress any time with your project ID."}
         </p>
@@ -1071,8 +1121,9 @@ function ReviewStep({
       <label className="flex items-start gap-3 text-sm">
         <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" {...register("agreeTerms")} />
         <span>
-          I agree to EduCraft&apos;s terms: {variablePrice ? "a" : "45%"} downpayment to begin, balance on
-          approval, and up to 3 rounds of revisions within scope.
+          {proBono
+            ? "I agree to EduCraft's terms: up to 3 rounds of revisions within scope."
+            : `I agree to EduCraft's terms: ${variablePrice ? "a" : "45%"} downpayment to begin, balance on approval, and up to 3 rounds of revisions within scope.`}
         </span>
       </label>
       {errors.agreeTerms ? <p className="text-xs text-danger">{errors.agreeTerms.message as string}</p> : null}

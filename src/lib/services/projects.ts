@@ -14,6 +14,7 @@ import {
 } from "@/lib/services/ambassador-commission";
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
+import { proBonoFinancials } from "@/lib/pro-bono";
 import {
   MAX_REVISIONS,
   TRANSITIONS,
@@ -130,6 +131,7 @@ const listSelect = {
   status: true,
   projectTitle: true,
   price: true,
+  isProBono: true,
   downpaymentStatus: true,
   balanceStatus: true,
   clientDeadline: true,
@@ -267,6 +269,7 @@ export async function transitionProject(
       departmentOutline: true,
       additionalData: true,
       revisionCount: true,
+      isProBono: true,
       deadlinePausedAt: true,
       internalDeadline: true,
       worker: { select: { userId: true } },
@@ -325,6 +328,11 @@ export async function transitionProject(
   if (to === "COMPLETED") data.finalCompletionDate = now;
   if (to === "APPROVED") data.qaStatus = "Passed";
 
+  // A pro bono job has no balance to wait for: approval unlocks delivery
+  // straight away, logged as its own step so the timeline stays honest.
+  const skipBalance = to === "APPROVED" && project.isProBono;
+  if (skipBalance) data.status = "BALANCE_VERIFIED";
+
   let flaggedForFounder = false;
   if (to === "REVISION_NEEDED") {
     data.revisionCount = { increment: 1 };
@@ -369,6 +377,19 @@ export async function transitionProject(
         notes: note ?? rule.action,
       },
     }),
+    ...(skipBalance
+      ? [
+          db.projectStatusLog.create({
+            data: {
+              projectId: project.id,
+              fromStatus: "APPROVED" as const,
+              toStatus: "BALANCE_VERIFIED" as const,
+              changedById,
+              notes: "Pro bono: no balance to collect",
+            },
+          }),
+        ]
+      : []),
   ]);
 
   // ── Notifications ──
@@ -855,9 +876,10 @@ export async function createProjectManual(
   let referralCodeUsed: string | null = null;
   let ambassadorName = "";
 
+  const proBono = input.proBono;
   const referralCode =
-    input.clientMode === "new" ? (input.referralCode ?? "").trim() : "";
-  if (input.ambassadorId) {
+    input.clientMode === "new" && !proBono ? (input.referralCode ?? "").trim() : "";
+  if (input.ambassadorId && !proBono) {
     try {
       const picked = await resolveAmbassadorRate(input.ambassadorId, input.ambassadorRate);
       ambassadorId = picked.id;
@@ -881,7 +903,7 @@ export async function createProjectManual(
   }
 
   const split = computeSplit(price.total, ambassadorCommRate);
-  const parentInfo = ambassadorId ? await resolveParentCommission(ambassadorId) : null;
+  const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId) : null;
   const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
   const now = new Date();
@@ -939,8 +961,8 @@ export async function createProjectManual(
         clientId,
         serviceId: service.id,
         serviceVariantId,
-        status: "NEW",
-        isExpressDelivery: input.isExpressDelivery,
+        status: proBono ? "DOWNPAYMENT_VERIFIED" : "NEW",
+        isExpressDelivery: proBono ? false : input.isExpressDelivery,
         projectTitle: input.projectTitle,
         matricNumber: input.matricNumber || null,
         supervisorName: input.supervisorName || null,
@@ -956,21 +978,25 @@ export async function createProjectManual(
             : Prisma.JsonNull,
         clientDeadline,
         internalDeadline,
-        price: price.total,
-        downpaymentAmount: price.downpaymentAmount,
-        balanceAmount: price.balanceAmount,
-        downpaymentStatus: "Unpaid",
-        balanceStatus: "Unpaid",
-        ambassadorId,
-        ambassadorCommRate,
-        ambassadorCommission: split.ambassadorCommission,
-        ambassadorAllocatedAt: ambassadorId ? now : null,
-        parentAmbassadorId: parentInfo?.id ?? null,
-        parentCommRate: parentInfo?.rate ?? null,
-        parentCommission,
-        workerPayoutRate: 40,
-        workerPayout: split.workerPayout,
-        educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
+        ...(proBono
+          ? { ...proBonoFinancials(), proBonoReason: input.proBonoReason?.trim() || null }
+          : {
+              price: price.total,
+              downpaymentAmount: price.downpaymentAmount,
+              balanceAmount: price.balanceAmount,
+              downpaymentStatus: "Unpaid",
+              balanceStatus: "Unpaid",
+              ambassadorId,
+              ambassadorCommRate,
+              ambassadorCommission: split.ambassadorCommission,
+              ambassadorAllocatedAt: ambassadorId ? now : null,
+              parentAmbassadorId: parentInfo?.id ?? null,
+              parentCommRate: parentInfo?.rate ?? null,
+              parentCommission,
+              workerPayoutRate: 40,
+              workerPayout: split.workerPayout,
+              educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
+            }),
       },
       select: { id: true, projectId: true },
     });
@@ -1001,9 +1027,11 @@ export async function createProjectManual(
       data: {
         projectId: project.id,
         fromStatus: "NEW",
-        toStatus: "NEW",
+        toStatus: proBono ? "DOWNPAYMENT_VERIFIED" : "NEW",
         changedById: createdById,
-        notes: "Project created manually by admin",
+        notes: proBono
+          ? `Pro bono project created manually by admin: ${input.proBonoReason?.trim()}`
+          : "Project created manually by admin",
       },
     });
 

@@ -207,7 +207,7 @@ export interface OutstandingBalances {
 
 export async function getOutstandingBalances(): Promise<OutstandingBalances> {
   const [approvedAgg, payouts] = await Promise.all([
-    db.project.aggregate({ where: { status: "APPROVED" }, _sum: { balanceAmount: true }, _count: true }),
+    db.project.aggregate({ where: { status: "APPROVED", isProBono: false }, _sum: { balanceAmount: true }, _count: true }),
     getPendingPayouts(),
   ]);
 
@@ -283,7 +283,8 @@ export interface BusinessIntelligence {
 
 export async function getBusinessIntelligence(): Promise<BusinessIntelligence> {
   const projects = await db.project.findMany({
-    where: { status: "COMPLETED" },
+    // Pro bono jobs carry no revenue and would only pad the counts.
+    where: { status: "COMPLETED", isProBono: false },
     select: {
       price: true,
       service: { select: { serviceName: true } },

@@ -11,6 +11,7 @@ import {
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { resolveTemplate } from "@/lib/intake-templates";
+import { proBonoFinancials } from "@/lib/pro-bono";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
 
 export interface PublicService {
@@ -95,7 +96,16 @@ export class IntakeError extends Error {}
  * later). Links a referring ambassador when the code resolves. Ids are
  * generated before the transaction, which carries an explicit timeout.
  */
-export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResult> {
+export interface SubmitIntakeOptions {
+  /** A pro bono submission: no price, no payment, no referral, opens at DOWNPAYMENT_VERIFIED. */
+  proBono?: { inviteId: string; reason: string | null };
+}
+
+export async function submitIntake(
+  input: IntakeSubmitInput,
+  options: SubmitIntakeOptions = {}
+): Promise<IntakeResult> {
+  const proBono = options.proBono ?? null;
   const service = await db.service.findFirst({
     where: { serviceCode: input.serviceCode, isActive: true },
     select: {
@@ -127,7 +137,8 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
   let referralCodeUsed: string | null = null;
   let ambassadorUserId: string | null = null;
   let ambassadorName = "";
-  const code = input.referralCode?.trim();
+  // A free job earns no ambassador commission, whatever code was typed.
+  const code = proBono ? "" : input.referralCode?.trim();
   if (code) {
     const ambassador = await db.ambassador.findUnique({
       where: { referralCode: code },
@@ -143,7 +154,7 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
   }
 
   const split = computeSplit(price.total, ambassadorCommRate);
-  const parentInfo = ambassadorId ? await resolveParentCommission(ambassadorId) : null;
+  const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId) : null;
   const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
   const now = new Date();
@@ -243,8 +254,8 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
           projectId: newProjectId,
           clientId: client.id,
           serviceId: service.id,
-          status: "NEW",
-          isExpressDelivery: input.isExpressDelivery,
+          status: proBono ? "DOWNPAYMENT_VERIFIED" : "NEW",
+          isExpressDelivery: proBono ? false : input.isExpressDelivery,
           projectTitle,
           matricNumber: input.matricNumber || null,
           supervisorName: input.supervisorName || null,
@@ -265,21 +276,29 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
               : Prisma.JsonNull,
           clientDeadline,
           internalDeadline,
-          price: price.total,
-          downpaymentAmount: price.downpaymentAmount,
-          balanceAmount: price.balanceAmount,
-          downpaymentStatus: "Unpaid",
-          balanceStatus: "Unpaid",
-          ambassadorId,
-          ambassadorCommRate,
-          ambassadorCommission: split.ambassadorCommission,
-          ambassadorAllocatedAt: ambassadorId ? now : null,
-          parentAmbassadorId: parentInfo?.id ?? null,
-          parentCommRate: parentInfo?.rate ?? null,
-          parentCommission,
-          workerPayoutRate: 40,
-          workerPayout: split.workerPayout,
-          educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
+          ...(proBono
+            ? {
+                ...proBonoFinancials(),
+                proBonoReason: proBono.reason,
+                proBonoInviteId: proBono.inviteId,
+              }
+            : {
+                price: price.total,
+                downpaymentAmount: price.downpaymentAmount,
+                balanceAmount: price.balanceAmount,
+                downpaymentStatus: "Unpaid",
+                balanceStatus: "Unpaid",
+                ambassadorId,
+                ambassadorCommRate,
+                ambassadorCommission: split.ambassadorCommission,
+                ambassadorAllocatedAt: ambassadorId ? now : null,
+                parentAmbassadorId: parentInfo?.id ?? null,
+                parentCommRate: parentInfo?.rate ?? null,
+                parentCommission,
+                workerPayoutRate: 40,
+                workerPayout: split.workerPayout,
+                educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
+              }),
         },
         select: { id: true, projectId: true },
       });
@@ -310,8 +329,10 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
         data: {
           projectId: project.id,
           fromStatus: "NEW",
-          toStatus: "NEW",
-          notes: "Submitted through the online intake form",
+          toStatus: proBono ? "DOWNPAYMENT_VERIFIED" : "NEW",
+          notes: proBono
+            ? "Submitted through a pro bono link. No payment required"
+            : "Submitted through the online intake form",
         },
       });
 
@@ -321,8 +342,8 @@ export async function submitIntake(input: IntakeSubmitInput): Promise<IntakeResu
   );
 
   await notifyAdmins({
-    title: "New project submitted",
-    message: `${created.projectId}: ${input.fullName.trim()} submitted ${input.projectTitle?.trim() || "a project"} through the intake form.`,
+    title: proBono ? "New pro bono project submitted" : "New project submitted",
+    message: `${created.projectId}: ${input.fullName.trim()} submitted ${input.projectTitle?.trim() || "a project"} through ${proBono ? "a pro bono link" : "the intake form"}.`,
     type: "info",
     link: `/admin/projects/${created.projectId}`,
   });

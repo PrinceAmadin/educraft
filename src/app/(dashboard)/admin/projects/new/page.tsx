@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { NewProjectForm } from "@/components/projects/NewProjectForm";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
@@ -9,6 +10,7 @@ export const metadata: Metadata = { title: "New project" };
 export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
+  const session = await auth();
   const [universities, services, ambassadors] = await Promise.all([
     db.university.findMany({
       orderBy: { name: "asc" },
@@ -55,7 +57,12 @@ export default async function NewProjectPage() {
         </p>
       </div>
 
-      <NewProjectForm universities={universities} services={services} ambassadors={ambassadors} />
+      <NewProjectForm
+        universities={universities}
+        services={services}
+        ambassadors={ambassadors}
+        canProBono={session?.user?.role === "SUPER_ADMIN"}
+      />
     </div>
   );
 }
