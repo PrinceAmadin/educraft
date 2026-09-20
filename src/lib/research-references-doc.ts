@@ -5,7 +5,7 @@
  * 12pt, double spaced, justified, 1 inch margins, hanging indent, journal
  * names and "et al." italicised, no colour, links or header/footer.
  */
-import { AlignmentType, Document, LineRuleType, Packer, Paragraph, TextRun } from "docx";
+import { AlignmentType, Document, HeadingLevel, LineRuleType, Packer, Paragraph, TextRun } from "docx";
 
 export interface DocReference {
   title: string | null;
@@ -22,8 +22,40 @@ type Seg = { text: string; italics?: boolean };
 const ET_AL: Seg = { text: "et al.", italics: true };
 
 const clean = (s: string) => s.replace(/\s+/g, " ").trim();
-const titleOf = (r: DocReference) => clean(r.title ?? r.proposedTitle).replace(/[.\s]+$/, "");
-const authorList = (r: DocReference) => (r.authors ?? "").split(";").map(clean).filter(Boolean);
+const ACRONYMS = new Set(["AI", "IT", "ICT", "IoT", "SME", "SMEs", "ML", "API", "IEEE", "NIST", "GDPR", "DDoS", "USA", "UK", "COVID", "COVID-19", "VPN", "IoMT", "OT", "IS", "ISO"]);
+const SMALL = new Set(["a", "an", "the", "of", "in", "on", "for", "and", "or", "to", "at", "by", "with", "from", "as", "vs", "via", "nor", "but"]);
+
+/** Text that is mostly capitals (a publisher's shouting title) becomes Title Case; anything else is left as published. */
+function unshout(s: string): string {
+  const letters = s.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 4 || letters.replace(/[^A-Z]/g, "").length / letters.length < 0.6) return s;
+  let afterColon = true;
+  return s
+    .split(/(\s+)/)
+    .map((w, i) => {
+      if (/^\s*$/.test(w)) return w;
+      const bare = w.replace(/[^A-Za-z0-9-]/g, "");
+      const acr = [...ACRONYMS].find((a) => a.toUpperCase() === bare.toUpperCase());
+      const first = i === 0 || afterColon;
+      afterColon = /[:?]$/.test(w);
+      if (acr) return w.replace(bare, acr);
+      const lower = w.toLowerCase();
+      if (!first && SMALL.has(bare.toLowerCase())) return lower;
+      return lower.replace(/(^|[-(/"'])([a-z])/g, (_m, p, c) => p + c.toUpperCase());
+    })
+    .join("");
+}
+
+const titleOf = (r: DocReference) => unshout(clean(r.title ?? r.proposedTitle).replace(/[.\s]+$/, ""));
+
+/** "ABRAHAMS, T." → "Abrahams, T." — only the surname is touched, and only when it is all capitals. */
+function fixSurname(a: string): string {
+  const i = a.indexOf(",");
+  const surname = i === -1 ? a : a.slice(0, i);
+  if (surname.length < 4 || surname !== surname.toUpperCase()) return a;
+  return unshout(surname) + (i === -1 ? "" : a.slice(i));
+}
+const authorList = (r: DocReference) => (r.authors ?? "").split(";").map(clean).filter(Boolean).map(fixSurname);
 
 /** "Bada, M. J." → "M. J. Bada" (IEEE order). */
 function initialsFirst(a: string): string {
@@ -66,7 +98,7 @@ function format(style: ReferencingStyle, r: DocReference, n: number): Seg[] {
   const authors = authorList(r);
   const title = titleOf(r);
   const year = r.year ? String(r.year) : "n.d.";
-  const journal = r.journal ? clean(r.journal) : null;
+  const journal = r.journal ? unshout(clean(r.journal)) : null;
   const url = r.doi ? `https://doi.org/${r.doi}` : "";
   const t = (text: string): Seg => ({ text });
   const j = (text: string): Seg => ({ text, italics: true });
@@ -171,6 +203,17 @@ export async function buildReferencesDocx(refs: DocReference[], style: Referenci
     title: "References",
     styles: {
       default: { document: { run: { font, size: 24, color: "000000" }, paragraph: { spacing } } },
+      paragraphStyles: [
+        {
+          id: "Heading1",
+          name: "heading 1",
+          basedOn: "Normal",
+          next: "Normal",
+          quickFormat: true,
+          run: { font, size: 24, bold: true, color: "000000" },
+          paragraph: { alignment: AlignmentType.CENTER, spacing, outlineLevel: 0 },
+        },
+      ],
     },
     sections: [
       {
@@ -179,7 +222,8 @@ export async function buildReferencesDocx(refs: DocReference[], style: Referenci
           new Paragraph({
             alignment: AlignmentType.CENTER,
             spacing,
-            children: [new TextRun({ text: "REFERENCES" })],
+            heading: HeadingLevel.HEADING_1,
+            children: [new TextRun({ text: "REFERENCES", bold: true })],
           }),
           ...list.map(
             (r, i) =>
