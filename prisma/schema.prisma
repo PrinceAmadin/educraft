@@ -618,12 +618,30 @@ model Ambassador {
 
 // ─── PAYMENTS ───────────────────────────────────────────
 
+  loginCodes           AmbassadorLoginCode[]
 enum PaymentType {
   CLIENT_DOWNPAYMENT
   CLIENT_BALANCE
   WORKER_PAYOUT
   AMBASSADOR_COMMISSION
   EXPENSE
+/// One-time codes that let an EXISTING ambassador set their dashboard password
+/// (same flow as ClientLoginCode). Only ever emailed to the address on record.
+model AmbassadorLoginCode {
+  id           String     @id @default(cuid())
+  ambassadorId String
+  ambassador   Ambassador @relation(fields: [ambassadorId], references: [id], onDelete: Cascade)
+  /// HMAC of the code (never the code itself).
+  codeHash     String
+  expiresAt    DateTime
+  attempts     Int        @default(0)
+  usedAt       DateTime?
+  ipHash       String?
+  createdAt    DateTime   @default(now())
+
+  @@index([ambassadorId, createdAt])
+}
+
   REFUND
 }
 

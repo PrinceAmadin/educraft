@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signIn } from "next-auth/react";
 import { z } from "zod";
-import { LuCircleAlert, LuEye, LuEyeOff, LuLoaderCircle } from "react-icons/lu";
+import { LuCircleAlert, LuCircleCheck, LuEye, LuEyeOff, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +58,13 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
+      {searchParams.get("passwordSet") && !formError && (
+        <div role="status" className="flex items-start gap-2.5 rounded-lg bg-zone px-3.5 py-3 text-sm text-foreground">
+          <LuCircleCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+          <span>Password saved. Sign in with your email and new password.</span>
+        </div>
+      )}
+
       {formError && (
         <div
           role="alert"
@@ -113,6 +121,13 @@ export function LoginForm() {
         {isSubmitting && <LuLoaderCircle className="size-4 animate-spin" aria-hidden />}
         {isSubmitting ? "Signing in…" : "Sign in"}
       </Button>
+
+      <p className="text-sm text-muted-foreground">
+        First time signing in, or forgot your password?{" "}
+        <Link href="/login/set-password" className="font-medium text-primary underline-offset-4 hover:underline">
+          Set it with an email code
+        </Link>
+      </p>
     </form>
   );
 }
