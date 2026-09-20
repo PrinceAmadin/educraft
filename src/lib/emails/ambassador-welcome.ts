@@ -18,7 +18,7 @@ export function ambassadorWelcomeEmail(input: {
   const slotLabel = `EduCraftA-${input.slotCode}`;
 
   const loginLine = input.hasLogin
-    ? "Sign in to your dashboard with the email and password you chose when you applied."
+    ? "Sign in to your dashboard with your email and password."
     : "We will send your dashboard login separately.";
 
   const text = [

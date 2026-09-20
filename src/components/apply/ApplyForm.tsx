@@ -37,6 +37,8 @@ export function ApplyForm({
   const router = useRouter();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [uniChoice, setUniChoice] = React.useState("");
+  // The email already has a login: a code was emailed and is asked for before the application is saved.
+  const [needCode, setNeedCode] = React.useState(false);
 
   const {
     register,
@@ -54,6 +56,7 @@ export function ApplyForm({
       email: "",
       password: "",
       confirmPassword: "",
+      emailCode: "",
       universityId: "",
       otherUniversity: "",
       department: "",
@@ -77,7 +80,11 @@ export function ApplyForm({
         body: JSON.stringify(data),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        const body = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
+        if (body?.code === "VERIFY_EMAIL") {
+          setNeedCode(true);
+          return;
+        }
         throw new Error(body?.error ?? "Could not submit your application.");
       }
       const result = (await res.json().catch(() => null)) as { slotCode?: string } | null;
@@ -108,7 +115,7 @@ export function ApplyForm({
 
       <FormSection
         title="Your dashboard login"
-        description="You will use these to sign in to your own ambassador dashboard once you are approved."
+        description="You will use these to sign in to your own ambassador dashboard once you are approved. Already a worker? Use the same email: we will ask for a code and you keep your current password."
       >
         <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
           <Field label="Email" required htmlFor="a-email" error={errors.email?.message} className="sm:col-span-2">
@@ -247,7 +254,26 @@ export function ApplyForm({
       </FormSection>
 
       <div className="space-y-4">
-        {submitError ? (
+        {needCode ? (
+        <FormSection
+          title="Confirm your email"
+          description="This email already has an EduCraft login. We sent a 6-digit code to it. Enter it to add this role to your existing login; your current password does not change."
+        >
+          <Field label="6-digit code" required htmlFor="a-code" error={errors.emailCode?.message}>
+            <Input
+              id="a-code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="123456"
+              className="font-mono tracking-[0.4em]"
+              {...register("emailCode")}
+            />
+          </Field>
+        </FormSection>
+      ) : null}
+
+      {submitError ? (
           <p role="alert" className="flex items-start gap-2 text-sm text-danger">
             <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
             {submitError}

@@ -9,6 +9,8 @@ export const ambassadorApplicationSchema = z
     email: z.string().trim().min(1, "Enter your email").email("Enter a valid email").max(160),
     password: z.string().min(8, "At least 8 characters").max(72),
     confirmPassword: z.string(),
+    /** 6-digit code emailed when this email already has a login (worker applying as ambassador). */
+    emailCode: z.string().trim().regex(/^\d{6}$/).optional().or(z.literal("")),
     universityId: z.string().optional().or(z.literal("")),
     otherUniversity: z.string().trim().max(120).optional().or(z.literal("")),
     department: z.string().trim().max(120).optional().or(z.literal("")),

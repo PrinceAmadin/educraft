@@ -3,16 +3,32 @@ import { Prisma, type ApplicationStatus, type WorkerApplication } from "@prisma/
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
+import type { SendFn } from "@/lib/services/client-otp";
 import type {
   WorkerRegistrationInput,
   EditWorkerApplicationInput,
 } from "@/lib/validations/worker-application";
 
-export class WorkerApplicationError extends Error {}
+export class WorkerApplicationError extends Error {
+  constructor(
+    message: string,
+    /** VERIFY_EMAIL: the email already has a login and a code was sent. BAD_CODE: the code was wrong. */
+    readonly code?: "VERIFY_EMAIL" | "BAD_CODE"
+  ) {
+    super(message);
+  }
+}
+
+export interface ApplyContext {
+  ip: string;
+  send: SendFn;
+  defer: (work: Promise<unknown>) => void;
+}
 
 // ── Public submit ────────────────────────────────────────────
 
-async function findConflict(input: { phone: string; email: string }): Promise<string | null> {
+async function findConflict(input: { phone: string; email: string; ownLogin?: boolean }): Promise<string | null> {
   const phone = input.phone.trim();
   const email = input.email.trim().toLowerCase();
 
@@ -22,7 +38,7 @@ async function findConflict(input: { phone: string; email: string }): Promise<st
       select: { id: true },
     }),
     db.worker.findFirst({ where: { OR: [{ phone }, { email }] }, select: { id: true } }),
-    db.user.findUnique({ where: { email }, select: { id: true } }),
+    input.ownLogin ? null : db.user.findUnique({ where: { email }, select: { id: true } }),
   ]);
 
   if (pendingApp) return "An application with this phone or email is already pending review.";
@@ -38,26 +54,43 @@ async function findConflict(input: { phone: string; email: string }): Promise<st
  * until an admin approves (see authorize() in src/lib/auth.ts).
  */
 export async function submitWorkerApplication(
-  input: WorkerRegistrationInput
+  input: WorkerRegistrationInput,
+  ctx: ApplyContext
 ): Promise<{ id: string }> {
-  const conflict = await findConflict({ phone: input.phone, email: input.email });
+  // An ambassador (anyone with an active login and an ambassador profile)
+  // applying as a worker keeps their one login: the emailed code proves the
+  // inbox, the application attaches to that login, and no new password is set.
+  const ownLogin = await findLoginForApplication(input.email, "WORKER");
+  if (ownLogin) {
+    if (!input.emailCode) {
+      await sendApplicationCode({ email: input.email, fullName: ownLogin.fullName, ...ctx });
+      throw new WorkerApplicationError("This email already has an EduCraft login. We sent a 6-digit code to it.", "VERIFY_EMAIL");
+    }
+    if (!(await verifyApplicationCode(input.email, input.emailCode, ctx.ip))) {
+      throw new WorkerApplicationError("That code did not work. Check it, or ask for a new one.", "BAD_CODE");
+    }
+  }
+
+  const conflict = await findConflict({ phone: input.phone, email: input.email, ownLogin: Boolean(ownLogin) });
   if (conflict) throw new WorkerApplicationError(conflict);
 
-  const passwordHash = await bcrypt.hash(input.password, 12);
+  const passwordHash = ownLogin ? "" : await bcrypt.hash(input.password, 12);
   const email = input.email.trim().toLowerCase();
 
   try {
     const application = await db.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email,
-          displayName: input.fullName.trim(),
-          passwordHash,
-          role: "WORKER",
-          isActive: false,
-        },
-        select: { id: true },
-      });
+      const user = ownLogin
+        ? { id: ownLogin.userId }
+        : await tx.user.create({
+            data: {
+              email,
+              displayName: input.fullName.trim(),
+              passwordHash,
+              role: "WORKER",
+              isActive: false,
+            },
+            select: { id: true },
+          });
 
       return tx.workerApplication.create({
         data: {

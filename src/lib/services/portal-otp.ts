@@ -134,16 +134,28 @@ export async function requestPortalCode(opts: {
 
   const account = await findAccount(opts.identifier);
   if (!account) return { limited: false };
-  const { email } = account;
+  await issueCode({ email: account.email, fullName: account.fullName, ip: opts.ip, send: opts.send, defer: opts.defer });
+  return { limited: false };
+}
 
+/** Creates and emails a code to `email` (which must already be a trusted address on file). Silent when cooling down or over the per-email cap. */
+async function issueCode(opts: {
+  email: string;
+  fullName: string;
+  ip: string;
+  send: SendFn;
+  defer: (work: Promise<unknown>) => void;
+  purpose?: string;
+}): Promise<void> {
+  const { email } = opts;
   const now = Date.now();
   const recent = await db.portalLoginCode.findMany({
     where: { email, createdAt: { gte: new Date(now - WINDOW_MS) } },
     orderBy: { createdAt: "desc" },
     select: { createdAt: true },
   });
-  if (recent.length >= MAX_CODES_PER_WINDOW) return { limited: false };
-  if (recent[0] && now - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) return { limited: false };
+  if (recent.length >= MAX_CODES_PER_WINDOW) return;
+  if (recent[0] && now - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) return;
 
   await db.portalLoginCode.updateMany({ where: { email, usedAt: null }, data: { usedAt: new Date() } });
 
@@ -153,14 +165,71 @@ export async function requestPortalCode(opts: {
   });
   if (process.env.NODE_ENV === "development") console.log(`[portal-otp:dev] ${email} = ${code}`);
 
-  const mail = clientCodeEmail({ fullName: account.fullName, code, minutes: CODE_TTL_MS / 60_000 });
+  const mail = clientCodeEmail({ fullName: opts.fullName, code, minutes: CODE_TTL_MS / 60_000, purpose: opts.purpose });
   opts.defer(
     opts.send({ to: email, ...mail }).then((res) => {
       if (!res.ok) console.error("[portal-otp] email failed:", res.error);
     })
   );
-  return { limited: false };
 }
+
+/** Spends a valid, unexpired code for `email`: counts the try atomically, single use. False for any failure. */
+async function spendCode(email: string, codeInput: string, ip: string): Promise<boolean> {
+  if (await ipLimited(ip, "portal-verify")) return false;
+  const code = (codeInput ?? "").trim();
+  if (!/^\d{6}$/.test(code)) return false;
+
+  const row = await db.portalLoginCode.findFirst({
+    where: { email, usedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!row) return false;
+
+  const counted = await db.portalLoginCode.updateMany({
+    where: { id: row.id, usedAt: null, attempts: { lt: MAX_ATTEMPTS } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (counted.count !== 1 || !safeEqual(row.codeHash, hashCode(email, code))) return false;
+
+  const used = await db.portalLoginCode.updateMany({ where: { id: row.id, usedAt: null }, data: { usedAt: new Date() } });
+  return used.count === 1;
+}
+
+/**
+ * Applying for the OTHER role with an email that already has a login: a worker
+ * applying as an ambassador, or an ambassador applying as a worker. Returns that
+ * login when it is active and holds only the other profile; the application then
+ * attaches to it (no new password, no second login) once the emailed code proves
+ * the applicant owns the inbox.
+ */
+export async function findLoginForApplication(email: string, kind: "AMBASSADOR" | "WORKER"): Promise<{ userId: string; fullName: string } | null> {
+  const address = realEmail(email);
+  if (!address) return null;
+  const user = await db.user.findUnique({
+    where: { email: address },
+    select: {
+      id: true,
+      role: true,
+      isActive: true,
+      displayName: true,
+      workerProfile: { select: { fullName: true, status: true } },
+      ambassadorProfile: { select: { fullName: true, status: true } },
+    },
+  });
+  if (!user || !user.isActive || (user.role !== "WORKER" && user.role !== "AMBASSADOR")) return null;
+  const has = kind === "AMBASSADOR" ? user.workerProfile : user.ambassadorProfile;
+  const already = kind === "AMBASSADOR" ? user.ambassadorProfile : user.workerProfile;
+  if (!has || already || !["Active", "On Break"].includes(has.status)) return null;
+  return { userId: user.id, fullName: has.fullName ?? user.displayName ?? "there" };
+}
+
+/** Emails the proof-of-inbox code for an application to an existing login. */
+export function sendApplicationCode(opts: { email: string; fullName: string; ip: string; send: SendFn; defer: (work: Promise<unknown>) => void }): Promise<void> {
+  return issueCode({ ...opts, email: opts.email.trim().toLowerCase(), purpose: "Enter this code to confirm your email for your EduCraft application. Your current password stays the same." });
+}
+
+/** True when `code` is the live code for this email; spends it. */
+export const verifyApplicationCode = (email: string, code: string, ip: string) => spendCode(email.trim().toLowerCase(), code, ip);
 
 /** Verifies the code, then stores the password on the person's one login (creating it if needed) and links their profiles to it. Any failure is just false. */
 export async function setPortalPasswordWithCode(opts: {
@@ -170,29 +239,10 @@ export async function setPortalPasswordWithCode(opts: {
   ip: string;
 }): Promise<boolean> {
   if (opts.password.length < PASSWORD_MIN || opts.password.length > PASSWORD_MAX) return false;
-  if (await ipLimited(opts.ip, "portal-verify")) return false;
-  const code = (opts.code ?? "").trim();
-  if (!/^\d{6}$/.test(code)) return false;
-
   const account = await findAccount(opts.identifier);
   if (!account) return false;
   const { email } = account;
-
-  const row = await db.portalLoginCode.findFirst({
-    where: { email, usedAt: null, expiresAt: { gt: new Date() } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!row) return false;
-
-  // Count the try first, atomically, so parallel guesses cannot exceed the limit.
-  const counted = await db.portalLoginCode.updateMany({
-    where: { id: row.id, usedAt: null, attempts: { lt: MAX_ATTEMPTS } },
-    data: { attempts: { increment: 1 } },
-  });
-  if (counted.count !== 1 || !safeEqual(row.codeHash, hashCode(email, code))) return false;
-
-  const used = await db.portalLoginCode.updateMany({ where: { id: row.id, usedAt: null }, data: { usedAt: new Date() } });
-  if (used.count !== 1) return false;
+  if (!(await spendCode(email, opts.code, opts.ip))) return false;
 
   const passwordHash = await bcrypt.hash(opts.password, 12);
   try {

@@ -19,6 +19,8 @@ export const workerRegistrationSchema = z.object({
   accountNumber: z.string().trim().max(20).optional().or(z.literal("")),
   accountName: z.string().trim().max(120).optional().or(z.literal("")),
   password: z.string().min(8, "At least 8 characters").max(72),
+  /** 6-digit code emailed when this email already has a login (ambassador applying as worker). */
+  emailCode: z.string().trim().regex(/^\d{6}$/).optional().or(z.literal("")),
 });
 export type WorkerRegistrationInput = z.infer<typeof workerRegistrationSchema>;
 

@@ -7,9 +7,25 @@ import { nextGeneralCode } from "@/lib/services/ambassador-roster";
 import { sendMail } from "@/lib/mailer";
 import { callbackBaseUrl } from "@/lib/paystack";
 import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
+import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
+import type { SendFn } from "@/lib/services/client-otp";
 import type { AmbassadorApplicationInput } from "@/lib/validations/application";
 
-export class ApplicationError extends Error {}
+export class ApplicationError extends Error {
+  constructor(
+    message: string,
+    /** VERIFY_EMAIL: the email already has a login and a code was sent. BAD_CODE: the code was wrong. */
+    readonly code?: "VERIFY_EMAIL" | "BAD_CODE"
+  ) {
+    super(message);
+  }
+}
+
+export interface ApplyContext {
+  ip: string;
+  send: SendFn;
+  defer: (work: Promise<unknown>) => void;
+}
 
 // ── Public submit ────────────────────────────────────────────
 
@@ -23,6 +39,8 @@ async function findConflict(input: {
   phone: string;
   email?: string;
   accountNumber: string;
+  /** The email login is the applicant's own (a worker applying as an ambassador). */
+  ownLogin?: boolean;
 }): Promise<string | null> {
   const phone = input.phone.trim();
   const email = input.email?.trim() || null;
@@ -42,7 +60,7 @@ async function findConflict(input: {
       },
       select: { id: true },
     }),
-    email ? db.user.findUnique({ where: { email: email.toLowerCase() }, select: { id: true } }) : null,
+    email && !input.ownLogin ? db.user.findUnique({ where: { email: email.toLowerCase() }, select: { id: true } }) : null,
   ]);
 
   if (user) return "That email is already in use.";
@@ -52,9 +70,24 @@ async function findConflict(input: {
 }
 
 export async function submitApplication(
-  input: AmbassadorApplicationInput
+  input: AmbassadorApplicationInput,
+  ctx: ApplyContext
 ): Promise<{ id: string; slotCode: string }> {
-  const conflict = await findConflict(input);
+  // A worker (anyone with an active login and a worker profile) applying as an
+  // ambassador keeps their one login: the emailed code proves the inbox, the
+  // application attaches to that login, and no new password is created.
+  const ownLogin = await findLoginForApplication(input.email, "AMBASSADOR");
+  if (ownLogin) {
+    if (!input.emailCode) {
+      await sendApplicationCode({ email: input.email, fullName: ownLogin.fullName, ...ctx });
+      throw new ApplicationError("This email already has an EduCraft login. We sent a 6-digit code to it.", "VERIFY_EMAIL");
+    }
+    if (!(await verifyApplicationCode(input.email, input.emailCode, ctx.ip))) {
+      throw new ApplicationError("That code did not work. Check it, or ask for a new one.", "BAD_CODE");
+    }
+  }
+
+  const conflict = await findConflict({ ...input, ownLogin: Boolean(ownLogin) });
   if (conflict) throw new ApplicationError(conflict);
 
   let universityId: string | null = null;
@@ -70,21 +103,24 @@ export async function submitApplication(
   // slot (or the next number), held for this application until it is decided.
   const { code: slotCode } = await nextGeneralCode();
   const email = input.email.trim().toLowerCase();
-  const passwordHash = await bcrypt.hash(input.password, 12);
+  const passwordHash = ownLogin ? "" : await bcrypt.hash(input.password, 12);
 
   // Like worker applications: the login exists from the start but stays
-  // inactive (isActive: false blocks sign-in) until an admin approves.
+  // inactive (isActive: false blocks sign-in) until an admin approves. An
+  // existing login is reused as it is (already active, password untouched).
   const application = await db.$transaction(async (tx) => {
-    const user = await tx.user.create({
-      data: {
-        email,
-        displayName: input.fullName.trim(),
-        passwordHash,
-        role: "AMBASSADOR",
-        isActive: false,
-      },
-      select: { id: true },
-    });
+    const user = ownLogin
+      ? { id: ownLogin.userId }
+      : await tx.user.create({
+          data: {
+            email,
+            displayName: input.fullName.trim(),
+            passwordHash,
+            role: "AMBASSADOR",
+            isActive: false,
+          },
+          select: { id: true },
+        });
     return tx.ambassadorApplication.create({
       data: {
         fullName: input.fullName.trim(),

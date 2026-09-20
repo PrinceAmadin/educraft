@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
+import { sendMail } from "@/lib/mailer";
 import { WorkerApplicationError, submitWorkerApplication } from "@/lib/services/worker-applications";
 import { workerRegistrationSchema } from "@/lib/validations/worker-application";
 
@@ -20,11 +22,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await submitWorkerApplication(parsed.data);
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
+    const result = await submitWorkerApplication(parsed.data, { ip, send: sendMail, defer: (work) => waitUntil(work.catch(() => {})) });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof WorkerApplicationError) {
-      return NextResponse.json({ error: error.message }, { status: 409 });
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
     }
     console.error("[POST /api/worker-applications]", error);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
