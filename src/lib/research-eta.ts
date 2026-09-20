@@ -20,7 +20,7 @@ export const PHASES: { key: PhaseKey; label: string }[] = [
 
 /**
  * Seconds per step, from a full run on the production deployment (100 papers,
- * 30 steps, 255s). Steps run back-to-back inside one invocation there, so
+ * 30 steps, 255s; the first round now fetches 150). Steps run back-to-back inside one invocation there, so
  * they're much faster than on a laptop.
  */
 export const DEFAULT_STEP_SECONDS: Record<PhaseKey, number> = {
@@ -30,7 +30,7 @@ export const DEFAULT_STEP_SECONDS: Record<PhaseKey, number> = {
   drive: 8,
 };
 
-const CANDIDATES_PER_ROUND = 100;
+const CANDIDATES_PER_ROUND = 150;
 const SEARCH_BATCH = 36; // ~3 queries per step, ~12 papers kept from each
 const RESOLVE_BATCH = 8;
 const CLASSIFY_BATCH = 20;

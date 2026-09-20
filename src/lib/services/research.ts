@@ -43,11 +43,19 @@ export class ResearchError extends Error {}
  */
 
 // ── Tuning constants ─────────────────────────────────────────
-const CANDIDATES_PER_ROUND = 100;
+/**
+ * Candidates fetched in the first round. About 45% pass the relevance check, so
+ * 150 lands around 65 keepers, comfortably over the target.
+ */
+const CANDIDATES_PER_ROUND = 150;
 const MAX_REPLACEMENT_ROUNDS = 3;
 const MIN_REPLACEMENT_CANDIDATES = 20;
+/** Searching continues (replacement rounds) until this many relevant references are kept. */
+export const TARGET_REFERENCES = 50;
+/** Never keep more than this; extras are trimmed, CORE and most-cited papers first. */
+export const MAX_REFERENCES = 70;
 /** Below this many relevant references the job goes to an admin instead of passing. */
-const MIN_USABLE_REFERENCES = 10;
+const MIN_USABLE_REFERENCES = 15;
 /** Fewer CORE papers than this passes, but with a warning to the worker and admins. */
 const MIN_CORE_REFERENCES = 10;
 
@@ -105,7 +113,7 @@ export async function startResearchJob(
   workerId: string,
   idOrCode: string,
   userId: string,
-  targetCount = 40
+  targetCount = TARGET_REFERENCES
 ) {
   const project = await loadProjectContext(workerId, idOrCode);
 
@@ -129,7 +137,7 @@ export async function startResearchJob(
  * research-runs.ts). The allowance is claimed before anything is deleted, so
  * a refused re-run leaves the existing results untouched.
  */
-export async function rerunResearchJob(workerId: string, idOrCode: string, userId: string, targetCount = 40) {
+export async function rerunResearchJob(workerId: string, idOrCode: string, userId: string, targetCount = TARGET_REFERENCES) {
   const project = await loadProjectContext(workerId, idOrCode);
 
   const claim = await claimRun(project.id, userId);
@@ -669,17 +677,25 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
   // Everything this attempt imported is classified — decide.
   const active = await db.reference.findMany({
     where: { researchJobId: job.id, status: { in: ["IMPORTED", "KEPT"] } },
-    select: { id: true, status: true, classification: true },
+    select: { id: true, status: true, classification: true, citedByCount: true },
   });
 
   const isKeeper = (c: ReferenceClassification | null) => c === "CORE" || c === "CLOSELY_RELATED";
-  const keeperIds = active.filter((r) => isKeeper(r.classification)).map((r) => r.id);
+  const allKeepers = active.filter((r) => isKeeper(r.classification));
+  // Over the cap: keep CORE papers first, then the most cited.
+  const ranked = [...allKeepers].sort(
+    (a, b) =>
+      Number(b.classification === "CORE") - Number(a.classification === "CORE") ||
+      (b.citedByCount ?? 0) - (a.citedByCount ?? 0)
+  );
+  const keeperIds = ranked.slice(0, MAX_REFERENCES).map((r) => r.id);
+  const trimmedIds = ranked.slice(MAX_REFERENCES).map((r) => r.id);
   // TANGENTIAL and IRRELEVANT are never kept — so the final set is always
   // 100% CORE + CLOSELY_RELATED with zero IRRELEVANT, comfortably inside the
   // Tier 2 rule (≥75% CORE + CLOSELY_RELATED, zero IRRELEVANT).
-  const offenderIds = active.filter((r) => !isKeeper(r.classification)).map((r) => r.id);
+  const offenderIds = [...active.filter((r) => !isKeeper(r.classification)).map((r) => r.id), ...trimmedIds];
 
-  const keeperRows = active.filter((r) => isKeeper(r.classification));
+  const keeperRows = ranked.slice(0, MAX_REFERENCES);
   const core = keeperRows.filter((r) => r.classification === "CORE").length;
   const closelyRelated = keeperRows.length - core;
   const pct = (n: number) => (keeperRows.length > 0 ? Math.round((n / keeperRows.length) * 1000) / 10 : 0);
