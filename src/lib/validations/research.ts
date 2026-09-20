@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const startResearchBodySchema = z.object({
-  targetCount: z.number().int().min(15).max(70).optional(),
+  targetCount: z.number().int().min(50).max(70).optional(),
 });
 
 export const rerunRequestBodySchema = z.object({

@@ -50,12 +50,12 @@ export class ResearchError extends Error {}
 const CANDIDATES_PER_ROUND = 150;
 const MAX_REPLACEMENT_ROUNDS = 3;
 const MIN_REPLACEMENT_CANDIDATES = 20;
-/** Searching continues (replacement rounds) until this many relevant references are kept. */
+/** The minimum: searching continues (replacement rounds) until this many relevant references are kept. */
 export const TARGET_REFERENCES = 50;
 /** Never keep more than this; extras are trimmed, CORE and most-cited papers first. */
 export const MAX_REFERENCES = 70;
-/** Below this many relevant references the job goes to an admin instead of passing. */
-const MIN_USABLE_REFERENCES = 15;
+/** Below this many relevant references, once the rounds run out, the job goes to an admin instead of passing. */
+const MIN_USABLE_REFERENCES = TARGET_REFERENCES;
 /** Fewer CORE papers than this passes, but with a warning to the worker and admins. */
 const MIN_CORE_REFERENCES = 10;
 
@@ -749,7 +749,6 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
   }
 
   const warnings: string[] = [];
-  if (!enough) warnings.push(`${keeperIds.length} of the ${job.targetCount} references requested were found`);
   if (core < MIN_CORE_REFERENCES) warnings.push(`only ${core} are CORE papers (aim for at least ${MIN_CORE_REFERENCES})`);
   const note = warnings.length ? `${warnings.join("; ")}.`.replace(/^./, (c) => c.toUpperCase()) : null;
 
