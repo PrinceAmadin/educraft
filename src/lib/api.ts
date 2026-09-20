@@ -56,7 +56,8 @@ export async function requireWorker(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  if (session.user.role !== "WORKER") {
+  // Worker profile is what matters: an ambassador login can also own one.
+  if (session.user.role !== "WORKER" && session.user.role !== "AMBASSADOR") {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const worker = await db.worker.findUnique({
@@ -80,7 +81,7 @@ export async function requireAmbassador(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  if (session.user.role !== "AMBASSADOR") {
+  if (session.user.role !== "AMBASSADOR" && session.user.role !== "WORKER") {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const ambassador = await db.ambassador.findUnique({

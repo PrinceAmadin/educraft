@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { LogOut, RefreshCw, Search, Settings, User } from "lucide-react";
+import { LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
@@ -24,6 +24,8 @@ import { initials } from "@/lib/utils";
 
 interface TopbarProps {
   role: NavRole;
+  /** Dashboards this login can open; a switcher shows when there is more than one. */
+  portals?: NavRole[];
   name: string;
   email: string;
   roleLabel: string;
@@ -54,8 +56,11 @@ function RefreshButton() {
   );
 }
 
-export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
+const PORTAL_LABELS: Record<string, string> = { worker: "Worker dashboard", ambassador: "Ambassador dashboard" };
+
+export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role);
+  const otherPortals = portals.filter((p) => p !== role && PORTAL_LABELS[p]);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 bg-background/80 px-4 backdrop-blur-md md:px-6">
@@ -135,6 +140,14 @@ export function Topbar({ role, name, email, roleLabel }: TopbarProps) {
                 </Link>
               </DropdownMenuItem>
             )}
+            {otherPortals.map((p) => (
+              <DropdownMenuItem key={p} asChild>
+                <Link href={navForRole(p).home}>
+                  <Repeat2 />
+                  Switch to {PORTAL_LABELS[p].toLowerCase()}
+                </Link>
+              </DropdownMenuItem>
+            ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => signOut({ callbackUrl: "/login" })}

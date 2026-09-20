@@ -36,10 +36,10 @@ export function SetPasswordForm() {
     e?.preventDefault();
     setError(null);
     const id = identifier.trim();
-    if (!id) return setError("Enter your email or Ambassador ID.");
+    if (!id) return setError("Enter your email or ID.");
     setBusy(true);
     try {
-      const res = await fetch("/api/ambassador/otp/request", {
+      const res = await fetch("/api/portal/otp/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identifier: id }),
@@ -64,7 +64,7 @@ export function SetPasswordForm() {
     if (password !== confirm) return setError("The two passwords do not match.");
     setBusy(true);
     try {
-      const res = await fetch("/api/ambassador/password/set", {
+      const res = await fetch("/api/portal/password/set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identifier: identifier.trim(), code, password }),
@@ -101,12 +101,12 @@ export function SetPasswordForm() {
       <form onSubmit={sendCode} noValidate className="space-y-5">
         {errorBox}
         <div className="space-y-2">
-          <Label htmlFor="identifier">Email or Ambassador ID</Label>
+          <Label htmlFor="identifier">Email</Label>
           <Input
             id="identifier"
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="you@gmail.com or EC-A-00012"
+            placeholder="you@gmail.com"
             autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
@@ -127,7 +127,7 @@ export function SetPasswordForm() {
       <div className="flex items-start gap-3 rounded-lg bg-zone px-4 py-3.5 text-sm text-foreground">
         <LuMailCheck className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
         <p className="leading-relaxed">
-          If that matches an ambassador, we have sent a 6-digit code to their registered email. It can take a minute, so
+          If that matches a worker or ambassador account, we have sent a 6-digit code to its registered email. It can take a minute, so
           check your spam folder too.
         </p>
       </div>

@@ -17,8 +17,8 @@ export default function SetPasswordPage() {
           Set your password
         </h1>
         <p className="mt-2 text-[15px] text-muted-foreground">
-          Already an EduCraft ambassador? Confirm it is you with a code we email you, then choose the password for your
-          dashboard.
+          Worker or ambassador? Confirm it is you with a code we email you, then choose one password for your
+          dashboards.
         </p>
       </div>
 

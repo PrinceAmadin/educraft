@@ -28,8 +28,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const user = await db.user.findUnique({
           where: { email: email.toLowerCase() },
           include: {
-            workerProfile: { select: { fullName: true } },
-            ambassadorProfile: { select: { fullName: true } },
+            workerProfile: { select: { fullName: true, status: true } },
+            ambassadorProfile: { select: { fullName: true, status: true } },
             clientProfiles: { select: { fullName: true }, take: 1 },
           },
         });
@@ -55,6 +55,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name,
           role: user.role,
+          portals: portalsForUser(user.role, Boolean(user.workerProfile), Boolean(user.ambassadorProfile)),
         };
       },
     }),
@@ -82,6 +83,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
 });
+
+/**
+ * The dashboards a login can open. One person can be a worker AND an ambassador
+ * on the same login; the role they registered as comes first (their default).
+ * Staff and clients have none of these.
+ */
+export function portalsForUser(role: string, hasWorker: boolean, hasAmbassador: boolean): string[] {
+  if (role !== "WORKER" && role !== "AMBASSADOR") return [];
+  const found = [hasWorker && "worker", hasAmbassador && "ambassador"].filter(Boolean) as string[];
+  const primary = role.toLowerCase();
+  if (!found.includes(primary)) found.unshift(primary);
+  return [primary, ...found.filter((p) => p !== primary)];
+}
 
 /** Landing route for each role after sign-in. */
 export function homeForRole(role: string | undefined) {

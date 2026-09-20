@@ -46,11 +46,12 @@ export default auth((req) => {
     return NextResponse.redirect(login);
   }
 
-  const allowedRoot = ROLE_ROOT[user.role];
+  // A worker who is also an ambassador (or the reverse) may open both portals.
+  const allowedRoots = user.portals?.length ? user.portals.map((p) => `/${p}`) : [ROLE_ROOT[user.role]].filter(Boolean);
 
-  // Wrong portal for this role → send them to the right one
-  if (!allowedRoot || !under(allowedRoot)) {
-    return NextResponse.redirect(new URL(allowedRoot ?? "/", nextUrl));
+  // Wrong portal for this role → send them to their own
+  if (!allowedRoots.some((root) => under(root))) {
+    return NextResponse.redirect(new URL(allowedRoots[0] ?? "/", nextUrl));
   }
 
   return NextResponse.next();
