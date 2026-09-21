@@ -73,7 +73,9 @@
 
     /* Section grounds. The page alternates between two, never one flat fill. */
     --ground-a: 210 17% 98%;
-    --ground-b: 0 0% 100%;
+    /* The alternate band carries a faint teal cast, so each section's edge is
+       visible without a rule. */
+    --ground-b: 170 30% 94%;
 
     /* Scene lighting — read by the WebGL workspace so the 3D belongs to
        the page instead of sitting on top of it. */
@@ -144,7 +146,7 @@
     --ink-deep: 224 55% 4%;
 
     --ground-a: 223 49% 8%;
-    --ground-b: 222 44% 10%;
+    --ground-b: 222 40% 12%;
 
     --scene-key: 205 40% 92%;
     --scene-rim: 174 72% 46%;

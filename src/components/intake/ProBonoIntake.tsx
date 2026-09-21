@@ -31,17 +31,17 @@ export function ProBonoIntake({ token, template, service, universities }: Props)
         <LuCircleCheck className="size-8 text-success" aria-hidden />
         <h2 className="mt-3 text-xl font-semibold tracking-tight text-foreground">Project received</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Save this ID. You will use it to track your project.
+          Save this ID. Sign in with your Client ID to track your project.
         </p>
         <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground">{projectId}</p>
         <p className="mt-4 text-sm text-muted-foreground">
           This link has now been used and will not open again.
         </p>
         <Link
-          href={`/track/${encodeURIComponent(projectId)}`}
+          href="/client/login"
           className="mt-5 inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline"
         >
-          Track your project
+          Sign in to track
         </Link>
       </div>
     );

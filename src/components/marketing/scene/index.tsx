@@ -10,9 +10,8 @@ import { PaperStack } from "./PaperStack";
  * hardware most of our traffic runs on, to redraw a composition the CSS
  * version already expresses.
  *
- * The CSS stack is now the only implementation, not a fallback — so this is a
- * plain server component with no client boundary, no capability probing and
- * no code-split chunk.
+ * The CSS stack is the only implementation. It is interactive (drag / tilt /
+ * scroll depth, see PaperStack) without any 3D library.
  */
 export function HeroVisual() {
   return <PaperStack />;

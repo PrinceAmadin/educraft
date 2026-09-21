@@ -25,7 +25,7 @@ const COLUMNS = [
   {
     heading: "Resources",
     links: [
-      { label: "Track a project", href: "/track" },
+      { label: "Client sign in", href: "/client/login" },
       { label: "Pricing", href: "/services" },
       { label: "Referencing guide", href: "/services#editing" },
       { label: "Sign in", href: "/login" },
@@ -35,8 +35,7 @@ const COLUMNS = [
     heading: "Contact",
     links: [
       { label: "hello@educraft.ng", href: "mailto:hello@educraft.ng" },
-      { label: "WhatsApp", href: "/track" },
-      { label: "Instagram", href: "/track" },
+      { label: "WhatsApp", href: "https://wa.me/2347063421088" },
     ],
   },
 ];

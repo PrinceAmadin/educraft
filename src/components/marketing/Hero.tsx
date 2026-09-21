@@ -6,8 +6,8 @@ import { HeroVisual } from "@/components/marketing/scene";
 /**
  * Opening composition.
  *
- * Desktop: type holds the left half and the paper stack bleeds off the right
- * edge, vertically centred in a near-full-height hero.
+ * Desktop: type holds the left half and the interactive paper stack sits in
+ * the right half, vertically centred in a near-full-height hero.
  *
  * Mobile is composed separately rather than squeezed: shorter body copy, the
  * two actions stacked, and the paper stack moved beneath the text as a masked
@@ -71,8 +71,9 @@ export function Hero() {
         </div>
 
         {/* One instance. A masked band beneath the copy on small screens;
-            absolutely placed and bleeding off the right edge from lg up. */}
-        <div className="relative col-span-4 mt-12 h-[88vw] max-h-[400px] w-full max-lg:mask-fade-b md:col-span-12 md:mx-auto md:max-w-[620px] lg:absolute lg:inset-y-0 lg:right-[-6%] lg:z-atmosphere lg:mt-0 lg:h-auto lg:max-h-none lg:w-[54%] lg:max-w-none">
+            absolutely placed in the right half from lg up, clear of the
+            header and the viewport edge so its shadows have room. */}
+        <div className="relative col-span-4 mt-12 h-[88vw] max-h-[400px] w-full max-lg:mask-fade-b md:col-span-12 md:mx-auto md:max-w-[620px] lg:absolute lg:bottom-[8%] lg:right-[3%] lg:top-[14%] lg:z-atmosphere lg:mt-0 lg:h-auto lg:max-h-none lg:w-[48%] lg:max-w-none">
           <HeroVisual />
         </div>
       </div>

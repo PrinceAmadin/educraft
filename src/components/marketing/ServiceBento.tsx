@@ -47,7 +47,7 @@ const LAYOUT: Record<
     dirs: ["cv_img"],
     area: "lg:col-span-1 lg:row-span-1 min-h-[220px] sm:min-h-0 lg:min-h-[190px]",
     sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
-    // CVs are pages, not photographs — paper ground, centred carousel.
+    // CVs are pages, not photographs — fanned cards on the tile field.
     media: "cv",
   },
   editing: {
@@ -74,7 +74,7 @@ const CELL_COPY: Record<string, string> = {
 
 export function ServiceBento() {
   return (
-    <Section id="services" ground="into-b" rhythm="normal">
+    <Section id="services" ground="a" rhythm="normal">
       <div className="shell">
         {/* ── Header, unchanged in structure ── */}
         <div className="grid-12 items-end">
@@ -101,12 +101,12 @@ export function ServiceBento() {
         <Reveal delay={60}>
           <div
             className={[
-              "mt-14 grid gap-1 md:mt-20",
+              "mt-14 grid gap-3 md:mt-20",
               "grid-cols-1",
               // Tablet: two equal columns, every cell the same height.
-              "sm:grid-cols-2 sm:auto-rows-[240px]",
+              "sm:grid-cols-2 sm:auto-rows-[250px]",
               // Desktop: the art-directed three-column composition.
-              "lg:grid-cols-3 lg:auto-rows-[200px]",
+              "lg:grid-cols-3 lg:auto-rows-[208px]",
             ].join(" ")}
           >
             {SERVICES.map((service, i) => {

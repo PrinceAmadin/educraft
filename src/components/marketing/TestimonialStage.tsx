@@ -34,7 +34,7 @@ export function TestimonialStage() {
   const shift = reduced ? 0 : 26;
 
   return (
-    <Section ground="b" rhythm="normal" aria-label="Student voice">
+    <Section ground="a" rhythm="normal" aria-label="Student voice">
       {/* Every other section contributes an <h2> to the outline; this one's
           title is carried visually by the eyebrow, so the heading is here for
           screen-reader and outline navigation rather than omitted. */}

@@ -14,13 +14,16 @@ import { TestimonialStage } from "@/components/marketing/TestimonialStage";
  * ground, density and composition all change from one to the next, and no two
  * adjacent sections are built the same way:
  *
- *   Hero        A      immersive   asymmetric 12-col, 3D bleed
- *   Ledger      A      quiet       editorial data index
- *   Services    A→B    dense       catalogue rows, broken grid
+ *   Hero        A      immersive   asymmetric 12-col, interactive 3D stack
+ *   Ledger      B      quiet       editorial data index
+ *   Services    A      dense       bento of real work
  *   Process     B      open        spatial timeline, sticky stage
- *   Expertise   B→A    dense       typographic index
- *   Quality     A→B    open        annotated document
- *   Voice       B      quiet       one dominant quote
+ *   Expertise   A      dense       typographic index
+ *   Quality     B      open        annotated document
+ *   Voice       A      quiet       one dominant quote
+ *
+ * Grounds alternate strictly A/B (B is teal-tinted), so every section edge is
+ * visible without a border.
  *   Closing     ink    immersive   full-bleed statement
  */
 export default function LandingPage() {

@@ -96,7 +96,7 @@ export async function initializePaystackPayment(
       email,
       amountNaira: amount,
       reference,
-      callbackUrl: `${callbackBaseUrl()}/track/${encodeURIComponent(project.projectId)}?payment=success`,
+      callbackUrl: `${callbackBaseUrl()}/client/projects/${encodeURIComponent(project.projectId)}?payment=success`,
       metadata: { projectDbId: project.id, projectCode: project.projectId, leg },
     });
     authorizationUrl = tx.authorizationUrl;

@@ -69,11 +69,18 @@ export interface TrackingResult {
   awaitingAmount: number | null;
 }
 
-/** Public lookup by the human EC-XXXXX code only. No sensitive fields. */
-export async function getPublicTracking(code: string): Promise<TrackingResult | null> {
+/**
+ * Tracking for a signed-in client. `clientIds` is `scope.clientIds` from
+ * `getClientScope()`: a project that is not one of the caller's own is simply
+ * "not found", never revealed.
+ */
+export async function getClientTracking(
+  code: string,
+  clientIds: string[]
+): Promise<TrackingResult | null> {
   const normalized = code.trim().toUpperCase();
-  const project = await db.project.findUnique({
-    where: { projectId: normalized },
+  const project = await db.project.findFirst({
+    where: { projectId: normalized, clientId: { in: clientIds } },
     select: {
       projectId: true,
       projectTitle: true,

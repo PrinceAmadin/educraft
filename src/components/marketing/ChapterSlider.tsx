@@ -81,86 +81,68 @@ export function ChapterSlider({
         {chapter.label}: {chapter.title}
       </p>
 
-      <div
-        className={cn(
-          "paper-surface relative aspect-[1/1.36] w-full overflow-hidden",
-          "[clip-path:polygon(0_0,100%_0,100%_calc(100%-30px),calc(100%-30px)_100%,0_100%)]"
-        )}
-      >
-        <AnimatePresence mode="wait" custom={direction}>
-          <motion.div
-            key={chapter.id}
-            custom={direction}
-            initial={reduced ? false : { opacity: 0, x: direction * 26 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={reduced ? undefined : { opacity: 0, x: direction * -26 }}
-            transition={{ type: "spring", stiffness: 300, damping: 34, mass: 0.8 }}
-            className="flex h-full flex-col p-[9%]"
-          >
-            <div className="flex shrink-0 items-start justify-between">
-              <p className="font-mono text-[0.5625rem] font-semibold tracking-[0.16em] text-primary">
-                EDUCRAFT / QUALITY REVIEW
+      {/* Page and stamp share a box so the stamp sits on the page's corner,
+          clear of the controls beneath. */}
+      <div className="relative">
+        <div className={cn("paper-surface relative aspect-[1/1.36] w-full overflow-hidden rounded-[4px]")}>
+          <AnimatePresence mode="wait" custom={direction}>
+            <motion.div
+              key={chapter.id}
+              custom={direction}
+              initial={reduced ? false : { opacity: 0, x: direction * 26 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={reduced ? undefined : { opacity: 0, x: direction * -26 }}
+              transition={{ type: "spring", stiffness: 300, damping: 34, mass: 0.8 }}
+              className="flex h-full flex-col p-[9%]"
+            >
+              <div className="flex shrink-0 items-start justify-between">
+                <p className="font-mono text-[0.5625rem] font-semibold tracking-[0.16em] text-primary">
+                  EDUCRAFT / QUALITY REVIEW
+                </p>
+                <p className="font-mono text-[0.5625rem] font-medium tracking-[0.16em] text-paper-muted">REV. 02</p>
+              </div>
+
+              <p className="mt-[7%] shrink-0 font-display text-[1.4rem] font-semibold leading-none tracking-tight text-paper-ink">
+                {chapter.label}
               </p>
-              <p className="font-mono text-[0.5625rem] font-medium tracking-[0.16em] text-paper-muted">
-                REV. 02
-              </p>
-            </div>
+              <p className="mt-2 shrink-0 text-[0.95rem] leading-none text-paper-muted">{chapter.title}</p>
 
-            <p className="mt-[7%] shrink-0 font-display text-[1.4rem] font-semibold leading-none tracking-tight text-paper-ink">
-              {chapter.label}
-            </p>
-            <p className="mt-2 shrink-0 text-[0.95rem] leading-none text-paper-muted">
-              {chapter.title}
-            </p>
+              <div className="mt-[6%] h-px shrink-0 bg-paper-ink/15" />
 
-            <div className="mt-[6%] h-px shrink-0 bg-paper-ink/15" />
+              {/* The page body — travels with the reader's scroll */}
+              <div className="relative mt-[6%] min-h-0 flex-1">
+                <span aria-hidden className="absolute -left-[5%] top-1 z-10 h-12 w-[2px] bg-primary" />
+                <ScrollingPage blocks={chapter.blocks} distance={38} fontSize="0.5rem" />
+              </div>
 
-            {/* The page body — travels with the reader's scroll */}
-            <div className="relative mt-[6%] min-h-0 flex-1">
-              <span
-                aria-hidden
-                className="absolute -left-[5%] top-1 z-10 h-12 w-[2px] bg-primary"
-              />
-              <ScrollingPage
-                blocks={chapter.blocks}
-                distance={38}
-                fontSize="0.5rem"
-              />
-            </div>
+              <span aria-hidden className="absolute right-0 top-[38%] h-[13%] w-[10px] bg-gold" />
 
-            <span
-              aria-hidden
-              className="absolute right-0 top-[38%] h-[13%] w-[10px] bg-gold"
-            />
+              <span className="absolute bottom-[7%] left-[9%] font-mono text-[0.5625rem] font-medium text-paper-muted">
+                {chapter.folio}
+              </span>
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
-            <span className="absolute bottom-[7%] left-[9%] font-mono text-[0.5625rem] font-medium text-paper-muted">
-              {chapter.folio}
-            </span>
-          </motion.div>
-        </AnimatePresence>
+        {/* Review stamp — lands after the annotations have settled */}
+        <motion.div
+          key={`stamp-${chapter.id}`}
+          initial={reduced ? false : { opacity: 0, scale: 0.82 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{
+            type: "spring",
+            stiffness: 420,
+            damping: 26,
+            delay: reduced ? 0 : 0.28 + ANNOTATIONS.length * 0.09,
+          }}
+          className={cn(
+            "absolute -bottom-4 -right-1 sm:-right-3 flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-primary-foreground shadow-[0_10px_24px_-10px_hsl(var(--primary)/0.7)]",
+          )}
+        >
+          <IconCheck aria-hidden className="size-3.5" />
+          <span className="font-mono text-[0.625rem] font-semibold tracking-[0.16em]">PASSED</span>
+        </motion.div>
       </div>
-
-      {/* Review stamp — lands after the annotations have settled */}
-      <motion.div
-        key={`stamp-${chapter.id}`}
-        initial={reduced ? false : { opacity: 0, scale: 0.82 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{
-          type: "spring",
-          stiffness: 420,
-          damping: 26,
-          delay: reduced ? 0 : 0.28 + ANNOTATIONS.length * 0.09,
-        }}
-        className={cn(
-          "absolute -bottom-5 -right-3 flex items-center gap-2 bg-primary px-4 py-2.5 text-primary-foreground",
-          "[clip-path:polygon(0_0,100%_0,100%_calc(100%-9px),calc(100%-9px)_100%,0_100%)]"
-        )}
-      >
-        <IconCheck aria-hidden className="size-3.5" />
-        <span className="font-mono text-[0.625rem] font-semibold tracking-[0.16em]">
-          PASSED
-        </span>
-      </motion.div>
 
       {/* ── Controls ─────────────────────────────────────── */}
       <div className="mt-10 flex items-center justify-between gap-4">
@@ -191,9 +173,7 @@ export function ChapterSlider({
                   className="absolute inset-x-0 top-1/2 h-px origin-left -translate-y-1/2 bg-primary"
                   initial={{ scaleX: paused ? 1 : 0 }}
                   animate={{ scaleX: 1 }}
-                  transition={
-                    paused ? { duration: 0 } : { duration: AUTO_MS / 1000, ease: "linear" }
-                  }
+                  transition={paused ? { duration: 0 } : { duration: AUTO_MS / 1000, ease: "linear" }}
                 />
               )}
             </button>
@@ -210,15 +190,7 @@ export function ChapterSlider({
   );
 }
 
-function SliderButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
+function SliderButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -229,7 +201,7 @@ function SliderButton({
         "border border-hairline/20 transition-colors duration-fast",
         "hover:border-primary/50 hover:text-primary",
         "focus-visible:border-primary focus-visible:text-primary",
-        "[clip-path:polygon(0_0,100%_0,100%_calc(100%-7px),calc(100%-7px)_100%,0_100%)]"
+        "rounded-full",
       )}
     >
       {children}

@@ -34,8 +34,8 @@ export interface BentoCellProps {
   /**
    * How the samples are shown.
    *   photo — full-bleed rotating sample under a scrim, copy revealed on hover
-   *   cv    — CV mockups on a paper ground, one centred with its neighbours
-   *           peeking; copy always visible beside it
+   *   cv    — CV pages fanned on the same deep teal field as the photo tiles;
+   *           copy always visible beside them
    */
   media?: "photo" | "cv";
 }
@@ -92,14 +92,16 @@ export function BentoCell({
 
   // Only a photo tile hides its copy — the reveal trades text for a picture.
   const revealOnHover = mode === "photo";
-  const onPaper = mode !== "photo";
+  const onPaper = mode === "empty";
 
   return (
     <Link
       href={href}
       aria-label={`${title} — ${description}`}
       className={cn(
-        "group/cell relative isolate block overflow-hidden rounded-[10px] bg-paper-placeholder outline-none",
+        "group/cell relative isolate block overflow-hidden rounded-2xl bg-[#10262b] outline-none",
+        "shadow-[0_1px_2px_rgb(15_23_42/0.1),0_18px_36px_-18px_rgb(15_23_42/0.5),0_0_0_1px_rgb(15_23_42/0.08)]",
+        "transition-[transform,box-shadow] duration-300 ease-editorial hover:-translate-y-0.5 active:scale-[0.99]",
         "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         className
       )}
@@ -129,25 +131,39 @@ export function BentoCell({
 
           {/* Scrim — bright document scans from mixed sources need a flat wash
               to sit together as one field; the gradient then carries the copy. */}
-          <span aria-hidden className="absolute inset-0 -z-10 bg-slate-950/50" />
+          {/* The top of the tile shows the work nearly untouched; the foot
+              deepens into the brand's dark teal where the copy sits. */}
+          <span aria-hidden className="absolute inset-0 -z-10 bg-[#0b2a2e]/15" />
           <span
             aria-hidden
-            className="absolute inset-0 -z-10 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent"
+            className="absolute inset-0 -z-10 bg-gradient-to-t from-[#06171a]/95 from-10% via-[#06171a]/55 via-45% to-transparent"
           />
           <span
             aria-hidden
             className={cn(
-              "absolute inset-0 -z-10 bg-slate-950/25 opacity-0 transition-opacity duration-300 ease-editorial",
-              "group-hover/cell:opacity-100 group-focus-visible/cell:opacity-100 [@media(hover:none)]:opacity-100 max-sm:opacity-100"
+              "absolute inset-0 -z-10 bg-[#06171a]/30 opacity-0 transition-opacity duration-300 ease-editorial",
+              "[@media(hover:hover)]:group-hover/cell:opacity-100 group-focus-visible/cell:opacity-100"
             )}
           />
         </>
       ) : null}
 
       {mode === "cv" ? (
-        <div className="absolute inset-y-0 right-0 -z-10 w-[56%]">
-          <CvCarousel images={images} />
-        </div>
+        <>
+          {/* Same deep teal field as the photo tiles, lit from the CV side */}
+          <span
+            aria-hidden
+            className="absolute inset-0 -z-10 bg-[radial-gradient(80%_90%_at_78%_50%,hsl(var(--primary)/0.32),transparent_70%),linear-gradient(135deg,#0e2a2f,#08171a)]"
+          />
+          <div className="absolute inset-y-0 right-0 -z-10 w-[62%] sm:w-[58%]">
+            <CvCarousel images={images} />
+          </div>
+          {/* Keeps the copy clear of the fanned pages */}
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 -z-10 w-[62%] bg-gradient-to-r from-[#08171a] via-[#08171a]/80 to-transparent"
+          />
+        </>
       ) : null}
 
       {mode === "empty" ? (
@@ -170,7 +186,7 @@ export function BentoCell({
       ) : null}
 
       {/* ── Copy ── */}
-      <div className={cn("relative flex h-full flex-col justify-end p-5 md:p-7", mode === "cv" && "max-w-[48%] md:pr-2")}>
+      <div className={cn("relative flex h-full flex-col justify-end p-5 md:p-7", mode === "cv" && "max-w-[46%] md:pr-2")}>
         <div
           className={cn(
             "transition-[transform,opacity] duration-300 ease-editorial",

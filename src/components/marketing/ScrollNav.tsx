@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { usePathname } from "next/navigation";
 import { useReducedMotion } from "framer-motion";
 import { IconChevronsDown, IconChevronsUp } from "@/lib/icons";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,8 @@ import { cn } from "@/lib/utils";
  */
 export function ScrollNav() {
   const reduced = useReducedMotion();
+  // Forms have their own sticky action bar; the controls would sit on top of it.
+  const onForm = /^\/(apply|intake|probono)(\/|$)/.test(usePathname() ?? "");
   const [state, setState] = React.useState({ needed: false, atTop: true, atBottom: false });
 
   React.useEffect(() => {
@@ -57,7 +60,7 @@ export function ScrollNav() {
     };
   }, []);
 
-  if (!state.needed) return null;
+  if (!state.needed || onForm) return null;
 
   const go = (top: number) => window.scrollTo({ top, behavior: reduced ? "auto" : "smooth" });
 

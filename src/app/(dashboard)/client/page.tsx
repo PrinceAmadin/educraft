@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { LuChevronRight } from "react-icons/lu";
 import { getClientScope } from "@/lib/api";
 import { db } from "@/lib/db";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -40,12 +42,20 @@ export default async function ClientHomePage() {
         ) : (
           <ul>
             {projects.map((p) => (
-              <li key={p.projectId} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/40 py-3 last:border-0">
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium text-foreground">{p.projectTitle?.trim() || p.service.serviceName}</span>
-                  <span className="block font-mono text-xs text-muted-foreground">{p.projectId} · {formatDate(p.createdAt)}</span>
-                </span>
-                <span className="text-xs text-muted-foreground">{p.status.replace(/_/g, " ").toLowerCase()}</span>
+              <li key={p.projectId} className="border-b border-border/40 last:border-0">
+                <Link
+                  href={`/client/projects/${encodeURIComponent(p.projectId)}`}
+                  className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-foreground">{p.projectTitle?.trim() || p.service.serviceName}</span>
+                    <span className="block font-mono text-xs text-muted-foreground">{p.projectId} · {formatDate(p.createdAt)}</span>
+                  </span>
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {p.status.replace(/_/g, " ").toLowerCase()}
+                    <LuChevronRight className="size-4" aria-hidden />
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

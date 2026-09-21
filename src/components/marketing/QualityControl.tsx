@@ -32,7 +32,7 @@ export function QualityControl() {
   const onChange = React.useCallback((i: number) => setChapter(i), []);
 
   return (
-    <Section ground="into-b" rhythm="open" grain>
+    <Section ground="b" rhythm="open" grain>
       <div className="shell">
         <div className="grid-12">
           <Reveal className="col-span-4 md:col-span-6">

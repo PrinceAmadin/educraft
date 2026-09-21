@@ -69,7 +69,7 @@ export function Expertise() {
   const current = DISCIPLINES[active];
 
   return (
-    <Section ground="into-a" rhythm="normal">
+    <Section ground="a" rhythm="normal">
       <div className="shell">
         <div className="grid-12">
           <Reveal className="col-span-4 md:col-span-5">
@@ -164,8 +164,12 @@ export function Expertise() {
               role="tabpanel"
               id="discipline-panel"
               aria-labelledby={`discipline-tab-${active}`}
-              className="col-span-4 mt-12 md:col-span-6 md:col-start-7 md:mt-0"
+              className="surface relative col-span-4 mt-10 overflow-hidden rounded-2xl p-6 sm:p-8 md:col-span-6 md:col-start-7 md:mt-0 md:p-10"
             >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-[radial-gradient(closest-side,hsl(var(--primary)/0.14),transparent)]"
+              />
               <AnimatePresence mode="wait">
                 <motion.div
                   key={current.name}

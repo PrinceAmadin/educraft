@@ -24,10 +24,9 @@ export function Ledger() {
   return (
     <section
       aria-label="EduCraft by the numbers"
-      className="relative bg-background"
+      className="relative ground-b"
     >
       <div className="shell">
-        <div className="rule" />
         <div className="grid-12 py-[clamp(2.75rem,6vh,4.5rem)]">
           <Reveal className="col-span-4 md:col-span-5">
             <p className="index-mark text-subtle">{lead.label.toUpperCase()}</p>
@@ -74,7 +73,6 @@ export function Ledger() {
             ))}
           </div>
         </div>
-        <div className="rule" />
       </div>
     </section>
   );
