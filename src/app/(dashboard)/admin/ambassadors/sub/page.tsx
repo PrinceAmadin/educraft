@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { BroadcastAction } from "@/components/ambassadors/BroadcastAction";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { RosterManageTable } from "@/components/ambassadors/RosterManageTable";
 import { AddSlotButton } from "@/components/ambassadors/SlotDialog";
@@ -22,7 +23,12 @@ export default async function SubAmbassadorsPage() {
       <PageHeader
         title="Ambassadors"
         description="Sub ambassadors (ECSA) are recruited by a Core ambassador and share their own client link."
-        actions={<AddSlotButton kind="SUB" cores={coreOptions} label="Add sub ambassador" />}
+        actions={
+          <>
+            <AddSlotButton kind="SUB" cores={coreOptions} label="Add sub ambassador" />
+            <BroadcastAction />
+          </>
+        }
       />
       <AmbassadorTabs active="sub" pendingApplications={pendingApplications} />
 

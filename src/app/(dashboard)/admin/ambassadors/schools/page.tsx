@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { LuBuilding2, LuCircleCheck, LuCircleDashed, LuUsers } from "react-icons/lu";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { BroadcastAction } from "@/components/ambassadors/BroadcastAction";
 import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { db } from "@/lib/db";
@@ -28,6 +29,7 @@ export default async function SchoolCoveragePage() {
       <PageHeader
         title="Ambassadors"
         description="Where EduCraft has ambassadors, ranked by presence. Counts include general slots, Core and Sub ambassadors."
+        actions={<BroadcastAction />}
       />
       <AmbassadorTabs active="schools" pendingApplications={pendingApplications} />
 

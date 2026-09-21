@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { LuChartPie, LuCircleCheck, LuCircleDashed, LuLayoutGrid } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { BroadcastAction } from "@/components/ambassadors/BroadcastAction";
 import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { RosterBoard } from "@/components/ambassadors/RosterBoard";
@@ -22,6 +23,7 @@ export default async function AmbassadorsPage() {
       <PageHeader
         title="Ambassadors"
         description="Every ambassador slot, and the link each one shares with students. Copy a link and it opens WhatsApp with their name already in the message."
+        actions={<BroadcastAction />}
       />
       <AmbassadorTabs active="list" pendingApplications={pendingApplications} />
 

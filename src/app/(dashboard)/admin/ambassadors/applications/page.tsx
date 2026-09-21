@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LuInbox } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { BroadcastAction } from "@/components/ambassadors/BroadcastAction";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { CopyLinkButton } from "@/components/ambassadors/CopyLinkButton";
 import { db } from "@/lib/db";
@@ -40,7 +41,12 @@ export default async function ApplicationsPage({
       <PageHeader
         title="Ambassadors"
         description="Review applications from /apply. Approving fills their slot, switches on their dashboard login and emails them their link."
-        actions={<CopyLinkButton path="/apply" label="Copy application link" />}
+        actions={
+          <>
+            <CopyLinkButton path="/apply" label="Copy application link" />
+            <BroadcastAction />
+          </>
+        }
       />
       <AmbassadorTabs active="applications" pendingApplications={pendingApplications} />
 

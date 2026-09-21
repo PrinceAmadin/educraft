@@ -33,7 +33,7 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
 
   async function send() {
     if (!subject.trim() || !message.trim()) {
-      setError("Enter a subject and a message.");
+      setError("Enter a title and the details.");
       return;
     }
     setBusy(true);
@@ -77,26 +77,26 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
           <DialogHeader>
             <DialogTitle>Broadcast to ambassadors</DialogTitle>
             <DialogDescription>
-              Emails every active ambassador with an address on file ({recipientCount} right now).
+              Write the update once. Every active ambassador gets it by email, and those with a dashboard login also see it in their notifications. {recipientCount === 1 ? "1 ambassador has" : `${recipientCount} ambassadors have`} an email on file right now.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <Field label="Subject" required htmlFor="bc-subject">
+            <Field label="Update title" required htmlFor="bc-subject">
               <Input
                 id="bc-subject"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
-                placeholder="e.g. Important update from EduCraft"
+                placeholder="e.g. New commission rates from October"
               />
             </Field>
-            <Field label="Message" required htmlFor="bc-body">
+            <Field label="Details" required htmlFor="bc-body">
               <Textarea
                 id="bc-body"
                 rows={7}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder="Type your message…"
+                placeholder="Write the full update. Line breaks are kept in the email."
               />
             </Field>
 
@@ -112,9 +112,9 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
                 Close
               </Button>
-              <Button type="button" disabled={busy} onClick={send}>
+              <Button type="button" disabled={busy || recipientCount === 0} onClick={send}>
                 {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
-                Send to all
+                {recipientCount === 1 ? "Send to 1 ambassador" : `Send to all ${recipientCount}`}
               </Button>
             </div>
           </div>

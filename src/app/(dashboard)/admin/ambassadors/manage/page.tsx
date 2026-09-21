@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { BroadcastAction } from "@/components/ambassadors/BroadcastAction";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { RosterManageTable } from "@/components/ambassadors/RosterManageTable";
 import { AddSlotButton } from "@/components/ambassadors/SlotDialog";
@@ -24,7 +25,12 @@ export default async function ManageAmbassadorsPage() {
         <PageHeader
           title="Ambassadors"
           description="Edit, add or empty slots. Changes are live on every tab and on the shared links straight away. There is no separate deploy step."
-          actions={<AddSlotButton kind="GENERAL" label="Add ambassador" />}
+          actions={
+          <>
+            <AddSlotButton kind="GENERAL" label="Add ambassador" />
+            <BroadcastAction />
+          </>
+        }
         />
         <AmbassadorTabs active="manage" pendingApplications={pendingApplications} />
       </div>
