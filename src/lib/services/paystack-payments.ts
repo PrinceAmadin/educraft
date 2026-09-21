@@ -389,6 +389,34 @@ async function creditPendingIntake(
 ): Promise<CreditReferenceResult> {
   const pending = await db.pendingIntake.findUnique({ where: { id: pendingIntakeId } });
   if (!pending || pending.reference !== reference) return { status: "no_local_record" };
+  if (pending.status === "CONSUMED" || pending.resultProjectCode) return { status: "already_confirmed" };
+  if (verified.status !== "success") return processPendingIntake(reference, pendingIntakeId, verified);
+
+  // The success page's poll, Paystack's webhook and an admin Sync can all reach
+  // this at once. Exactly one of them wins the claim and creates the project;
+  // the rest see it as already handled.
+  const claim = await db.pendingIntake.updateMany({
+    where: { id: pendingIntakeId, status: "PENDING" },
+    data: { status: "PROCESSING" },
+  });
+  if (claim.count === 0) return { status: "already_confirmed" };
+
+  try {
+    return await processPendingIntake(reference, pendingIntakeId, verified);
+  } catch (error) {
+    // Not finished: hand the claim back so a retry can pick it up.
+    await db.pendingIntake.updateMany({ where: { id: pendingIntakeId, status: "PROCESSING" }, data: { status: "PENDING" } });
+    throw error;
+  }
+}
+
+async function processPendingIntake(
+  reference: string,
+  pendingIntakeId: string,
+  verified: PaystackTransactionData
+): Promise<CreditReferenceResult> {
+  const pending = await db.pendingIntake.findUnique({ where: { id: pendingIntakeId } });
+  if (!pending || pending.reference !== reference) return { status: "no_local_record" };
   if (pending.status === "CONSUMED") return { status: "already_confirmed" };
 
   if (verified.status !== "success") {
