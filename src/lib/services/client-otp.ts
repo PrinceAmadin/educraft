@@ -92,12 +92,18 @@ export async function requestCode(opts: {
     select: { id: true, fullName: true, email: true },
   });
   const email = realEmail(client?.email);
-  if (!client || !email) return { limited: false };
+  if (!client || !email) {
+    console.warn("[client-otp] no code sent: unknown Client ID or no usable email on the client");
+    return { limited: false };
+  }
 
   // An address that belongs to an admin, worker or ambassador account is never a
   // client sign-in address: refuse quietly rather than mix the two.
   const owner = await db.user.findUnique({ where: { email }, select: { role: true } });
-  if (owner && owner.role !== "CLIENT") return { limited: false };
+  if (owner && owner.role !== "CLIENT") {
+    console.warn("[client-otp] no code sent: that client email belongs to a non-client login");
+    return { limited: false };
+  }
 
   const now = Date.now();
   const recent = await db.clientLoginCode.findMany({

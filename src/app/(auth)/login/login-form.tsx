@@ -34,7 +34,7 @@ export function LoginForm() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "", password: "" },
+    defaultValues: { email: searchParams.get("email") ?? "", password: "" },
   });
 
   const onSubmit = async (values: FormValues) => {
@@ -61,7 +61,11 @@ export function LoginForm() {
       {searchParams.get("passwordSet") && !formError && (
         <div role="status" className="flex items-start gap-2.5 rounded-lg bg-zone px-3.5 py-3 text-sm text-foreground">
           <LuCircleCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-          <span>Password saved. Sign in with your email and new password.</span>
+          <span>
+            Password saved. Sign in with{" "}
+            {searchParams.get("email") ? <strong className="font-medium">{searchParams.get("email")}</strong> : "your email"} and your new
+            password.
+          </span>
         </div>
       )}
 

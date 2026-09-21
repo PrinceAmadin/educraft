@@ -59,9 +59,15 @@ async function ipLimited(ip: string, kind: "portal-request" | "portal-verify"): 
 }
 
 interface PortalAccount {
+  /** Where the code goes: the email on the worker / ambassador record. */
   email: string;
+  /** The email they sign in with (their existing login's, which can differ from the record email). */
+  loginEmail: string;
   fullName: string;
-  user: { id: string } | null;
+  /** Their existing login, or null when one has to be created. */
+  userId: string | null;
+  /** An inactive leftover login (a rejected application) being reused: reactivate it. */
+  reclaim: boolean;
   workerId: string | null;
   ambassadorId: string | null;
 }
@@ -71,10 +77,18 @@ function only<T>(rows: T[]): T | null {
   return rows.length === 1 ? rows[0] : null;
 }
 
+/** Why no code was sent. Server log only: the caller always gets the same answer. */
+function refuse(reason: string): null {
+  console.warn(`[portal-otp] no code sent: ${reason}`);
+  return null;
+}
+
 /**
- * Who is behind an email or an EC-A-/EC-W- ID: their login (if any) and their
- * worker / ambassador profiles that may be signed into it. Null when nobody
- * qualifies (unknown, suspended, staff/client email, profile on another login).
+ * Who is behind an email or an EC-A-/EC-W- ID. The PROFILES decide: the worker
+ * and ambassador records that carry this email, and the one login they already
+ * sit on (a person's worker login may use a different email than the record).
+ * Null when nobody qualifies (unknown, suspended, staff/client email, records on
+ * two different logins).
  */
 async function findAccount(input: string): Promise<PortalAccount | null> {
   const value = (input ?? "").trim();
@@ -89,10 +103,9 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
   } else {
     email = realEmail(value);
   }
-  if (!email) return null;
+  if (!email) return refuse("no usable email");
 
-  const [user, workers, ambassadors] = await Promise.all([
-    db.user.findUnique({ where: { email }, select: { id: true, role: true, isActive: true, displayName: true } }),
+  const [workers, ambassadors] = await Promise.all([
     db.worker.findMany({
       where: { email: { equals: email, mode: "insensitive" }, status: { in: ["Active", "On Break"] } },
       select: { id: true, fullName: true, userId: true },
@@ -104,24 +117,53 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
       take: 2,
     }),
   ]);
+  const worker = only(workers);
+  const ambassador = only(ambassadors);
+  if (!worker && !ambassador) return refuse("no active worker or ambassador record with that email");
 
-  // Staff and client emails never sign in through here; an inactive login is a pending applicant or a suspension.
-  if (user && (!user.isActive || (user.role !== "WORKER" && user.role !== "AMBASSADOR"))) return null;
+  const fullName = worker?.fullName ?? ambassador?.fullName ?? "there";
+  const linked = Array.from(new Set([worker?.userId, ambassador?.userId].filter((id): id is string => Boolean(id))));
+  if (linked.length > 1) return refuse("worker and ambassador records sit on two different logins");
 
-  // A profile already on a different login is left alone.
-  const usable = <T extends { userId: string | null }>(row: T | null) =>
-    row && (row.userId === null || row.userId === user?.id) ? row : null;
-  const worker = usable(only(workers));
-  const ambassador = usable(only(ambassadors));
-  if (!worker && !ambassador) return null;
+  const base = { email, fullName, workerId: worker?.id ?? null, ambassadorId: ambassador?.id ?? null };
 
-  return {
-    email,
-    fullName: worker?.fullName ?? ambassador?.fullName ?? user?.displayName ?? "there",
-    user: user ? { id: user.id } : null,
-    workerId: worker?.id ?? null,
-    ambassadorId: ambassador?.id ?? null,
-  };
+  // 1. A record is already on a login: that is their login, whatever its email.
+  if (linked.length === 1) {
+    const login = await db.user.findUnique({ where: { id: linked[0] }, select: { id: true, email: true, role: true, isActive: true } });
+    if (!login || !login.isActive || (login.role !== "WORKER" && login.role !== "AMBASSADOR")) {
+      return refuse("the login their record is on is inactive or not a worker/ambassador login");
+    }
+    return { ...base, loginEmail: login.email, userId: login.id, reclaim: false };
+  }
+
+  // 2. Neither record has a login yet: use the login with this email if there is one.
+  const user = await db.user.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      role: true,
+      isActive: true,
+      workerProfile: { select: { id: true } },
+      ambassadorProfile: { select: { id: true } },
+    },
+  });
+  if (!user) return { ...base, loginEmail: email, userId: null, reclaim: false };
+  if (user.role !== "WORKER" && user.role !== "AMBASSADOR") return refuse("that email belongs to a staff or client login");
+  if (user.isActive) {
+    if (user.workerProfile || user.ambassadorProfile) return refuse("that email's login already owns a different profile");
+    return { ...base, loginEmail: email, userId: user.id, reclaim: false };
+  }
+
+  // An inactive login: a pending applicant (leave alone), a suspended person (has a profile,
+  // leave alone), or a leftover from a rejected application (nothing attached: reuse it).
+  const [pendingWorker, pendingAmbassador] = await Promise.all([
+    db.workerApplication.count({ where: { userId: user.id, status: "PENDING" } }),
+    db.ambassadorApplication.count({ where: { userId: user.id, status: "PENDING" } }),
+  ]);
+  if (user.workerProfile || user.ambassadorProfile || pendingWorker || pendingAmbassador) {
+    return refuse("that email's login is inactive (pending application or suspended)");
+  }
+  return { ...base, loginEmail: email, userId: user.id, reclaim: true };
 }
 
 export async function requestPortalCode(opts: {
@@ -237,19 +279,28 @@ export async function setPortalPasswordWithCode(opts: {
   code: string;
   password: string;
   ip: string;
-}): Promise<boolean> {
-  if (opts.password.length < PASSWORD_MIN || opts.password.length > PASSWORD_MAX) return false;
+}): Promise<{ signInEmail: string } | null> {
+  if (opts.password.length < PASSWORD_MIN || opts.password.length > PASSWORD_MAX) return null;
   const account = await findAccount(opts.identifier);
-  if (!account) return false;
+  if (!account) return null;
   const { email } = account;
-  if (!(await spendCode(email, opts.code, opts.ip))) return false;
+  if (!(await spendCode(email, opts.code, opts.ip))) return null;
 
   const passwordHash = await bcrypt.hash(opts.password, 12);
   try {
-    await db.$transaction(async (tx) => {
-      let userId = account.user?.id;
-      if (userId) {
-        await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+    const userId = await db.$transaction(async (tx) => {
+      let id = account.userId;
+      if (id) {
+        await tx.user.update({
+          where: { id },
+          data: {
+            passwordHash,
+            // Reusing a leftover login from a rejected application: bring it back as the right kind.
+            ...(account.reclaim
+              ? { isActive: true, role: account.workerId ? "WORKER" : "AMBASSADOR", displayName: account.fullName }
+              : {}),
+          },
+        });
       } else {
         const created = await tx.user.create({
           data: {
@@ -261,15 +312,17 @@ export async function setPortalPasswordWithCode(opts: {
           },
           select: { id: true },
         });
-        userId = created.id;
+        id = created.id;
       }
       // Only profiles not yet on a login are attached; one already on this login stays as it is.
-      if (account.workerId) await tx.worker.updateMany({ where: { id: account.workerId, userId: null }, data: { userId } });
-      if (account.ambassadorId) await tx.ambassador.updateMany({ where: { id: account.ambassadorId, userId: null }, data: { userId } });
+      if (account.workerId) await tx.worker.updateMany({ where: { id: account.workerId, userId: null }, data: { userId: id } });
+      if (account.ambassadorId) await tx.ambassador.updateMany({ where: { id: account.ambassadorId, userId: null }, data: { userId: id } });
+      return id;
     });
-    return true;
+    void userId;
+    return { signInEmail: account.loginEmail };
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return false;
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;
     throw error;
   }
 }

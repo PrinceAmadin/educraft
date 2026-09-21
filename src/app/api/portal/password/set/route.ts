@@ -19,9 +19,11 @@ export async function POST(req: NextRequest) {
   }
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
   try {
-    const ok = await setPortalPasswordWithCode({ ...parsed.data, ip });
-    if (!ok) return NextResponse.json({ error: "That code did not work. Check it, or ask for a new one." }, { status: 400 });
-    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    const result = await setPortalPasswordWithCode({ ...parsed.data, ip });
+    if (!result) return NextResponse.json({ error: "That code did not work. Check it, or ask for a new one." }, { status: 400 });
+    // Safe to reveal: the emailed code just proved they own this account. It can differ from
+    // the address the code went to when their login was created with another email.
+    return NextResponse.json({ ok: true, signInEmail: result.signInEmail }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/portal/password/set]", error instanceof Error ? error.message : error);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });

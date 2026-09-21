@@ -75,7 +75,9 @@ export function SetPasswordForm() {
         setBusy(false);
         return;
       }
-      router.push("/login?passwordSet=1");
+      const done = (await res.json().catch(() => null)) as { signInEmail?: string } | null;
+      const email = done?.signInEmail ? `&email=${encodeURIComponent(done.signInEmail)}` : "";
+      router.push(`/login?passwordSet=1${email}`);
     } catch {
       setBusy(false);
       setError("Something went wrong. Please try again.");
