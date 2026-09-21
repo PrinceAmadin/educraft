@@ -55,9 +55,14 @@ export const metadata: Metadata = {
   description:
     "Final year projects, seminar reports, defence decks and CVs — researched, written and quality-checked by specialists, for university students across Nigeria.",
   icons: {
-    icon: "/images/logo/transparent_dark_logo.png",
-    apple: "/images/logo/transparent_dark_logo.png",
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    // Opaque on purpose: iOS paints transparent icon pixels black.
+    apple: "/icons/apple-touch-icon.png",
   },
+  appleWebApp: { capable: true, title: "EduCraft", statusBarStyle: "default" },
   openGraph: {
     title: BRAND_NAME,
     description: "Academic work, done properly.",

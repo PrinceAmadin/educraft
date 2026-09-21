@@ -56,6 +56,7 @@ model User {
   clientProfiles    Client[]
 
   notifications     Notification[]
+  pushSubscriptions PushSubscription[]
   statusChanges     ProjectStatusLog[] @relation("ChangedBy")
   paymentsConfirmed Payment[]          @relation("ConfirmedBy")
   researchJobsRequested ResearchJob[]  @relation("ResearchRequestedBy")
@@ -717,6 +718,22 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, read])
+}
+
+/// A browser/phone that has turned on push notifications. One row per device
+/// (endpoint is unique); signing in on a device re-links it to that user.
+model PushSubscription {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 // ─── SETTINGS ───────────────────────────────────────────

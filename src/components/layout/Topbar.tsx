@@ -2,8 +2,10 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
-import { signOut } from "next-auth/react";
+import { BellOff, BellRing, Download, LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
+import { usePwa } from "@/components/pwa/PwaProvider";
+import { usePush } from "@/hooks/use-push";
+import { signOutAndClear } from "@/lib/pwa/sign-out";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { AiBalanceIndicator } from "@/components/layout/AiBalanceIndicator";
@@ -61,6 +63,8 @@ const PORTAL_LABELS: Record<string, string> = { worker: "Worker dashboard", amba
 export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role);
   const otherPortals = portals.filter((p) => p !== role && PORTAL_LABELS[p]);
+  const { canInstall, promptInstall } = usePwa();
+  const push = usePush();
 
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 bg-background/80 px-4 backdrop-blur-md md:px-6">
@@ -148,9 +152,33 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
                 </Link>
               </DropdownMenuItem>
             ))}
+            {canInstall ? (
+              <DropdownMenuItem onClick={() => void promptInstall()}>
+                <Download />
+                Install app
+              </DropdownMenuItem>
+            ) : null}
+            {push.state === "off" || push.state === "on" ? (
+              <DropdownMenuItem
+                disabled={push.busy}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  void (push.state === "on" ? push.disable() : push.enable());
+                }}
+              >
+                {push.state === "on" ? <BellOff /> : <BellRing />}
+                {push.state === "on" ? "Turn off notifications" : "Turn on notifications"}
+              </DropdownMenuItem>
+            ) : null}
+            {push.state === "blocked" ? (
+              <DropdownMenuItem disabled>
+                <BellOff />
+                Notifications blocked in browser
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={() => void signOutAndClear()}
               className="text-danger focus:text-danger"
             >
               <LogOut />

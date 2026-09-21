@@ -3,8 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut } from "lucide-react";
-import { signOut } from "next-auth/react";
+import { BellOff, BellRing, Download, LogOut } from "lucide-react";
+import { usePwa } from "@/components/pwa/PwaProvider";
+import { usePush } from "@/hooks/use-push";
+import { signOutAndClear } from "@/lib/pwa/sign-out";
 import { LogoLockup } from "@/components/shared/Logo";
 import { isActive } from "@/components/layout/Sidebar";
 import { Button } from "@/components/ui/button";
@@ -25,6 +27,8 @@ export function MobileNav({ role }: { role: NavRole }) {
   const pathname = usePathname();
   const { mobile, sections, home } = navForRole(role);
   const [moreOpen, setMoreOpen] = React.useState(false);
+  const { canInstall, promptInstall } = usePwa();
+  const push = usePush();
 
   const primaryHrefs = new Set(mobile.map((i) => i.href));
   const overflow = sections
@@ -116,10 +120,34 @@ export function MobileNav({ role }: { role: NavRole }) {
           </ul>
 
           <div className="pb-safe px-4 pb-4">
+            {canInstall ? (
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void promptInstall();
+                }}
+              >
+                <Download className="h-[18px] w-[18px]" />
+                Install app
+              </Button>
+            ) : null}
+            {push.state === "off" || push.state === "on" ? (
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3"
+                disabled={push.busy}
+                onClick={() => void (push.state === "on" ? push.disable() : push.enable())}
+              >
+                {push.state === "on" ? <BellOff className="h-[18px] w-[18px]" /> : <BellRing className="h-[18px] w-[18px]" />}
+                {push.state === "on" ? "Turn off notifications" : "Turn on notifications"}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               className="w-full justify-start gap-3 text-danger hover:bg-danger/10 hover:text-danger"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={() => void signOutAndClear()}
             >
               <LogOut className="h-[18px] w-[18px]" />
               Sign out

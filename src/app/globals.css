@@ -531,3 +531,11 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* No signal: anything that saves data waits. The service worker also answers
+   failed saves with a clear "you're offline" message. */
+html[data-offline] button[type="submit"],
+html[data-offline] [data-online-only] {
+  opacity: 0.5;
+  pointer-events: none;
+}

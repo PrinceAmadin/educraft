@@ -1,5 +1,7 @@
 import { Prisma, type UserRole } from "@prisma/client";
+import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
+import { sendPushToUsers } from "@/lib/services/push";
 
 export type NotificationType = "info" | "warning" | "urgent" | "success";
 
@@ -26,6 +28,10 @@ export async function notifyUsers(
       link: input.link ?? null,
     })),
   });
+
+  // Same message to their phones. Handed to waitUntil so the request that raised the
+  // notification isn't held up by the push services.
+  waitUntil(sendPushToUsers(ids, { title: input.title, body: input.message, url: input.link }));
 }
 
 /** Notify every active user holding a role (e.g. SUPER_ADMIN, OPS_MANAGER). */

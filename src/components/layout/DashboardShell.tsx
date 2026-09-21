@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { MobileNav } from "@/components/layout/MobileNav";
+import { OfflineBanner } from "@/components/pwa/OfflineBanner";
+import { PwaBanner } from "@/components/pwa/PwaBanner";
 import type { NavRole } from "@/lib/constants";
 
 interface DashboardShellProps {
@@ -32,7 +34,11 @@ export function DashboardShell({ defaultRole, portals, name, email, roleLabel, c
 
         {/* pb-24 clears the fixed mobile bottom nav */}
         <main className="flex-1 px-4 pb-24 pt-6 md:px-6 md:pb-10 lg:px-8">
-          <div className="mx-auto w-full max-w-[1400px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1400px]">
+            <OfflineBanner />
+            <PwaBanner />
+            {children}
+          </div>
         </main>
       </div>
 
