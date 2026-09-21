@@ -234,6 +234,7 @@ export const AMBASSADOR_MOBILE_NAV: NavItem[] = [
   { label: "Home", href: "/ambassador", icon: LayoutDashboard },
   { label: "My link", href: "/ambassador/link", icon: MousePointerClick },
   { label: "Commissions", href: "/ambassador/commissions", icon: Wallet },
+  { label: "Leaderboard", href: "/ambassador/leaderboard", icon: Trophy },
   { label: "Profile", href: "/ambassador/profile", icon: User },
 ];
 
