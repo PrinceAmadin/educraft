@@ -12,7 +12,8 @@
  * Saved pages are wiped on sign-out and never shared between users.
  */
 
-const VERSION = "v1";
+// Bump when a cached shell asset changes without its URL changing (icons are cache-first).
+const VERSION = "v2";
 const STATIC = `ec-static-${VERSION}`;
 const PAGES_PREFIX = "ec-pages-"; // + userId
 const META = "ec-meta";

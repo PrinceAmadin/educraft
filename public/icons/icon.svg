@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><rect width="512" height="512" fill="#12827c"/><g transform="translate(256 256) scale(0.94) translate(-256 -256)"><defs><clipPath id="c"><rect width="393" height="512"/></clipPath></defs>
+  <path d="M 119 256 a 170 170 0 1 0 340 0 a 170 170 0 1 0 -340 0 Z M 171 256 a 118 118 0 1 0 236 0 a 118 118 0 1 0 -236 0 Z" fill="#fff" fill-rule="evenodd" clip-path="url(#c)"/>
+  <rect x="235" y="185" width="120" height="34" fill="#fff"/><rect x="235" y="239" width="120" height="34" fill="#fff"/><rect x="235" y="293" width="120" height="34" fill="#fff"/><rect x="235" y="185" width="34" height="142" fill="#fff"/></g></svg>

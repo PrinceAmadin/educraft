@@ -56,6 +56,7 @@ export const metadata: Metadata = {
     "Final year projects, seminar reports, defence decks and CVs — researched, written and quality-checked by specialists, for university students across Nigeria.",
   icons: {
     icon: [
+      { url: "/icons/icon.svg", type: "image/svg+xml" },
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],

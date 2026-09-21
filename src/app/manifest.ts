@@ -15,8 +15,9 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#F8F9FA",
-    theme_color: "#0D9488",
+    // Same teal as the icon, so the Android splash screen is the icon on its own colour.
+    background_color: "#12827c",
+    theme_color: "#12827c",
     categories: ["business", "productivity", "education"],
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
