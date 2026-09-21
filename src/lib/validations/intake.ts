@@ -29,6 +29,33 @@ const experienceEntry = z.object({
   description: z.string().trim().max(2000).optional().or(z.literal("")),
 });
 
+/**
+ * A document the client attached on the form. Uploaded straight from the
+ * browser to Vercel Blob, so only a Blob URL is ever accepted here, never an
+ * arbitrary link.
+ */
+export const ATTACHMENT_CATEGORIES = ["from_client", "department_outline"] as const;
+export const MAX_ATTACHMENTS = 10;
+export const attachmentSchema = z.object({
+  url: z
+    .string()
+    .url()
+    .max(600)
+    .refine((u) => {
+      try {
+        const { protocol, hostname } = new URL(u);
+        return protocol === "https:" && hostname.endsWith(".blob.vercel-storage.com");
+      } catch {
+        return false;
+      }
+    }, "Invalid file link"),
+  name: z.string().trim().min(1).max(200),
+  size: z.number().int().nonnegative().max(60_000_000).optional(),
+  type: z.string().trim().max(120).optional(),
+  category: z.enum(ATTACHMENT_CATEGORIES).default("from_client"),
+});
+export type IntakeAttachment = z.infer<typeof attachmentSchema>;
+
 export const INTAKE_TEMPLATES = [
   "academic_fyp",
   "academic_termpaper",
@@ -47,6 +74,10 @@ export const intakeSubmitSchema = z
   .object({
     template: z.enum(INTAKE_TEMPLATES),
     serviceCode: z.string().min(1),
+    /** Optional package of the service, e.g. "With Data Analysis". Blank = the base option. */
+    serviceVariantId: z.string().trim().max(60).optional().or(z.literal("")),
+    /** Documents the client attached (proposal, outline, existing work). */
+    attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
 
     // Personal / contact
     fullName: z.string().trim().min(2, "Enter your full name").max(120),

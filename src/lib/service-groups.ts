@@ -19,24 +19,41 @@ export interface ServiceGroup {
 }
 
 export const SERVICE_GROUPS: ServiceGroup[] = [
+  { key: "fyp", label: "Final year reports", pill: "Final year" },
+  { key: "combos", label: "Final year combos", pill: "Combos" },
   { key: "academic", label: "Academic writing", pill: "Academic" },
   { key: "research", label: "Research & analysis", pill: "Research" },
   { key: "presentations", label: "Presentations", pill: "Presentations" },
   { key: "career", label: "Career & professional", pill: "Career" },
   { key: "letters", label: "Letters & essays", pill: "Letters" },
   { key: "editing", label: "Editing & formatting", pill: "Editing" },
-  { key: "documents", label: "Documents & diagrams", pill: "Documents" },
-  { key: "combos", label: "Final year combos", pill: "Combos" },
+];
+
+/**
+ * The tabs on the price list. Final year is first because it is the core
+ * product; "Other services" is everything else; "All" is the whole list.
+ */
+export interface ServiceTab {
+  key: "fyp" | "other" | "all";
+  label: string;
+  /** Group keys shown under this tab; null means every group. */
+  groups: string[] | null;
+}
+
+export const SERVICE_TABS: ServiceTab[] = [
+  { key: "fyp", label: "Final year", groups: ["fyp", "combos"] },
+  { key: "other", label: "Other", groups: ["academic", "research", "presentations", "career", "letters", "editing"] },
+  { key: "all", label: "All", groups: null },
 ];
 
 const CODE_RULES: [RegExp, string][] = [
   [/^COMBO/, "combos"],
+  [/^(FYP|THESIS|SEM$|PUB$|PPT-FYP|EDIT-FYP)/, "fyp"],
   [/^PPT/, "presentations"],
   [/^(EDIT|FORMAT|PROOF)/, "editing"],
-  [/^(WATERMARK|WM-|PDF|IMG-|DIAGRAM|UML|GD-)/, "documents"],
   [/^(CV|PROFILE|LTR-APP)/, "career"],
   [/^(LTR|ESSAY)/, "letters"],
-  [/^(THESIS|CASE|BIZ|DATA)/, "research"],
+  [/^(CASE|BIZ|DATA)/, "research"],
 ];
 
 const CATEGORY_FALLBACK: Record<string, string> = {
@@ -44,7 +61,7 @@ const CATEGORY_FALLBACK: Record<string, string> = {
   LEARNING: "academic",
   DESIGN: "presentations",
   CAREER: "career",
-  DIGITAL: "documents",
+  DIGITAL: "academic",
 };
 
 export function groupKeyFor(service: { serviceCode: string; category: string }): string {
@@ -87,6 +104,14 @@ export function priceLabel(service: PricedService): string {
   }
   const from = service.variants.length > 0 || service.pricingModel === "VARIABLE";
   return `${from ? "from " : ""}${formatNaira(service.basePrice)}`;
+}
+
+/** "With Data Analysis" means the base option reads "Without Data Analysis". */
+export function baseOptionLabel(variants: { name: string }[]): string {
+  if (variants.length > 0 && variants.every((v) => /^with\s/i.test(v.name))) {
+    return `Without ${variants[0].name.replace(/^with\s/i, "")}`;
+  }
+  return "Standard";
 }
 
 export function turnaroundLabel(days: number): string {

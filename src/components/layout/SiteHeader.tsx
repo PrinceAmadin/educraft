@@ -7,7 +7,7 @@ import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { CUT_CORNER } from "@/components/primitives/ActionLink";
 import { LuChevronRight } from "react-icons/lu";
-import { IconClose, IconMenu } from "@/lib/icons";
+import { IconArrow, IconClose, IconMenu } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -188,9 +188,13 @@ export function SiteHeader() {
                 <Link
                   href="/intake"
                   onClick={() => setOpen(false)}
-                  className="inline-flex h-12 items-center justify-center rounded-xl bg-primary px-6 text-base font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
+                  className={cn(
+                    CUT_CORNER,
+                    "inline-flex h-12 items-center justify-between bg-primary px-6 text-[0.9375rem] font-medium text-primary-foreground"
+                  )}
                 >
                   Start a project
+                  <IconArrow aria-hidden className="size-[18px]" />
                 </Link>
                 <Link
                   href="/login"

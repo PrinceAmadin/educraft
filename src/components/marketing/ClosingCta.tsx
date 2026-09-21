@@ -30,18 +30,18 @@ export function ClosingCta() {
           fill
           priority={false}
           sizes="100vw"
-          className="object-cover object-center opacity-45"
+          className="object-cover object-center"
         />
       </div>
 
       {/* Legibility wash — horizontal for the type, vertical for the seam */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-atmosphere bg-[linear-gradient(to_right,hsl(var(--ink-deep)/0.96)_0%,hsl(var(--ink-deep)/0.88)_42%,hsl(var(--ink-deep)/0.62)_100%)]"
+        className="pointer-events-none absolute inset-0 z-atmosphere bg-[linear-gradient(to_right,hsl(var(--ink-deep)/0.78)_0%,hsl(var(--ink-deep)/0.42)_45%,hsl(var(--ink-deep)/0.08)_100%)]"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-atmosphere bg-[linear-gradient(to_bottom,hsl(var(--ink-deep))_0%,transparent_28%,transparent_72%,hsl(var(--ink-deep)/0.85)_100%)]"
+        className="pointer-events-none absolute inset-0 z-atmosphere bg-[linear-gradient(to_bottom,hsl(var(--ink-deep)/0.7)_0%,transparent_22%,transparent_78%,hsl(var(--ink-deep)/0.55)_100%)]"
       />
       {/* One localised light source, low and left */}
       <div aria-hidden className="ambient-ink pointer-events-none absolute inset-0 z-atmosphere" />

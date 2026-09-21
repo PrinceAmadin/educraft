@@ -22,9 +22,13 @@ import { intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/in
 import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
+import { baseOptionLabel } from "@/lib/service-groups";
+import { AttachmentsField, UploadBusyContext } from "@/components/intake/AttachmentsField";
+import { VariantField, type ServiceVariantProp } from "@/components/intake/VariantField";
 import { formatNaira } from "@/lib/utils";
 
 interface ServiceProp {
+  variants?: ServiceVariantProp[];
   serviceCode: string;
   serviceName: string;
   basePrice: number;
@@ -128,6 +132,8 @@ export function IntakeForm({
     defaultValues: {
       template,
       serviceCode: service.serviceCode,
+      serviceVariantId: "",
+      attachments: [],
       fullName: "",
       phone: "",
       email: "",
@@ -180,9 +186,12 @@ export function IntakeForm({
   const stepId = steps[step].id;
   const isReview = stepId === "review";
   const isExpress = watch("isExpressDelivery");
+  const variantId = watch("serviceVariantId");
+  const variantAddon = service.variants?.find((v) => v.id === variantId)?.priceAddon ?? 0;
+  const [uploading, setUploading] = React.useState(false);
 
   const price = computePrice({
-    basePrice: service.basePrice,
+    basePrice: service.basePrice + variantAddon,
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: Boolean(isExpress),
     downpaymentPercentage: service.downpaymentPercentage,
@@ -196,6 +205,10 @@ export function IntakeForm({
 
   async function next() {
     setSubmitError(null);
+    if (uploading) {
+      setSubmitError("Please wait for your files to finish uploading.");
+      return;
+    }
     const fields = STEP_FIELDS[template][stepId] ?? [];
     const ok = await trigger(fields as never[], { shouldFocus: true });
     if (ok) {
@@ -212,6 +225,10 @@ export function IntakeForm({
 
   const onSubmit = async (data: IntakeSubmitInput) => {
     setSubmitError(null);
+    if (uploading) {
+      setSubmitError("Please wait for your files to finish uploading.");
+      return;
+    }
 
     // Pro bono link: no payment. The link itself enforces one submission from
     // one device, so a failure here leaves it usable.
@@ -282,9 +299,14 @@ export function IntakeForm({
 
   return (
     <ProBonoContext.Provider value={Boolean(proBono)}>
+    <UploadBusyContext.Provider value={setUploading}>
     <FormProvider {...form}>
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-9">
         <FormProgress steps={steps} current={step} />
+
+        {step === 0 && service.variants && service.variants.length > 0 ? (
+          <VariantField basePrice={service.basePrice} variants={service.variants} />
+        ) : null}
 
         {/* The step sits directly on the page — its heading organises it, not a card. */}
         <StepContent
@@ -329,6 +351,7 @@ export function IntakeForm({
         </div>
       </form>
     </FormProvider>
+    </UploadBusyContext.Provider>
     </ProBonoContext.Provider>
   );
 }
@@ -612,6 +635,18 @@ function FypRequirementsStep({ service }: { service: ServiceProp }) {
       <Field label="Proposal or existing work" htmlFor="proposalNotes" hint="Describe anything you've already written or been given">
         <Textarea id="proposalNotes" rows={3} {...register("proposalNotes")} />
       </Field>
+      <AttachmentsField
+        id="att-outline"
+        category="department_outline"
+        label="Department outline or table of contents (file)"
+        hint="Upload the outline, TOC or format your department gave you"
+      />
+      <AttachmentsField
+        id="att-docs"
+        category="from_client"
+        label="Proposal or other documents (files)"
+        hint="Your approved proposal, earlier chapters, data files, anything we should work from"
+      />
       <Field label="Special instructions" htmlFor="specialInstructions">
         <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
       </Field>
@@ -688,6 +723,13 @@ function SeminarRequirementsStep({ service }: { service: ServiceProp }) {
       <Field label="Department outline / structure" htmlFor="departmentOutline" hint="Paste or describe what your department expects">
         <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
       </Field>
+      <AttachmentsField
+        id="att-outline"
+        category="department_outline"
+        label="Department outline or format (file)"
+        hint="Upload what your department expects"
+      />
+      <AttachmentsField id="att-docs" category="from_client" label="Other documents (files)" />
       <Field label="Special instructions" htmlFor="specialInstructions">
         <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
       </Field>
@@ -1029,11 +1071,18 @@ function FilesStep({ template, service }: { template: IntakeTemplate; service: S
       <Field label={label} htmlFor="specialInstructions">
         <Textarea id="specialInstructions" rows={5} {...register("specialInstructions")} />
       </Field>
+      <AttachmentsField
+        id="att-docs"
+        category="from_client"
+        label={template === "editing" ? "Your document (file)" : "Documents and requirements (files)"}
+        hint={
+          template === "editing"
+            ? "Upload the document you want edited or formatted"
+            : "Lecturer instructions, an outline, existing work, or anything we should work from"
+        }
+      />
       {template !== "editing" ? <DeadlineField /> : null}
       {template === "design_presentation" ? <ExpressField service={service} /> : null}
-      <p className="text-xs text-muted-foreground">
-        Have documents to send? You&apos;ll be able to share them on WhatsApp once you submit.
-      </p>
     </div>
   );
 }
@@ -1077,6 +1126,14 @@ function ReviewStep({
         ) : null}
         {template === "academic_it" && v.companyName ? <Row label="Company" value={v.companyName} /> : null}
         {template === "editing" && v.editingType ? <Row label="Service" value={v.editingType} /> : null}
+        {service.variants?.length && v.serviceVariantId ? (
+          <Row label="Option" value={service.variants.find((x) => x.id === v.serviceVariantId)?.name ?? ""} />
+        ) : service.variants?.length ? (
+          <Row label="Option" value={baseOptionLabel(service.variants)} />
+        ) : null}
+        {(v.attachments ?? []).length > 0 ? (
+          <Row label="Files attached" value={String((v.attachments ?? []).length)} />
+        ) : null}
         {v.clientDeadline ? <Row label="Needed by" value={v.clientDeadline} /> : null}
         {!proBono && template !== "editing" && template !== "career_cv" ? (
           <Row label="Express delivery" value={v.isExpressDelivery ? "Yes" : "No"} />

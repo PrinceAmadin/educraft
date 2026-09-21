@@ -1,7 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from "framer-motion";
+import {
+  animate,
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useScroll,
+  useSpring,
+  useTransform,
+  type MotionValue,
+} from "framer-motion";
 import { ScrollingPage } from "@/components/marketing/scene/DocumentBody";
 import { ANALYSIS_SHEET, REFERENCE_SHEET, REVIEW_SHEET } from "@/lib/document-content";
 import { cn } from "@/lib/utils";
@@ -39,27 +48,58 @@ function RunningHead({ left, right }: { left: string; right: string }) {
  *   • at rest it breathes with a slow float.
  * Reduced motion gets the static composition.
  */
+
+/**
+ * One sheet's own motion. Every sheet answers the same pointer, but with its own
+ * depth, weight and rhythm, so the stack never moves as a single rigid block:
+ * near sheets travel further and settle quickly, distant ones lag behind, each
+ * leans a little differently, and each drifts on its own slow cycle.
+ */
+function useSheet(
+  tiltX: MotionValue<number>,
+  tiltY: MotionValue<number>,
+  lift: MotionValue<number>,
+  reduced: boolean | null,
+  o: { depth: number; stiffness: number; damping: number; lean: number; roll: number; float: number; period: number; delay: number; baseY: number; baseZ: number },
+) {
+  const spring = { stiffness: o.stiffness, damping: o.damping, mass: 0.9 };
+  const x = useSpring(useTransform(tiltX, (v) => v * o.depth), spring);
+  const yTilt = useSpring(useTransform(tiltY, (v) => v * o.depth * 0.7), spring);
+  const rotateY = useSpring(useTransform(tiltX, (v) => o.baseY + v * o.lean), spring);
+  const rotateX = useSpring(useTransform(tiltY, (v) => -v * o.lean * 0.6), spring);
+  const rotateZ = useSpring(useTransform(tiltX, (v) => o.baseZ + v * o.roll), spring);
+  const drift = useMotionValue(0);
+
+  React.useEffect(() => {
+    if (reduced) return;
+    const controls = animate(drift, [0, -o.float, 0], {
+      duration: o.period,
+      delay: o.delay,
+      repeat: Infinity,
+      ease: "easeInOut",
+    });
+    return () => controls.stop();
+  }, [reduced, drift, o.float, o.period, o.delay]);
+
+  const y = useTransform([yTilt, drift, lift], ([a, b, c]: number[]) => a + b + c * (o.depth / 22));
+  return { x, y, rotateX, rotateY, rotateZ };
+}
+
 export function PaperStack({ className }: { className?: string }) {
   const reduced = useReducedMotion();
   const root = React.useRef<HTMLDivElement>(null);
   const tiltX = useMotionValue(0);
   const tiltY = useMotionValue(0);
-  const spring = { stiffness: 120, damping: 18, mass: 0.6 };
-  const rx = useSpring(
-    useTransform(tiltY, (v) => 3 - v * 10),
-    spring,
-  );
-  const ry = useSpring(
-    useTransform(tiltX, (v) => -12 + v * 16),
-    spring,
-  );
-
   const { scrollYProgress } = useScroll({ target: root, offset: ["start start", "end start"] });
   const spread = useTransform(scrollYProgress, [0, 1], [0, 1]);
   const backZ = useTransform(spread, (v) => -150 - v * 140);
   const midZ = useTransform(spread, (v) => -80 - v * 70);
   const frontZ = useTransform(spread, (v) => 40 + v * 90);
   const lift = useTransform(spread, (v) => v * -40);
+
+  const back = useSheet(tiltX, tiltY, lift, reduced, { depth: 8, stiffness: 55, damping: 16, lean: 5, roll: 1.2, float: 7, period: 7.4, delay: 0.6, baseY: 5, baseZ: 2 });
+  const mid = useSheet(tiltX, tiltY, lift, reduced, { depth: 15, stiffness: 80, damping: 15, lean: -7, roll: -2, float: 10, period: 6.1, delay: 0.2, baseY: 10, baseZ: -2.5 });
+  const front = useSheet(tiltX, tiltY, lift, reduced, { depth: 26, stiffness: 130, damping: 14, lean: 9, roll: 1.6, float: 13, period: 5.2, delay: 0, baseY: -5, baseZ: 0 });
 
   React.useEffect(() => {
     if (reduced) return;
@@ -107,11 +147,8 @@ export function PaperStack({ className }: { className?: string }) {
 
       {/* Float lives on its own layer: a CSS animation would overwrite the
           transform the tilt writes on the stack itself. */}
-      <div className={cn("absolute inset-0 [transform-style:preserve-3d]", !reduced && "animate-float-slow")}>
-        <motion.div
-          className="absolute inset-0 [transform-style:preserve-3d]"
-          style={reduced ? { rotateX: 3, rotateY: -12 } : { rotateX: rx, rotateY: ry, y: lift }}
-        >
+      <div className="absolute inset-0 [transform-style:preserve-3d]">
+        <motion.div className="absolute inset-0 [transform-style:preserve-3d]" style={{ rotateX: 3, rotateY: -12 }}>
           {/* References — behind the right edge */}
           <motion.div
             className={cn(SHEET, "overflow-hidden")}
@@ -121,8 +158,7 @@ export function PaperStack({ className }: { className?: string }) {
               right: "5%",
               top: "8%",
               z: reduced ? -150 : backZ,
-              rotateY: 5,
-              rotateZ: 2,
+              ...(reduced ? { rotateY: 5, rotateZ: 2 } : { x: back.x, y: back.y, rotateX: back.rotateX, rotateY: back.rotateY, rotateZ: back.rotateZ }),
             }}
           >
             <div className="flex h-full flex-col p-[8%]" style={{ fontSize: "0.9rem" }}>
@@ -142,8 +178,7 @@ export function PaperStack({ className }: { className?: string }) {
               left: "0%",
               top: "1%",
               z: reduced ? -80 : midZ,
-              rotateY: 10,
-              rotateZ: -2.5,
+              ...(reduced ? { rotateY: 10, rotateZ: -2.5 } : { x: mid.x, y: mid.y, rotateX: mid.rotateX, rotateY: mid.rotateY, rotateZ: mid.rotateZ }),
             }}
           >
             <div className="flex h-full flex-col p-[8%]" style={{ fontSize: "0.9rem" }}>
@@ -163,7 +198,7 @@ export function PaperStack({ className }: { className?: string }) {
               left: "23%",
               top: "17%",
               z: reduced ? 40 : frontZ,
-              rotateY: -5,
+              ...(reduced ? { rotateY: -5 } : { x: front.x, y: front.y, rotateX: front.rotateX, rotateY: front.rotateY, rotateZ: front.rotateZ }),
             }}
           >
             <div className="relative flex h-full flex-col p-[8%]" style={{ fontSize: "1rem" }}>

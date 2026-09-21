@@ -150,9 +150,17 @@ export async function initializeIntakePayment(
       intakeFormTemplate: true,
       expressDeliverySurcharge: true,
       downpaymentPercentage: true,
+      variants: { where: { isActive: true }, select: { id: true, priceAddon: true } },
     },
   });
   if (!service) throw new PaystackPaymentError("That service is no longer available");
+
+  let variantAddon = 0;
+  if (input.serviceVariantId) {
+    const variant = service.variants.find((v) => v.id === input.serviceVariantId);
+    if (!variant) throw new PaystackPaymentError("That option is no longer available");
+    variantAddon = variant.priceAddon;
+  }
 
   const template = resolveTemplate(service.intakeFormTemplate);
   if (!template || template !== input.template) {
@@ -160,7 +168,7 @@ export async function initializeIntakePayment(
   }
 
   const price = computePrice({
-    basePrice: service.basePrice,
+    basePrice: service.basePrice + variantAddon,
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,

@@ -9,14 +9,15 @@ import { cn } from "@/lib/utils";
 /**
  * Actions.
  *
- * The primary action is a solid rounded button with a soft teal shadow, so it
- * reads as the one thing on the page you can press.
+ * The primary action carries a cut bottom-right corner — the founder's
+ * preferred button, kept deliberately. (A shadow would be clipped by it.)
  *
  * Secondary actions have no container at all. They are type plus a rule that
  * draws in on hover, which is enough separation at this scale.
  */
 
-export const CUT_CORNER = "rounded-xl";
+export const CUT_CORNER =
+  "[clip-path:polygon(0_0,100%_0,100%_calc(100%-11px),calc(100%-11px)_100%,0_100%)]";
 
 /* ── Magnetic wrapper ─────────────────────────────────────────
    Pointer proximity displaces the element by a fraction of the
@@ -147,7 +148,7 @@ export function ActionLink({
           CUT_CORNER,
           "h-12 px-6 text-[0.9375rem]",
           variant === "primary"
-            ? "bg-primary text-primary-foreground shadow-[0_1px_2px_rgb(15_23_42/0.12),0_10px_24px_-10px_hsl(var(--primary)/0.65)] hover:bg-primary-hover active:scale-[0.98]"
+            ? "bg-primary text-primary-foreground hover:bg-primary-hover"
             : "bg-[hsl(40_24%_97%)] text-[hsl(224_52%_5%)] hover:bg-white",
           className
         )}

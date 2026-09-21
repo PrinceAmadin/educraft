@@ -133,15 +133,14 @@ export function BentoCell({
               to sit together as one field; the gradient then carries the copy. */}
           {/* The top of the tile shows the work nearly untouched; the foot
               deepens into the brand's dark teal where the copy sits. */}
-          <span aria-hidden className="absolute inset-0 -z-10 bg-[#0b2a2e]/15" />
           <span
             aria-hidden
-            className="absolute inset-0 -z-10 bg-gradient-to-t from-[#06171a]/95 from-10% via-[#06171a]/55 via-45% to-transparent"
+            className="absolute inset-0 -z-10 bg-gradient-to-t from-[#06171a]/90 from-0% via-[#06171a]/60 via-30% to-transparent to-62%"
           />
           <span
             aria-hidden
             className={cn(
-              "absolute inset-0 -z-10 bg-[#06171a]/30 opacity-0 transition-opacity duration-300 ease-editorial",
+              "absolute inset-0 -z-10 bg-[#06171a]/15 opacity-0 transition-opacity duration-300 ease-editorial",
               "[@media(hover:hover)]:group-hover/cell:opacity-100 group-focus-visible/cell:opacity-100"
             )}
           />
@@ -204,7 +203,7 @@ export function BentoCell({
           <h3
             className={cn(
               "font-display font-semibold leading-[1.05] tracking-[-0.03em]",
-              onPaper ? "text-paper-ink" : "text-white",
+              onPaper ? "text-paper-ink" : "text-white [text-shadow:0_1px_12px_rgb(0_0_0/0.45)]",
               emphasis ? "text-[clamp(1.5rem,2.6vw,2.5rem)]" : "text-[clamp(1.125rem,1.6vw,1.5rem)]"
             )}
           >

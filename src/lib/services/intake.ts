@@ -115,9 +115,22 @@ export async function submitIntake(
       intakeFormTemplate: true,
       expressDeliverySurcharge: true,
       downpaymentPercentage: true,
+      variants: { where: { isActive: true }, select: { id: true, priceAddon: true } },
     },
   });
   if (!service) throw new IntakeError("That service is no longer available");
+
+  // The chosen package adds its own amount; blank means the base option. An id
+  // that is not one of this service's active options is refused rather than
+  // silently priced at the base.
+  let serviceVariantId: string | null = null;
+  let variantAddon = 0;
+  if (input.serviceVariantId) {
+    const variant = service.variants.find((v) => v.id === input.serviceVariantId);
+    if (!variant) throw new IntakeError("That option is no longer available");
+    serviceVariantId = variant.id;
+    variantAddon = variant.priceAddon;
+  }
 
   const template = resolveTemplate(service.intakeFormTemplate);
   if (!template || template !== input.template) {
@@ -125,7 +138,7 @@ export async function submitIntake(
   }
 
   const price = computePrice({
-    basePrice: service.basePrice,
+    basePrice: service.basePrice + variantAddon,
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,
@@ -254,6 +267,7 @@ export async function submitIntake(
           projectId: newProjectId,
           clientId: client.id,
           serviceId: service.id,
+          serviceVariantId,
           status: proBono ? "DOWNPAYMENT_VERIFIED" : "NEW",
           isExpressDelivery: proBono ? false : input.isExpressDelivery,
           projectTitle,
@@ -322,6 +336,21 @@ export async function submitIntake(
           rate: parentInfo.rate,
           commission: parentCommission,
           date: now,
+        });
+      }
+
+      const attachments = input.attachments ?? [];
+      if (attachments.length > 0) {
+        await tx.projectFile.createMany({
+          data: attachments.map((f) => ({
+            projectId: project.id,
+            fileName: f.name,
+            fileUrl: f.url,
+            fileSize: f.size ?? null,
+            fileType: f.type ?? null,
+            category: f.category,
+            uploadedBy: "client (intake form)",
+          })),
         });
       }
 

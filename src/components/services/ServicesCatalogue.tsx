@@ -6,8 +6,10 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { LuArrowRight, LuChevronDown, LuSearch, LuSearchX, LuX } from "react-icons/lu";
 import { Input } from "@/components/ui/input";
 import {
+  baseOptionLabel,
   groupKeyFor,
   groupServices,
+  SERVICE_TABS,
   priceLabel,
   turnaroundLabel,
 } from "@/lib/service-groups";
@@ -25,14 +27,14 @@ import { cn, formatNaira } from "@/lib/utils";
  */
 export function ServicesCatalogue({ services }: { services: PublicService[] }) {
   const [query, setQuery] = React.useState("");
-  const [active, setActive] = React.useState("all");
+  const [tab, setTab] = React.useState<(typeof SERVICE_TABS)[number]["key"]>("fyp");
   const [expanded, setExpanded] = React.useState<string | null>(null);
 
-  const pills = React.useMemo(() => groupServices(services).map(({ group }) => group), [services]);
-
   const q = query.trim().toLowerCase();
+  const activeTab = SERVICE_TABS.find((t) => t.key === tab) ?? SERVICE_TABS[0];
   const visible = services.filter((s) => {
-    if (active !== "all" && groupKeyFor(s) !== active) return false;
+    // A search looks across every tab; a tab only narrows an empty search.
+    if (!q && activeTab.groups && !activeTab.groups.includes(groupKeyFor(s))) return false;
     if (!q) return true;
     return (
       s.serviceName.toLowerCase().includes(q) ||
@@ -71,28 +73,30 @@ export function ServicesCatalogue({ services }: { services: PublicService[] }) {
         ) : null}
       </label>
 
-      {/* ── Category pills — scroll sideways on phones ── */}
+      {/* ── Tabs: final year first (the core product), then everything else ── */}
       <div
-        role="group"
-        aria-label="Filter by category"
-        className="no-scrollbar -mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
+        role="tablist"
+        aria-label="Service categories"
+        className="mt-4 flex gap-1 rounded-xl bg-zone p-1"
       >
-        {[{ key: "all", pill: "All" }, ...pills].map((p) => {
-          const on = active === p.key;
+        {SERVICE_TABS.map((t) => {
+          const on = !q && tab === t.key;
           return (
             <button
-              key={p.key}
+              key={t.key}
               type="button"
-              aria-pressed={on}
-              onClick={() => setActive(p.key)}
+              role="tab"
+              aria-selected={on}
+              onClick={() => {
+                setQuery("");
+                setTab(t.key);
+              }}
               className={cn(
-                "h-10 shrink-0 rounded-full px-4 text-sm font-medium transition-colors duration-fast",
-                on
-                  ? "bg-foreground text-background"
-                  : "bg-zone text-muted-foreground hover:bg-elevated hover:text-foreground"
+                "min-h-11 flex-1 rounded-lg px-3 text-sm font-medium transition-colors duration-fast",
+                on ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {p.pill}
+              {t.label}
             </button>
           );
         })}
@@ -104,13 +108,13 @@ export function ServicesCatalogue({ services }: { services: PublicService[] }) {
           <div className="flex flex-col items-center gap-3 rounded-2xl bg-zone px-6 py-14 text-center">
             <LuSearchX className="size-6 text-subtle" aria-hidden />
             <p className="text-sm font-medium text-foreground">
-              No services match {q ? `“${query.trim()}”` : "this filter"}
+              No services match {q ? `“${query.trim()}”` : "this tab"}
             </p>
             <button
               type="button"
               onClick={() => {
                 setQuery("");
-                setActive("all");
+                setTab("all");
               }}
               className="text-sm font-medium text-primary hover:underline"
             >
@@ -142,14 +146,6 @@ export function ServicesCatalogue({ services }: { services: PublicService[] }) {
       </div>
     </div>
   );
-}
-
-/** "With Data Analysis" → the base option reads "Without Data Analysis". */
-function baseOptionLabel(variants: { name: string }[]): string {
-  if (variants.length > 0 && variants.every((v) => /^with\s/i.test(v.name))) {
-    return `Without ${variants[0].name.replace(/^with\s/i, "")}`;
-  }
-  return "Standard";
 }
 
 function ServiceRow({

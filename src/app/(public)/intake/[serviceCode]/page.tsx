@@ -77,6 +77,7 @@ export default async function IntakeServicePage({
             expressDeliverySurcharge: service.expressDeliverySurcharge,
             pricingModel: service.pricingModel,
             downpaymentPercentage: service.downpaymentPercentage,
+            variants: service.variants,
           }}
           universities={await db.university.findMany({
             orderBy: { name: "asc" },

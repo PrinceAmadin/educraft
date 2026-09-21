@@ -13,15 +13,14 @@ import { PricingModel, ServiceCategory } from "@prisma/client";
  *   - Assignment-based report     from ₦5,000 (₦5k–10k)
  *   - Editing & formatting        20% under 50 pages, 25% at 50+ (general)
  *   - Final year editing          10% under 50 pages, 15% at 50+ (FYB flyer)
- *   - Express delivery            +₦2,000 general, +₦5,000 final year,
- *                                 +₦2,500 documents & diagrams
+ *   - Express delivery            +₦2,000 general, +₦5,000 final year
  *
  * Ranges on the flyers ("₦10k–15k") are stored as VARIABLE from the lower
  * figure, with the full range in the description.
  *
- * NOT re-confirmed by the two flyers above (carried over from an earlier
- * source — flag to the founder before relying on it):
- *   - COMBO-PFRS "Proposal + Full Report + Slides" — ₦100,000
+ * Every price here is on one of the two flyers. Documents & diagrams
+ * (watermark removal, PDF/image conversion, diagrams, UML) are NOT offered and
+ * are retired below.
  */
 
 export type CatalogueService = {
@@ -39,7 +38,6 @@ export type CatalogueService = {
 
 const EXPRESS_GENERAL = 2000;
 const EXPRESS_FINAL_YEAR = 5000;
-const EXPRESS_DOCUMENTS = 2500;
 
 export const SERVICE_CATALOGUE: CatalogueService[] = [
   // ── Academic writing ──
@@ -377,94 +375,6 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     estimatedDays: 4,
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
-
-  // ── Documents & diagrams (flyer 4.png) ──
-  {
-    serviceCode: "WATERMARK",
-    serviceName: "Watermark Removal (Plain Documents)",
-    category: ServiceCategory.DIGITAL,
-    basePrice: 10000,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "design_watermark",
-    estimatedDays: 2,
-    description: "₦10,000–₦15,000 depending on length. Done by hand, not by an automated tool.",
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "WM-COMPLEX",
-    serviceName: "Watermark Removal (Coloured / Complex)",
-    category: ServiceCategory.DIGITAL,
-    basePrice: 15000,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "design_watermark",
-    estimatedDays: 3,
-    description: "₦15,000–₦25,000 for coloured or heavily designed documents.",
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "WM-MARKS",
-    serviceName: "Removal of Unwanted Marks",
-    category: ServiceCategory.DIGITAL,
-    basePrice: 5000,
-    intakeFormTemplate: "design_watermark",
-    estimatedDays: 1,
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "PDF-MOD",
-    serviceName: "PDF Text Editing",
-    category: ServiceCategory.DIGITAL,
-    basePrice: 10000,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "design_pdf",
-    estimatedDays: 2,
-    description: "₦10,000–₦15,000 depending on the amount of text changed.",
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "PDF-WORD",
-    serviceName: "PDF to Word Conversion",
-    category: ServiceCategory.DIGITAL,
-    basePrice: 3000,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "design_pdf",
-    estimatedDays: 1,
-    description: "₦3,000–₦5,000 depending on length and layout.",
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "IMG-WORD",
-    serviceName: "Image to Word Conversion",
-    category: ServiceCategory.DIGITAL,
-    basePrice: 5000,
-    intakeFormTemplate: "design_pdf",
-    estimatedDays: 1,
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "DIAGRAM",
-    serviceName: "System & Engineering Diagrams",
-    category: ServiceCategory.DESIGN,
-    basePrice: 2500,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "design_diagram",
-    estimatedDays: 3,
-    description:
-      "Bar charts and graphs ₦2,500–₦5,000 · block and flowchart diagrams ₦3,000–₦6,000 · Gantt charts ₦4,000–₦8,000 · circuit and engineering diagrams ₦5,000–₦10,000.",
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
-  {
-    serviceCode: "UML",
-    serviceName: "UML Diagrams",
-    category: ServiceCategory.DESIGN,
-    basePrice: 4000,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "design_diagram",
-    estimatedDays: 3,
-    description:
-      "Use case and activity diagrams ₦4,000–₦7,000 · class diagrams ₦4,500–₦8,000 · sequence diagrams ₦4,500–₦8,500.",
-    expressDeliverySurcharge: EXPRESS_DOCUMENTS,
-  },
 ];
 
 /**
@@ -475,5 +385,19 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
  *   FORMAT   Formatting Only (₦5,000) — flyer 4.png prices formatting as a
  *            percentage, which EDIT-SM / EDIT-LG already cover
  *   GD-FLY   Graphic Design (Flyer) — not on any flyer
+ *   WATERMARK, WM-COMPLEX, WM-MARKS, PDF-MOD, PDF-WORD, IMG-WORD, DIAGRAM, UML
+ *            Documents & diagrams — not offered (founder, Sept 2026)
  */
-export const RETIRED_SERVICE_CODES = ["DATA", "FORMAT", "GD-FLY"] as const;
+export const RETIRED_SERVICE_CODES = [
+  "DATA",
+  "FORMAT",
+  "GD-FLY",
+  "WATERMARK",
+  "WM-COMPLEX",
+  "WM-MARKS",
+  "PDF-MOD",
+  "PDF-WORD",
+  "IMG-WORD",
+  "DIAGRAM",
+  "UML",
+] as const;
