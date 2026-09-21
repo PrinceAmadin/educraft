@@ -6,7 +6,8 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { CUT_CORNER } from "@/components/primitives/ActionLink";
-import { IconArrow, IconClose, IconMenu } from "@/lib/icons";
+import { LuChevronRight } from "react-icons/lu";
+import { IconClose, IconMenu } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -168,42 +169,34 @@ export function SiteHeader() {
               </button>
             </div>
 
-            <nav aria-label="Primary" className="shell mt-8">
-              <ul className="index-list">
-                {NAV.map((item, i) => (
-                  <li key={item.href} className="border-t border-hairline/12">
+            <nav aria-label="Primary" className="shell mt-4 flex h-[calc(100%-4.5rem)] flex-col pb-8">
+              <ul className="divide-y divide-border/60">
+                {NAV.map((item) => (
+                  <li key={item.href}>
                     <Link
                       href={item.href}
                       onClick={() => setOpen(false)}
-                      className="flex items-baseline gap-5 py-6"
+                      className="flex min-h-14 items-center justify-between gap-4 py-4 text-lg font-medium text-foreground transition-colors active:text-primary"
                     >
-                      <span className="index-mark text-subtle">
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                      <span className="font-display text-[2rem] font-medium leading-none tracking-[-0.035em] text-foreground">
-                        {item.label}
-                      </span>
+                      {item.label}
+                      <LuChevronRight aria-hidden className="size-5 text-subtle" />
                     </Link>
                   </li>
                 ))}
               </ul>
 
-              <div className="mt-12 flex flex-col gap-4">
+              <div className="mt-auto flex flex-col gap-3 pt-8">
                 <Link
                   href="/intake"
                   onClick={() => setOpen(false)}
-                  className={cn(
-                    CUT_CORNER,
-                    "inline-flex h-12 items-center justify-between bg-primary px-6 text-[0.9375rem] font-medium text-primary-foreground"
-                  )}
+                  className="inline-flex h-12 items-center justify-center rounded-xl bg-primary px-6 text-base font-semibold text-primary-foreground transition-colors hover:bg-primary-hover"
                 >
                   Start a project
-                  <IconArrow aria-hidden className="size-[18px]" />
                 </Link>
                 <Link
                   href="/login"
                   onClick={() => setOpen(false)}
-                  className="py-2 text-[0.9375rem] text-muted-foreground"
+                  className="inline-flex h-12 items-center justify-center rounded-xl bg-zone text-base font-medium text-foreground transition-colors hover:bg-elevated"
                 >
                   Sign in
                 </Link>
