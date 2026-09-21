@@ -14,6 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+type Failure = { name: string; email: string; error: string };
+
 /** Email every active ambassador with an address on file — the old panel's Broadcast. */
 export function BroadcastButton({ recipientCount }: { recipientCount: number }) {
   const [open, setOpen] = React.useState(false);
@@ -22,11 +24,13 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [outcome, setOutcome] = React.useState<string | null>(null);
+  const [failures, setFailures] = React.useState<Failure[]>([]);
 
   function openDialog() {
     setSubject("");
     setMessage("");
     setError(null);
+    setFailures([]);
     setOutcome(null);
     setOpen(true);
   }
@@ -38,6 +42,7 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
     }
     setBusy(true);
     setError(null);
+    setFailures([]);
     try {
       const res = await fetch("/api/admin/ambassadors/broadcast", {
         method: "POST",
@@ -45,7 +50,7 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
         body: JSON.stringify({ subject: subject.trim(), message: message.trim() }),
       });
       const body = (await res.json().catch(() => null)) as
-        | { sent: number; failed: number; total: number }
+        | { sent: number; failed: number; total: number; failures?: Failure[] }
         | { error: string }
         | null;
       if (!res.ok || !body) throw new Error((body as { error?: string })?.error ?? "Could not send.");
@@ -55,6 +60,7 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
             ? `Sent to ${body.sent} of ${body.total} ambassadors — ${body.failed} failed.`
             : `Sent to all ${body.sent} ambassadors.`
         );
+        setFailures(body.failures ?? []);
         setSubject("");
         setMessage("");
       }
@@ -101,6 +107,19 @@ export function BroadcastButton({ recipientCount }: { recipientCount: number }) 
             </Field>
 
             {outcome ? <p className="text-sm text-success">{outcome}</p> : null}
+            {failures.length > 0 ? (
+              <div className="space-y-1.5 text-sm">
+                <p className="text-muted-foreground">Not delivered. Fix the address on their page, then message them directly:</p>
+                <ul className="space-y-1">
+                  {failures.map((f) => (
+                    <li key={f.email} className="text-danger">
+                      <span className="font-medium">{f.name}</span> <span className="font-mono text-xs">{f.email}</span>
+                      <span className="block text-xs text-muted-foreground">{f.error}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {error ? (
               <p role="alert" className="flex items-start gap-2 text-sm text-danger">
                 <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />

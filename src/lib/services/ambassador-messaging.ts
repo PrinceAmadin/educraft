@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ambassadorMessageEmail } from "@/lib/emails/ambassador-message";
-import { sendMail } from "@/lib/mailer";
+import { sendMail, sendMailBatch } from "@/lib/mailer";
 import { notifyUsers } from "@/lib/services/notifications";
 
 /**
@@ -49,6 +49,8 @@ export interface BroadcastResult {
   sent: number;
   failed: number;
   total: number;
+  /** Who did not get it, and why — so a typo in an address can be fixed. */
+  failures: { name: string; email: string; error: string }[];
 }
 
 /** Every active ambassador with an email on file — the same pool as allocation. */
@@ -68,21 +70,19 @@ export async function broadcastToAmbassadors(subject: string, message: string): 
     }).catch(() => {});
   }
 
-  let sent = 0;
-  let failed = 0;
-  // Sequential, not Promise.all — same as the old panel, easier on Gmail's
-  // per-connection send rate than firing every message at once.
-  for (const row of rows) {
-    const mail = ambassadorMessageEmail({
-      ambassadorName: row.fullName,
-      title: subject,
-      message,
-      broadcast: true,
-    });
-    const result = await sendMail({ to: row.email as string, ...mail });
-    if (result.ok) sent += 1;
-    else failed += 1;
-  }
+  // A small connection pool, not one login per email — see sendMailBatch.
+  const results = await sendMailBatch(
+    rows.map((row) => ({
+      to: row.email as string,
+      ...ambassadorMessageEmail({ ambassadorName: row.fullName, title: subject, message, broadcast: true }),
+    })),
+    { connections: 5 }
+  );
 
-  return { sent, failed, total: rows.length };
+  const failures = rows.flatMap((row, i) =>
+    results[i].ok
+      ? []
+      : [{ name: row.fullName, email: row.email as string, error: results[i].error ?? "Could not send" }]
+  );
+  return { sent: rows.length - failures.length, failed: failures.length, total: rows.length, failures };
 }
