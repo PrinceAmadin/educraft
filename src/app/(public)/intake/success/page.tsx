@@ -35,6 +35,7 @@ export default async function IntakeSuccessPage({
             downpaymentAmount: true,
             downpaymentStatus: true,
             service: { select: { serviceName: true, pricingModel: true } },
+            client: { select: { clientId: true } },
           },
         })
       : Promise.resolve(null),
@@ -59,10 +60,20 @@ export default async function IntakeSuccessPage({
 
       {project ? (
         <>
-          <p className="mt-3 text-muted-foreground">Save this ID — you&apos;ll use it to track your project.</p>
-          <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+          <p className="mt-3 text-muted-foreground">Your project ID is</p>
+          <p className="mt-1 font-mono text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             {project.projectId}
           </p>
+
+          <div className="mt-6 w-full rounded-2xl bg-zone p-4 text-left text-sm">
+            <p className="font-semibold text-foreground">Your dashboard</p>
+            <p className="mt-1 text-muted-foreground">
+              Track this project, see its progress and pay the balance from your dashboard. Sign in with your
+              Client ID{" "}
+              <span className="font-mono font-semibold text-foreground">{project.client.clientId}</span>. The first
+              time, we email a 6-digit code to the email you gave us so you can set your password.
+            </p>
+          </div>
 
           <div className="mt-6 w-full surface p-4 text-left text-sm">
             <p className="font-semibold text-foreground">
@@ -129,7 +140,7 @@ export default async function IntakeSuccessPage({
 
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Button asChild>
-              <Link href="/client/login">Sign in to track</Link>
+              <Link href={`/client/login?id=${encodeURIComponent(project.client.clientId)}`}>Go to my dashboard</Link>
             </Button>
             <Button asChild variant="outline">
               <Link href="/intake">Start another project</Link>

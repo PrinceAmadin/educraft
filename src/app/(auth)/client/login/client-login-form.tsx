@@ -20,10 +20,10 @@ type Step = "signin" | "request" | "setup";
  * proves ownership before a password can be set. The wording never says whether
  * an ID exists.
  */
-export function ClientLoginForm() {
+export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>("signin");
-  const [clientId, setClientId] = React.useState("");
+  const [clientId, setClientId] = React.useState(initialId);
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [code, setCode] = React.useState("");

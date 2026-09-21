@@ -20,7 +20,6 @@ export interface ServiceGroup {
 
 export const SERVICE_GROUPS: ServiceGroup[] = [
   { key: "fyp", label: "Final year reports", pill: "Final year" },
-  { key: "chapters", label: "Chapter-based reports", pill: "Chapters" },
   { key: "combos", label: "Final year combos", pill: "Combos" },
   { key: "academic", label: "Academic writing", pill: "Academic" },
   { key: "research", label: "Research & analysis", pill: "Research" },
@@ -28,6 +27,8 @@ export const SERVICE_GROUPS: ServiceGroup[] = [
   { key: "career", label: "Career & professional", pill: "Career" },
   { key: "letters", label: "Letters & essays", pill: "Letters" },
   { key: "editing", label: "Editing & formatting", pill: "Editing" },
+  // Last on purpose: available, but not promoted next to the full reports.
+  { key: "chapters", label: "Chapter-based final year projects", pill: "Chapters" },
 ];
 
 /**
@@ -35,16 +36,17 @@ export const SERVICE_GROUPS: ServiceGroup[] = [
  * product; "Other services" is everything else; "All" is the whole list.
  */
 export interface ServiceTab {
-  key: "fyp" | "other" | "all";
+  key: "fyp" | "chapters" | "other" | "all";
   label: string;
   /** Group keys shown under this tab; null means every group. */
   groups: string[] | null;
 }
 
 export const SERVICE_TABS: ServiceTab[] = [
-  { key: "fyp", label: "Final year", groups: ["fyp", "chapters", "combos"] },
+  { key: "fyp", label: "Final year", groups: ["fyp", "combos"] },
+  { key: "chapters", label: "Chapter-based FYP", groups: ["chapters"] },
   { key: "other", label: "Other", groups: ["academic", "research", "presentations", "career", "letters", "editing"] },
-  { key: "all", label: "All", groups: null },
+  { key: "all", label: "All", groups: ["fyp", "combos", "academic", "research", "presentations", "career", "letters", "editing"] },
 ];
 
 const CODE_RULES: [RegExp, string][] = [

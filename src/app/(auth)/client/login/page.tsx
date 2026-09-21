@@ -8,7 +8,9 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function ClientLoginPage() {
+export default function ClientLoginPage({ searchParams }: { searchParams: { id?: string } }) {
+  // The intake success page hands over the Client ID; only a well-formed one is used.
+  const initialId = /^EC-C-\d{3,}$/i.test(searchParams.id ?? "") ? (searchParams.id as string).toUpperCase() : "";
   return (
     <div className="w-full max-w-[400px]">
       <div className="mb-9">
@@ -21,7 +23,7 @@ export default function ClientLoginPage() {
         </p>
       </div>
 
-      <ClientLoginForm />
+      <ClientLoginForm initialId={initialId} />
 
       <p className="mt-9 text-sm text-muted-foreground">
         Not a client?{" "}

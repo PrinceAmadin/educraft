@@ -21,7 +21,13 @@ function secretKey(): string {
  * explicitly (e.g. a custom domain Vercel doesn't know about yet).
  */
 export function callbackBaseUrl(): string {
-  if (process.env.PAYSTACK_CALLBACK_BASE_URL) return process.env.PAYSTACK_CALLBACK_BASE_URL;
+  const override = process.env.PAYSTACK_CALLBACK_BASE_URL;
+  // A localhost override is what a developer copies from .env.local into Vercel.
+  // On a real deployment it would send every paying client to a page on their
+  // own machine, so it is ignored there.
+  const onVercel = Boolean(process.env.VERCEL);
+  const isLocal = override ? /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(override.trim()) : false;
+  if (override && !(onVercel && isLocal)) return override.replace(/\/+$/, "");
   if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) {
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   }

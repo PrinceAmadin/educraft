@@ -79,7 +79,7 @@ export function ServicesCatalogue({ services }: { services: PublicService[] }) {
       <div
         role="tablist"
         aria-label="Service categories"
-        className="mt-4 flex gap-1 rounded-xl bg-zone p-1"
+        className="no-scrollbar mt-4 flex gap-1 overflow-x-auto rounded-xl bg-zone p-1"
       >
         {SERVICE_TABS.map((t) => {
           const on = !q && tab === t.key;
@@ -94,7 +94,7 @@ export function ServicesCatalogue({ services }: { services: PublicService[] }) {
                 setTab(t.key);
               }}
               className={cn(
-                "min-h-11 flex-1 rounded-lg px-3 text-sm font-medium transition-colors duration-fast",
+                "min-h-11 flex-1 shrink-0 whitespace-nowrap rounded-lg px-2.5 text-[13px] font-medium sm:px-3.5 sm:text-sm transition-colors duration-fast",
                 on ? "bg-card text-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -256,12 +256,12 @@ function ServiceRow({
   );
 }
 
-/** The chapter-based report: pick chapters, see the sum, start with them. */
+/** The chapter-based report: pick chapters, see the sum, continue. Plain on purpose. */
 function ChapterSection({ service }: { service: PublicService }) {
-  const [chapters, setChapters] = React.useState<number[]>([1, 2]);
+  const [chapters, setChapters] = React.useState<number[]>([]);
   const [withAnalysis, setWithAnalysis] = React.useState(false);
-  const addon = service.variants[0]?.priceAddon ?? 0;
   const variant = service.variants[0];
+  const addon = variant?.priceAddon ?? 0;
 
   const query = new URLSearchParams();
   if (chapters.length > 0) query.set("chapters", chapters.join(","));
@@ -270,7 +270,7 @@ function ChapterSection({ service }: { service: PublicService }) {
   return (
     <div className="pt-4">
       <p className="max-w-[56ch] text-[13.5px] leading-relaxed text-muted-foreground">
-        You do not have to order the whole report. Each chapter is a fixed share of the full report price; pick the ones you need and the total is worked out below.
+        For final year projects only. Each chapter is charged as a fixed share of the full report price.
       </p>
       <div className="mt-5">
         <ChapterCalculator
@@ -282,17 +282,17 @@ function ChapterSection({ service }: { service: PublicService }) {
           analysisAddon={addon}
         />
       </div>
-      <div className="mt-5">
-        {chapters.length > 0 ? (
+      {chapters.length > 0 ? (
+        <div className="mt-5">
           <Link
             href={`/intake/${service.serviceCode}?${query.toString()}`}
             className="inline-flex h-12 items-center justify-between gap-6 bg-primary px-6 text-[0.9375rem] font-medium text-primary-foreground [clip-path:polygon(0_0,100%_0,100%_calc(100%-11px),calc(100%-11px)_100%,0_100%)] hover:bg-primary-hover"
           >
-            Start with these chapters
+            Continue
             <LuArrowRight className="size-[18px]" aria-hidden />
           </Link>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
