@@ -61,7 +61,7 @@ async function ipLimited(ip: string, kind: "portal-request" | "portal-verify"): 
 interface PortalAccount {
   /** Where the code goes: the email on the worker / ambassador record. */
   email: string;
-  /** The email they sign in with (their existing login's, which can differ from the record email). */
+  /** The email they sign in with: always the same inbox the code went to. */
   loginEmail: string;
   fullName: string;
   /** Their existing login, or null when one has to be created. */
@@ -132,6 +132,11 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
     const login = await db.user.findUnique({ where: { id: linked[0] }, select: { id: true, email: true, role: true, isActive: true } });
     if (!login || !login.isActive || (login.role !== "WORKER" && login.role !== "AMBASSADOR")) {
       return refuse("the login their record is on is inactive or not a worker/ambassador login");
+    }
+    // The code only proves the inbox it was sent to. Never let it set the password of a
+    // login under a different email: an admin has to align the record and the login first.
+    if (login.email.toLowerCase() !== email) {
+      return refuse("their record's email differs from the email of the login it is linked to (admin must align them)");
     }
     return { ...base, loginEmail: login.email, userId: login.id, reclaim: false };
   }
