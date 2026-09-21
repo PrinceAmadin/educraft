@@ -12,6 +12,10 @@ import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
 import { ParentAssignment, SubAmbassadorsList } from "@/components/ambassadors/ParentAssignment";
 import { MessageAmbassadorButton } from "@/components/ambassadors/MessageAmbassadorButton";
+import { EditAmbassadorDialog } from "@/components/ambassadors/EditAmbassadorDialog";
+import { DeleteAmbassadorButton } from "@/components/ambassadors/DeleteAmbassadorButton";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { AdminAnalytics } from "@/components/ambassador-analytics/AdminAnalytics";
@@ -43,11 +47,17 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, progress, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, defaultParentRate, linkedWorker] = await Promise.all([
+  const [parentCandidates, defaultParentRate, linkedWorker, session, universities] = await Promise.all([
     listParentCandidates(ambassador.id),
     getDefaultParentCommissionRate(),
     getLinkedWorker(ambassador.userId),
+    auth(),
+    db.university.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, abbreviation: true },
+    }),
   ]);
+  const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
   return (
     <div className="space-y-5">
@@ -79,6 +89,22 @@ export default async function AmbassadorDetailPage({
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <EditAmbassadorDialog
+              universities={universities}
+              ambassador={{
+                id: ambassador.id,
+                fullName: ambassador.fullName,
+                phone: ambassador.phone,
+                email: ambassador.email,
+                universityId: ambassador.universityId,
+                department: ambassador.department,
+                level: ambassador.level,
+                bankName: ambassador.bankName,
+                accountNumber: ambassador.accountNumber,
+                accountName: ambassador.accountName,
+                hasLogin: Boolean(ambassador.userId),
+              }}
+            />
             <MessageAmbassadorButton
               ambassadorId={ambassador.id}
               ambassadorName={ambassador.fullName}
@@ -94,6 +120,9 @@ export default async function AmbassadorDetailPage({
               status={ambassador.status}
               tier={ambassador.tier}
             />
+            {isSuperAdmin ? (
+              <DeleteAmbassadorButton ambassadorId={ambassador.id} fullName={ambassador.fullName} />
+            ) : null}
           </div>
         </div>
 

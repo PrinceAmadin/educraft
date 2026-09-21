@@ -21,12 +21,25 @@ export const createAmbassadorSchema = z.object({
 
 export type CreateAmbassadorInput = z.infer<typeof createAmbassadorSchema>;
 
+/** Status / tier (AmbassadorControls) or any profile field (EditAmbassadorDialog). */
 export const updateAmbassadorSchema = z
   .object({
     status: z.enum(statusValues).optional(),
     tier: z.enum(tierValues).optional(),
+    fullName: z.string().trim().min(2, "Enter the ambassador's full name").max(120).optional(),
+    // Optional on the record: ambassadors from the old panel never gave one.
+    phone: phoneSchema.optional().or(z.literal("")),
+    email: z.string().trim().email("Enter a valid email").max(160).optional().or(z.literal("")),
+    universityId: z.string().min(1, "Select a university").optional(),
+    department: z.string().trim().max(120).optional().or(z.literal("")),
+    level: z.string().trim().max(40).optional().or(z.literal("")),
+    bankName: z.string().trim().max(80).optional().or(z.literal("")),
+    accountNumber: z.string().trim().max(20).optional().or(z.literal("")),
+    accountName: z.string().trim().max(120).optional().or(z.literal("")),
   })
-  .refine((v) => v.status || v.tier, "Nothing to update");
+  .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to update");
+
+export type UpdateAmbassadorInput = z.infer<typeof updateAmbassadorSchema>;
 
 export const ambassadorListParamsSchema = z.object({
   university: z.string().min(1).optional().catch(undefined),

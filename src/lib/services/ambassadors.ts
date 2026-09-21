@@ -8,7 +8,7 @@ import {
   PARENT_ACTIVATION_TIERS,
   isValidParentRate,
 } from "@/lib/commission";
-import type { CreateAmbassadorInput } from "@/lib/validations/ambassadors";
+import type { CreateAmbassadorInput, UpdateAmbassadorInput } from "@/lib/validations/ambassadors";
 import type { SetParentInput } from "@/lib/validations/commission";
 
 export const AMBASSADOR_PAGE_SIZE = 20;
@@ -156,6 +156,7 @@ export async function listAmbassadors(params: {
 const detailSelect = {
   id: true,
   ambassadorId: true,
+  universityId: true,
   fullName: true,
   phone: true,
   email: true,
@@ -468,19 +469,142 @@ export async function createAmbassador(input: CreateAmbassadorInput) {
   throw new TransitionError("Could not allocate an ambassador id — try again");
 }
 
-export async function updateAmbassador(
-  id: string,
-  data: { status?: string; tier?: AmbassadorTier }
-) {
-  const ambassador = await db.ambassador.findUnique({ where: { id }, select: { id: true } });
+/** A refused edit or delete the admin can act on (shown in the dialog as-is). */
+export class AmbassadorEditError extends Error {}
+
+const blank = (v: string | undefined) => (v === undefined ? undefined : v.trim() || null);
+
+/**
+ * Status/tier change, or an admin correcting the profile. Not editable here:
+ * the referral code and slot (shared links depend on them — the Manage tab
+ * owns slots), parent (ParentAssignment) and the weekly-email opt-out, which
+ * is the ambassador's own choice.
+ *
+ * A name change is copied to their roster slot, since the slot's name is what
+ * the shared /EduCraftA links show. An email change is copied to their
+ * sign-in when that login still uses the old address — the set-password code
+ * only goes to a login whose own email matches the record, so leaving them
+ * apart would lock the ambassador out of resetting their password.
+ */
+export async function updateAmbassador(id: string, input: UpdateAmbassadorInput) {
+  const ambassador = await db.ambassador.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      email: true,
+      legacySlotId: true,
+      user: { select: { id: true, email: true, workerProfile: { select: { id: true, email: true } } } },
+    },
+  });
   if (!ambassador) throw new TransitionError("Ambassador not found");
 
-  return db.ambassador.update({
+  const data: Prisma.AmbassadorUncheckedUpdateInput = {};
+  if (input.status) data.status = input.status;
+  if (input.tier) data.tier = input.tier;
+  if (input.fullName !== undefined) data.fullName = input.fullName;
+  if (input.phone !== undefined) data.phone = blank(input.phone);
+  if (input.universityId !== undefined) {
+    const uni = await db.university.findUnique({ where: { id: input.universityId }, select: { id: true } });
+    if (!uni) throw new AmbassadorEditError("Pick a university from the list");
+    data.universityId = input.universityId;
+  }
+  if (input.department !== undefined) data.department = blank(input.department);
+  if (input.level !== undefined) data.level = blank(input.level);
+  if (input.bankName !== undefined) data.bankName = blank(input.bankName);
+  if (input.accountNumber !== undefined) data.accountNumber = blank(input.accountNumber);
+  if (input.accountName !== undefined) data.accountName = blank(input.accountName);
+
+  const writes: Prisma.PrismaPromise<unknown>[] = [];
+  const oldEmail = ambassador.email?.trim().toLowerCase() ?? null;
+  const newEmail = input.email === undefined ? undefined : input.email.trim() || null;
+
+  if (newEmail !== undefined && newEmail?.toLowerCase() !== oldEmail) {
+    const user = ambassador.user;
+    if (user && !newEmail) {
+      throw new AmbassadorEditError("They sign in with this email, so it can't be removed. Change it instead.");
+    }
+    data.email = newEmail;
+    const loginUsesOld = user && oldEmail && user.email.toLowerCase() === oldEmail;
+    if (user && newEmail && loginUsesOld) {
+      const taken = await db.user.findFirst({
+        where: { email: { equals: newEmail, mode: "insensitive" }, id: { not: user.id } },
+        select: { id: true },
+      });
+      if (taken) throw new AmbassadorEditError("Another HQ login already uses that email.");
+      writes.push(db.user.update({ where: { id: user.id }, data: { email: newEmail.toLowerCase() } }));
+      // Same person's worker profile, when it carried the same old address.
+      const worker = user.workerProfile;
+      if (worker && worker.email?.trim().toLowerCase() === oldEmail) {
+        writes.push(db.worker.update({ where: { id: worker.id }, data: { email: newEmail } }));
+      }
+    }
+  }
+
+  if (input.fullName !== undefined && ambassador.legacySlotId) {
+    writes.push(
+      db.ambassadorSlot.updateMany({
+        where: { code: ambassador.legacySlotId, vacant: false },
+        data: { name: input.fullName },
+      })
+    );
+  }
+
+  const [updated] = await db.$transaction([
+    db.ambassador.update({ where: { id }, data, select: { status: true, tier: true } }),
+    ...writes,
+  ]);
+  return updated;
+}
+
+/**
+ * Removes an ambassador outright — for a duplicate, a test record or someone
+ * added by mistake. Refused once they have any history (jobs, commissions,
+ * referred clients, sub-ambassadors): deleting would wipe commission records
+ * and orphan those rows, so Terminate is the answer there. Their slot is
+ * emptied for the next applicant, click history is kept (detached, as a
+ * vacant slot's would be), and the login is deactivated, not deleted, unless
+ * it still carries an active worker profile.
+ */
+export async function deleteAmbassador(id: string): Promise<void> {
+  const ambassador = await db.ambassador.findUnique({
     where: { id },
-    data: {
-      ...(data.status ? { status: data.status } : {}),
-      ...(data.tier ? { tier: data.tier } : {}),
+    select: {
+      id: true,
+      userId: true,
+      legacySlotId: true,
+      _count: { select: { projects: true, subReferredProjects: true, referredClients: true, children: true } },
     },
-    select: { status: true, tier: true },
   });
+  if (!ambassador) throw new TransitionError("Ambassador not found");
+
+  const c = ambassador._count;
+  const history = [
+    c.projects + c.subReferredProjects > 0 ? `${c.projects + c.subReferredProjects} job(s)` : null,
+    c.referredClients > 0 ? `${c.referredClients} referred client(s)` : null,
+    c.children > 0 ? `${c.children} sub-ambassador(s)` : null,
+  ].filter(Boolean);
+  if (history.length > 0) {
+    throw new AmbassadorEditError(
+      `They have ${history.join(", ")} on record, and deleting would erase that history. Set their status to Terminated instead.`
+    );
+  }
+
+  const writes: Prisma.PrismaPromise<unknown>[] = [
+    db.ambassadorApplication.updateMany({ where: { ambassadorId: id }, data: { ambassadorId: null } }),
+    db.ambassador.delete({ where: { id } }),
+  ];
+  if (ambassador.legacySlotId) {
+    writes.push(
+      db.ambassadorSlot.updateMany({ where: { code: ambassador.legacySlotId }, data: { name: "", vacant: true } })
+    );
+  }
+  if (ambassador.userId) {
+    const activeWorker = await db.worker.count({
+      where: { userId: ambassador.userId, status: { in: ["Active", "On Break"] } },
+    });
+    if (activeWorker === 0) {
+      writes.push(db.user.update({ where: { id: ambassador.userId }, data: { isActive: false } }));
+    }
+  }
+  await db.$transaction(writes);
 }
