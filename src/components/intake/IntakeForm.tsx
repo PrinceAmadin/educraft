@@ -189,7 +189,7 @@ export function IntakeForm({
     } as Partial<IntakeSubmitInput> as IntakeSubmitInput,
   });
 
-  const { trigger, handleSubmit, watch } = form;
+  const { trigger, handleSubmit, watch, getValues, setError, setFocus } = form;
   const stepId = steps[step].id;
   const isReview = stepId === "review";
   const isExpress = watch("isExpressDelivery");
@@ -228,11 +228,52 @@ export function IntakeForm({
       return;
     }
     const fields = STEP_FIELDS[template][stepId] ?? [];
-    const ok = await trigger(fields as never[], { shouldFocus: true });
+    const fieldOk = await trigger(fields as never[], { shouldFocus: true });
+    const ok = requiredOk(fields) && fieldOk;
     if (ok) {
       setStep((s) => Math.min(s + 1, steps.length - 1));
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
+  }
+
+  /**
+   * The form's cross-field rules (a university, a topic, the details each
+   * template needs) live in the schema's superRefine, which never runs while a
+   * later field, such as the terms box, is still empty. So a step could let a
+   * client through with something missing, and the payment button then failed
+   * silently on the last page. Here the whole schema is run with the terms
+   * treated as accepted, and any problem that belongs to this step blocks it.
+   */
+  function requiredOk(fields: (keyof IntakeSubmitInput)[]): boolean {
+    const parsed = intakeSubmitSchema.safeParse({ ...getValues(), agreeTerms: true });
+    if (parsed.success) return true;
+    let first: keyof IntakeSubmitInput | null = null;
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0] as keyof IntakeSubmitInput;
+      if (!fields.includes(key)) continue;
+      setError(key as never, { type: "required", message: issue.message });
+      first ??= key;
+    }
+    if (first) {
+      setSubmitError("Please complete the highlighted fields to continue.");
+      setFocus(first as never);
+      return false;
+    }
+    return true;
+  }
+
+  /** The final button was pressed with something still wrong: go to it and say so. */
+  function onInvalid(errors: Record<string, unknown>) {
+    const at = steps.findIndex((s) => (STEP_FIELDS[template][s.id] ?? []).some((f) => errors[f as string]));
+    if (at >= 0 && at !== step) {
+      setStep(at);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    setSubmitError(
+      at >= 0 && at !== step
+        ? `Some required details are missing. We've taken you to "${steps[at].label}".`
+        : "Please complete the highlighted fields before paying."
+    );
   }
 
   function back() {
@@ -319,7 +360,7 @@ export function IntakeForm({
     <ProBonoContext.Provider value={Boolean(proBono)}>
     <UploadBusyContext.Provider value={setUploading}>
     <FormProvider {...form}>
-      <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-9">
+      <form onSubmit={handleSubmit(onSubmit, onInvalid)} noValidate className="space-y-9">
         <FormProgress steps={steps} current={step} />
 
         {step === 0 && chapterService ? (
