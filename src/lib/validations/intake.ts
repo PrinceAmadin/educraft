@@ -76,6 +76,8 @@ export const intakeSubmitSchema = z
     serviceCode: z.string().min(1),
     /** Optional package of the service, e.g. "With Data Analysis". Blank = the base option. */
     serviceVariantId: z.string().trim().max(60).optional().or(z.literal("")),
+    /** Chapter-based report only: which chapters (1-5) the client wants. */
+    chapters: z.array(z.number().int().min(1).max(5)).max(5).optional(),
     /** Documents the client attached (proposal, outline, existing work). */
     attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
 

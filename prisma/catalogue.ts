@@ -177,6 +177,23 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
 
+  // ── Chapter-based final year reports ──
+  // Priced per chapter as a share of the full report (see src/lib/chapter-pricing.ts).
+  // basePrice is the full report without data analysis; the option is the same
+  // report with it. The public price is worked out from the chapters picked.
+  {
+    serviceCode: "FYP-CHAPTERS",
+    serviceName: "Final Year Project (Chapter-based)",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 70000,
+    intakeFormTemplate: "academic_fyp",
+    estimatedDays: 14,
+    description:
+      "Order only the chapters you need. Chapter 1: 12%, Chapter 2: 18%, Chapter 3: 30%, Chapter 4: 35%, Chapter 5: 5% of the full report price.",
+    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+    variants: [{ name: "With Data Analysis", priceAddon: 20000 }],
+  },
+
   // ── Final year combos ──
   {
     serviceCode: "COMBO-PR",

@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { ChapterCalculator } from "@/components/services/ChapterCalculator";
+import { CHAPTER_SERVICE_CODE } from "@/lib/chapter-pricing";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { LuArrowRight, LuChevronDown, LuSearch, LuSearchX, LuX } from "react-icons/lu";
 import { Input } from "@/components/ui/input";
@@ -131,15 +133,22 @@ export function ServicesCatalogue({ services }: { services: PublicService[] }) {
                 {group.label}
               </h2>
               <ul className="divide-y divide-border/80">
-                {rows.map((s) => (
-                  <ServiceRow
-                    key={s.id}
-                    service={s}
-                    open={expanded === s.id}
-                    onToggle={() => setExpanded((cur) => (cur === s.id ? null : s.id))}
-                  />
-                ))}
+                {group.key === "chapters"
+                  ? null
+                  : rows.map((s) => (
+                      <ServiceRow
+                        key={s.id}
+                        service={s}
+                        open={expanded === s.id}
+                        onToggle={() => setExpanded((cur) => (cur === s.id ? null : s.id))}
+                      />
+                    ))}
               </ul>
+              {group.key === "chapters"
+                ? rows
+                    .filter((s) => s.serviceCode === CHAPTER_SERVICE_CODE)
+                    .map((s) => <ChapterSection key={s.id} service={s} />)
+                : null}
             </section>
           ))
         )}
@@ -244,5 +253,46 @@ function ServiceRow({
         ) : null}
       </AnimatePresence>
     </li>
+  );
+}
+
+/** The chapter-based report: pick chapters, see the sum, start with them. */
+function ChapterSection({ service }: { service: PublicService }) {
+  const [chapters, setChapters] = React.useState<number[]>([1, 2]);
+  const [withAnalysis, setWithAnalysis] = React.useState(false);
+  const addon = service.variants[0]?.priceAddon ?? 0;
+  const variant = service.variants[0];
+
+  const query = new URLSearchParams();
+  if (chapters.length > 0) query.set("chapters", chapters.join(","));
+  if (withAnalysis && variant) query.set("option", variant.id);
+
+  return (
+    <div className="pt-4">
+      <p className="max-w-[56ch] text-[13.5px] leading-relaxed text-muted-foreground">
+        You do not have to order the whole report. Each chapter is a fixed share of the full report price; pick the ones you need and the total is worked out below.
+      </p>
+      <div className="mt-5">
+        <ChapterCalculator
+          chapters={chapters}
+          onChapters={setChapters}
+          withAnalysis={withAnalysis}
+          onWithAnalysis={setWithAnalysis}
+          basePrice={service.basePrice}
+          analysisAddon={addon}
+        />
+      </div>
+      <div className="mt-5">
+        {chapters.length > 0 ? (
+          <Link
+            href={`/intake/${service.serviceCode}?${query.toString()}`}
+            className="inline-flex h-12 items-center justify-between gap-6 bg-primary px-6 text-[0.9375rem] font-medium text-primary-foreground [clip-path:polygon(0_0,100%_0,100%_calc(100%-11px),calc(100%-11px)_100%,0_100%)] hover:bg-primary-hover"
+          >
+            Start with these chapters
+            <LuArrowRight className="size-[18px]" aria-hidden />
+          </Link>
+        ) : null}
+      </div>
+    </div>
   );
 }

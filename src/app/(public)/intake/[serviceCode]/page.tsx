@@ -7,6 +7,7 @@ import { getServiceByCode } from "@/lib/services/intake";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { IntakeForm } from "@/components/intake/IntakeForm";
 import { formatNaira } from "@/lib/utils";
+import { isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +25,21 @@ export default async function IntakeServicePage({
   searchParams,
 }: {
   params: { serviceCode: string };
-  searchParams: { ref?: string };
+  searchParams: { ref?: string; chapters?: string; option?: string };
 }) {
   const service = await getServiceByCode(params.serviceCode);
   if (!service) notFound();
 
   const template = resolveTemplate(service.intakeFormTemplate);
+
+  // The price list can hand over a chapter choice and an option.
+  const initialChapters = normalizeChapters(
+    (searchParams.chapters ?? "")
+      .split(",")
+      .map((n) => Number(n))
+      .filter((n) => Number.isInteger(n))
+  );
+  const initialVariantId = service.variants.some((v) => v.id === searchParams.option) ? searchParams.option : "";
 
   // Validate a URL referral code so the form only prefills a real one.
   const ref = searchParams.ref?.trim();
@@ -61,7 +71,9 @@ export default async function IntakeServicePage({
         <p className="mt-1 font-mono text-sm text-muted-foreground">
           {service.pricingModel === "VARIABLE" && service.basePrice === 0
             ? "Price confirmed after review"
-            : `${service.variants.length > 0 ? "from " : ""}${formatNaira(service.basePrice)}`}
+            : isChapterService(service.serviceCode)
+              ? "Priced by the chapters you pick"
+              : `${service.variants.length > 0 ? "from " : ""}${formatNaira(service.basePrice)}`}
           {" · "}~{service.estimatedDays} days
         </p>
       </div>
@@ -84,6 +96,8 @@ export default async function IntakeServicePage({
             select: { id: true, name: true, abbreviation: true },
           })}
           initialReferralCode={initialReferralCode}
+          initialChapters={initialChapters}
+          initialVariantId={initialVariantId}
         />
       ) : (
         <div className="rounded-2xl bg-zone p-6 text-sm">

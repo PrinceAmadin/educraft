@@ -44,7 +44,7 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
 
   const deadline = project.internalDeadline ?? project.clientDeadline;
   const info = deadlineInfo(deadline);
-  const clientFiles = project.files.filter((f) => f.category === "from_client");
+  const clientFiles = project.files.filter((f) => f.category === "from_client" || f.category === "department_outline");
   const mySubmissions = project.files.filter((f) => f.category === "from_worker");
   const showRevisionFeedback = project.status === "REVISION_NEEDED" && project.qaNotes;
 

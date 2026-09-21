@@ -6,6 +6,7 @@ import { emailPendingCommission } from "@/lib/services/ambassador-commission";
 import { IntakeError, submitIntake } from "@/lib/services/intake";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { computePrice } from "@/lib/pricing";
+import { intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
 import {
   callbackBaseUrl,
@@ -167,8 +168,12 @@ export async function initializeIntakePayment(
     throw new PaystackPaymentError("This form does not match the selected service");
   }
 
+  const chapters = normalizeChapters(input.chapters);
+  if (isChapterService(input.serviceCode) && chapters.length === 0) {
+    throw new PaystackPaymentError("Choose at least one chapter");
+  }
   const price = computePrice({
-    basePrice: service.basePrice + variantAddon,
+    basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,

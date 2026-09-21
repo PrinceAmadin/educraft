@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 export function ScrollNav() {
   const reduced = useReducedMotion();
   // Forms have their own sticky action bar; the controls would sit on top of it.
-  const onForm = /^\/(apply|intake|probono)(\/|$)/.test(usePathname() ?? "");
+  const onForm = /^\/(apply|intake|probono|services)(\/|$)/.test(usePathname() ?? "");
   const [state, setState] = React.useState({ needed: false, atTop: true, atBottom: false });
 
   React.useEffect(() => {

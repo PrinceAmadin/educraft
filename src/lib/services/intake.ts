@@ -10,6 +10,7 @@ import {
 } from "@/lib/services/ambassador-commission";
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
+import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { proBonoFinancials } from "@/lib/pro-bono";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
@@ -137,8 +138,12 @@ export async function submitIntake(
     throw new IntakeError("This form does not match the selected service");
   }
 
+  const chapters = normalizeChapters(input.chapters);
+  if (isChapterService(input.serviceCode) && chapters.length === 0) {
+    throw new IntakeError("Choose at least one chapter");
+  }
   const price = computePrice({
-    basePrice: service.basePrice + variantAddon,
+    basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,
@@ -188,6 +193,7 @@ export async function submitIntake(
   add("wordCount", input.wordCount);
   add("lecturerInstructions", input.lecturerInstructions);
   add("proposalNotes", input.proposalNotes);
+  if (isChapterService(input.serviceCode)) add("chapters", chapters);
 
   // IT report
   add("companyName", input.companyName);
@@ -275,12 +281,16 @@ export async function submitIntake(
           supervisorName: input.supervisorName || null,
           hodName: input.hodName || null,
           projectType: input.projectType ? input.projectType : "NOT_APPLICABLE",
-          chapterCount: input.chapterCount ?? null,
+          chapterCount: isChapterService(input.serviceCode) ? chapters.length : (input.chapterCount ?? null),
           referencingStyle: input.referencingStyle ? input.referencingStyle : null,
           dataRequirements: input.dataRequirements ? input.dataRequirements : null,
           minimumPages: input.minimumPages || null,
           departmentOutline: input.departmentOutline || null,
-          specialInstructions: input.specialInstructions || null,
+          specialInstructions: isChapterService(input.serviceCode)
+            ? [`Chapter-based order: Chapter ${chapterListLabel(chapters)} only, not the full report.`, input.specialInstructions]
+                .filter(Boolean)
+                .join("\n\n")
+            : input.specialInstructions || null,
           dedicationType: input.dedicationType || null,
           dedicationDetails,
           acknowledgmentDetails,

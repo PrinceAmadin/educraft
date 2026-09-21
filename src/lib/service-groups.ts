@@ -20,6 +20,7 @@ export interface ServiceGroup {
 
 export const SERVICE_GROUPS: ServiceGroup[] = [
   { key: "fyp", label: "Final year reports", pill: "Final year" },
+  { key: "chapters", label: "Chapter-based reports", pill: "Chapters" },
   { key: "combos", label: "Final year combos", pill: "Combos" },
   { key: "academic", label: "Academic writing", pill: "Academic" },
   { key: "research", label: "Research & analysis", pill: "Research" },
@@ -41,13 +42,14 @@ export interface ServiceTab {
 }
 
 export const SERVICE_TABS: ServiceTab[] = [
-  { key: "fyp", label: "Final year", groups: ["fyp", "combos"] },
+  { key: "fyp", label: "Final year", groups: ["fyp", "chapters", "combos"] },
   { key: "other", label: "Other", groups: ["academic", "research", "presentations", "career", "letters", "editing"] },
   { key: "all", label: "All", groups: null },
 ];
 
 const CODE_RULES: [RegExp, string][] = [
   [/^COMBO/, "combos"],
+  [/^FYP-CHAP/, "chapters"],
   [/^(FYP|THESIS|SEM$|PUB$|PPT-FYP|EDIT-FYP)/, "fyp"],
   [/^PPT/, "presentations"],
   [/^(EDIT|FORMAT|PROOF)/, "editing"],
@@ -85,6 +87,7 @@ export function groupServices<T extends { serviceCode: string; category: string 
 }
 
 interface PricedService {
+  serviceCode?: string;
   basePrice: number;
   pricingModel: string;
   description: string | null;
@@ -97,6 +100,7 @@ interface PricedService {
  * read back rather than duplicated into a second column.
  */
 export function priceLabel(service: PricedService): string {
+  if (service.serviceCode?.toUpperCase().startsWith("FYP-CHAP")) return "by chapter";
   if (service.pricingModel === "QUOTE") return "Custom quote";
   if (service.pricingModel === "VARIABLE" && service.basePrice === 0) {
     const pct = service.description?.match(/(\d+(?:\.\d+)?)\s?%/);

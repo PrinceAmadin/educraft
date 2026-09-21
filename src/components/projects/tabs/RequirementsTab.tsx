@@ -82,7 +82,7 @@ export function RequirementsTab({ project }: { project: ProjectDetail }) {
   const experienceCount = Array.isArray(extra.experience) ? extra.experience.length : 0;
   if (educationCount) serviceRows.push({ label: "Education entries", value: String(educationCount) });
   if (experienceCount) serviceRows.push({ label: "Experience entries", value: String(experienceCount) });
-  const clientFiles = project.files.filter((f) => f.category === "from_client");
+  const clientFiles = project.files.filter((f) => f.category === "from_client" || f.category === "department_outline");
 
   return (
     <div className="space-y-10">

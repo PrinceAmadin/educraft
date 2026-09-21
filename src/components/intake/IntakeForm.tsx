@@ -23,6 +23,8 @@ import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
 import { baseOptionLabel } from "@/lib/service-groups";
+import { ChapterCalculator } from "@/components/services/ChapterCalculator";
+import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
 import { AttachmentsField, UploadBusyContext } from "@/components/intake/AttachmentsField";
 import { VariantField, type ServiceVariantProp } from "@/components/intake/VariantField";
 import { formatNaira } from "@/lib/utils";
@@ -113,12 +115,16 @@ export function IntakeForm({
   service,
   universities,
   initialReferralCode = "",
+  initialChapters = [],
+  initialVariantId = "",
   proBono,
 }: {
   template: IntakeTemplate;
   service: ServiceProp;
   universities: UniversityOption[];
   initialReferralCode?: string;
+  initialChapters?: number[];
+  initialVariantId?: string;
   proBono?: ProBonoMode;
 }) {
   const router = useRouter();
@@ -132,7 +138,8 @@ export function IntakeForm({
     defaultValues: {
       template,
       serviceCode: service.serviceCode,
-      serviceVariantId: "",
+      serviceVariantId: initialVariantId,
+      chapters: initialChapters,
       attachments: [],
       fullName: "",
       phone: "",
@@ -187,11 +194,18 @@ export function IntakeForm({
   const isReview = stepId === "review";
   const isExpress = watch("isExpressDelivery");
   const variantId = watch("serviceVariantId");
+  const chosenChapters = watch("chapters");
+  const chapterService = isChapterService(service.serviceCode);
   const variantAddon = service.variants?.find((v) => v.id === variantId)?.priceAddon ?? 0;
   const [uploading, setUploading] = React.useState(false);
 
   const price = computePrice({
-    basePrice: service.basePrice + variantAddon,
+    basePrice: intakeBasePrice({
+      serviceCode: service.serviceCode,
+      basePrice: service.basePrice,
+      variantAddon,
+      chapters: chosenChapters,
+    }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: Boolean(isExpress),
     downpaymentPercentage: service.downpaymentPercentage,
@@ -207,6 +221,10 @@ export function IntakeForm({
     setSubmitError(null);
     if (uploading) {
       setSubmitError("Please wait for your files to finish uploading.");
+      return;
+    }
+    if (chapterService && step === 0 && normalizeChapters(chosenChapters).length === 0) {
+      setSubmitError("Choose at least one chapter to continue.");
       return;
     }
     const fields = STEP_FIELDS[template][stepId] ?? [];
@@ -304,7 +322,9 @@ export function IntakeForm({
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-9">
         <FormProgress steps={steps} current={step} />
 
-        {step === 0 && service.variants && service.variants.length > 0 ? (
+        {step === 0 && chapterService ? (
+          <ChapterPicker service={service} />
+        ) : step === 0 && service.variants && service.variants.length > 0 ? (
           <VariantField basePrice={service.basePrice} variants={service.variants} />
         ) : null}
 
@@ -425,6 +445,25 @@ function StepContent({
 }
 
 // ── Shared field helpers ─────────────────────────────────────
+
+/** The chapter-based report's chapter choice, bound to the form. */
+function ChapterPicker({ service }: { service: ServiceProp }) {
+  const { watch, setValue } = useFormContext<IntakeSubmitInput>();
+  const variant = service.variants?.[0];
+  return (
+    <section className="space-y-4">
+      <h2 className="text-base font-semibold tracking-tight text-foreground">Choose your chapters</h2>
+      <ChapterCalculator
+        chapters={watch("chapters") ?? []}
+        onChapters={(next) => setValue("chapters", next, { shouldDirty: true })}
+        withAnalysis={Boolean(variant && watch("serviceVariantId") === variant.id)}
+        onWithAnalysis={(on) => setValue("serviceVariantId", on && variant ? variant.id : "", { shouldDirty: true })}
+        basePrice={service.basePrice}
+        analysisAddon={variant?.priceAddon ?? 0}
+      />
+    </section>
+  );
+}
 
 function ReferralField() {
   const { register } = useFormContext<IntakeSubmitInput>();
@@ -627,34 +666,33 @@ function FypProjectStep() {
 function FypRequirementsStep({ service }: { service: ServiceProp }) {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <h2 className="text-lg font-semibold tracking-tight text-foreground">Requirements</h2>
-      <Field label="Department outline" htmlFor="departmentOutline" hint="Paste your department's outline, or describe the structure they expect">
-        <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
+      <Field
+        label="Department outline"
+        htmlFor="departmentOutline"
+        hint="Type or paste your department's outline, or attach the file"
+      >
+        <div className="space-y-2.5">
+          <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
+          <AttachmentsField bare id="att-outline" category="department_outline" />
+        </div>
       </Field>
-      <Field label="Proposal or existing work" htmlFor="proposalNotes" hint="Describe anything you've already written or been given">
-        <Textarea id="proposalNotes" rows={3} {...register("proposalNotes")} />
+      <Field
+        label="Proposal or existing work"
+        htmlFor="proposalNotes"
+        hint="Describe what you have already written or been given, or attach it"
+      >
+        <div className="space-y-2.5">
+          <Textarea id="proposalNotes" rows={3} {...register("proposalNotes")} />
+          <AttachmentsField bare id="att-docs" category="from_client" />
+        </div>
       </Field>
-      <AttachmentsField
-        id="att-outline"
-        category="department_outline"
-        label="Department outline or table of contents (file)"
-        hint="Upload the outline, TOC or format your department gave you"
-      />
-      <AttachmentsField
-        id="att-docs"
-        category="from_client"
-        label="Proposal or other documents (files)"
-        hint="Your approved proposal, earlier chapters, data files, anything we should work from"
-      />
       <Field label="Special instructions" htmlFor="specialInstructions">
         <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
       </Field>
       <DeadlineField />
       <ExpressField service={service} />
-      <p className="text-xs text-muted-foreground">
-        You&apos;ll share files (outline, proposal, questionnaires) with us on WhatsApp after submitting.
-      </p>
     </div>
   );
 }
@@ -718,20 +756,23 @@ function SeminarStep() {
 function SeminarRequirementsStep({ service }: { service: ServiceProp }) {
   const { register } = useFormContext<IntakeSubmitInput>();
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <h2 className="text-lg font-semibold tracking-tight text-foreground">Requirements</h2>
-      <Field label="Department outline / structure" htmlFor="departmentOutline" hint="Paste or describe what your department expects">
-        <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
+      <Field
+        label="Department outline / structure"
+        htmlFor="departmentOutline"
+        hint="Type or paste what your department expects, or attach the file"
+      >
+        <div className="space-y-2.5">
+          <Textarea id="departmentOutline" rows={4} {...register("departmentOutline")} />
+          <AttachmentsField bare id="att-outline" category="department_outline" />
+        </div>
       </Field>
-      <AttachmentsField
-        id="att-outline"
-        category="department_outline"
-        label="Department outline or format (file)"
-        hint="Upload what your department expects"
-      />
-      <AttachmentsField id="att-docs" category="from_client" label="Other documents (files)" />
-      <Field label="Special instructions" htmlFor="specialInstructions">
-        <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
+      <Field label="Special instructions" htmlFor="specialInstructions" hint="Attach any other documents here too">
+        <div className="space-y-2.5">
+          <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
+          <AttachmentsField bare id="att-docs" category="from_client" />
+        </div>
       </Field>
       <DeadlineField />
       <ExpressField service={service} />
@@ -1066,21 +1107,24 @@ function FilesStep({ template, service }: { template: IntakeTemplate; service: S
           : "Special instructions";
 
   return (
-    <div className="space-y-5">
-      <h2 className="text-lg font-semibold tracking-tight text-foreground">Instructions</h2>
-      <Field label={label} htmlFor="specialInstructions">
-        <Textarea id="specialInstructions" rows={5} {...register("specialInstructions")} />
-      </Field>
-      <AttachmentsField
-        id="att-docs"
-        category="from_client"
-        label={template === "editing" ? "Your document (file)" : "Documents and requirements (files)"}
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">
+        {template === "editing" ? "Your document" : "Instructions"}
+      </h2>
+      <Field
+        label={label}
+        htmlFor="specialInstructions"
         hint={
           template === "editing"
-            ? "Upload the document you want edited or formatted"
-            : "Lecturer instructions, an outline, existing work, or anything we should work from"
+            ? "Attach the document you want edited or formatted, and add any notes"
+            : "Type your requirements, and attach any documents (lecturer instructions, an outline, existing work)"
         }
-      />
+      >
+        <div className="space-y-2.5">
+          <Textarea id="specialInstructions" rows={5} {...register("specialInstructions")} />
+          <AttachmentsField bare id="att-docs" category="from_client" />
+        </div>
+      </Field>
       {template !== "editing" ? <DeadlineField /> : null}
       {template === "design_presentation" ? <ExpressField service={service} /> : null}
     </div>
@@ -1126,6 +1170,9 @@ function ReviewStep({
         ) : null}
         {template === "academic_it" && v.companyName ? <Row label="Company" value={v.companyName} /> : null}
         {template === "editing" && v.editingType ? <Row label="Service" value={v.editingType} /> : null}
+        {isChapterService(service.serviceCode) ? (
+          <Row label="Chapters" value={chapterListLabel(v.chapters ?? [])} />
+        ) : null}
         {service.variants?.length && v.serviceVariantId ? (
           <Row label="Option" value={service.variants.find((x) => x.id === v.serviceVariantId)?.name ?? ""} />
         ) : service.variants?.length ? (

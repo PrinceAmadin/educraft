@@ -26,11 +26,14 @@ export function AttachmentsField({
   label,
   hint,
   id,
+  bare = false,
 }: {
   category: IntakeAttachment["category"];
-  label: string;
+  label?: string;
   hint?: string;
   id: string;
+  /** Just the picker and its list, to sit under a text field that supplies the label. */
+  bare?: boolean;
 }) {
   const { watch, setValue } = useFormContext<IntakeSubmitInput>();
   const setBusy = React.useContext(UploadBusyContext);
@@ -97,15 +100,14 @@ export function AttachmentsField({
     );
   }
 
-  return (
-    <Field label={label} htmlFor={id} hint={hint}>
+  const body = (
       <div className="space-y-2">
         <label
           htmlFor={id}
           className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl bg-input px-4 text-sm text-muted-foreground ring-1 ring-inset ring-input-border transition-colors hover:bg-elevated"
         >
           <LuPaperclip className="size-4 shrink-0" aria-hidden />
-          <span>{busy ? "Uploading…" : "Choose files to attach"}</span>
+          <span>{busy ? "Uploading…" : "Or attach the file"}</span>
           <span className="ml-auto hidden text-xs text-subtle sm:block">PDF, Word, PowerPoint, images · up to 25 MB</span>
         </label>
         <input
@@ -151,6 +153,12 @@ export function AttachmentsField({
           </p>
         ) : null}
       </div>
+  );
+
+  if (bare) return body;
+  return (
+    <Field label={label ?? ""} htmlFor={id} hint={hint}>
+      {body}
     </Field>
   );
 }
