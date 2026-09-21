@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { headers } from "next/headers";
 import QRCode from "qrcode";
-import { LuUsers, LuUserCheck, LuPercent, LuWallet, LuInbox } from "react-icons/lu";
+import { LuUsers, LuUserCheck, LuPercent, LuWallet, LuInbox, LuArrowRight } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import {
   getAmbassadorByUserId,
@@ -71,6 +72,15 @@ export default async function AmbassadorDashboardPage() {
           tone="gold"
         />
       </div>
+
+      {/* The phone bottom bar is full, so the referrals list is reached from here. */}
+      <Link
+        href="/ambassador/referrals"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+      >
+        See everyone you referred
+        <LuArrowRight className="size-4" aria-hidden />
+      </Link>
 
       <section className="surface p-4 sm:p-5">
         <div className="flex items-center justify-between">

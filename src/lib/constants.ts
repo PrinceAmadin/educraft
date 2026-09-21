@@ -204,6 +204,7 @@ export const AMBASSADOR_NAV: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/ambassador", icon: LayoutDashboard },
       { label: "My link", href: "/ambassador/link", icon: MousePointerClick },
+      { label: "Referrals", href: "/ambassador/referrals", icon: Users },
       { label: "Commissions", href: "/ambassador/commissions", icon: Wallet },
       { label: "Leaderboard", href: "/ambassador/leaderboard", icon: Trophy },
       { label: "Profile", href: "/ambassador/profile", icon: User },
