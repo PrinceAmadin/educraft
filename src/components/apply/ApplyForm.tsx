@@ -305,6 +305,7 @@ export function ApplyForm({
             <FormSection title="Why EduCraft">
               <Field
                 label="Why do you want to be an EduCraft ambassador?"
+                required
                 htmlFor="a-why"
                 error={errors.motivation?.message as string | undefined}
                 hint={`${motivation.length}/200 characters`}

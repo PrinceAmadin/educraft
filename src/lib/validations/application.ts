@@ -18,9 +18,8 @@ export const ambassadorApplicationSchema = z
     motivation: z
       .string()
       .trim()
-      .max(200, "Keep it under 200 characters")
-      .optional()
-      .or(z.literal("")),
+      .min(10, "Tell us in a sentence why you want to join")
+      .max(200, "Keep it under 200 characters"),
     // Payment details — used to pay commission, so held to the same bar as
     // the original ambassador app: a real bank, a 10-digit account number.
     bankName: z.string().trim().min(2, "Select or enter your bank").max(80),
