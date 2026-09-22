@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { INTAKE_FIELDS } from "@/lib/intake-fields";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { FileList } from "@/components/projects/tabs/FileList";
+import { OrderDetailsNotice } from "@/components/projects/OrderDetailsNotice";
 import { formatDate } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
 
@@ -109,6 +110,13 @@ export function RequirementsTab({ project }: { project: ProjectDetail }) {
           ))}
         </dl>
       </section>
+
+      <OrderDetailsNotice
+        audience="admin"
+        additionalData={project.additionalData}
+        client={project.client}
+        universityName={project.client.university?.name ?? ""}
+      />
 
       <section>
         <h3 className="text-[15px] font-semibold text-foreground">Project details</h3>

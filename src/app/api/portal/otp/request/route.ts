@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const schema = z.object({ identifier: z.string().trim().min(1).max(120) });
 
 /**
- * POST /api/portal/otp/request  { "identifier": an email, or an EC-A-/EC-W- ID }
+ * POST /api/portal/otp/request  { "identifier": an email, or an EC-A- / ECW- ID }
  *
  * Emails a code to the address on that worker or ambassador record. The caller
  * never chooses where it goes, and the answer is identical whether or not the

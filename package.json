@@ -18,6 +18,7 @@
     "db:reset": "dotenv -e .env.local -- prisma migrate reset",
     "migrate:legacy": "dotenv -e .env.local -- tsx scripts/migrate-legacy-data.ts",
     "migrate:ambassador-panel": "dotenv -e .env.local -- tsx scripts/migrate-ambassador-panel.ts",
+    "migrate:ids": "dotenv -e .env.local -- tsx scripts/migrate-id-formats.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
     "catalogue:sync": "dotenv -e .env.local -- tsx scripts/sync-service-catalogue.ts"
   },

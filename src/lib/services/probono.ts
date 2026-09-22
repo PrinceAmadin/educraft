@@ -189,7 +189,7 @@ export async function submitThroughInvite(
   token: string,
   deviceSecret: string | null,
   input: IntakeSubmitInput
-): Promise<{ projectId: string }> {
+): Promise<{ projectId: string; clientId: string }> {
   if (!deviceSecret) throw new ProBonoError("This link is locked to another device");
 
   const invite = await db.proBonoInvite.findUnique({ where: { token } });
@@ -215,9 +215,9 @@ export async function submitThroughInvite(
     // reopen the link — the submission did go through.
     const created = await db.project.findUnique({
       where: { proBonoInviteId: invite.id },
-      select: { projectId: true },
+      select: { projectId: true, client: { select: { clientId: true } } },
     });
-    if (created) return { projectId: created.projectId };
+    if (created) return { projectId: created.projectId, clientId: created.client.clientId };
     await db.proBonoInvite.update({
       where: { id: invite.id },
       data: { status: "OPEN", usedAt: null },

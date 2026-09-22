@@ -36,6 +36,20 @@ const experienceEntry = z.object({
  */
 export const ATTACHMENT_CATEGORIES = ["from_client", "department_outline"] as const;
 export const MAX_ATTACHMENTS = 10;
+
+/**
+ * The public host of OUR Blob store, read from the server's token the same way
+ * @vercel/blob does ("vercel_blob_rw_<storeId>_…" -> "<storeid>.public.blob.
+ * vercel-storage.com"). Null in the browser (the token is server-only) and when
+ * no token is set; the API re-validates on the server, where it is known, so a
+ * link to some other Vercel customer's store is refused.
+ */
+function ourBlobHost(): string | null {
+  if (typeof window !== "undefined") return null;
+  const storeId = (process.env.BLOB_READ_WRITE_TOKEN ?? "").split("_")[3];
+  return storeId ? `${storeId.toLowerCase()}.public.blob.vercel-storage.com` : null;
+}
+
 export const attachmentSchema = z.object({
   url: z
     .string()
@@ -44,7 +58,9 @@ export const attachmentSchema = z.object({
     .refine((u) => {
       try {
         const { protocol, hostname } = new URL(u);
-        return protocol === "https:" && hostname.endsWith(".blob.vercel-storage.com");
+        if (protocol !== "https:" || !hostname.endsWith(".blob.vercel-storage.com")) return false;
+        const ours = ourBlobHost();
+        return !ours || hostname.toLowerCase() === ours;
       } catch {
         return false;
       }

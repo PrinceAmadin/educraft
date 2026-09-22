@@ -20,6 +20,9 @@ const STORAGE_KEY = "educraft:sidebar-collapsed";
 export function isActive(pathname: string, item: NavItem) {
   // AI usage lives under /admin/finance but has its own nav entry — don't light up both.
   if (item.href === "/admin/finance" && pathname.startsWith("/admin/finance/ai-usage")) return false;
+  if (item.alsoActiveUnder && (pathname === item.alsoActiveUnder || pathname.startsWith(`${item.alsoActiveUnder}/`))) {
+    return true;
+  }
   if (item.matchNested) {
     return pathname === item.href || pathname.startsWith(`${item.href}/`);
   }

@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
 import { recordClick } from "@/lib/click-tracking/record-click";
 import { db } from "@/lib/db";
+import { EDUCRAFT_WHATSAPP, waLink } from "@/lib/whatsapp";
 
 /**
  * Referral links → WhatsApp, exactly as the original `api/redirect.ts`:
@@ -24,10 +25,7 @@ import { db } from "@/lib/db";
 
 export type ReferralKind = "ambassador" | "ecca" | "ecsa";
 
-const EDUCRAFT_WHATSAPP = "2347063421088";
-
-const wa = (number: string, message: string) =>
-  `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
+const wa = waLink;
 
 function trackClick(id: string, req: Request): void {
   const redisWrite = redisConfigured()

@@ -1,5 +1,6 @@
 import { LuDownload, LuFile } from "react-icons/lu";
 import { formatDate } from "@/lib/utils";
+import { safeHref } from "@/lib/safe-href";
 import type { ProjectDetail } from "@/lib/services/projects";
 
 type ProjectFile = ProjectDetail["files"][number];
@@ -26,15 +27,19 @@ export function FileList({ files }: { files: ProjectFile[] }) {
                 {size ? ` · ${size}` : ""}
               </p>
             </div>
-            <a
-              href={file.fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Download ${file.fileName}`}
-            >
-              <LuDownload className="size-4" aria-hidden />
-            </a>
+            {safeHref(file.fileUrl) ? (
+              <a
+                href={safeHref(file.fileUrl)!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Download ${file.fileName}`}
+              >
+                <LuDownload className="size-4" aria-hidden />
+              </a>
+            ) : (
+              <span className="shrink-0 text-xs text-danger">Unsafe link hidden</span>
+            )}
           </li>
         );
       })}

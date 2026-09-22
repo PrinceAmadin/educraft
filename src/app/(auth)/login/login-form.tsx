@@ -23,7 +23,9 @@ type FormValues = z.infer<typeof schema>;
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl");
+  // Only a path on this site: never bounce a fresh sign-in to another website.
+  const requested = searchParams.get("callbackUrl");
+  const callbackUrl = requested && requested.startsWith("/") && !requested.startsWith("//") && !requested.includes("\\") ? requested : null;
 
   const [showPassword, setShowPassword] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);

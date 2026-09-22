@@ -48,7 +48,7 @@ type UniversityOption = { id: string; name: string; abbreviation: string };
  */
 export interface ProBonoMode {
   submitUrl: string;
-  onDone: (projectId: string) => void;
+  onDone: (result: { projectId: string; clientId?: string }) => void;
 }
 
 const ProBonoContext = React.createContext(false);
@@ -299,12 +299,12 @@ export function IntakeForm({
           body: JSON.stringify(data),
         });
         const body = (await res.json().catch(() => null)) as
-          | { projectId?: string; error?: string }
+          | { projectId?: string; clientId?: string; error?: string }
           | null;
         if (!res.ok || !body?.projectId) {
           throw new Error(body?.error ?? "Could not submit. Please try again.");
         }
-        proBono.onDone(body.projectId);
+        proBono.onDone({ projectId: body.projectId, clientId: body.clientId });
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : "Could not submit. Please try again.");
       }

@@ -58,24 +58,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         };
       },
     }),
-    // Clients: Client ID + the password they set (once, with an emailed code).
+    // Clients: Client ID (or email) + the password they set (once, with an emailed code).
     Credentials({
       id: "client-password",
       name: "Client password",
       credentials: {
-        clientId: { label: "Client ID", type: "text" },
+        identifier: { label: "Client ID or email", type: "text" },
         password: { label: "Password", type: "password" },
       },
       async authorize(raw, request) {
+        // `clientId` is the field name older cached pages still send.
         const parsed = z
-          .object({ clientId: z.string().min(1).max(40), password: z.string().min(1).max(200) })
+          .object({
+            identifier: z.string().min(1).max(160).optional(),
+            clientId: z.string().min(1).max(160).optional(),
+            password: z.string().min(1).max(200),
+          })
+          .refine((v) => v.identifier || v.clientId)
           .safeParse(raw);
         if (!parsed.success) return null;
 
         const forwarded = request?.headers?.get("x-forwarded-for")?.split(",")[0]?.trim();
         const ip = forwarded || request?.headers?.get("x-real-ip") || "unknown";
 
-        const client = await verifyPassword({ clientIdInput: parsed.data.clientId, password: parsed.data.password, ip });
+        const client = await verifyPassword({
+          identifierInput: (parsed.data.identifier ?? parsed.data.clientId)!,
+          password: parsed.data.password,
+          ip,
+        });
         if (!client) return null;
         return { id: client.userId, email: client.email, name: client.name, role: "CLIENT" };
       },

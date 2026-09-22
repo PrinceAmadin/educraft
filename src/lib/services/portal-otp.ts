@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { clientCodeEmail } from "@/lib/emails/client-code";
 import { realEmail } from "@/lib/client-email";
+import { normalizeWorkerIdInput } from "@/lib/id-format";
 import {
   hashIp,
   CODE_TTL_MS,
@@ -84,7 +85,7 @@ function refuse(reason: string): null {
 }
 
 /**
- * Who is behind an email or an EC-A-/EC-W- ID. The PROFILES decide: the worker
+ * Who is behind an email or an EC-A-/ECW- ID. The PROFILES decide: the worker
  * and ambassador records that carry this email, and the one login they already
  * sit on (a person's worker login may use a different email than the record).
  * Null when nobody qualifies (unknown, suspended, staff/client email, records on
@@ -97,8 +98,8 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
   if (/^EC-A-\d{3,8}$/i.test(value)) {
     const row = await db.ambassador.findUnique({ where: { ambassadorId: value.toUpperCase() }, select: { email: true } });
     email = realEmail(row?.email);
-  } else if (/^EC-W-\d{3,8}$/i.test(value)) {
-    const row = await db.worker.findUnique({ where: { workerId: value.toUpperCase() }, select: { email: true } });
+  } else if (normalizeWorkerIdInput(value)) {
+    const row = await db.worker.findUnique({ where: { workerId: normalizeWorkerIdInput(value)! }, select: { email: true } });
     email = realEmail(row?.email);
   } else {
     email = realEmail(value);

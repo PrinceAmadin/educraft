@@ -2,15 +2,26 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/shared/Logo";
 import { ClientLoginForm } from "@/app/(auth)/client/login/client-login-form";
+import { normalizeClientIdInput } from "@/lib/id-format";
 
 export const metadata: Metadata = {
   title: "Client sign in",
   robots: { index: false, follow: false },
 };
 
-export default function ClientLoginPage({ searchParams }: { searchParams: { id?: string } }) {
+/** Only a path inside the client dashboard, so the page cannot be used to bounce people elsewhere. */
+function safeClientPath(raw: string | undefined): string {
+  if (!raw || !raw.startsWith("/client") || raw.startsWith("//") || raw.includes("\\")) return "/client";
+  return raw.startsWith("/client/login") ? "/client" : raw;
+}
+
+export default function ClientLoginPage({
+  searchParams,
+}: {
+  searchParams: { id?: string; callbackUrl?: string };
+}) {
   // The intake success page hands over the Client ID; only a well-formed one is used.
-  const initialId = /^EC-C-\d{3,}$/i.test(searchParams.id ?? "") ? (searchParams.id as string).toUpperCase() : "";
+  const initialId = normalizeClientIdInput(searchParams.id ?? "") ?? "";
   return (
     <div className="w-full max-w-[400px]">
       <div className="mb-9">
@@ -19,11 +30,12 @@ export default function ClientLoginPage({ searchParams }: { searchParams: { id?:
           Open your dashboard
         </h1>
         <p className="mt-2 text-[15px] text-muted-foreground">
-          Sign in with your Client ID and password. First time here? Set your password with a code we email you.
+          Sign in with your Client ID or email and your password. First time here? Set your password with a code we
+          email you.
         </p>
       </div>
 
-      <ClientLoginForm initialId={initialId} />
+      <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} />
 
       <p className="mt-9 text-sm text-muted-foreground">
         Not a client?{" "}

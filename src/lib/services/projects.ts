@@ -24,6 +24,7 @@ import {
   type TransitionCandidate,
 } from "@/lib/pipeline";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
 import type { CreateProjectInput } from "@/lib/validations/projects";
 
 export { TRANSITIONS, allowedTransitions } from "@/lib/pipeline";
@@ -911,6 +912,21 @@ export async function createProjectManual(
   if (input.courseCode) additionalData.courseCode = input.courseCode;
   if (input.wordCount) additionalData.wordCount = input.wordCount;
 
+  // One client ID per person: a "new" client whose email is already on record
+  // must be picked as the existing client instead of becoming a second record.
+  if (input.clientMode === "new" && input.email?.trim()) {
+    const sameEmail = await db.client.findFirst({
+      where: { email: { equals: input.email.trim(), mode: "insensitive" } },
+      orderBy: { createdAt: "asc" },
+      select: { clientId: true, fullName: true },
+    });
+    if (sameEmail) {
+      throw new TransitionError(
+        `${sameEmail.fullName} (${sameEmail.clientId}) already uses this email. Choose "Existing client" and pick them, so they keep one client ID.`
+      );
+    }
+  }
+
   // Ids generated up front so the transaction only does writes.
   const newProjectId = await nextId("PROJECT");
   const newClientId = input.clientMode === "new" ? await nextId("CLIENT") : null;
@@ -1049,60 +1065,60 @@ export async function createProjectManual(
 // ID generation
 // ─────────────────────────────────────────────────────────────
 
-const ID_PREFIX = {
-  PROJECT: "EC",
-  CLIENT: "EC-C",
-  WORKER: "EC-W",
-  AMBASSADOR: "EC-A",
-  PAYMENT: "EC-PAY",
-} as const;
+/**
+ * Where each ID lives, and which stored spellings count towards the next
+ * number. The pre-Sept-2026 client/worker spellings (EC-C-, EC-W-) still count,
+ * so a row created before `npm run migrate:ids` runs can never take a number
+ * that migration will need. Table and column names are fixed here, never
+ * user input — the only reason they may go into raw SQL.
+ */
+const ID_SOURCE: Record<IdKind, { table: string; column: string; pattern: string }> = {
+  PROJECT: { table: "Project", column: "projectId", pattern: "^EC-([0-9]+)$" },
+  CLIENT: { table: "Client", column: "clientId", pattern: "^(?:ECC-|EC-C-)([0-9]+)$" },
+  WORKER: { table: "Worker", column: "workerId", pattern: "^(?:ECW-|EC-W-)([0-9]+)$" },
+  AMBASSADOR: { table: "Ambassador", column: "ambassadorId", pattern: "^EC-A-([0-9]+)$" },
+  PAYMENT: { table: "Payment", column: "paymentId", pattern: "^EC-PAY-([0-9]+)$" },
+};
+
+async function idTaken(kind: IdKind, id: string): Promise<boolean> {
+  switch (kind) {
+    case "PROJECT":
+      return (await db.project.count({ where: { projectId: id } })) > 0;
+    case "CLIENT":
+      return (await db.client.count({ where: { clientId: id } })) > 0;
+    case "WORKER":
+      return (await db.worker.count({ where: { workerId: id } })) > 0;
+    case "AMBASSADOR":
+      return (await db.ambassador.count({ where: { ambassadorId: id } })) > 0;
+    case "PAYMENT":
+      return (await db.payment.count({ where: { paymentId: id } })) > 0;
+  }
+}
 
 /**
- * Sequential 5-digit id per entity type, e.g. EC-00234, EC-PAY-00007.
- * Derived from the current row count plus a collision retry — good enough
- * at this scale and readable, which the blueprint asks for.
+ * Next sequential id for an entity type (formats in src/lib/id-format.ts):
+ * the highest number already used, plus one. Max-based rather than
+ * count-based, so deleting a row in the middle can never hand out a number
+ * that is still taken.
+ *
+ * Always reads through `db` (never a transaction client) and is meant to be
+ * called BEFORE opening a transaction — keeping these round-trips out of the
+ * interactive-transaction budget. Callers that write inside a transaction
+ * should catch a P2002 on the id column and retry with a fresh call.
  */
-/**
- * Sequential id for an entity type. Always reads through `db` (never a
- * transaction client) and is meant to be called BEFORE opening a transaction —
- * keeping slow count/exists round-trips out of the interactive-transaction
- * budget. Callers that write inside a transaction should catch a P2002 on the
- * id column and retry with a fresh call.
- */
-export async function nextId(kind: keyof typeof ID_PREFIX): Promise<string> {
-  const prefix = ID_PREFIX[kind];
+export async function nextId(kind: IdKind): Promise<string> {
+  const { table, column, pattern } = ID_SOURCE[kind];
+  const rows = await db.$queryRaw<{ max: number | null }[]>(
+    Prisma.sql`SELECT MAX(CAST(substring(${Prisma.raw(`"${column}"`)} FROM ${pattern}::text) AS INTEGER)) AS max
+               FROM ${Prisma.raw(`"${table}"`)}`
+  );
+  const highest = rows[0]?.max ?? 0;
 
-  for (let attempt = 0; attempt < 5; attempt++) {
-    let count: number;
-    let exists: (id: string) => Promise<boolean>;
-
-    switch (kind) {
-      case "PROJECT":
-        count = await db.project.count();
-        exists = async (id) => (await db.project.count({ where: { projectId: id } })) > 0;
-        break;
-      case "CLIENT":
-        count = await db.client.count();
-        exists = async (id) => (await db.client.count({ where: { clientId: id } })) > 0;
-        break;
-      case "WORKER":
-        count = await db.worker.count();
-        exists = async (id) => (await db.worker.count({ where: { workerId: id } })) > 0;
-        break;
-      case "AMBASSADOR":
-        count = await db.ambassador.count();
-        exists = async (id) => (await db.ambassador.count({ where: { ambassadorId: id } })) > 0;
-        break;
-      case "PAYMENT":
-        count = await db.payment.count();
-        exists = async (id) => (await db.payment.count({ where: { paymentId: id } })) > 0;
-        break;
-    }
-
-    const candidate = `${prefix}-${String(count + 1 + attempt).padStart(5, "0")}`;
-    if (!(await exists(candidate))) return candidate;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const candidate = formatId(kind, highest + attempt);
+    if (!(await idTaken(kind, candidate))) return candidate;
   }
 
   // Fall back to a timestamp suffix rather than loop forever.
-  return `${prefix}-${Date.now().toString().slice(-6)}`;
+  return `${ID_FORMAT[kind].prefix}${Date.now().toString().slice(-6)}`;
 }

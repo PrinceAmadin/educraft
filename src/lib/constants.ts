@@ -153,6 +153,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** Match nested routes (e.g. /admin/projects/123) instead of exact match. */
   matchNested?: boolean;
+  /** Also light up anywhere under this path (e.g. the client's /client/projects/… pages for "/client"). */
+  alsoActiveUnder?: string;
 }
 
 export interface NavSection {
@@ -239,12 +241,20 @@ export const AMBASSADOR_MOBILE_NAV: NavItem[] = [
   { label: "Profile", href: "/ambassador/profile", icon: User },
 ];
 
-/** The client's own dashboard is built separately; this is just its entry point in the shell. */
+/** Clients: their projects (each with its own tabs) and their profile. */
 export const CLIENT_NAV: NavSection[] = [
-  { items: [{ label: "Home", href: "/client", icon: LayoutDashboard }] },
+  {
+    items: [
+      { label: "My projects", href: "/client", icon: FolderKanban, alsoActiveUnder: "/client/projects" },
+      { label: "Profile", href: "/client/profile", icon: User },
+    ],
+  },
 ];
 
-export const CLIENT_MOBILE_NAV: NavItem[] = [{ label: "Home", href: "/client", icon: LayoutDashboard }];
+export const CLIENT_MOBILE_NAV: NavItem[] = [
+  { label: "Projects", href: "/client", icon: FolderKanban, alsoActiveUnder: "/client/projects" },
+  { label: "Profile", href: "/client/profile", icon: User },
+];
 
 export type NavRole = "admin" | "worker" | "ambassador" | "client";
 

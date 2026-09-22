@@ -23,22 +23,32 @@ type Props = {
 
 /** The intake form for a pro bono link, then its confirmation. */
 export function ProBonoIntake({ token, template, service, universities }: Props) {
-  const [projectId, setProjectId] = React.useState<string | null>(null);
+  const [done, setDone] = React.useState<{ projectId: string; clientId?: string } | null>(null);
 
-  if (projectId) {
+  if (done) {
     return (
       <div className="rounded-2xl bg-zone p-6">
         <LuCircleCheck className="size-8 text-success" aria-hidden />
         <h2 className="mt-3 text-xl font-semibold tracking-tight text-foreground">Project received</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Save this ID. Sign in with your Client ID to track your project.
-        </p>
-        <p className="mt-2 font-mono text-2xl font-bold tracking-tight text-foreground">{projectId}</p>
+        <dl className="mt-4 grid grid-cols-2 gap-4">
+          {done.clientId ? (
+            <div>
+              <dt className="meta-label">Client ID</dt>
+              <dd className="mt-1 font-mono text-xl font-bold tracking-tight text-foreground">{done.clientId}</dd>
+              <dd className="mt-1 text-xs text-muted-foreground">Sign in with it or your email.</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt className="meta-label">Project ID</dt>
+            <dd className="mt-1 font-mono text-xl font-bold tracking-tight text-foreground">{done.projectId}</dd>
+            <dd className="mt-1 text-xs text-muted-foreground">This order.</dd>
+          </div>
+        </dl>
         <p className="mt-4 text-sm text-muted-foreground">
           This link has now been used and will not open again.
         </p>
         <Link
-          href="/client/login"
+          href={done.clientId ? `/client/login?id=${encodeURIComponent(done.clientId)}` : "/client/login"}
           className="mt-5 inline-flex min-h-11 items-center text-sm font-medium text-primary hover:underline"
         >
           Sign in to track
@@ -54,7 +64,7 @@ export function ProBonoIntake({ token, template, service, universities }: Props)
       universities={universities}
       proBono={{
         submitUrl: `/api/probono/${encodeURIComponent(token)}/submit`,
-        onDone: setProjectId,
+        onDone: setDone,
       }}
     />
   );

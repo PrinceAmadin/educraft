@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
+import type { SubmittedContact } from "@/lib/submitted-contact";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates } from "@/lib/services/settings";
 import {
@@ -86,6 +87,8 @@ export async function getServiceByCode(serviceCode: string): Promise<PublicServi
 
 export interface IntakeResult {
   projectId: string;
+  /** The client's display ID (ECC-0001), the same one for all their orders. */
+  clientId: string;
 }
 
 export class IntakeError extends Error {}
@@ -246,27 +249,58 @@ export async function submitIntake(
     ? { details: input.acknowledgmentDetails }
     : Prisma.JsonNull;
 
-  const newClientId = await nextId("CLIENT");
+  // One client ID per person (Sept 2026): a returning client's order joins their
+  // existing record, matched by email. The public form never overwrites what is
+  // on record; what was typed this time goes on the project instead
+  // (see src/lib/submitted-contact.ts).
+  const typedEmail = input.email?.trim() || "";
+  const returningClient = typedEmail
+    ? await db.client.findFirst({
+        where: { email: { equals: typedEmail, mode: "insensitive" } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, clientId: true, referredById: true },
+      })
+    : null;
+  if (returningClient) {
+    const typed: SubmittedContact = {
+      fullName: input.fullName.trim(),
+      phone: input.phone.trim(),
+      email: typedEmail,
+      universityId: input.universityId as string,
+      faculty: input.faculty || "",
+      department: (input.department || "General").trim(),
+      level: (input.level || "").trim(),
+    };
+    additionalData.submittedContact = typed;
+  }
+
+  const newClientId = returningClient ? null : await nextId("CLIENT");
   const newProjectId = await nextId("PROJECT");
 
   const created = await db.$transaction(
     async (tx) => {
-      const client = await tx.client.create({
-        data: {
-          clientId: newClientId,
-          fullName: input.fullName.trim(),
-          phone: input.phone.trim(),
-          email: input.email || null,
-          universityId: input.universityId as string,
-          faculty: input.faculty || "",
-          department: (input.department || "General").trim(),
-          level: (input.level || "").trim(),
-          referredById: ambassadorId,
-          referralCodeUsed,
-          status: "Active",
-        },
-        select: { id: true },
-      });
+      const client =
+        returningClient ??
+        (await tx.client.create({
+            data: {
+              clientId: newClientId as string,
+              fullName: input.fullName.trim(),
+              phone: input.phone.trim(),
+              email: input.email || null,
+              universityId: input.universityId as string,
+              faculty: input.faculty || "",
+              department: (input.department || "General").trim(),
+              level: (input.level || "").trim(),
+              referredById: ambassadorId,
+              referralCodeUsed,
+              status: "Active",
+            },
+            select: { id: true, clientId: true, referredById: true },
+          }));
+      // The first ambassador credited for a returning client becomes their referrer.
+      if (returningClient && ambassadorId && !returningClient.referredById) {
+        await tx.client.update({ where: { id: returningClient.id }, data: { referredById: ambassadorId, referralCodeUsed } });
+      }
 
       const project = await tx.project.create({
         data: {
@@ -375,7 +409,7 @@ export async function submitIntake(
         },
       });
 
-      return project;
+      return { ...project, clientCode: client.clientId };
     },
     { timeout: 15_000 }
   );
@@ -399,5 +433,5 @@ export async function submitIntake(
   // No commission email here: anyone can submit this public form with a
   // referral code. The ambassador is emailed once the downpayment is verified
   // (see verifyPayment → emailPendingCommission).
-  return { projectId: created.projectId };
+  return { projectId: created.projectId, clientId: created.clientCode };
 }

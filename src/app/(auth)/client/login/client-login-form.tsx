@@ -3,27 +3,32 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { LuCircleAlert, LuLoaderCircle, LuMailCheck } from "react-icons/lu";
+import { LuCircleAlert, LuExternalLink, LuLoaderCircle, LuMailCheck } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CLIENT_ID_EXAMPLE, normalizeClientIdInput } from "@/lib/id-format";
 
-const ID_PATTERN = /^EC-C-\d{3,8}$/i;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESEND_SECONDS = 60;
 const PASSWORD_MIN = 8;
 
 type Step = "signin" | "request" | "setup";
 
+/** In-app browsers (WhatsApp, Facebook, Instagram) keep their own sign-in, separate from Chrome/Safari. */
+const IN_APP_BROWSER = /WhatsApp|FBAN|FBAV|Instagram/i;
+
 /**
- * Returning clients: Client ID + password. First time (or forgot password): the
- * code goes to the email already on the client, never to a typed address, and
- * proves ownership before a password can be set. The wording never says whether
- * an ID exists.
+ * Returning clients: Client ID (or email) + password. First time (or forgot
+ * password): the code goes to the email already on the client, never to a
+ * typed address, and proves ownership before a password can be set. The
+ * wording never says whether an ID or email exists.
  */
-export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
+export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { initialId?: string; callbackUrl?: string }) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>("signin");
-  const [clientId, setClientId] = React.useState(initialId);
+  const [identifier, setIdentifier] = React.useState(initialId);
+  const [inAppBrowser, setInAppBrowser] = React.useState(false);
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [code, setCode] = React.useState("");
@@ -32,24 +37,29 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
   const [cooldown, setCooldown] = React.useState(0);
 
   React.useEffect(() => {
+    setInAppBrowser(IN_APP_BROWSER.test(navigator.userAgent));
+  }, []);
+
+  React.useEffect(() => {
     if (cooldown <= 0) return;
     const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
     return () => clearTimeout(t);
   }, [cooldown]);
 
+  /** "ecc 9" -> "ECC-0009", an email -> lower case, anything else -> an error. */
   function idOrError(): string | null {
-    const id = clientId.trim().toUpperCase();
-    if (!ID_PATTERN.test(id)) {
-      setError("Enter your Client ID, like EC-C-00124.");
-      return null;
-    }
-    return id;
+    const raw = identifier.trim();
+    const id = normalizeClientIdInput(raw);
+    if (id) return id;
+    if (EMAIL_PATTERN.test(raw)) return raw.toLowerCase();
+    setError(`Enter your Client ID (like ${CLIENT_ID_EXAMPLE}) or your email.`);
+    return null;
   }
 
   async function login(id: string, pass: string) {
-    const result = await signIn("client-password", { clientId: id, password: pass, redirect: false });
+    const result = await signIn("client-password", { identifier: id, password: pass, redirect: false });
     if (!result || result.error) return false;
-    router.push("/client");
+    router.push(callbackUrl);
     router.refresh();
     return true;
   }
@@ -67,7 +77,7 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
     const ok = await login(id, password);
     if (!ok) {
       setBusy(false);
-      setError("That Client ID and password did not match. If this is your first time, or you forgot your password, use the link below.");
+      setError("That Client ID or email and password did not match. If this is your first time, or you forgot your password, use the link below.");
     }
   }
 
@@ -81,14 +91,14 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
       const res = await fetch("/api/client/otp/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: id }),
+        body: JSON.stringify({ identifier: id }),
       });
       if (res.status === 429) {
         setError("Too many attempts. Please wait a few minutes and try again.");
         return;
       }
       if (!res.ok) throw new Error();
-      setClientId(id);
+      setIdentifier(id);
       setCode("");
       setCooldown(RESEND_SECONDS);
       setStep("setup");
@@ -110,7 +120,7 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
       const res = await fetch("/api/client/password/set", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, code, password }),
+        body: JSON.stringify({ identifier, code, password }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -118,7 +128,7 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
         setBusy(false);
         return;
       }
-      if (!(await login(clientId, password))) {
+      if (!(await login(identifier, password))) {
         setBusy(false);
         setStep("signin");
         setError("Your password is saved. Please sign in.");
@@ -138,20 +148,30 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
 
   const idField = (
     <div className="space-y-2">
-      <Label htmlFor="clientId">Client ID</Label>
+      <Label htmlFor="identifier">Client ID or email</Label>
       <Input
-        id="clientId"
-        value={clientId}
-        onChange={(e) => setClientId(e.target.value)}
-        placeholder="EC-C-00124"
+        id="identifier"
+        value={identifier}
+        onChange={(e) => setIdentifier(e.target.value)}
+        placeholder={`${CLIENT_ID_EXAMPLE} or you@email.com`}
         autoComplete="username"
-        autoCapitalize="characters"
+        autoCapitalize="none"
+        inputMode="email"
         spellCheck={false}
-        className="font-mono uppercase"
         aria-invalid={!!error}
       />
     </div>
   );
+
+  const inAppHint = inAppBrowser ? (
+    <p className="flex items-start gap-2 rounded-lg bg-zone px-3.5 py-3 text-xs leading-relaxed text-muted-foreground">
+      <LuExternalLink className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+      <span>
+        Opened from WhatsApp? Tap the menu and choose <span className="font-medium text-foreground">Open in browser</span>{" "}
+        (Chrome or Safari) so you stay signed in next time.
+      </span>
+    </p>
+  ) : null;
 
   const link = "font-medium text-primary underline-offset-4 hover:underline";
 
@@ -165,6 +185,7 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
   if (step === "signin") {
     return (
       <form onSubmit={signInSubmit} noValidate className="space-y-5">
+        {inAppHint}
         {errorBox}
         {idField}
         <div className="space-y-2">
@@ -229,7 +250,7 @@ export function ClientLoginForm({ initialId = "" }: { initialId?: string }) {
       <div className="flex items-start gap-3 rounded-lg bg-zone px-4 py-3.5 text-sm text-foreground">
         <LuMailCheck className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
         <p className="leading-relaxed">
-          If <span className="font-mono">{clientId}</span> is registered, we have sent a 6-digit code to the email
+          If <span className="font-mono">{identifier}</span> is registered, we have sent a 6-digit code to the email
           used at intake. It can take a minute, so check your spam folder too.
         </p>
       </div>

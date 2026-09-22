@@ -11,17 +11,21 @@ export const metadata: Metadata = { title: "My dashboard" };
 export const dynamic = "force-dynamic";
 
 /**
- * Placeholder landing page for a signed-in client. The real client dashboard is
- * built separately and replaces this file; it shows the contract every client
- * page must follow: get the scope from `getClientScope()` and filter EVERY query
- * by `scope.clientIds`, so a client can only ever see their own projects.
+ * A signed-in client's projects. Every client page follows the same contract:
+ * get the scope from `getClientScope()` and filter EVERY query by
+ * `scope.clientIds`, so a client can only ever see their own projects.
  */
 export default async function ClientHomePage() {
   const scope = await getClientScope();
   if (!scope) redirect("/client/login");
 
   const [clients, projects] = await Promise.all([
-    db.client.findMany({ where: { id: { in: scope.clientIds } }, select: { clientId: true, fullName: true } }),
+    // One record per person; if older duplicates are still linked, the oldest is theirs.
+    db.client.findMany({
+      where: { id: { in: scope.clientIds } },
+      orderBy: { createdAt: "asc" },
+      select: { clientId: true, fullName: true },
+    }),
     db.project.findMany({
       where: { clientId: { in: scope.clientIds } },
       orderBy: { createdAt: "desc" },
@@ -33,7 +37,13 @@ export default async function ClientHomePage() {
     <div className="space-y-7">
       <PageHeader
         title={`Welcome, ${clients[0]?.fullName.split(/\s+/)[0] ?? "there"}`}
-        description={`Signed in as ${clients.map((c) => c.clientId).join(", ")}.`}
+        description={
+          clients[0] ? (
+            <>
+              Your Client ID: <span className="font-mono text-foreground">{clients[0].clientId}</span>
+            </>
+          ) : undefined
+        }
       />
       <section aria-label="Your projects">
         <h2 className="meta-label mb-2">Your projects · {projects.length}</h2>

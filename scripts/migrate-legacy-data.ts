@@ -52,6 +52,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "csv-parse/sync";
 import { PrismaClient, type AmbassadorTier, type ProjectStatus } from "@prisma/client";
+import { ID_FORMAT, formatId } from "../src/lib/id-format";
 
 const db = new PrismaClient();
 
@@ -73,7 +74,7 @@ function readCsv(filename: string): Record<string, string>[] | null {
 }
 
 async function nextId(kind: "CLIENT" | "WORKER" | "AMBASSADOR" | "PROJECT"): Promise<string> {
-  const prefix = { CLIENT: "EC-C", WORKER: "EC-W", AMBASSADOR: "EC-A", PROJECT: "EC" }[kind];
+  const prefix = ID_FORMAT[kind].prefix;
   const counts = {
     CLIENT: () => db.client.count(),
     WORKER: () => db.worker.count(),
@@ -88,10 +89,10 @@ async function nextId(kind: "CLIENT" | "WORKER" | "AMBASSADOR" | "PROJECT"): Pro
   };
   const count = await counts[kind]();
   for (let attempt = 0; attempt < 5; attempt++) {
-    const candidate = `${prefix}-${String(count + 1 + attempt).padStart(5, "0")}`;
+    const candidate = formatId(kind, count + 1 + attempt);
     if ((await exists[kind](candidate)) === 0) return candidate;
   }
-  return `${prefix}-${Date.now().toString().slice(-6)}`;
+  return `${prefix}${Date.now().toString().slice(-6)}`;
 }
 
 function generateReferralCode(fullName: string): string {

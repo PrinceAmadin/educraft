@@ -4,24 +4,25 @@ import { db } from "@/lib/db";
 import { clientCodeEmail } from "@/lib/emails/client-code";
 import type { MailResult } from "@/lib/mailer";
 import { realEmail } from "@/lib/client-email";
+import { normalizeClientIdInput } from "@/lib/id-format";
 
 /**
- * Client sign-in: Client ID + a one-time code emailed to the address stored on
- * that client.
+ * Client sign-in: Client ID (ECC-0001) or email, plus a one-time code emailed
+ * to the address stored on that client.
  *
- *   Client ID  = "which client are you?"   (guessable, proves nothing)
- *   the code   = "prove you control that client's email"
+ *   ID or email = "which client are you?"   (guessable, proves nothing)
+ *   the code    = "prove you control that client's email"
  *
  * Rules that make it safe:
  *  - The code is only ever sent to the email ALREADY on the client, never to
- *    an address the visitor supplies.
- *  - Every ID gets the same response and the same work, so the form cannot be
- *    used to discover which IDs exist. Email delivery is deferred so timing
- *    does not give it away either.
+ *    an address the visitor supplies (typing an email only looks the client up).
+ *  - Every identifier gets the same response and the same work, so the form
+ *    cannot be used to discover which IDs or emails exist. Email delivery is
+ *    deferred so timing does not give it away either.
  *  - Codes are 6 digits, stored only as an HMAC, valid 10 minutes, single use,
  *    superseded by a newer code, and locked after 5 wrong tries.
  *  - Per-client (60 s cooldown, 3 per 15 min) and per-IP limits apply whether
- *    or not the ID exists.
+ *    or not the identifier exists.
  */
 
 export const CODE_TTL_MS = 10 * 60_000;
@@ -39,13 +40,40 @@ function secret(): string {
 }
 
 const mac = (purpose: string, value: string) => createHmac("sha256", secret()).update(`${purpose}:${value}`).digest("hex");
-export const hashCode = (clientId: string, code: string) => mac("client-login-code", `${clientId}:${code}`);
+/** Keyed by the Client row's internal id, so a code survives a change of display ID. */
+export const hashCode = (clientDbId: string, code: string) => mac("client-login-code", `${clientDbId}:${code}`);
 export const hashIp = (ip: string) => mac("client-login-ip", ip);
 
-/** "ec-c-00124 " -> "EC-C-00124"; anything that is not a Client ID -> null. */
-export function normalizeClientId(input: string | null | undefined): string | null {
-  const id = (input ?? "").trim().toUpperCase();
-  return /^EC-C-\d{3,8}$/.test(id) ? id : null;
+type Identifier = { kind: "id"; clientId: string } | { kind: "email"; email: string };
+
+/** "ecc 9" -> the Client ID ECC-0009; "Ada@X.com " -> an email; anything else -> null. */
+export function readIdentifier(input: string | null | undefined): Identifier | null {
+  const raw = (input ?? "").trim();
+  const clientId = normalizeClientIdInput(raw);
+  if (clientId) return { kind: "id", clientId };
+  const email = raw.toLowerCase();
+  if (email.length <= 160 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { kind: "email", email };
+  return null;
+}
+
+const signInSelect = {
+  id: true,
+  clientId: true,
+  fullName: true,
+  email: true,
+  user: { select: { id: true, email: true, displayName: true, role: true, isActive: true, passwordHash: true } },
+} as const;
+
+/** The client an identifier points at. By email: the oldest record with it (one per person since Sept 2026). */
+async function findClient(identifier: Identifier) {
+  if (identifier.kind === "id") {
+    return db.client.findUnique({ where: { clientId: identifier.clientId }, select: signInSelect });
+  }
+  return db.client.findFirst({
+    where: { email: { equals: identifier.email, mode: "insensitive" } },
+    orderBy: { createdAt: "asc" },
+    select: signInSelect,
+  });
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -76,7 +104,7 @@ export interface RequestCodeResult {
 }
 
 export async function requestCode(opts: {
-  clientIdInput: string;
+  identifierInput: string;
   ip: string;
   send: SendFn;
   /** Runs the (slow) email send after the response, e.g. `waitUntil`. */
@@ -84,16 +112,13 @@ export async function requestCode(opts: {
 }): Promise<RequestCodeResult> {
   if (await ipLimited(opts.ip, "request")) return { limited: true };
 
-  const clientId = normalizeClientId(opts.clientIdInput);
-  if (!clientId) return { limited: false };
+  const identifier = readIdentifier(opts.identifierInput);
+  if (!identifier) return { limited: false };
 
-  const client = await db.client.findUnique({
-    where: { clientId },
-    select: { id: true, fullName: true, email: true },
-  });
+  const client = await findClient(identifier);
   const email = realEmail(client?.email);
   if (!client || !email) {
-    console.warn("[client-otp] no code sent: unknown Client ID or no usable email on the client");
+    console.warn("[client-otp] no code sent: unknown Client ID/email or no usable email on the client");
     return { limited: false };
   }
 
@@ -124,7 +149,7 @@ export async function requestCode(opts: {
   await db.clientLoginCode.create({
     data: {
       clientId: client.id,
-      codeHash: hashCode(clientId, code),
+      codeHash: hashCode(client.id, code),
       expiresAt: new Date(now + CODE_TTL_MS),
       ipHash: hashIp(opts.ip),
     },
@@ -133,7 +158,7 @@ export async function requestCode(opts: {
   // Development only: the mail is off in tests, so print the code. `NODE_ENV`
   // is inlined at build time, so this branch does not exist in a production bundle.
   if (process.env.NODE_ENV === "development") {
-    console.log(`[client-otp:dev] ${clientId} = ${code}`);
+    console.log(`[client-otp:dev] ${client.clientId} = ${code}`);
   }
 
   const mail = clientCodeEmail({ fullName: client.fullName, code, minutes: CODE_TTL_MS / 60_000 });
@@ -154,24 +179,22 @@ export interface VerifiedClient {
 }
 
 /**
- * Returns the signed-in user, or null for ANY failure (unknown ID, no email,
- * wrong/expired/used code, locked, rate limited). The reason is never revealed.
+ * Returns the signed-in user, or null for ANY failure (unknown ID or email, no
+ * email on the client, wrong/expired/used code, locked, rate limited). The
+ * reason is never revealed.
  */
 export async function verifyCode(opts: {
-  clientIdInput: string;
+  identifierInput: string;
   code: string;
   ip: string;
 }): Promise<VerifiedClient | null> {
   if (await ipLimited(opts.ip, "verify")) return null;
 
-  const clientId = normalizeClientId(opts.clientIdInput);
+  const identifier = readIdentifier(opts.identifierInput);
   const code = (opts.code ?? "").trim();
-  if (!clientId || !/^\d{6}$/.test(code)) return null;
+  if (!identifier || !/^\d{6}$/.test(code)) return null;
 
-  const client = await db.client.findUnique({
-    where: { clientId },
-    select: { id: true, fullName: true, email: true },
-  });
+  const client = await findClient(identifier);
   const email = realEmail(client?.email);
   if (!client || !email) return null;
 
@@ -188,7 +211,7 @@ export async function verifyCode(opts: {
     data: { attempts: { increment: 1 } },
   });
   if (counted.count !== 1) return null;
-  if (!safeEqual(row.codeHash, hashCode(clientId, code))) return null;
+  if (!safeEqual(row.codeHash, hashCode(client.id, code))) return null;
 
   // Single use: only one caller can flip usedAt.
   const used = await db.clientLoginCode.updateMany({
@@ -201,10 +224,21 @@ export async function verifyCode(opts: {
 }
 
 /**
+ * Attaches every Client row carrying this email to the login, so the person
+ * sees all their projects (older rows from before one-ID-per-person, and any an
+ * admin created). Never takes a row that already belongs to another login.
+ */
+async function linkClientRows(userId: string, email: string): Promise<void> {
+  await db.client.updateMany({
+    where: { email: { equals: email, mode: "insensitive" }, OR: [{ userId: null }, { userId }] },
+    data: { userId },
+  });
+}
+
+/**
  * The User behind an email that has just proven ownership. Created on first
- * sign-in with an unusable password, and every Client row with the same email
- * (intake makes a new one each time) is linked to it, so signing in with any of
- * a person's IDs shows all their projects.
+ * sign-in with an unusable password, and linked to every Client row with the
+ * same email.
  */
 async function resolveClientUser(input: { email: string; fullName: string }): Promise<VerifiedClient | null> {
   const { email } = input;
@@ -231,10 +265,7 @@ async function resolveClientUser(input: { email: string; fullName: string }): Pr
     }
   }
 
-  await db.client.updateMany({
-    where: { email: { equals: email, mode: "insensitive" }, OR: [{ userId: null }, { userId: user.id }] },
-    data: { userId: user.id },
-  });
+  await linkClientRows(user.id, email);
 
   return { userId: user.id, email: user.email, name: user.displayName ?? input.fullName };
 }
@@ -245,7 +276,7 @@ export async function clientIdsForUser(userId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-// ── Password (set once with a code, then sign in with ID + password) ──
+// ── Password (set once with a code, then sign in with ID or email + password) ──
 
 export const PASSWORD_MIN = 8;
 export const PASSWORD_MAX = 72; // bcrypt ignores anything longer
@@ -258,7 +289,7 @@ const MAX_PASSWORD_FAILURES = 10;
  * and never emailed or logged.
  */
 export async function setPasswordWithCode(opts: {
-  clientIdInput: string;
+  identifierInput: string;
   code: string;
   password: string;
   ip: string;
@@ -277,38 +308,50 @@ export async function setPasswordWithCode(opts: {
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
 
 /**
- * Client ID + password sign-in. Fails identically for an unknown ID, no password
- * set yet, or a wrong password. Wrong guesses are limited per IP and per account
- * (10 failures per 15 minutes, then the account waits it out).
+ * Client ID (or email) + password sign-in. Fails identically for an unknown ID
+ * or email, no password set yet, or a wrong password. Wrong guesses are limited
+ * per IP and per account (10 failures per 15 minutes, then the account waits
+ * it out), however the account was named.
  */
 export async function verifyPassword(opts: {
-  clientIdInput: string;
+  identifierInput: string;
   password: string;
   ip: string;
 }): Promise<VerifiedClient | null> {
   if (await ipLimited(opts.ip, "verify")) return null;
 
-  const clientId = normalizeClientId(opts.clientIdInput);
+  const identifier = readIdentifier(opts.identifierInput);
   const password = opts.password ?? "";
-  if (!clientId || !password || password.length > PASSWORD_MAX) return null;
+  if (!identifier || !password || password.length > PASSWORD_MAX) return null;
 
-  const acctKey = hashIp(`acct:${clientId}`);
+  const client = await findClient(identifier);
+  const email = realEmail(client?.email);
+
+  // The login behind the client: its own link, else the CLIENT login with the
+  // same email (a record that was never linked, e.g. one an admin created).
+  let user = client?.user ?? null;
+  if (!user && email) {
+    user = await db.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, displayName: true, role: true, isActive: true, passwordHash: true },
+    });
+  }
+
+  const acctKey = hashIp(`acct:${client?.id ?? (identifier.kind === "id" ? identifier.clientId : identifier.email)}`);
   const failures = await db.clientLoginAttempt.count({
     where: { ipHash: acctKey, kind: "password-fail", createdAt: { gte: new Date(Date.now() - WINDOW_MS) } },
   });
 
-  const client = await db.client.findUnique({
-    where: { clientId },
-    select: { fullName: true, email: true, user: true },
-  });
-  const user = client?.user ?? null;
-  const hash = user && user.role === "CLIENT" && user.isActive ? user.passwordHash : DUMMY_HASH;
+  const usable = user && user.role === "CLIENT" && user.isActive;
+  const hash = usable ? user!.passwordHash : DUMMY_HASH;
   const valid = await bcrypt.compare(password, hash);
 
   if (failures >= MAX_PASSWORD_FAILURES) return null;
-  if (!client || !user || hash === DUMMY_HASH || !valid || !realEmail(client.email)) {
+  if (!client || !user || !usable || hash === DUMMY_HASH || !valid || !email) {
     await db.clientLoginAttempt.create({ data: { ipHash: acctKey, kind: "password-fail" } });
     return null;
   }
+
+  await linkClientRows(user.id, user.email);
   return { userId: user.id, email: user.email, name: user.displayName ?? client.fullName };
 }

@@ -29,8 +29,13 @@ export default auth((req) => {
   const CLIENT_SESSION_MS = 14 * 24 * 3_600_000;
   const clientExpired =
     user?.role === "CLIENT" && (!user.loginAt || Date.now() - user.loginAt > CLIENT_SESSION_MS);
+  // Where to come back to after signing in: the path AND its query string, so a
+  // Paystack return (?payment=success&reference=…) survives the detour.
+  const backTo = `${path}${nextUrl.search}`;
   if (clientExpired && under("/client") && !isClientLogin) {
-    return NextResponse.redirect(new URL("/client/login", nextUrl));
+    const login = new URL("/client/login", nextUrl);
+    login.searchParams.set("callbackUrl", backTo);
+    return NextResponse.redirect(login);
   }
 
   // Signed in and heading to a sign-in page → bounce to their own dashboard
@@ -42,7 +47,7 @@ export default auth((req) => {
 
   if (!user) {
     const login = new URL(under("/client") ? "/client/login" : "/login", nextUrl);
-    login.searchParams.set("callbackUrl", path);
+    login.searchParams.set("callbackUrl", backTo);
     return NextResponse.redirect(login);
   }
 

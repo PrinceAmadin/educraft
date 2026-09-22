@@ -188,7 +188,17 @@ const assignmentSelect = {
   qaNotes: true,
   revisionCount: true,
   service: { select: { serviceName: true, estimatedDays: true } },
-  client: { select: { fullName: true, department: true, university: { select: { abbreviation: true } } } },
+  // No phone or email: workers never contact clients directly.
+  client: {
+    select: {
+      fullName: true,
+      department: true,
+      faculty: true,
+      level: true,
+      universityId: true,
+      university: { select: { abbreviation: true, name: true } },
+    },
+  },
   files: { orderBy: { createdAt: "desc" } },
 } satisfies Prisma.ProjectSelect;
 

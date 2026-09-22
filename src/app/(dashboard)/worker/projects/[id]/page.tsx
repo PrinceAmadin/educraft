@@ -5,6 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { LuFile, LuDownload, LuTriangleAlert } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerAssignment, getWorkerByUserId } from "@/lib/services/worker-portal";
+import { OrderDetailsNotice } from "@/components/projects/OrderDetailsNotice";
+import { safeHref } from "@/lib/safe-href";
 import { WorkerAssignmentActions } from "@/components/worker/WorkerAssignmentActions";
 import { ResearchPanel } from "@/components/worker/ResearchPanel";
 import { StatusBadge } from "@/components/projects/StatusBadge";
@@ -108,6 +110,13 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
         </dl>
       </div>
 
+      <OrderDetailsNotice
+        audience="worker"
+        additionalData={project.additionalData}
+        client={{ ...project.client, phone: "", email: null }}
+        universityName={project.client.university?.name ?? ""}
+      />
+
       {showRevisionFeedback ? (
         <div className="rounded-2xl bg-danger/10 p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">
@@ -192,16 +201,24 @@ function FileGroup({
         <ul className="mt-2 space-y-1.5">
           {files.map((f) => (
             <li key={f.id}>
-              <a
-                href={f.fileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-md p-1.5 text-sm text-foreground transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
-              >
-                <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
-                <LuDownload className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              </a>
+              {safeHref(f.fileUrl) ? (
+                <a
+                  href={safeHref(f.fileUrl)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 rounded-md p-1.5 text-sm text-foreground transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
+                >
+                  <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
+                  <LuDownload className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                </a>
+              ) : (
+                <p className="flex items-center gap-2 p-1.5 text-sm text-foreground">
+                  <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
+                  <span className="text-xs text-danger">Unsafe link hidden</span>
+                </p>
+              )}
               <p className="pl-8 text-[11px] text-subtle">{formatDate(f.createdAt)}</p>
             </li>
           ))}

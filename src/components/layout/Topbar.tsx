@@ -73,31 +73,36 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
         <LogoLockup href={home} size="xs" />
       </div>
 
-      {/* Desktop search */}
-      <div className="hidden flex-1 md:block">
-        <label className="relative block max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
-          <input
-            type="search"
-            placeholder="Search projects, clients, workers…"
-            className="h-10 w-full rounded-lg border border-transparent bg-card pl-9 pr-3 text-sm text-foreground shadow-soft placeholder:text-subtle transition-[border-color,box-shadow] duration-fast focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
-          />
-          <span className="sr-only">Search</span>
-        </label>
-      </div>
+      {/* Desktop search: admins only. Searches projects by ID, title or client name. */}
+      {role === "admin" ? (
+        <form action="/admin/projects" method="get" role="search" className="hidden flex-1 md:block">
+          <label className="relative block max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
+            <input
+              type="search"
+              name="q"
+              placeholder="Search projects by ID, title or client…"
+              className="h-10 w-full rounded-lg border border-transparent bg-card pl-9 pr-3 text-sm text-foreground shadow-soft placeholder:text-subtle transition-[border-color,box-shadow] duration-fast focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
+            />
+            <span className="sr-only">Search projects</span>
+          </label>
+        </form>
+      ) : null}
 
       <div className="ml-auto flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="md:hidden text-muted-foreground"
-          aria-label="Search"
-          asChild
-        >
-          <Link href="#search">
-            <Search className="h-[18px] w-[18px]" />
-          </Link>
-        </Button>
+        {role === "admin" ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="md:hidden text-muted-foreground"
+            aria-label="Search projects"
+            asChild
+          >
+            <Link href="/admin/projects">
+              <Search className="h-[18px] w-[18px]" />
+            </Link>
+          </Button>
+        ) : null}
 
         <RefreshButton />
 
