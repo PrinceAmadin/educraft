@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
@@ -8,6 +9,8 @@ import { nextGeneralCode } from "@/lib/services/ambassador-roster";
 import { sendMail } from "@/lib/mailer";
 import { callbackBaseUrl } from "@/lib/paystack";
 import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
+import { applicationRejectedEmail } from "@/lib/emails/application-decision";
+import { alertAmbassadorApplication } from "@/lib/services/team-alerts";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
 import type { SendFn } from "@/lib/services/client-otp";
 import type { AmbassadorApplicationInput, EditApplicationInput } from "@/lib/validations/application";
@@ -143,6 +146,9 @@ export async function submitApplication(
     });
   });
 
+  // The team's Gmail (Settings > Email alerts), sent after the response. Queued
+  // before anything else can throw, so a saved application is always emailed.
+  alertAmbassadorApplication(application.id, { existingLogin: Boolean(ownLogin) });
   await notifyAdmins({
     title: "New ambassador application",
     message: `${input.fullName.trim()} applied for slot ${slotCode}.`,
@@ -510,7 +516,9 @@ export async function approveApplication(
       fullName: application.fullName,
       slotCode: claimed,
       referralLink: `${base}/EduCraftA/${claimed}`,
-      loginUrl: `${base}/login`,
+      // /ambassador, not /login: a worker who became an ambassador would
+      // otherwise land on their worker dashboard.
+      loginUrl: `${base}/ambassador`,
       hasLogin: Boolean(application.userId),
     });
     const sent = await sendMail({ to: application.email, ...mail });
@@ -534,7 +542,7 @@ export async function rejectApplication(
 ): Promise<void> {
   const application = await db.ambassadorApplication.findUnique({
     where: { id: applicationId },
-    select: { status: true, userId: true },
+    select: { status: true, userId: true, fullName: true, email: true },
   });
   if (!application) throw new ApplicationError("Application not found");
   if (application.status !== "PENDING") {
@@ -560,4 +568,17 @@ export async function rejectApplication(
       await tx.user.deleteMany({ where: { id: application.userId, isActive: false } });
     }
   });
+
+  // The applicant hears the outcome by email (the note stays internal). Sent
+  // after the response; a failed send never undoes the rejection.
+  if (application.email) {
+    const mail = applicationRejectedEmail({ fullName: application.fullName, role: "ambassador" });
+    const to = application.email;
+    waitUntil(
+      sendMail({ to, ...mail }).then((sent) => {
+        if (sent.ok) console.info("[rejectApplication] decision email sent");
+        else console.error("[rejectApplication] decision email failed:", sent.error);
+      })
+    );
+  }
 }

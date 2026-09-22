@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { emailPendingCommission } from "@/lib/services/ambassador-commission";
+import { alertPaidIntakeFailed, alertPaidOrder } from "@/lib/services/team-alerts";
 import { IntakeError, submitIntake } from "@/lib/services/intake";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { computePrice } from "@/lib/pricing";
@@ -352,6 +353,18 @@ async function creditProjectPayment(
 
   await db.$transaction(writes);
 
+  // An order submitted first (variable price) is now paid: tell the team's
+  // Gmail. Queued before anything else can throw, so it is never lost.
+  if (leg === "downpayment") {
+    alertPaidOrder(project.id, {
+      reference,
+      paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
+      paidOn,
+      newOrder: false,
+      advanced: advance !== null,
+    });
+  }
+
   await notifyAdmins({
     title: leg === "downpayment" ? "Downpayment received" : "Balance received",
     message:
@@ -438,6 +451,22 @@ async function processPendingIntake(
     console.error(`[paystack] submitIntake failed for pending intake ${pendingIntakeId}`, error);
     if (error instanceof IntakeError) {
       await db.pendingIntake.update({ where: { id: pendingIntakeId }, data: { status: "FAILED" } });
+      // Paid, but no project: nothing else in HQ shows this money, so say so loudly.
+      const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
+      alertPaidIntakeFailed(pendingIntakeId, {
+        reference,
+        amountNaira: verified.amount / 100,
+        paidOn,
+        reason: error.message,
+      });
+      const form = (pending.payload ?? {}) as { fullName?: unknown; phone?: unknown };
+      const who = [form.fullName, form.phone].filter((v) => typeof v === "string" && v.trim()).join(", ");
+      await notifyAdmins({
+        title: "Payment received, order not created",
+        message: `Paystack confirmed ${reference}${who ? ` from ${who}` : ""}, but the order could not be created (${error.message}). Contact the client, then create the project by hand or refund them in Paystack.`,
+        type: "urgent",
+        link: "/admin/projects/new",
+      });
       return { status: "missing_metadata" };
     }
     throw error;
@@ -494,6 +523,16 @@ async function processPendingIntake(
       data: { status: "CONSUMED", consumedAt: paidOn, resultProjectCode: project.projectId },
     }),
   ]);
+
+  // A new, paid order: tell the team's Gmail (Settings > Email alerts).
+  // Queued before anything else can throw, so it is never lost.
+  alertPaidOrder(project.id, {
+    reference,
+    paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
+    paidOn,
+    newOrder: true,
+    advanced: true,
+  });
 
   await notifyAdmins({
     title: "Downpayment received",

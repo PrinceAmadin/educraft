@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/forms/Field";
 import { FormActions } from "@/components/forms/FormActions";
 import { FormSection } from "@/components/forms/FormSection";
-import { generalSettingsSchema, type GeneralSettingsInput } from "@/lib/validations/settings";
+import { generalSettingsSchema, splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 import type { GeneralSettings } from "@/lib/services/settings";
 
 const TIERS = ["BRONZE", "SILVER", "GOLD", "PLATINUM"] as const;
@@ -35,6 +35,7 @@ export function GeneralSettingsForm({
   const {
     register,
     handleSubmit,
+    reset,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<GeneralSettingsInput>({
     resolver: zodResolver(generalSettingsSchema),
@@ -48,6 +49,7 @@ export function GeneralSettingsForm({
       downpaymentPercentage: settings.downpaymentPercentage,
       commissionRates: settings.commissionRates,
       parentCommissionRate: settings.parentCommissionRate,
+      alertEmails: settings.alertEmails,
     },
   });
 
@@ -74,6 +76,12 @@ export function GeneralSettingsForm({
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(body?.error ?? "Could not save settings.");
       }
+      // What was saved becomes the new baseline (so "Settings saved." shows),
+      // with the alert list as the server stores it: lower-case, comma-separated.
+      reset({
+        ...data,
+        ...(data.alertEmails !== undefined ? { alertEmails: splitEmailList(data.alertEmails).join(", ") } : {}),
+      });
       setSaved(true);
       router.refresh();
     } catch (err) {
@@ -183,6 +191,32 @@ export function GeneralSettingsForm({
             />
           </Field>
         </div>
+      </FormSection>
+
+      <FormSection
+        title="Email alerts"
+        description={
+          canEditPricing
+            ? "Emailed the moment an ambassador or worker applies, and when a client's downpayment on an order comes in through Paystack."
+            : "Only the founder (Super Admin) can change where alerts go."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <Field
+          label="Send alerts to"
+          required
+          htmlFor="alertEmails"
+          error={errors.alertEmails?.message}
+          hint="Separate several addresses with commas. Use an inbox other than educraft611@gmail.com: that account sends the alerts, and Gmail files mail it sends to itself under Sent."
+        >
+          <Input
+            id="alertEmails"
+            inputMode="email"
+            autoComplete="off"
+            disabled={!canEditPricing}
+            {...register("alertEmails")}
+          />
+        </Field>
       </FormSection>
 
       {submitError ? (

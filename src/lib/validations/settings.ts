@@ -2,6 +2,29 @@ import { z } from "zod";
 import { phoneSchema } from "@/lib/validations/clients";
 
 const pct = z.coerce.number().min(0, "0–100").max(100, "0–100");
+
+/** "a@x.com, b@y.com" (commas, semicolons, spaces or new lines) -> distinct lower-case addresses. */
+export function splitEmailList(raw: string): string[] {
+  return [...new Set(raw.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))];
+}
+
+const emailList = z
+  .string()
+  .trim()
+  .max(1000)
+  .superRefine((raw, ctx) => {
+    const emails = splitEmailList(raw);
+    if (emails.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter at least one email" });
+      return;
+    }
+    if (emails.length > 10) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Up to 10 addresses" });
+      return;
+    }
+    const bad = emails.find((e) => !z.string().email().safeParse(e).success);
+    if (bad) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `"${bad}" is not a valid email` });
+  });
 const blank = z.literal("");
 const text = (max: number) => z.string().trim().max(max).optional().or(blank);
 
@@ -28,6 +51,8 @@ export const generalSettingsSchema = z.object({
     .optional(),
   /** Default rate a parent (Core) ambassador earns from a sub's job. */
   parentCommissionRate: pct.optional(),
+  /** Who gets the new-application and paid-order emails. Super Admin only. */
+  alertEmails: emailList.optional(),
 });
 export type GeneralSettingsInput = z.infer<typeof generalSettingsSchema>;
 

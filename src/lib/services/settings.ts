@@ -2,7 +2,7 @@ import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { DOWNPAYMENT_PERCENTAGE, TIER_COMMISSION_RATE } from "@/lib/constants";
 import { DEFAULT_PARENT_COMMISSION_RATE } from "@/lib/commission";
-import type { GeneralSettingsInput } from "@/lib/validations/settings";
+import { splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 
 /** Setting keys this module owns. Everything else lives in its own service. */
 const KEYS = {
@@ -18,6 +18,7 @@ const KEYS = {
   rateGold: "commission_rate_gold",
   ratePlatinum: "commission_rate_platinum",
   parentCommissionRate: "parent_commission_rate",
+  alertEmails: "alert_emails",
 } as const;
 
 const RATE_KEY_BY_TIER: Record<AmbassadorTier, string> = {
@@ -36,6 +37,8 @@ const DEFAULTS = {
   accountNumber: "",
   accountName: "",
   downpaymentPercentage: DOWNPAYMENT_PERCENTAGE,
+  /** The founder's own Gmail: a different account from the sender, so alerts land in the inbox. */
+  alertEmails: "amadinprince26@gmail.com",
 };
 
 export interface GeneralSettings {
@@ -50,6 +53,20 @@ export interface GeneralSettings {
   commissionRates: Record<AmbassadorTier, number>;
   /** Default parent-ambassador rate — an admin can override it per sub-ambassador. */
   parentCommissionRate: number;
+  /** Comma-separated inboxes for new-application and paid-order alerts. */
+  alertEmails: string;
+}
+
+/**
+ * Inboxes that get the team alerts (new ambassador / worker application, paid
+ * client order). Falls back to the founder's Gmail when the setting is unset.
+ * Not the sender (educraft611@gmail.com): Gmail files mail an account sends to
+ * itself under Sent, so no inbox alert would show.
+ */
+export async function getAlertEmails(): Promise<string[]> {
+  const row = await db.setting.findUnique({ where: { key: KEYS.alertEmails } });
+  const emails = splitEmailList(row?.value ?? "");
+  return emails.length > 0 ? emails : splitEmailList(DEFAULTS.alertEmails);
 }
 
 /**
@@ -107,14 +124,16 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
       PLATINUM: num(s[KEYS.ratePlatinum], TIER_COMMISSION_RATE.PLATINUM),
     },
     parentCommissionRate: num(s[KEYS.parentCommissionRate], DEFAULT_PARENT_COMMISSION_RATE),
+    alertEmails: splitEmailList(s[KEYS.alertEmails] ?? "").join(", ") || DEFAULTS.alertEmails,
   };
 }
 
 /**
  * `pricingFields` gated separately from company info: OPS_MANAGER can update
  * contact/bank details but never the downpayment default or commission rates
- * (CLAUDE.md — "no pricing changes" for that role). The route enforces this
- * by omitting the fields from the payload it forwards here for that role.
+ * (CLAUDE.md — "no pricing changes" for that role), nor where the founder's
+ * alerts go. The route enforces this by omitting the fields from the payload
+ * it forwards here for that role.
  */
 export async function updateGeneralSettings(input: GeneralSettingsInput): Promise<void> {
   const writes: { key: string; value: string }[] = [];
@@ -140,6 +159,8 @@ export async function updateGeneralSettings(input: GeneralSettingsInput): Promis
   }
   if (input.parentCommissionRate !== undefined)
     writes.push({ key: KEYS.parentCommissionRate, value: String(input.parentCommissionRate) });
+  if (input.alertEmails !== undefined)
+    writes.push({ key: KEYS.alertEmails, value: splitEmailList(input.alertEmails).join(", ") });
 
   if (writes.length === 0) return;
 

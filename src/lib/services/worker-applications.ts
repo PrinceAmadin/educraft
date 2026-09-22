@@ -1,8 +1,13 @@
 import bcrypt from "bcryptjs";
+import { waitUntil } from "@vercel/functions";
 import { Prisma, type ApplicationStatus, type WorkerApplication } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { alertWorkerApplication } from "@/lib/services/team-alerts";
+import { sendMail } from "@/lib/mailer";
+import { callbackBaseUrl } from "@/lib/paystack";
+import { applicationRejectedEmail, workerApprovedEmail } from "@/lib/emails/application-decision";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
 import type { SendFn } from "@/lib/services/client-otp";
 import type {
@@ -110,6 +115,9 @@ export async function submitWorkerApplication(
       });
     });
 
+    // The team's Gmail (Settings > Email alerts), sent after the response. Queued
+    // before anything else can throw, so a saved application is always emailed.
+    alertWorkerApplication(application.id, { existingLogin: Boolean(ownLogin) });
     await notifyAdmins({
       title: "New worker application",
       message: `${input.fullName.trim()} applied to join as a worker.`,
@@ -296,6 +304,13 @@ export async function approveWorkerApplication(
     throw new WorkerApplicationError("This application has already been reviewed");
   }
 
+  // Active before approval means they applied with the login they already use
+  // (an ambassador), so the welcome email says "sign in as usual".
+  const login = await db.user.findUnique({
+    where: { id: application.userId },
+    select: { email: true, isActive: true },
+  });
+
   const newWorkerId = await nextId("WORKER");
 
   const worker = await db.$transaction(async (tx) => {
@@ -333,6 +348,25 @@ export async function approveWorkerApplication(
     return created;
   });
 
+  // Welcome email with their worker ID and how to sign in. Sent after the
+  // response and queued before anything else can throw; a failed send never
+  // undoes the approval.
+  const mail = workerApprovedEmail({
+    fullName: application.fullName,
+    workerCode: worker.workerId,
+    loginEmail: login?.email ?? application.email,
+    // /worker, not /login: an ambassador who became a worker would otherwise
+    // land on their ambassador dashboard. Signed out, it goes via /login.
+    loginUrl: `${callbackBaseUrl()}/worker`,
+    existingLogin: Boolean(login?.isActive),
+  });
+  waitUntil(
+    sendMail({ to: application.email, ...mail }).then((sent) => {
+      if (sent.ok) console.info("[approveWorkerApplication] welcome email sent");
+      else console.error("[approveWorkerApplication] welcome email failed:", sent.error);
+    })
+  );
+
   await notifyUsers([application.userId], {
     title: "Application approved",
     message: "Your worker application has been approved — you can now sign in.",
@@ -348,7 +382,10 @@ export async function rejectWorkerApplication(
   reviewerId: string,
   note?: string
 ): Promise<void> {
-  const application = await db.workerApplication.findUnique({ where: { id }, select: { status: true } });
+  const application = await db.workerApplication.findUnique({
+    where: { id },
+    select: { status: true, fullName: true, email: true },
+  });
   if (!application) throw new WorkerApplicationError("Application not found");
   if (application.status !== "PENDING") {
     throw new WorkerApplicationError("This application has already been reviewed");
@@ -363,4 +400,14 @@ export async function rejectWorkerApplication(
       reviewNote: note?.trim() || null,
     },
   });
+
+  // The applicant hears the outcome by email (the note stays internal). Sent
+  // after the response; a failed send never undoes the rejection.
+  const mail = applicationRejectedEmail({ fullName: application.fullName, role: "worker" });
+  waitUntil(
+    sendMail({ to: application.email, ...mail }).then((sent) => {
+      if (sent.ok) console.info("[rejectWorkerApplication] decision email sent");
+      else console.error("[rejectWorkerApplication] decision email failed:", sent.error);
+    })
+  );
 }
