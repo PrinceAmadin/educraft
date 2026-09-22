@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, serverError } from "@/lib/api";
 import { ambassadorWeeklyEmail } from "@/lib/emails/ambassador-weekly";
 import { mailerConfigured, sendMail } from "@/lib/mailer";
-import { callbackBaseUrl } from "@/lib/paystack";
+import { siteUrl as liveSiteUrl } from "@/lib/site-url";
 import { buildWeeklyReports, runWeeklyReport } from "@/lib/services/ambassador-weekly-report";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +35,9 @@ function hasValidCronSecret(req: NextRequest): boolean {
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
-  const siteUrl = callbackBaseUrl();
+  // Dashboard and unsubscribe links point at the live site whichever
+  // deployment (or local server) renders the email.
+  const siteUrl = liveSiteUrl();
   const dashboardUrl = `${siteUrl}/ambassador`;
 
   try {

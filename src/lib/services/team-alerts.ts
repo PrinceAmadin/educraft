@@ -1,7 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { sendMail } from "@/lib/mailer";
-import { callbackBaseUrl } from "@/lib/paystack";
+import { siteUrl } from "@/lib/site-url";
 import {
   ambassadorApplicationAlert,
   paidIntakeFailedAlert,
@@ -112,7 +112,7 @@ export function alertAmbassadorApplication(applicationId: string, { existingLogi
       motivation: app.motivation,
       existingLogin,
       submittedAt: watDateTime(app.createdAt),
-      reviewUrl: `${callbackBaseUrl()}/admin/ambassadors/applications`,
+      reviewUrl: `${siteUrl()}/admin/ambassadors/applications`,
     });
   });
 }
@@ -140,7 +140,7 @@ export function alertWorkerApplication(applicationId: string, { existingLogin }:
       ...app,
       existingLogin,
       submittedAt: watDateTime(app.createdAt),
-      reviewUrl: `${callbackBaseUrl()}/admin/workers/applications`,
+      reviewUrl: `${siteUrl()}/admin/workers/applications`,
     });
   });
 }
@@ -224,7 +224,7 @@ export function alertPaidOrder(
       referredBy: project.ambassador?.fullName ?? null,
       paidAt: watDateTime(payment.paidOn),
       instructions: project.specialInstructions,
-      projectUrl: `${callbackBaseUrl()}/admin/projects/${project.projectId}`,
+      projectUrl: `${siteUrl()}/admin/projects/${project.projectId}`,
     });
   });
 }
@@ -262,7 +262,7 @@ export function alertPaidIntakeFailed(
       email: text(form.email),
       service,
       paidAt: watDateTime(payment.paidOn),
-      newProjectUrl: `${callbackBaseUrl()}/admin/projects/new`,
+      newProjectUrl: `${siteUrl()}/admin/projects/new`,
     });
   });
 }

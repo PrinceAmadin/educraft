@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, Inter_Tight, JetBrains_Mono } from "next/font/google";
 import { Providers } from "@/app/providers";
 import { APP_NAME, BRAND_NAME } from "@/lib/constants";
+import { siteUrl } from "@/lib/site-url";
 import "./globals.css";
 
 // Inter's `latin-ext` file carries the naira sign (U+20A6); the browser only
@@ -47,7 +48,7 @@ export const metadata: Metadata = {
   // to an absolute one. Without this Next.js warns at build time and falls
   // back to localhost, which is never reachable by a link-preview crawler.
   // Override with NEXT_PUBLIC_SITE_URL once a custom domain is attached.
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://educraft-hq.vercel.app"),
+  metadataBase: new URL(siteUrl()),
   title: {
     default: `${BRAND_NAME} — Academic work, done properly`,
     template: `%s · ${APP_NAME}`,

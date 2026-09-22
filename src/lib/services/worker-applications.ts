@@ -6,7 +6,7 @@ import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { alertWorkerApplication } from "@/lib/services/team-alerts";
 import { sendMail } from "@/lib/mailer";
-import { callbackBaseUrl } from "@/lib/paystack";
+import { siteUrl } from "@/lib/site-url";
 import { applicationRejectedEmail, workerApprovedEmail } from "@/lib/emails/application-decision";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
 import type { SendFn } from "@/lib/services/client-otp";
@@ -357,7 +357,7 @@ export async function approveWorkerApplication(
     loginEmail: login?.email ?? application.email,
     // /worker, not /login: an ambassador who became a worker would otherwise
     // land on their ambassador dashboard. Signed out, it goes via /login.
-    loginUrl: `${callbackBaseUrl()}/worker`,
+    loginUrl: `${siteUrl()}/worker`,
     existingLogin: Boolean(login?.isActive),
   });
   waitUntil(

@@ -7,7 +7,7 @@ import { notifyAdmins } from "@/lib/services/notifications";
 import { generateReferralCode } from "@/lib/ambassador";
 import { nextGeneralCode } from "@/lib/services/ambassador-roster";
 import { sendMail } from "@/lib/mailer";
-import { callbackBaseUrl } from "@/lib/paystack";
+import { siteUrl } from "@/lib/site-url";
 import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
 import { applicationRejectedEmail } from "@/lib/emails/application-decision";
 import { alertAmbassadorApplication } from "@/lib/services/team-alerts";
@@ -511,7 +511,8 @@ export async function approveApplication(
   // Welcome email: slot ID, their client link, and how to sign in. A failed
   // send never undoes the approval — the admin can message them from Tracking.
   if (application.email) {
-    const base = callbackBaseUrl();
+    // The live site, never localhost: the link is opened on the applicant's phone.
+    const base = siteUrl();
     const mail = ambassadorWelcomeEmail({
       fullName: application.fullName,
       slotCode: claimed,
