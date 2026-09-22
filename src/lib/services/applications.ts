@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins } from "@/lib/services/notifications";
@@ -9,7 +10,7 @@ import { callbackBaseUrl } from "@/lib/paystack";
 import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
 import type { SendFn } from "@/lib/services/client-otp";
-import type { AmbassadorApplicationInput } from "@/lib/validations/application";
+import type { AmbassadorApplicationInput, EditApplicationInput } from "@/lib/validations/application";
 
 export class ApplicationError extends Error {
   constructor(
@@ -174,6 +175,14 @@ export interface ApplicationRow {
   needsUniversity: boolean;
   /** The general slot held for this applicant ("059"). */
   slotCode: string | null;
+  universityId: string | null;
+  otherUniversity: string | null;
+  /**
+   * True when the application sits on a login the person already uses (a
+   * worker applying as an ambassador): that email is their sign-in, so it
+   * can't be edited from the application.
+   */
+  emailLocked: boolean;
 }
 
 export async function listApplications(
@@ -201,8 +210,18 @@ export async function listApplications(
       createdAt: true,
       universityId: true,
       university: { select: { abbreviation: true, name: true } },
+      userId: true,
     },
   });
+
+  const userIds = rows.map((r) => r.userId).filter((id): id is string => Boolean(id));
+  const activeLogins = new Set(
+    userIds.length
+      ? (
+          await db.user.findMany({ where: { id: { in: userIds }, isActive: true }, select: { id: true } })
+        ).map((u) => u.id)
+      : []
+  );
 
   return rows.map((r) => ({
     id: r.id,
@@ -222,7 +241,147 @@ export async function listApplications(
     ambassadorId: r.ambassadorId,
     needsUniversity: !r.universityId,
     slotCode: r.slotCode,
+    universityId: r.universityId,
+    otherUniversity: r.otherUniversity,
+    emailLocked: r.status === "PENDING" && Boolean(r.userId && activeLogins.has(r.userId)),
   }));
+}
+
+// ── Admin edit ───────────────────────────────────────────────
+
+const padSlot = (code: string) => String(parseInt(code, 10)).padStart(3, "0");
+
+/**
+ * Admin correcting a pending application before approving or rejecting it:
+ * any detail the applicant typed, and the general slot held for them.
+ *
+ * The login is not the admin's to change: the password is never touched.
+ * When the login was created by this application (still inactive), its email
+ * and display name follow the correction, so the applicant signs in with the
+ * corrected email once approved. When the application sits on a login the
+ * person already uses (a worker applying as an ambassador), the email is
+ * their sign-in and is refused here.
+ */
+export async function editApplication(applicationId: string, input: EditApplicationInput): Promise<void> {
+  const application = await db.ambassadorApplication.findUnique({
+    where: { id: applicationId },
+    select: { status: true, userId: true, email: true, phone: true, accountNumber: true, slotCode: true },
+  });
+  if (!application) throw new ApplicationError("Application not found");
+  if (application.status !== "PENDING") {
+    throw new ApplicationError("This application has already been reviewed");
+  }
+
+  const login = application.userId
+    ? await db.user.findUnique({ where: { id: application.userId }, select: { id: true, isActive: true } })
+    : null;
+
+  const data: Prisma.AmbassadorApplicationUpdateInput = {};
+  const loginData: Prisma.UserUpdateInput = {};
+
+  if (input.fullName !== undefined) {
+    data.fullName = input.fullName;
+    loginData.displayName = input.fullName;
+  }
+
+  // Duplicate checks mirror the public form, excluding this application.
+  const others = { status: "PENDING" as const, id: { not: applicationId } };
+
+  if (input.phone !== undefined && input.phone !== application.phone) {
+    const [app, amb] = await Promise.all([
+      db.ambassadorApplication.findFirst({ where: { ...others, phone: input.phone }, select: { fullName: true } }),
+      db.ambassador.findFirst({ where: { phone: input.phone }, select: { fullName: true } }),
+    ]);
+    if (app) throw new ApplicationError(`That phone number is on ${app.fullName}'s pending application.`);
+    if (amb) throw new ApplicationError(`That phone number already belongs to ambassador ${amb.fullName}.`);
+    data.phone = input.phone;
+  }
+
+  if (input.email !== undefined) {
+    const email = input.email.trim().toLowerCase();
+    if (email !== (application.email ?? "").toLowerCase()) {
+      if (!email) throw new ApplicationError("Enter an email: it is the email they sign in with.");
+      if (login?.isActive) {
+        throw new ApplicationError(
+          "This person applied with the login they already use, so that email is their sign-in and can't be changed here."
+        );
+      }
+      const [user, app, amb] = await Promise.all([
+        db.user.findUnique({ where: { email }, select: { id: true } }),
+        db.ambassadorApplication.findFirst({ where: { ...others, email }, select: { fullName: true } }),
+        db.ambassador.findFirst({ where: { email }, select: { fullName: true } }),
+      ]);
+      if (user && user.id !== login?.id) throw new ApplicationError("That email already belongs to another login.");
+      if (app) throw new ApplicationError(`That email is on ${app.fullName}'s pending application.`);
+      if (amb) throw new ApplicationError(`That email already belongs to ambassador ${amb.fullName}.`);
+      data.email = email;
+      loginData.email = email;
+    }
+  }
+
+  if (input.universityId !== undefined || input.otherUniversity !== undefined) {
+    let universityId: string | null = null;
+    if (input.universityId) {
+      const uni = await db.university.findUnique({ where: { id: input.universityId }, select: { id: true } });
+      if (!uni) throw new ApplicationError("That university does not exist");
+      universityId = uni.id;
+    }
+    const other = input.otherUniversity?.trim() || null;
+    if (!universityId && !other) throw new ApplicationError("Pick a university, or type the one that isn't listed");
+    data.university = universityId ? { connect: { id: universityId } } : { disconnect: true };
+    data.otherUniversity = universityId ? null : other;
+  }
+
+  if (input.department !== undefined) data.department = input.department || null;
+  if (input.level !== undefined) data.level = input.level || null;
+  if (input.motivation !== undefined) data.motivation = input.motivation || null;
+  if (input.bankName !== undefined) data.bankName = input.bankName || null;
+  if (input.accountName !== undefined) data.accountName = input.accountName || null;
+
+  if (input.accountNumber !== undefined && input.accountNumber !== (application.accountNumber ?? "")) {
+    if (!input.accountNumber) throw new ApplicationError("Enter a 10-digit account number: commission is paid into it.");
+    const [app, amb] = await Promise.all([
+      db.ambassadorApplication.findFirst({
+        where: { ...others, accountNumber: input.accountNumber },
+        select: { fullName: true },
+      }),
+      db.ambassador.findFirst({ where: { accountNumber: input.accountNumber }, select: { fullName: true } }),
+    ]);
+    if (app) throw new ApplicationError(`That account number is on ${app.fullName}'s pending application.`);
+    if (amb) throw new ApplicationError(`That account number already belongs to ambassador ${amb.fullName}.`);
+    data.accountNumber = input.accountNumber;
+  }
+
+  if (input.slotCode) {
+    const code = padSlot(input.slotCode);
+    if (code === "000") throw new ApplicationError("Slot IDs start at 001");
+    if (code !== application.slotCode) {
+      const [slot, holder, app] = await Promise.all([
+        db.ambassadorSlot.findUnique({ where: { code }, select: { vacant: true, name: true } }),
+        db.ambassador.findUnique({ where: { legacySlotId: code }, select: { fullName: true } }),
+        db.ambassadorApplication.findFirst({ where: { ...others, slotCode: code }, select: { fullName: true } }),
+      ]);
+      if (holder) throw new ApplicationError(`Slot ${code} belongs to ${holder.fullName}.`);
+      if (slot && !slot.vacant) throw new ApplicationError(`Slot ${code} is taken${slot.name ? ` by ${slot.name}` : ""}.`);
+      if (app) throw new ApplicationError(`Slot ${code} is held for ${app.fullName}'s pending application.`);
+      data.slotCode = code;
+    }
+  }
+
+  // Only a login this application created (still inactive) follows the edit.
+  const editsLogin = Boolean(login && !login.isActive && Object.keys(loginData).length > 0);
+
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.ambassadorApplication.update({ where: { id: applicationId }, data });
+      if (editsLogin && login) await tx.user.update({ where: { id: login.id }, data: loginData });
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new ApplicationError("That email already belongs to another login.");
+    }
+    throw error;
+  }
 }
 
 // ── Approve / reject ─────────────────────────────────────────

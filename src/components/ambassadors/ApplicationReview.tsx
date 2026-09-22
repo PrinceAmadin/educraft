@@ -2,9 +2,15 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CircleAlert, Check, X } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { LuCheck, LuCircleAlert, LuLoaderCircle, LuPencil, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Field } from "@/components/forms/Field";
+import { OTHER_UNIVERSITY, UniversityCombobox, type UniversityOption } from "@/components/forms/UniversityCombobox";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +18,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { ACADEMIC_LEVELS } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
+import { editApplicationSchema, type EditApplicationInput } from "@/lib/validations/application";
 import type { ApplicationRow } from "@/lib/services/applications";
 
 export function ApplicationReview({
@@ -20,13 +28,13 @@ export function ApplicationReview({
   universities,
 }: {
   rows: ApplicationRow[];
-  universities: { id: string; name: string; abbreviation: string }[];
+  universities: UniversityOption[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [modal, setModal] = React.useState<
-    { row: ApplicationRow; action: "approve" | "reject" } | null
+    { row: ApplicationRow; action: "approve" | "reject" | "edit" } | null
   >(null);
   const [universityId, setUniversityId] = React.useState("");
   const [note, setNote] = React.useState("");
@@ -59,7 +67,7 @@ export function ApplicationReview({
     <div className="space-y-3">
       {error && !modal ? (
         <p className="flex items-start gap-2 text-sm text-danger">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
           {error}
         </p>
       ) : null}
@@ -98,7 +106,19 @@ export function ApplicationReview({
                 ) : null}
               </div>
 
-              <div className="flex shrink-0 gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setModal({ row, action: "edit" });
+                    setError(null);
+                  }}
+                >
+                  <LuPencil className="size-4" aria-hidden />
+                  Edit
+                </Button>
                 <Button
                   size="sm"
                   disabled={busy !== null}
@@ -108,7 +128,7 @@ export function ApplicationReview({
                     setError(null);
                   }}
                 >
-                  <Check className="size-4" aria-hidden />
+                  <LuCheck className="size-4" aria-hidden />
                   Approve
                 </Button>
                 <Button
@@ -122,7 +142,7 @@ export function ApplicationReview({
                     setError(null);
                   }}
                 >
-                  <X className="size-4" aria-hidden />
+                  <LuX className="size-4" aria-hidden />
                   Reject
                 </Button>
               </div>
@@ -132,13 +152,24 @@ export function ApplicationReview({
       </ul>
 
       <Dialog open={modal !== null} onOpenChange={(o) => !o && setModal(null)}>
-        <DialogContent>
-          {modal?.action === "approve" ? (
+        <DialogContent className={modal?.action === "edit" ? "max-w-xl" : undefined}>
+          {modal?.action === "edit" ? (
+            <EditApplicationForm
+              row={modal.row}
+              universities={universities}
+              onDone={() => {
+                setModal(null);
+                router.refresh();
+              }}
+              onCancel={() => setModal(null)}
+            />
+          ) : modal?.action === "approve" ? (
             <>
               <DialogHeader>
                 <DialogTitle>Approve {modal.row.fullName}</DialogTitle>
                 <DialogDescription>
-                  Creates an ambassador with a fresh referral code.
+                  Creates an ambassador with a fresh referral code
+                  {modal.row.slotCode ? ` in slot EduCraftA-${modal.row.slotCode}` : ""}.
                 </DialogDescription>
               </DialogHeader>
               <form
@@ -181,7 +212,7 @@ export function ApplicationReview({
                     size="sm"
                     disabled={busy !== null || (modal.row.needsUniversity && !universityId)}
                   >
-                    {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                    {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
                     Approve
                   </Button>
                 </div>
@@ -218,7 +249,7 @@ export function ApplicationReview({
                     variant="destructive"
                     disabled={busy !== null}
                   >
-                    {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+                    {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
                     Reject
                   </Button>
                 </div>
@@ -228,5 +259,201 @@ export function ApplicationReview({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** Admin correcting a pending application — every detail they typed, plus the slot. Never the password. */
+function EditApplicationForm({
+  row,
+  universities,
+  onDone,
+  onCancel,
+}: {
+  row: ApplicationRow;
+  universities: UniversityOption[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [uniChoice, setUniChoice] = React.useState(
+    row.universityId ?? (row.otherUniversity ? OTHER_UNIVERSITY : "")
+  );
+  const {
+    register,
+    handleSubmit,
+    control,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting, dirtyFields },
+  } = useForm<EditApplicationInput>({
+    resolver: zodResolver(editApplicationSchema),
+    defaultValues: {
+      slotCode: row.slotCode ?? "",
+      fullName: row.fullName,
+      phone: row.phone,
+      email: row.email ?? "",
+      universityId: row.universityId ?? "",
+      otherUniversity: row.otherUniversity ?? "",
+      department: row.department ?? "",
+      level: row.level ?? "",
+      motivation: row.motivation ?? "",
+      bankName: row.bankName ?? "",
+      accountNumber: row.accountNumber ?? "",
+      accountName: row.accountName ?? "",
+    },
+  });
+  const motivation = watch("motivation") ?? "";
+
+  const onSubmit = async (data: EditApplicationInput) => {
+    setSubmitError(null);
+    // Only what the admin touched. The university is one choice across two fields.
+    const changed: Partial<EditApplicationInput> = Object.fromEntries(
+      Object.entries(data).filter(([key]) => dirtyFields[key as keyof EditApplicationInput])
+    );
+    if (dirtyFields.universityId || dirtyFields.otherUniversity) {
+      changed.universityId = data.universityId ?? "";
+      changed.otherUniversity = data.otherUniversity ?? "";
+    }
+    if (Object.keys(changed).length === 0) {
+      onCancel();
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/ambassadors/applications/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(changed),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Could not save the changes.");
+      }
+      onDone();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Could not save the changes.");
+    }
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Edit {row.fullName}&apos;s application</DialogTitle>
+        <DialogDescription>
+          Fix anything before approving or rejecting. Their password stays as they set it
+          {row.emailLocked ? "." : "; a corrected email becomes the email they sign in with."}
+        </DialogDescription>
+      </DialogHeader>
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+        <Field
+          label="Slot ID"
+          htmlFor="ap-slot"
+          error={errors.slotCode?.message}
+          hint="Any free general slot number. Their client link becomes /EduCraftA/ plus this number."
+        >
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 font-mono text-sm text-muted-foreground">EduCraftA-</span>
+            <Input id="ap-slot" inputMode="numeric" className="font-mono" {...register("slotCode")} />
+          </div>
+        </Field>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Full name" htmlFor="ap-name" error={errors.fullName?.message} className="sm:col-span-2">
+            <Input id="ap-name" {...register("fullName")} />
+          </Field>
+          <Field label="Phone" htmlFor="ap-phone" error={errors.phone?.message}>
+            <Input id="ap-phone" inputMode="tel" {...register("phone")} />
+          </Field>
+          <Field
+            label="Email"
+            htmlFor="ap-email"
+            error={errors.email?.message}
+            hint={row.emailLocked ? "This is the login they already use, so it can't be changed here." : undefined}
+          >
+            <Input id="ap-email" type="email" inputMode="email" readOnly={row.emailLocked} {...register("email")} />
+          </Field>
+          <Field label="University" htmlFor="ap-uni" error={errors.universityId?.message} className="sm:col-span-2">
+            <UniversityCombobox
+              id="ap-uni"
+              universities={universities}
+              value={uniChoice}
+              onChange={(v, typed) => {
+                setUniChoice(v);
+                if (v === OTHER_UNIVERSITY) {
+                  setValue("universityId", "", { shouldDirty: true });
+                  if (typed) setValue("otherUniversity", typed, { shouldDirty: true });
+                } else {
+                  setValue("universityId", v, { shouldDirty: true });
+                  setValue("otherUniversity", "", { shouldDirty: true });
+                }
+              }}
+            />
+          </Field>
+          {uniChoice === OTHER_UNIVERSITY ? (
+            <Field
+              label="Which university?"
+              htmlFor="ap-otheruni"
+              error={errors.otherUniversity?.message}
+              className="sm:col-span-2"
+            >
+              <Input id="ap-otheruni" {...register("otherUniversity")} />
+            </Field>
+          ) : null}
+          <Field label="Department" htmlFor="ap-dept" error={errors.department?.message}>
+            <Input id="ap-dept" {...register("department")} />
+          </Field>
+          <Field label="Level" htmlFor="ap-level" error={errors.level?.message}>
+            <Select id="ap-level" {...register("level")}>
+              <option value="">Not specified</option>
+              {row.level && !(ACADEMIC_LEVELS as readonly string[]).includes(row.level) ? (
+                <option value={row.level}>{row.level}</option>
+              ) : null}
+              {ACADEMIC_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Bank name" htmlFor="ap-bank" error={errors.bankName?.message}>
+            <Input id="ap-bank" {...register("bankName")} />
+          </Field>
+          <Field label="Account number" htmlFor="ap-acctno" error={errors.accountNumber?.message}>
+            <Input id="ap-acctno" inputMode="numeric" className="font-mono" {...register("accountNumber")} />
+          </Field>
+          <Field label="Account name" htmlFor="ap-acctname" error={errors.accountName?.message} className="sm:col-span-2">
+            <Input id="ap-acctname" {...register("accountName")} />
+          </Field>
+        </div>
+
+        <Field
+          label="Why they want to join"
+          htmlFor="ap-why"
+          error={errors.motivation?.message}
+          hint={`${motivation.length}/200 characters`}
+        >
+          <Textarea id="ap-why" rows={3} maxLength={200} {...register("motivation")} />
+        </Field>
+
+        {submitError ? (
+          <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+            <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+            {submitError}
+          </p>
+        ) : null}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={isSubmitting}>
+            {isSubmitting ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+            Save changes
+          </Button>
+        </div>
+      </form>
+    </>
   );
 }

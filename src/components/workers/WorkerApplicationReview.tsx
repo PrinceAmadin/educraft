@@ -244,7 +244,10 @@ function EditApplicationForm({
     <>
       <DialogHeader>
         <DialogTitle>Correct {row.fullName}&apos;s details</DialogTitle>
-        <DialogDescription>Fix anything before approving or rejecting.</DialogDescription>
+        <DialogDescription>
+          Fix anything before approving or rejecting. Their password stays as they set it
+          {row.emailLocked ? "." : "; a corrected email becomes the email they sign in with."}
+        </DialogDescription>
       </DialogHeader>
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -254,8 +257,14 @@ function EditApplicationForm({
           <Field label="Phone" htmlFor="e-phone" error={errors.phone?.message}>
             <Input id="e-phone" {...register("phone")} />
           </Field>
-          <Field label="Email" htmlFor="e-email" error={errors.email?.message} className="sm:col-span-2">
-            <Input id="e-email" type="email" {...register("email")} />
+          <Field
+            label="Email"
+            htmlFor="e-email"
+            error={errors.email?.message}
+            hint={row.emailLocked ? "This is the login they already use, so it can't be changed here." : undefined}
+            className="sm:col-span-2"
+          >
+            <Input id="e-email" type="email" inputMode="email" readOnly={row.emailLocked} {...register("email")} />
           </Field>
           <Field label="Education" htmlFor="e-edu" error={errors.educationLevel?.message}>
             <Input id="e-edu" {...register("educationLevel")} />

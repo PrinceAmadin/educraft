@@ -143,11 +143,15 @@ export interface WorkerApplicationRow {
   reviewNote: string | null;
   reviewedAt: string | null;
   workerId: string | null;
+  /** Sits on a login the person already uses, so the email is their sign-in. */
+  emailLocked: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-function toRow(r: WorkerApplication): WorkerApplicationRow {
+type RowSource = WorkerApplication & { user: { isActive: boolean } };
+
+function toRow(r: RowSource): WorkerApplicationRow {
   return {
     id: r.id,
     fullName: r.fullName,
@@ -163,6 +167,7 @@ function toRow(r: WorkerApplication): WorkerApplicationRow {
     reviewNote: r.reviewNote,
     reviewedAt: r.reviewedAt?.toISOString() ?? null,
     workerId: r.workerId,
+    emailLocked: r.status === "PENDING" && r.user.isActive,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
@@ -174,12 +179,13 @@ export async function listWorkerApplications(
   const rows = await db.workerApplication.findMany({
     where: status === "all" ? {} : { status },
     orderBy: { createdAt: "desc" },
+    include: { user: { select: { isActive: true } } },
   });
   return rows.map(toRow);
 }
 
 export async function getWorkerApplication(id: string): Promise<WorkerApplicationRow | null> {
-  const row = await db.workerApplication.findUnique({ where: { id } });
+  const row = await db.workerApplication.findUnique({ where: { id }, include: { user: { select: { isActive: true } } } });
   return row ? toRow(row) : null;
 }
 
@@ -187,21 +193,65 @@ export async function countPendingWorkerApplications(): Promise<number> {
   return db.workerApplication.count({ where: { status: "PENDING" } });
 }
 
-/** Admin correcting an applicant's details before approving. */
+/**
+ * Admin correcting an applicant's details before approving. The password is
+ * never touched. The login created at registration (still inactive) follows a
+ * name or email correction, so the worker signs in with the corrected email
+ * once approved; a login the person already uses (an ambassador applying as a
+ * worker) is their sign-in, so its email is refused here.
+ */
 export async function editWorkerApplication(
   id: string,
   input: EditWorkerApplicationInput
 ): Promise<WorkerApplicationRow> {
-  const application = await db.workerApplication.findUnique({ where: { id }, select: { status: true } });
+  const application = await db.workerApplication.findUnique({
+    where: { id },
+    select: { status: true, email: true, phone: true, userId: true, user: { select: { isActive: true } } },
+  });
   if (!application) throw new WorkerApplicationError("Application not found");
   if (application.status !== "PENDING") {
     throw new WorkerApplicationError("This application has already been reviewed");
   }
 
   const data: Prisma.WorkerApplicationUpdateInput = {};
-  if (input.fullName !== undefined) data.fullName = input.fullName;
-  if (input.phone !== undefined) data.phone = input.phone;
-  if (input.email !== undefined) data.email = input.email.trim().toLowerCase();
+  const loginData: Prisma.UserUpdateInput = {};
+  const others = { status: "PENDING" as const, id: { not: id } };
+
+  if (input.fullName !== undefined) {
+    data.fullName = input.fullName;
+    loginData.displayName = input.fullName;
+  }
+  if (input.phone !== undefined && input.phone !== application.phone) {
+    const [app, worker] = await Promise.all([
+      db.workerApplication.findFirst({ where: { ...others, phone: input.phone }, select: { fullName: true } }),
+      db.worker.findFirst({ where: { phone: input.phone }, select: { fullName: true } }),
+    ]);
+    if (app) throw new WorkerApplicationError(`That phone number is on ${app.fullName}'s pending application.`);
+    if (worker) throw new WorkerApplicationError(`That phone number already belongs to worker ${worker.fullName}.`);
+    data.phone = input.phone;
+  }
+  if (input.email !== undefined) {
+    const email = input.email.trim().toLowerCase();
+    if (email !== application.email.toLowerCase()) {
+      if (application.user.isActive) {
+        throw new WorkerApplicationError(
+          "This person applied with the login they already use, so that email is their sign-in and can't be changed here."
+        );
+      }
+      const [user, app, worker] = await Promise.all([
+        db.user.findUnique({ where: { email }, select: { id: true } }),
+        db.workerApplication.findFirst({ where: { ...others, email }, select: { fullName: true } }),
+        db.worker.findFirst({ where: { email }, select: { fullName: true } }),
+      ]);
+      if (user && user.id !== application.userId) {
+        throw new WorkerApplicationError("That email already belongs to another login.");
+      }
+      if (app) throw new WorkerApplicationError(`That email is on ${app.fullName}'s pending application.`);
+      if (worker) throw new WorkerApplicationError(`That email already belongs to worker ${worker.fullName}.`);
+      data.email = email;
+      loginData.email = email;
+    }
+  }
   if (input.educationLevel !== undefined) data.educationLevel = input.educationLevel || null;
   if (input.specialties !== undefined) data.specialties = input.specialties;
   if (input.skills !== undefined) data.skills = input.skills;
@@ -209,8 +259,25 @@ export async function editWorkerApplication(
   if (input.accountNumber !== undefined) data.accountNumber = input.accountNumber || null;
   if (input.accountName !== undefined) data.accountName = input.accountName || null;
 
-  const updated = await db.workerApplication.update({ where: { id }, data });
-  return toRow(updated);
+  const editsLogin = !application.user.isActive && Object.keys(loginData).length > 0;
+
+  try {
+    const updated = await db.$transaction(async (tx) => {
+      const row = await tx.workerApplication.update({
+        where: { id },
+        data,
+        include: { user: { select: { isActive: true } } },
+      });
+      if (editsLogin) await tx.user.update({ where: { id: application.userId }, data: loginData });
+      return row;
+    });
+    return toRow(updated);
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      throw new WorkerApplicationError("That email already belongs to another login.");
+    }
+    throw err;
+  }
 }
 
 /**

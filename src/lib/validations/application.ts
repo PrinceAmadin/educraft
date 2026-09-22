@@ -61,3 +61,40 @@ export const approveApplicationSchema = z.object({
 export const rejectApplicationSchema = z.object({
   note: z.string().trim().max(1000).optional().or(z.literal("")),
 });
+
+/**
+ * Admin correcting a pending application before deciding it. Every field is
+ * optional: the dialog sends only what was changed. The password and the
+ * login itself are never editable here.
+ */
+export const editApplicationSchema = z
+  .object({
+    fullName: z.string().trim().min(2, "Enter the full name").max(120).optional(),
+    phone: phoneSchema.optional(),
+    // "" only survives validation for older migrated rows that never had one.
+    email: z.string().trim().email("Enter a valid email").max(160).optional().or(z.literal("")),
+    /** "" with `otherUniversity` set means a school that isn't listed. */
+    universityId: z.string().optional().or(z.literal("")),
+    otherUniversity: z.string().trim().max(120).optional().or(z.literal("")),
+    department: z.string().trim().max(120).optional().or(z.literal("")),
+    level: z.string().trim().max(40).optional().or(z.literal("")),
+    motivation: z.string().trim().max(200, "Keep it under 200 characters").optional().or(z.literal("")),
+    bankName: z.string().trim().min(2, "Enter the bank").max(80).optional().or(z.literal("")),
+    accountNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{10}$/, "Enter a 10-digit account number")
+      .optional()
+      .or(z.literal("")),
+    accountName: z.string().trim().min(2, "Enter the account name").max(120).optional().or(z.literal("")),
+    /** General slot number, e.g. "7" or "007" — stored padded to three digits. "" leaves it as is. */
+    slotCode: z
+      .string()
+      .trim()
+      .regex(/^\d{1,4}$/, "Slot IDs are numbers, like 067")
+      .optional()
+      .or(z.literal("")),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to update");
+
+export type EditApplicationInput = z.infer<typeof editApplicationSchema>;
