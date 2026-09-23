@@ -139,7 +139,19 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
     const ok = await login(id, password);
     if (!ok) {
       setBusy(false);
-      fail("That Client ID or email and password did not match. If this is your first time, or you forgot your password, use the link below.");
+      // This page only opens client accounts. An EduCraft team address can never
+      // sign in here however right its password is, so say where it does work
+      // instead of leaving "did not match" as the only clue.
+      fail(
+        <>
+          That Client ID or email and password did not match. If this is your first time, or you forgot your password,
+          use the link below. Staff, specialists and ambassadors sign in on the{" "}
+          <Link href={id.includes("@") ? `/login?email=${encodeURIComponent(id)}` : "/login"} className={inlineLink}>
+            main sign-in page
+          </Link>
+          .
+        </>
+      );
     }
   }
 

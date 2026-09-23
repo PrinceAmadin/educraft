@@ -33,13 +33,12 @@ export default async function LoginPage() {
         </p>
       </div>
 
-      {signedIn ? (
-        <SignedInNotice email={signedIn.email} roleLabel={ROLE_LABELS[signedIn.role] ?? "Member"} />
-      ) : (
-        <Suspense fallback={<Skeleton className="h-[260px] w-full rounded-xl" />}>
-          <LoginForm />
-        </Suspense>
-      )}
+      {/* A session already on this device is announced, never a reason to hide the
+          form: signing in here replaces it. */}
+      {signedIn ? <SignedInNotice email={signedIn.email} roleLabel={ROLE_LABELS[signedIn.role] ?? "Member"} /> : null}
+      <Suspense fallback={<Skeleton className="h-[260px] w-full rounded-xl" />}>
+        <LoginForm />
+      </Suspense>
 
       <p className="mt-9 text-sm text-muted-foreground">
         Want to become an ambassador?{" "}

@@ -29,8 +29,8 @@ export default async function ClientLoginPage({
   // The intake success page hands over the Client ID, the forgot-password page the ID or email
   // a client just set a password for. Only a well-formed ID or email is used.
   const initialId = normalizeClientIdInput(searchParams.id ?? "") ?? realEmail(searchParams.id) ?? "";
-  // Already signed in (as anyone): say so instead of a form, so nobody signs in on
-  // top of someone else's session by mistake.
+  // Already signed in (as anyone): say so ABOVE the form, never instead of it, so a
+  // stale session can always be signed over.
   const session = await auth();
   const signedIn =
     session?.user && !isClientSessionExpired(session.user) ? { email: session.user.email ?? "", role: session.user.role } : null;
@@ -47,11 +47,8 @@ export default async function ClientLoginPage({
         </p>
       </div>
 
-      {signedIn ? (
-        <SignedInNotice email={signedIn.email} roleLabel={ROLE_LABELS[signedIn.role] ?? "Member"} />
-      ) : (
-        <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} />
-      )}
+      {signedIn ? <SignedInNotice email={signedIn.email} roleLabel={ROLE_LABELS[signedIn.role] ?? "Member"} /> : null}
+      <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} />
 
       <p className="mt-9 text-sm text-muted-foreground">
         Also a specialist or ambassador with EduCraft? One login opens all your dashboards.{" "}
