@@ -3,11 +3,11 @@ import { auth, homeForRole } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 /**
- * Server-side gate for /worker and /ambassador pages. The middleware lets either
- * of those roles into either portal (it cannot read the database); this checks
- * the login really owns that profile and that it is in good standing, so a
- * suspended worker who is also an ambassador cannot open the worker dashboard.
- * Anyone without it goes back to their own dashboard.
+ * Server-side gate for /worker and /ambassador pages. The middleware lets any
+ * worker, ambassador or client login into either portal (it cannot read the
+ * database); this checks the login really owns that profile and that it is in
+ * good standing, so a suspended worker who is also an ambassador cannot open
+ * the worker dashboard. Anyone without it goes back to their own dashboard.
  */
 export async function requirePortalProfile(portal: "worker" | "ambassador"): Promise<void> {
   const session = await auth();
@@ -36,4 +36,6 @@ export async function requirePortalProfile(portal: "worker" | "ambassador"): Pro
   const otherOpen =
     otherPortal === "worker" ? other?.status === "Active" || other?.status === "On Break" : other?.status === "Active";
   if (otherOpen) redirect(`/${otherPortal}`);
+  // Or their client orders, if they have any.
+  if (await db.client.count({ where: { userId: session.user.id } })) redirect("/client");
 }

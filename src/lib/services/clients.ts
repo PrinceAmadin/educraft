@@ -1,6 +1,8 @@
 import { realEmail } from "@/lib/client-email";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { isStaffRole } from "@/lib/roles";
+import { provedLoginForEmail } from "@/lib/services/account-links";
 import { TransitionError } from "@/lib/services/projects";
 
 export const CLIENT_PAGE_SIZE = 20;
@@ -224,10 +226,12 @@ export async function searchClientsForPicker(q: string) {
 export class ClientEmailError extends Error {}
 
 /**
- * Sets the address a client's sign-in code is sent to. Refuses an address that
- * belongs to a team (admin/worker/ambassador) account, since the two must never
- * be mixed. If the client was already linked to a sign-in user under their old
- * address, the link is dropped so the new address starts a clean sign-in.
+ * Sets the address a client's sign-in code is sent to. Refuses a staff
+ * (admin/operations) address: staff logins never hold client orders. An
+ * address that belongs to a worker or ambassador is fine: it is the same
+ * person, and once they have proved that inbox with a code the orders show in
+ * their one dashboard. If the client was linked to a login under their old
+ * address, that link is dropped so the new address starts clean.
  */
 export async function updateClientEmail(id: string, rawEmail: string) {
   const email = realEmail(rawEmail);
@@ -237,14 +241,15 @@ export async function updateClientEmail(id: string, rawEmail: string) {
   if (!client) throw new ClientEmailError("Client not found");
 
   const owner = await db.user.findUnique({ where: { email }, select: { role: true } });
-  if (owner && owner.role !== "CLIENT") {
-    throw new ClientEmailError("That address belongs to a team account, so it cannot be used for client sign-in.");
+  if (owner && isStaffRole(owner.role)) {
+    throw new ClientEmailError("That address belongs to a staff account, so it cannot be used for a client.");
   }
 
   const unlink = client.userId && client.user?.email !== email;
+  const joinLogin = await provedLoginForEmail(email);
   return db.client.update({
     where: { id },
-    data: { email, ...(unlink ? { userId: null } : {}) },
+    data: { email, ...(joinLogin ? { userId: joinLogin } : unlink ? { userId: null } : {}) },
     select: { id: true, email: true },
   });
 }

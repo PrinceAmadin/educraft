@@ -6,6 +6,8 @@ import { clientCodeEmail } from "@/lib/emails/client-code";
 import { realEmail } from "@/lib/client-email";
 import { normalizeClientIdInput, normalizeWorkerIdInput } from "@/lib/id-format";
 import { maskEmail, type CodeRequestResult, type CodeRequestStatus } from "@/lib/code-request";
+import { isPersonRole } from "@/lib/roles";
+import { linkClientOrders } from "@/lib/services/account-links";
 import {
   hashIp,
   CODE_TTL_MS,
@@ -153,8 +155,8 @@ async function lookupAccount(input: string): Promise<Lookup> {
   // 1. A record is already on a login: that is their login, whatever its email.
   if (linked.length === 1) {
     const login = await db.user.findUnique({ where: { id: linked[0] }, select: { id: true, email: true, role: true, isActive: true } });
-    if (!login || !login.isActive || (login.role !== "WORKER" && login.role !== "AMBASSADOR")) {
-      return refuse("needs_admin", "the login their record is on is inactive or not a worker/ambassador login");
+    if (!login || !login.isActive || !isPersonRole(login.role)) {
+      return refuse("needs_admin", "the login their record is on is inactive or a staff login");
     }
     // The code only proves the inbox it was sent to. Never let it set the password of a
     // login under a different email: an admin has to align the record and the login first.
@@ -176,7 +178,9 @@ async function lookupAccount(input: string): Promise<Lookup> {
     },
   });
   if (!user) return found({ ...base, loginEmail: email, userId: null, reclaim: false });
-  if (user.role !== "WORKER" && user.role !== "AMBASSADOR") return refuse("needs_admin", "that email belongs to a staff or client login");
+  // A client login with this email is the same person: their worker/ambassador
+  // record joins it (one login). Staff logins never take a profile.
+  if (!isPersonRole(user.role)) return refuse("needs_admin", "that email belongs to a staff login");
   if (user.isActive) {
     if (user.workerProfile || user.ambassadorProfile) return refuse("needs_admin", "that email's login already owns a different profile");
     return found({ ...base, loginEmail: email, userId: user.id, reclaim: false });
@@ -306,11 +310,11 @@ async function spendCode(email: string, codeInput: string, ip: string): Promise<
 }
 
 /**
- * Applying for the OTHER role with an email that already has a login: a worker
- * applying as an ambassador, or an ambassador applying as a worker. Returns that
- * login when it is active and holds only the other profile; the application then
- * attaches to it (no new password, no second login) once the emailed code proves
- * the applicant owns the inbox.
+ * Applying with an email that already has a login: a worker applying as an
+ * ambassador, an ambassador applying as a worker, or a client applying as
+ * either. Returns that login when it is active and does not already hold the
+ * profile applied for; the application then attaches to it (no new password,
+ * no second login) once the emailed code proves the applicant owns the inbox.
  */
 export async function findLoginForApplication(email: string, kind: "AMBASSADOR" | "WORKER"): Promise<{ userId: string; fullName: string } | null> {
   const address = realEmail(email);
@@ -326,10 +330,13 @@ export async function findLoginForApplication(email: string, kind: "AMBASSADOR" 
       ambassadorProfile: { select: { fullName: true, status: true } },
     },
   });
-  if (!user || !user.isActive || (user.role !== "WORKER" && user.role !== "AMBASSADOR")) return null;
-  const has = kind === "AMBASSADOR" ? user.workerProfile : user.ambassadorProfile;
+  if (!user || !user.isActive || !isPersonRole(user.role)) return null;
   const already = kind === "AMBASSADOR" ? user.ambassadorProfile : user.workerProfile;
-  if (!has || already || !["Active", "On Break"].includes(has.status)) return null;
+  if (already) return null;
+  // A client login: their orders are the other profile.
+  if (user.role === "CLIENT") return { userId: user.id, fullName: user.displayName ?? "there" };
+  const has = kind === "AMBASSADOR" ? user.workerProfile : user.ambassadorProfile;
+  if (!has || !["Active", "On Break"].includes(has.status)) return null;
   return { userId: user.id, fullName: has.fullName ?? user.displayName ?? "there" };
 }
 
@@ -338,8 +345,25 @@ export async function sendApplicationCode(opts: { email: string; fullName: strin
   await issueCode({ ...opts, email: opts.email.trim().toLowerCase(), purpose: "Enter this code to confirm your email for your EduCraft application. Your current password stays the same." });
 }
 
-/** True when `code` is the live code for this email; spends it. */
-export const verifyApplicationCode = (email: string, code: string, ip: string) => spendCode(email.trim().toLowerCase(), code, ip);
+/**
+ * True when `code` is the live code for this email; spends it. The code proves
+ * the inbox, so that login's email counts as proved from now on and client
+ * orders with the same email join it.
+ */
+export async function verifyApplicationCode(email: string, code: string, ip: string): Promise<boolean> {
+  const address = email.trim().toLowerCase();
+  if (!(await spendCode(address, code, ip))) return false;
+  await markEmailProved(address);
+  return true;
+}
+
+/** An emailed code for this address was just used: record the proof and pull in their client orders. */
+async function markEmailProved(email: string): Promise<void> {
+  const user = await db.user.findUnique({ where: { email }, select: { id: true, role: true } });
+  if (!user || !isPersonRole(user.role)) return;
+  await db.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+  await linkClientOrders(user.id, email);
+}
 
 /** Verifies the code, then stores the password on the person's one login (creating it if needed) and links their profiles to it. Any failure is just false. */
 export async function setPortalPasswordWithCode(opts: {
@@ -388,6 +412,9 @@ export async function setPortalPasswordWithCode(opts: {
       return id;
     });
     void userId;
+    // The code proved the inbox: the login's email counts as proved, and any client
+    // orders under it join this login (one dashboard per person).
+    await markEmailProved(account.loginEmail.toLowerCase());
     return { signInEmail: account.loginEmail };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return null;

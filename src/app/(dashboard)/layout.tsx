@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, navRoleForUser, portalsForUser, ROLE_LABELS } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isPersonRole } from "@/lib/roles";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import type { NavRole } from "@/lib/constants";
 
@@ -14,19 +15,24 @@ export default async function DashboardLayout({
 
   const role = navRoleForUser(session.user.role);
 
-  // Worker / ambassador logins can own both profiles: ask the database which, so a
-  // newly linked or approved second role appears without a fresh sign-in.
+  // One person can be a worker, an ambassador and a client on the same login: ask
+  // the database which, so a newly linked or approved role appears without a
+  // fresh sign-in. The switcher offers each one they hold in good standing.
   let portals: NavRole[] = [role];
-  if (session.user.role === "WORKER" || session.user.role === "AMBASSADOR") {
+  if (isPersonRole(session.user.role)) {
     const profiles = await db.user.findUnique({
       where: { id: session.user.id },
-      select: { workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
+      select: {
+        workerProfile: { select: { status: true } },
+        ambassadorProfile: { select: { status: true } },
+        _count: { select: { clientProfiles: true } },
+      },
     });
-    const found = portalsForUser(
-      session.user.role,
-      profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
-      profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false
-    ) as NavRole[];
+    const found = portalsForUser(session.user.role, {
+      worker: profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
+      ambassador: profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false,
+      client: (profiles?._count.clientProfiles ?? 0) > 0,
+    });
     if (found.length) portals = found;
   }
 

@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "@/lib/auth.config";
+import { isClientSessionExpired, isPersonRole, PORTAL_ROOTS } from "@/lib/roles";
 
 const { auth } = NextAuth(authConfig);
 
@@ -26,22 +27,21 @@ export default auth((req) => {
   const isProtected = under("/admin") || under("/worker") || under("/ambassador") || (under("/client") && !isClientLogin);
 
   // Client sessions last 14 days from sign-in (a client's projects are private).
-  const CLIENT_SESSION_MS = 14 * 24 * 3_600_000;
-  const clientExpired =
-    user?.role === "CLIENT" && (!user.loginAt || Date.now() - user.loginAt > CLIENT_SESSION_MS);
+  const clientExpired = isClientSessionExpired(user);
   // Where to come back to after signing in: the path AND its query string, so a
   // Paystack return (?payment=success&reference=…) survives the detour.
   const backTo = `${path}${nextUrl.search}`;
-  if (clientExpired && under("/client") && !isClientLogin) {
-    const login = new URL("/client/login", nextUrl);
+  // (A client-first login that also holds a worker or ambassador profile gets the
+  // same 14 days everywhere.)
+  if (clientExpired && isProtected) {
+    const login = new URL(under("/client") ? "/client/login" : "/login", nextUrl);
     login.searchParams.set("callbackUrl", backTo);
     return NextResponse.redirect(login);
   }
 
-  // Signed in and heading to a sign-in page → bounce to their own dashboard
-  if ((path === "/login" || isClientLogin) && user && !clientExpired) {
-    return NextResponse.redirect(new URL(ROLE_ROOT[user.role] ?? "/", nextUrl));
-  }
+  // Sign-in pages stay reachable while signed in: they say who is signed in and
+  // signing in again replaces the session. (Silently bouncing to the current
+  // account's dashboard made "sign in as the worker" land on the admin area.)
 
   if (!isProtected) return NextResponse.next();
 
@@ -51,11 +51,13 @@ export default auth((req) => {
     return NextResponse.redirect(login);
   }
 
-  // A worker who is also an ambassador (or the reverse) may open both portals. The
-  // edge cannot query the database, so it lets either role into either root and the
-  // portal's own layout sends them back unless they really have that profile.
-  const allowedRoots =
-    user.role === "WORKER" || user.role === "AMBASSADOR" ? [ROLE_ROOT[user.role], "/worker", "/ambassador"] : [ROLE_ROOT[user.role]].filter(Boolean);
+  // One person can be a worker, an ambassador and a client on the same login. The
+  // edge cannot query the database, so it lets any of those logins into all three
+  // roots and each portal's own layout sends them home unless they really hold
+  // that profile. Staff stay in /admin.
+  const allowedRoots = isPersonRole(user.role)
+    ? [ROLE_ROOT[user.role], ...Object.values(PORTAL_ROOTS)]
+    : [ROLE_ROOT[user.role]].filter(Boolean);
 
   // Wrong portal for this role → send them to their own
   if (!allowedRoots.some((root) => under(root))) {

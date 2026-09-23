@@ -58,7 +58,11 @@ function RefreshButton() {
   );
 }
 
-const PORTAL_LABELS: Record<string, string> = { worker: "Worker dashboard", ambassador: "Ambassador dashboard" };
+const PORTAL_LABELS: Record<string, string> = {
+  worker: "Worker dashboard",
+  ambassador: "Ambassador dashboard",
+  client: "Client dashboard",
+};
 
 export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role);

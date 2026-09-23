@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+// The first field takes an email, or a client's Client ID (ECC-0001).
 const schema = z.object({
-  email: z.string().min(1, "Email is required").email("Enter a valid email address"),
+  email: z.string().trim().min(1, "Enter your email or Client ID").max(160),
   password: z.string().min(1, "Password is required"),
 });
 
@@ -36,7 +37,7 @@ export function LoginForm() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { email: searchParams.get("email") ?? "", password: "" },
+    defaultValues: { email: searchParams.get("email") ?? searchParams.get("id") ?? "", password: "" },
   });
 
   const onSubmit = async (values: FormValues) => {
@@ -49,7 +50,7 @@ export function LoginForm() {
     });
 
     if (!result || result.error) {
-      setFormError("Incorrect email or password. Please try again.");
+      setFormError("That email or Client ID and password don't match. Check them, or set your password with an email code below.");
       return;
     }
 
@@ -82,13 +83,14 @@ export function LoginForm() {
       )}
 
       <div className="space-y-2">
-        <Label htmlFor="email">Email address</Label>
+        <Label htmlFor="email">Email or Client ID</Label>
         <Input
           id="email"
-          type="email"
-          autoComplete="email"
-          inputMode="email"
-          placeholder="you@educraft.ng"
+          type="text"
+          autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="you@gmail.com or ECC-0001"
           aria-invalid={!!errors.email}
           {...register("email")}
         />

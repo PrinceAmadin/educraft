@@ -6,6 +6,7 @@ import type { MailResult } from "@/lib/mailer";
 import { realEmail } from "@/lib/client-email";
 import { normalizeClientIdInput } from "@/lib/id-format";
 import { maskEmail, type CodeRequestResult, type CodeRequestStatus } from "@/lib/code-request";
+import { isPersonRole, isStaffRole } from "@/lib/roles";
 
 /**
  * Client sign-in: Client ID (ECC-0001) or email, plus a one-time code emailed
@@ -64,7 +65,9 @@ const signInSelect = {
   clientId: true,
   fullName: true,
   email: true,
-  user: { select: { id: true, email: true, displayName: true, role: true, isActive: true, passwordHash: true } },
+  user: {
+    select: { id: true, email: true, displayName: true, role: true, isActive: true, passwordHash: true, emailVerifiedAt: true },
+  },
 } as const;
 
 /** The client an identifier points at. By email: the oldest record with it (one per person since Sept 2026). */
@@ -185,10 +188,12 @@ export async function sendClientCode(opts: ClientCodeRequest): Promise<CodeReque
   const email = realEmail(client.email);
   if (!email) return refused("no_email", "the client has no usable email on record");
 
-  // An address that belongs to an admin, worker or ambassador account is never a
-  // client sign-in address: an admin has to give the client another email.
+  // One login per person: a client whose email is also their worker or ambassador
+  // login signs in to that same login (the code proves the inbox). A staff address
+  // is never a client's: an admin has to give the client another email.
   const owner = await db.user.findUnique({ where: { email }, select: { role: true, isActive: true } });
-  if (owner && owner.role !== "CLIENT") return refused("needs_admin", "that client email belongs to a non-client login");
+  if (owner && isStaffRole(owner.role)) return refused("needs_admin", "that client email belongs to a staff login");
+  if (owner && !isPersonRole(owner.role)) return refused("needs_admin", "that client email belongs to a login of an unknown kind");
   // A switched-off client login can never be signed into (resolveClientUser refuses it), so don't send a dead code.
   if (owner && !owner.isActive) return refused("inactive", "the client login is switched off");
 
@@ -240,6 +245,8 @@ export interface VerifiedClient {
   userId: string;
   email: string;
   name: string;
+  /** The login's own role (a client may sign in to their worker or ambassador login). */
+  role: string;
 }
 
 /**
@@ -300,14 +307,15 @@ async function linkClientRows(userId: string, email: string): Promise<void> {
 }
 
 /**
- * The User behind an email that has just proven ownership. Created on first
- * sign-in with an unusable password, and linked to every Client row with the
- * same email.
+ * The User behind an email that has just proven ownership. A person who is
+ * already a worker or ambassador keeps their one login (their orders join it);
+ * anyone else gets a client login, created with an unusable password. Either
+ * way the email is now proved and every Client row with it is linked.
  */
 async function resolveClientUser(input: { email: string; fullName: string }): Promise<VerifiedClient | null> {
   const { email } = input;
   let user = await db.user.findUnique({ where: { email } });
-  if (user && user.role !== "CLIENT") return null;
+  if (user && !isPersonRole(user.role)) return null;
   if (user && !user.isActive) return null;
 
   if (!user) {
@@ -325,13 +333,14 @@ async function resolveClientUser(input: { email: string; fullName: string }): Pr
     } catch (error) {
       if ((error as { code?: string }).code !== "P2002") throw error;
       user = await db.user.findUnique({ where: { email } });
-      if (!user || user.role !== "CLIENT") return null;
+      if (!user || !isPersonRole(user.role) || !user.isActive) return null;
     }
   }
 
+  await db.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
   await linkClientRows(user.id, email);
 
-  return { userId: user.id, email: user.email, name: user.displayName ?? input.fullName };
+  return { userId: user.id, email: user.email, name: user.displayName ?? input.fullName, role: user.role };
 }
 
 /** The Client rows a signed-in client owns. Every client-portal query must filter by these. */
@@ -397,7 +406,7 @@ export async function verifyPassword(opts: {
   if (!user && email) {
     user = await db.user.findUnique({
       where: { email },
-      select: { id: true, email: true, displayName: true, role: true, isActive: true, passwordHash: true },
+      select: { id: true, email: true, displayName: true, role: true, isActive: true, passwordHash: true, emailVerifiedAt: true },
     });
   }
 
@@ -406,7 +415,9 @@ export async function verifyPassword(opts: {
     where: { ipHash: acctKey, kind: "password-fail", createdAt: { gte: new Date(Date.now() - WINDOW_MS) } },
   });
 
-  const usable = user && user.role === "CLIENT" && user.isActive;
+  // Any person's login (a client may be signing in to their worker or ambassador
+  // login with their Client ID); never a staff login.
+  const usable = user && isPersonRole(user.role) && user.isActive;
   const hash = usable ? user!.passwordHash : DUMMY_HASH;
   const valid = await bcrypt.compare(password, hash);
 
@@ -416,6 +427,7 @@ export async function verifyPassword(opts: {
     return null;
   }
 
-  await linkClientRows(user.id, user.email);
-  return { userId: user.id, email: user.email, name: user.displayName ?? client.fullName };
+  // Orders join a login only once its inbox is proved (client logins always are).
+  if (user.role === "CLIENT" || user.emailVerifiedAt) await linkClientRows(user.id, user.email);
+  return { userId: user.id, email: user.email, name: user.displayName ?? client.fullName, role: user.role };
 }

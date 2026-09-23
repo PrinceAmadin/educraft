@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/shared/Logo";
 import { ClientLoginForm } from "@/app/(auth)/client/login/client-login-form";
+import { SignedInNotice } from "@/app/(auth)/login/signed-in-notice";
+import { auth, ROLE_LABELS } from "@/lib/auth";
+import { isClientSessionExpired } from "@/lib/roles";
 import { normalizeClientIdInput } from "@/lib/id-format";
 import { realEmail } from "@/lib/client-email";
 
@@ -16,7 +19,9 @@ function safeClientPath(raw: string | undefined): string {
   return raw.startsWith("/client/login") ? "/client" : raw;
 }
 
-export default function ClientLoginPage({
+export const dynamic = "force-dynamic";
+
+export default async function ClientLoginPage({
   searchParams,
 }: {
   searchParams: { id?: string; callbackUrl?: string };
@@ -24,6 +29,11 @@ export default function ClientLoginPage({
   // The intake success page hands over the Client ID, the forgot-password page the ID or email
   // a client just set a password for. Only a well-formed ID or email is used.
   const initialId = normalizeClientIdInput(searchParams.id ?? "") ?? realEmail(searchParams.id) ?? "";
+  // Already signed in (as anyone): say so instead of a form, so nobody signs in on
+  // top of someone else's session by mistake.
+  const session = await auth();
+  const signedIn =
+    session?.user && !isClientSessionExpired(session.user) ? { email: session.user.email ?? "", role: session.user.role } : null;
   return (
     <div className="w-full max-w-[400px]">
       <div className="mb-9">
@@ -37,12 +47,16 @@ export default function ClientLoginPage({
         </p>
       </div>
 
-      <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} />
+      {signedIn ? (
+        <SignedInNotice email={signedIn.email} roleLabel={ROLE_LABELS[signedIn.role] ?? "Member"} />
+      ) : (
+        <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} />
+      )}
 
       <p className="mt-9 text-sm text-muted-foreground">
-        Not a client?{" "}
+        Also a worker or ambassador? One login opens all your dashboards.{" "}
         <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
-          Team sign in
+          Sign in here
         </Link>
       </p>
     </div>

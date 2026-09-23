@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { clientIdsForUser } from "@/lib/services/client-otp";
+import { isClientSessionExpired, isPersonRole } from "@/lib/roles";
 
 const ADMIN_ROLES = ["SUPER_ADMIN", "OPS_MANAGER"];
 
@@ -56,8 +57,8 @@ export async function requireWorker(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  // Worker profile is what matters: an ambassador login can also own one.
-  if (session.user.role !== "WORKER" && session.user.role !== "AMBASSADOR") {
+  // The worker profile is what matters: an ambassador or client login can also own one.
+  if (!isPersonRole(session.user.role)) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const worker = await db.worker.findUnique({
@@ -84,7 +85,8 @@ export async function requireAmbassador(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  if (session.user.role !== "AMBASSADOR" && session.user.role !== "WORKER") {
+  // The ambassador profile is what matters: a worker or client login can also own one.
+  if (!isPersonRole(session.user.role)) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const ambassador = await db.ambassador.findUnique({
@@ -115,7 +117,6 @@ export function serverError(tag: string, error: unknown) {
   return NextResponse.json({ error: "Something went wrong. Try again." }, { status: 500 });
 }
 
-const CLIENT_SESSION_MS = 14 * 24 * 3_600_000;
 
 export interface ClientScope {
   userId: string;
@@ -124,14 +125,18 @@ export interface ClientScope {
 }
 
 /**
- * The signed-in client and what they own, or null (no session, not a client, or
- * the 14-day session has run out). Use this in client-portal server components.
+ * The signed-in client and what they own, or null (no session, a staff login,
+ * a login with no client orders, or a client session past its 14 days). A
+ * worker or ambassador who is also a client gets their own orders here too.
+ * Use this in client-portal server components.
  */
 export async function getClientScope(): Promise<ClientScope | null> {
   const session = await auth();
-  if (!session?.user || session.user.role !== "CLIENT") return null;
-  if (!session.user.loginAt || Date.now() - session.user.loginAt > CLIENT_SESSION_MS) return null;
+  if (!session?.user || !isPersonRole(session.user.role)) return null;
+  if (isClientSessionExpired(session.user)) return null;
   const clientIds = await clientIdsForUser(session.user.id);
+  // A client-first login keeps its dashboard (empty) even with no orders yet.
+  if (session.user.role !== "CLIENT" && clientIds.length === 0) return null;
   return { userId: session.user.id, clientIds };
 }
 

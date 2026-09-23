@@ -46,6 +46,11 @@ model User {
   passwordHash String
   role         UserRole
   isActive     Boolean  @default(true)
+  /// When an emailed code last proved this person owns `email`. Client orders
+  /// placed with the same email join this login (one login, several
+  /// dashboards) only once this is set: a password alone proves nothing about
+  /// the inbox, since worker and ambassador applicants type their own email.
+  emailVerifiedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
