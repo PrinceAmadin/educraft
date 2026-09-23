@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { clearDeviceBeforeSwitch } from "@/lib/pwa/sign-out";
 import { LuCircleAlert, LuInfo, LuLoaderCircle, LuMailCheck } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -157,6 +158,7 @@ export function SetPasswordForm({ initialIdentifier = "" }: { initialIdentifier?
       }
       if (isClient) {
         // Clients have their own sign-in (Client ID or email): sign them straight in.
+        await clearDeviceBeforeSwitch();
         const signedIn = await signIn("client-password", { identifier: id, password, redirect: false });
         if (signedIn && !signedIn.error) {
           router.push("/client");

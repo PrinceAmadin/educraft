@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { clearDeviceBeforeSwitch } from "@/lib/pwa/sign-out";
 import { LuCircleAlert, LuExternalLink, LuInfo, LuLoaderCircle, LuMailCheck } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,6 +132,8 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
   }
 
   async function login(id: string, pass: string) {
+    // Signing in over someone else's session: clear their notifications and saved pages first.
+    await clearDeviceBeforeSwitch();
     const result = await signIn("client-password", { identifier: id, password: pass, redirect: false });
     if (!result || result.error) return false;
     router.push(callbackUrl);

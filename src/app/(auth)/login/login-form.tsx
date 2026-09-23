@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signIn } from "next-auth/react";
+import { clearDeviceBeforeSwitch } from "@/lib/pwa/sign-out";
 import { z } from "zod";
 import { LuCircleAlert, LuCircleCheck, LuEye, LuEyeOff, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,8 @@ export function LoginForm() {
   const onSubmit = async (values: FormValues) => {
     setFormError(null);
 
+    // Signing in over someone else's session: clear their notifications and saved pages first.
+    await clearDeviceBeforeSwitch();
     const result = await signIn("credentials", {
       email: values.email,
       password: values.password,

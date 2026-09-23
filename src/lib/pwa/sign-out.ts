@@ -35,3 +35,21 @@ export async function signOutAndClear(): Promise<void> {
   await clearOfflineData();
   await signOut({ callbackUrl: fromClientPortal ? "/client/login" : "/login" });
 }
+
+/**
+ * Before a sign-in replaces a session that is still on this device (the sign-in
+ * forms stay usable while signed in): stop the previous person's phone
+ * notifications and wipe their saved pages, exactly as Sign out would, so
+ * nothing of one person stays with the next. A no-op when nobody is signed in.
+ */
+export async function clearDeviceBeforeSwitch(): Promise<void> {
+  try {
+    const res = await fetch("/api/auth/session", { cache: "no-store" });
+    const session = (await res.json().catch(() => null)) as { user?: unknown } | null;
+    if (!session?.user) return;
+  } catch {
+    return;
+  }
+  await Promise.race([disablePush(), new Promise((resolve) => setTimeout(resolve, 2500))]);
+  await clearOfflineData();
+}
