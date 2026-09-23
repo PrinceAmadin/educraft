@@ -280,14 +280,19 @@ export interface ClientPaymentRow {
   date: string;
 }
 
-/** Confirmed payments (with receipts) and ones still being confirmed. Abandoned checkouts are left out. */
+/**
+ * Confirmed payments (with receipts) and checkouts still being confirmed. A
+ * checkout left pending for more than two days was never paid (Paystack
+ * checkouts don't last that long), so it is left out rather than shown as
+ * "being confirmed" forever.
+ */
 export async function getClientPayments(projectDbId: string): Promise<ClientPaymentRow[]> {
   const rows = await db.payment.findMany({
     where: {
       projectId: projectDbId,
       direction: "INFLOW",
       type: { in: ["CLIENT_DOWNPAYMENT", "CLIENT_BALANCE"] },
-      status: { in: ["Confirmed", "Pending"] },
+      OR: [{ status: "Confirmed" }, { status: "Pending", date: { gte: new Date(Date.now() - 48 * 3_600_000) } }],
     },
     orderBy: { date: "desc" },
     select: { id: true, paymentId: true, type: true, amount: true, status: true, paymentMethod: true, date: true },
