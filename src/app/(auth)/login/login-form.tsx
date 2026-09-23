@@ -45,7 +45,7 @@ export function LoginForm() {
     setFormError(null);
 
     // Signing in over someone else's session: clear their notifications and saved pages first.
-    await clearDeviceBeforeSwitch();
+    await clearDeviceBeforeSwitch(values.email);
     const result = await signIn("credentials", {
       email: values.email,
       password: values.password,

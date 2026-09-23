@@ -158,7 +158,7 @@ export function SetPasswordForm({ initialIdentifier = "" }: { initialIdentifier?
       }
       if (isClient) {
         // Clients have their own sign-in (Client ID or email): sign them straight in.
-        await clearDeviceBeforeSwitch();
+        await clearDeviceBeforeSwitch(id);
         const signedIn = await signIn("client-password", { identifier: id, password, redirect: false });
         if (signedIn && !signedIn.error) {
           router.push("/client");

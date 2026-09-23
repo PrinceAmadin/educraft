@@ -40,9 +40,11 @@ export async function signOutAndClear(): Promise<void> {
  * Before a sign-in replaces a session that is still on this device (the sign-in
  * forms stay usable while signed in): stop the previous person's phone
  * notifications and wipe their saved pages, exactly as Sign out would, so
- * nothing of one person stays with the next. A no-op when nobody is signed in.
+ * nothing of one person stays with the next. A no-op when nobody is signed in,
+ * and when the same person signs in again with their own email (their saved
+ * pages and notifications stay). A Client ID can't be compared, so it clears.
  */
-export async function clearDeviceBeforeSwitch(): Promise<void> {
+export async function clearDeviceBeforeSwitch(identifier?: string): Promise<void> {
   // This runs BEFORE sign-in, so it must never be what stops someone signing in:
   // most users are on phones with patchy signal, and an unbounded fetch would
   // leave the button on "Signing in…" for as long as the network hangs. On a
@@ -52,8 +54,10 @@ export async function clearDeviceBeforeSwitch(): Promise<void> {
   const abort = setTimeout(() => controller.abort(), 2500);
   try {
     const res = await fetch("/api/auth/session", { cache: "no-store", signal: controller.signal });
-    const session = (await res.json().catch(() => null)) as { user?: unknown } | null;
+    const session = (await res.json().catch(() => null)) as { user?: { email?: string | null } } | null;
     if (!session?.user) return;
+    const typed = identifier?.trim().toLowerCase();
+    if (typed && typed.includes("@") && session.user.email?.toLowerCase() === typed) return;
   } catch {
     return;
   } finally {
