@@ -33,10 +33,7 @@ function refusal(result: CodeRequestResult, typed: string): Alert {
       return {
         tone: "error",
         body: isEmail ? (
-          <>
-            {shown} is not registered with EduCraft as a worker, ambassador or client. Check the spelling, or use the email you
-            registered with.
-          </>
+          <>{shown} is not registered with EduCraft. Check the spelling, or use the email you registered with.</>
         ) : (
           <>No account has the ID {shown}. Check it, or enter your email instead.</>
         ),

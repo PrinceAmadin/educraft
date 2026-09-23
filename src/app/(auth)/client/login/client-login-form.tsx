@@ -71,7 +71,19 @@ function refusal(result: CodeRequestResult, typed: string): Alert {
     case "inactive":
       return { tone: "error", body: <>This client account is switched off. Please {contactUs}.</> };
     case "unavailable":
-      return { tone: "error", body: <>This email can&apos;t be used for client sign-in. Please {contactUs}.</> };
+      // An EduCraft team address: it resets its password on the main sign-in page, not here.
+      return {
+        tone: "info",
+        body: (
+          <>
+            {shown} is an EduCraft team account, not a client account. Set its password on the{" "}
+            <Link href={`/login/set-password?email=${encodeURIComponent(typed)}`} className={inlineLink}>
+              main sign-in page
+            </Link>
+            .
+          </>
+        ),
+      };
     default:
       return { tone: "error", body: "Something went wrong. Please try again." };
   }

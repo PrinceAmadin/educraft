@@ -20,8 +20,8 @@ export default function SetPasswordPage({ searchParams }: { searchParams: { emai
           Set your password
         </h1>
         <p className="mt-2 text-[15px] text-muted-foreground">
-          Worker, ambassador or client? Enter the email you registered with. We check which account it is, email you a
-          code, and you choose a new password.
+          Staff, worker, ambassador or client? Enter the email you registered with. We check which account it is, email
+          you a code, and you choose a new password.
         </p>
       </div>
 

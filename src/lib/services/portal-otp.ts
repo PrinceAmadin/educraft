@@ -6,7 +6,7 @@ import { clientCodeEmail } from "@/lib/emails/client-code";
 import { realEmail } from "@/lib/client-email";
 import { normalizeClientIdInput, normalizeWorkerIdInput } from "@/lib/id-format";
 import { maskEmail, type CodeRequestResult, type CodeRequestStatus } from "@/lib/code-request";
-import { isPersonRole } from "@/lib/roles";
+import { isPersonRole, isStaffRole } from "@/lib/roles";
 import { linkClientOrders } from "@/lib/services/account-links";
 import {
   hashIp,
@@ -143,7 +143,7 @@ async function lookupAccount(input: string): Promise<Lookup> {
   if (workers.length > 1 || ambassadors.length > 1) return refuse("needs_admin", "two active worker or ambassador records share that email");
   const worker = workers[0] ?? null;
   const ambassador = ambassadors[0] ?? null;
-  if (!worker && !ambassador) return classifyNoActiveProfile(email);
+  if (!worker && !ambassador) return classifyNoActiveProfile(email, typedEmail);
 
   const fullName = worker?.fullName ?? ambassador?.fullName ?? "there";
   const linked = Array.from(new Set([worker?.userId, ambassador?.userId].filter((id): id is string => Boolean(id))));
@@ -198,12 +198,35 @@ async function lookupAccount(input: string): Promise<Lookup> {
 }
 
 /** No active worker or ambassador has this email: say what it is instead (suspended, applying, a client, staff, or nobody). */
-async function classifyNoActiveProfile(email: string): Promise<Lookup> {
+async function classifyNoActiveProfile(email: string, typedEmail: boolean): Promise<Lookup> {
   const [workers, ambassadors, user] = await Promise.all([
     db.worker.count({ where: sameEmail(email) }),
     db.ambassador.count({ where: sameEmail(email) }),
-    db.user.findUnique({ where: { email }, select: { id: true, role: true } }),
+    db.user.findUnique({ where: { email }, select: { id: true, role: true, displayName: true, isActive: true } }),
   ]);
+
+  // Staff hold no worker or ambassador profile, but they must be able to reset
+  // their own password: without this a forgotten admin password locked the
+  // founder out of production with no way back except editing the database.
+  // The code still goes only to the login's own email, and `markEmailProved`
+  // leaves staff alone, so an admin never collects client orders.
+  if (isStaffRole(user?.role)) {
+    if (!user?.isActive) return refuse("inactive", "that staff login is switched off");
+    return {
+      ok: true,
+      typedEmail,
+      account: {
+        email,
+        loginEmail: email,
+        fullName: user.displayName ?? "there",
+        userId: user.id,
+        reclaim: false,
+        workerId: null,
+        ambassadorId: null,
+      },
+    };
+  }
+
   if (workers || ambassadors) return refuse("inactive", "their worker/ambassador record is suspended, paused or terminated");
 
   const ownLogin = user ? [{ userId: user.id }] : [];
@@ -213,7 +236,6 @@ async function classifyNoActiveProfile(email: string): Promise<Lookup> {
     db.client.count({ where: sameEmail(email) }),
   ]);
   if (pendingWorker || pendingAmbassador) return refuse("pending", "an application with that email is under review");
-  if (user?.role === "SUPER_ADMIN" || user?.role === "OPS_MANAGER") return refuse("unavailable", "that email belongs to a staff login");
   // Only a real client record, never a bare leftover login: the client code needs one.
   if (clients) return { ok: false, status: "client", email };
   return refuse("not_registered", "no worker, ambassador, application or client has that email");
