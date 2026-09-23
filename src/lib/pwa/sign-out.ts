@@ -43,12 +43,21 @@ export async function signOutAndClear(): Promise<void> {
  * nothing of one person stays with the next. A no-op when nobody is signed in.
  */
 export async function clearDeviceBeforeSwitch(): Promise<void> {
+  // This runs BEFORE sign-in, so it must never be what stops someone signing in:
+  // most users are on phones with patchy signal, and an unbounded fetch would
+  // leave the button on "Signing in…" for as long as the network hangs. On a
+  // timeout we skip the clearing and let the sign-in through; Sign out still
+  // clears properly, and the next sign-out catches anything left behind.
+  const controller = new AbortController();
+  const abort = setTimeout(() => controller.abort(), 2500);
   try {
-    const res = await fetch("/api/auth/session", { cache: "no-store" });
+    const res = await fetch("/api/auth/session", { cache: "no-store", signal: controller.signal });
     const session = (await res.json().catch(() => null)) as { user?: unknown } | null;
     if (!session?.user) return;
   } catch {
     return;
+  } finally {
+    clearTimeout(abort);
   }
   await Promise.race([disablePush(), new Promise((resolve) => setTimeout(resolve, 2500))]);
   await clearOfflineData();
