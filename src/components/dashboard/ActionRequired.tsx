@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LuMessageCircle } from "react-icons/lu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SurfaceHeader } from "@/components/ui/surface";
 import {
@@ -44,12 +45,28 @@ function buildItems(actions: ActionCounts): ActionItem[] {
       severity: "urgent",
     },
     {
+      key: "client-late",
+      icon: LuMessageCircle,
+      label: "Client messages waiting over a day",
+      count: actions.clientMessagesOverADay,
+      href: "/admin/client-inbox",
+      severity: "urgent",
+    },
+    {
       key: "revisions",
       icon: IconRevision,
       label: "Past the 3-revision cap — needs founder review",
       count: actions.revisionEscalations,
       href: "/admin/projects?flag=revision-escalated",
       severity: "urgent",
+    },
+    {
+      key: "client-messages",
+      icon: LuMessageCircle,
+      label: "Client messages waiting for a reply",
+      count: Math.max(0, actions.clientMessagesWaiting - actions.clientMessagesOverADay),
+      href: "/admin/client-inbox",
+      severity: "attention",
     },
     {
       key: "downpayments",

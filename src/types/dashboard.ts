@@ -62,6 +62,10 @@ export interface ActionCounts {
   overdue: number;
   qaQueue: number;
   revisionEscalations: number;
+  /** Client message threads whose latest message is from the client. */
+  clientMessagesWaiting: number;
+  /** Of those, waiting more than a day. */
+  clientMessagesOverADay: number;
 }
 
 export interface DashboardSummary {

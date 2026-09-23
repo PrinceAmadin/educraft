@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import type { SubmittedContact } from "@/lib/submitted-contact";
+import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates } from "@/lib/services/settings";
 import {
@@ -334,6 +335,7 @@ export async function submitIntake(
               : Prisma.JsonNull,
           clientDeadline,
           internalDeadline,
+          expectedDeliveryAt: clientDeadline ?? internalDeadline,
           ...(proBono
             ? {
                 ...proBonoFinancials(),
@@ -407,6 +409,13 @@ export async function submitIntake(
             ? "Submitted through a pro bono link. No payment required"
             : "Submitted through the online intake form",
         },
+      });
+      await recordUpdate(tx, {
+        projectId: project.id,
+        kind: "STATUS",
+        title: "Order received",
+        body: proBono ? "Your project is confirmed. No payment needed." : "We have your order.",
+        dedupeKey: `created:${project.id}`,
       });
 
       return { ...project, clientCode: client.clientId };

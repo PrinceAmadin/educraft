@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   FolderKanban,
+  Inbox,
   Users,
   UserCog,
   Megaphone,
@@ -168,6 +169,7 @@ export const ADMIN_NAV: NavSection[] = [
       { label: "Command Center", href: "/admin", icon: LayoutDashboard },
       { label: "Projects", href: "/admin/projects", icon: FolderKanban, matchNested: true },
       { label: "QA Review", href: "/admin/qa", icon: ClipboardCheck, matchNested: true },
+      { label: "Client inbox", href: "/admin/client-inbox", icon: Inbox },
       { label: "Research approvals", href: "/admin/research-requests", icon: BookCheck },
     ],
   },

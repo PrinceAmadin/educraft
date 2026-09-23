@@ -5,6 +5,10 @@ import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { emailPendingCommission } from "@/lib/services/ambassador-commission";
 import { alertPaidIntakeFailed, alertPaidOrder } from "@/lib/services/team-alerts";
 import { IntakeError, submitIntake } from "@/lib/services/intake";
+import { recordUpdate } from "@/lib/services/client-updates";
+import { notifyClient } from "@/lib/services/client-notify";
+import { balancePayable } from "@/lib/payment-rules";
+import { formatNaira } from "@/lib/utils";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { computePrice } from "@/lib/pricing";
 import { intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
@@ -28,8 +32,10 @@ const LEG_PAYMENT_TYPE: Record<Leg, "CLIENT_DOWNPAYMENT" | "CLIENT_BALANCE"> = {
   balance: "CLIENT_BALANCE",
 };
 
-// A project only unlocks a leg's Paystack link from one specific status —
-// mirrors the manual-verification guards in transitionProject/verifyPayment.
+// The status a paid leg moves the project on from. The downpayment is only
+// payable at NEW; the balance is payable from any working status once the
+// downpayment is in (see src/lib/payment-rules.ts), and only moves the project
+// on (APPROVED -> BALANCE_VERIFIED) when it arrives at APPROVED.
 const LEG_REQUIRED_STATUS: Record<Leg, ProjectStatus> = {
   downpayment: "NEW",
   balance: "APPROVED",
@@ -56,7 +62,9 @@ export interface InitializePaystackPaymentResult {
  */
 export async function initializePaystackPayment(
   projectIdOrCode: string,
-  leg: Leg
+  leg: Leg,
+  /** The signed-in client may pay the balance before QA approval (Chapters 3+ need it). */
+  opts: { allowEarlyBalance?: boolean } = {}
 ): Promise<InitializePaystackPaymentResult> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: projectIdOrCode }, { projectId: projectIdOrCode }] },
@@ -64,6 +72,7 @@ export async function initializePaystackPayment(
       id: true,
       projectId: true,
       status: true,
+      isProBono: true,
       downpaymentStatus: true,
       downpaymentAmount: true,
       balanceStatus: true,
@@ -77,7 +86,9 @@ export async function initializePaystackPayment(
   if (legStatus === "Verified") {
     throw new PaystackPaymentError("That payment has already been verified");
   }
-  if (project.status !== LEG_REQUIRED_STATUS[leg]) {
+  const payableNow =
+    leg === "balance" && opts.allowEarlyBalance ? balancePayable(project) : project.status === LEG_REQUIRED_STATUS[leg];
+  if (!payableNow) {
     throw new PaystackPaymentError(
       leg === "downpayment"
         ? "This project is not awaiting a downpayment"
@@ -98,7 +109,9 @@ export async function initializePaystackPayment(
       email,
       amountNaira: amount,
       reference,
-      callbackUrl: `${callbackBaseUrl()}/client/projects/${encodeURIComponent(project.projectId)}?payment=success`,
+      // Paystack adds &reference=… on the way back; the project page checks it
+      // with Paystack at once, so the client never waits on the webhook.
+      callbackUrl: `${callbackBaseUrl()}/client/projects/${encodeURIComponent(project.projectId)}?tab=payments&payment=success`,
       metadata: { projectDbId: project.id, projectCode: project.projectId, leg },
     });
     authorizationUrl = tx.authorizationUrl;
@@ -316,42 +329,64 @@ async function creditProjectPayment(
     );
   }
   const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
-  const advance = project.status === LEG_REQUIRED_STATUS[leg] ? LEG_ADVANCE_STATUS[leg] : null;
+  const wantAdvance = project.status === LEG_REQUIRED_STATUS[leg] ? LEG_ADVANCE_STATUS[leg] : null;
 
-  const data: Prisma.ProjectUpdateInput =
+  const legData: Prisma.ProjectUpdateManyMutationInput =
     leg === "downpayment"
       ? { downpaymentStatus: "Verified", downpaymentDate: paidOn, downpaymentReference: reference }
       : { balanceStatus: "Verified", balanceDate: paidOn, balanceReference: reference };
-  if (advance) data.status = advance;
 
-  const writes: Prisma.PrismaPromise<unknown>[] = [
-    db.project.update({ where: { id: project.id }, data }),
-    db.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: "Confirmed",
-        // amount stays the project's leg amount, not Paystack's gross charge —
-        // the customer-borne fee on top is not EduCraft revenue.
-        paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
-        date: paidOn,
-      },
-    }),
-  ];
-
-  if (advance) {
-    writes.push(
-      db.projectStatusLog.create({
+  // One transaction, and the Payment row is claimed first: Paystack's webhook,
+  // the client's return page and an admin Sync can all arrive at once, and only
+  // the one that flips the row to Confirmed goes on to credit the project.
+  const outcome = await db.$transaction(
+    async (tx) => {
+      const claim = await tx.payment.updateMany({
+        where: { id: payment.id, status: { not: "Confirmed" } },
         data: {
-          projectId: project.id,
-          fromStatus: project.status,
-          toStatus: advance,
-          notes: `${leg === "downpayment" ? "Downpayment" : "Balance"} verified via Paystack (${reference})`,
+          status: "Confirmed",
+          // amount stays the project's leg amount, not Paystack's gross charge —
+          // the customer-borne fee on top is not EduCraft revenue.
+          paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
+          date: paidOn,
         },
-      })
-    );
-  }
+      });
+      if (claim.count !== 1) return null;
 
-  await db.$transaction(writes);
+      // Move the project on only if it is still where we read it.
+      let advance: ProjectStatus | null = null;
+      if (wantAdvance) {
+        const moved = await tx.project.updateMany({
+          where: { id: project.id, status: project.status },
+          data: { ...legData, status: wantAdvance },
+        });
+        if (moved.count === 1) advance = wantAdvance;
+      }
+      if (!advance) await tx.project.updateMany({ where: { id: project.id }, data: legData });
+
+      if (advance) {
+        await tx.projectStatusLog.create({
+          data: {
+            projectId: project.id,
+            fromStatus: project.status,
+            toStatus: advance,
+            notes: `${leg === "downpayment" ? "Downpayment" : "Balance"} verified via Paystack (${reference})`,
+          },
+        });
+      }
+      await recordUpdate(tx, {
+        projectId: project.id,
+        kind: "PAYMENT",
+        title: "Payment received",
+        body: `Your ${leg} of ${formatNaira(payment.amount)} is confirmed.`,
+        dedupeKey: `payment:${payment.id}`,
+      });
+      return { advance };
+    },
+    { timeout: 15_000, maxWait: 10_000 }
+  );
+  if (!outcome) return { status: "already_confirmed" };
+  const advance = outcome.advance;
 
   // An order submitted first (variable price) is now paid: tell the team's
   // Gmail. Queued before anything else can throw, so it is never lost.
@@ -370,9 +405,27 @@ async function creditProjectPayment(
     message:
       leg === "downpayment"
         ? `Paystack confirmed the downpayment for ${project.projectId}.`
-        : `Paystack confirmed the balance for ${project.projectId} — ready for delivery.`,
+        : advance
+          ? `Paystack confirmed the balance for ${project.projectId} — ready for delivery.`
+          : `Paystack confirmed the balance for ${project.projectId} early. Chapters 3+ and the final unlock for the client; delivery still waits for QA.`,
     type: "success",
     link: `/admin/projects/${project.projectId}`,
+  });
+
+  await notifyClient(project.id, {
+    title: "Payment received",
+    message: `Your ${leg} for ${project.projectId} is confirmed.`,
+    type: "success",
+    tab: "payments",
+    email: {
+      kind: "payment",
+      heading: "Payment received",
+      lines: [
+        `Your ${leg} of ${formatNaira(payment.amount)} is confirmed. Thank you.`,
+        "Your receipt is in the Payments tab of your dashboard.",
+      ],
+      ctaLabel: "View your receipt",
+    },
   });
 
   if (leg === "downpayment" && project.ambassador?.userId) {
@@ -522,6 +575,13 @@ async function processPendingIntake(
       where: { id: pendingIntakeId },
       data: { status: "CONSUMED", consumedAt: paidOn, resultProjectCode: project.projectId },
     }),
+    recordUpdate(db, {
+      projectId: project.id,
+      kind: "PAYMENT",
+      title: "Payment received",
+      body: `Your downpayment of ${formatNaira(project.downpaymentAmount)} is confirmed.`,
+      dedupeKey: `payment-ref:${reference}`,
+    }),
   ]);
 
   // A new, paid order: tell the team's Gmail (Settings > Email alerts).
@@ -539,6 +599,22 @@ async function processPendingIntake(
     message: `Paystack confirmed the downpayment for ${project.projectId} — new project created.`,
     type: "success",
     link: `/admin/projects/${project.projectId}`,
+  });
+
+  await notifyClient(project.id, {
+    title: "Payment received",
+    message: `Your downpayment for ${project.projectId} is confirmed.`,
+    type: "success",
+    tab: "payments",
+    email: {
+      kind: "payment",
+      heading: "Payment received",
+      lines: [
+        `Your downpayment of ${formatNaira(project.downpaymentAmount)} is confirmed. Thank you.`,
+        "Sign in to follow your project and keep your receipt.",
+      ],
+      ctaLabel: "Open your dashboard",
+    },
   });
 
   if (project.ambassador?.userId) {

@@ -3,7 +3,12 @@ import { badRequest, serverError } from "@/lib/api";
 import { PaystackPaymentError, initializePaystackPayment } from "@/lib/services/paystack-payments";
 import { paystackInitializeBodySchema } from "@/lib/validations/payments";
 
-/** Public — no auth. A client only ever pays their own project's own amount. */
+/**
+ * Public, no sign-in: the DOWNPAYMENT only (the intake success page, before the
+ * client has a login). The balance is paid from the signed-in dashboard
+ * (POST /api/client/projects/[code]/pay), so a stranger holding a project code
+ * cannot start or supersede balance checkouts on someone else's project.
+ */
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
@@ -14,6 +19,10 @@ export async function POST(req: NextRequest) {
 
   const parsed = paystackInitializeBodySchema.safeParse(body);
   if (!parsed.success) return badRequest("Invalid request", parsed.error.flatten());
+
+  if (parsed.data.leg !== "downpayment") {
+    return NextResponse.json({ error: "Sign in to your dashboard to pay your balance." }, { status: 403 });
+  }
 
   try {
     const result = await initializePaystackPayment(parsed.data.projectId, parsed.data.leg);

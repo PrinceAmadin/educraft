@@ -51,9 +51,10 @@ model User {
 
   workerProfile     Worker?
   ambassadorProfile Ambassador?
-  /// One person can own several Client rows (intake creates a new one each
-  /// time); they are all linked to the same User the first time it signs in.
+  /// One Client row per person since Sept 2026 (a returning email joins it);
+  /// older duplicates, if any, are all linked to the same User.
   clientProfiles    Client[]
+  projectMessages   ProjectMessage[]   @relation("ProjectMessageAuthor")
 
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
@@ -374,6 +375,10 @@ model Project {
   internalDeadline   DateTime?
   deadlinePausedAt   DateTime?
   deadlinePausedDays Int       @default(0)
+  /// The date the CLIENT is shown ("expected delivery"). Starts as the client's
+  /// deadline (or the service estimate), moves with paused days, and admins can
+  /// change it. Never show internalDeadline to clients.
+  expectedDeliveryAt DateTime?
 
   // ── Pricing ──
   price                Float
@@ -452,6 +457,8 @@ model Project {
   references  Reference[]
   researchRunLogs      ResearchRunLog[]
   researchRerunRequests ResearchRerunRequest[]
+  clientUpdates        ProjectUpdate[]
+  messages             ProjectMessage[]
 
   @@index([status])
   @@index([clientId])
@@ -1099,4 +1106,76 @@ model ClientLoginAttempt {
   createdAt DateTime @default(now())
 
   @@index([ipHash, kind, createdAt])
+}
+
+
+// ─── CLIENT DASHBOARD ───────────────────────────────────
+// The client sees ONLY what is written here and in their project's own fields
+// chosen by src/lib/services/client-portal.ts. ProjectStatusLog stays internal:
+// its notes carry QA feedback, pause reasons and payment references.
+
+enum ProjectUpdateKind {
+  PAYMENT
+  STATUS
+  RESEARCH
+  RELEASE
+  REQUEST
+  CORRECTION
+  MANUAL
+}
+
+/// One line in the client's activity feed, in client wording.
+model ProjectUpdate {
+  id          String            @id @default(cuid())
+  projectId   String
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind        ProjectUpdateKind
+  title       String
+  body        String?
+  /// Set for system events so a replay (webhook retry, double click) is a no-op.
+  dedupeKey   String?           @unique
+  /// The admin who posted a MANUAL update.
+  createdById String?
+  /// Hidden by an admin: kept for the record, never shown to the client.
+  hiddenAt    DateTime?
+  createdAt   DateTime          @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+enum MessageSide {
+  CLIENT
+  ADMIN
+}
+
+/// Client <-> EduCraft messages on one project. Workers never see these.
+model ProjectMessage {
+  id           String      @id @default(cuid())
+  projectId    String
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorUserId String
+  author       User        @relation("ProjectMessageAuthor", fields: [authorUserId], references: [id])
+  authorSide   MessageSide
+  body         String
+  /// When the other side opened the thread after this was sent.
+  readAt       DateTime?
+  createdAt    DateTime    @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([authorSide, readAt])
+}
+
+/// Client-facing emails sent, so they can be rate limited (Gmail allows ~500 a
+/// day, shared with sign-in codes) and a project is not emailed twice in a row.
+model EmailLog {
+  id        String   @id @default(cuid())
+  kind      String
+  to        String
+  projectId String?
+  ok        Boolean
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([projectId, kind, createdAt])
 }

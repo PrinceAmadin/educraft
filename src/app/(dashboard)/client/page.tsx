@@ -1,70 +1,92 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { LuChevronRight } from "react-icons/lu";
+import { LuChevronRight, LuFolderPlus } from "react-icons/lu";
 import { getClientScope } from "@/lib/api";
 import { db } from "@/lib/db";
+import { listClientProjectCards } from "@/lib/services/client-portal";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { formatDate } from "@/lib/utils";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { cn, formatDate } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "My dashboard" };
+export const metadata: Metadata = { title: "My projects" };
 export const dynamic = "force-dynamic";
 
 /**
- * A signed-in client's projects. Every client page follows the same contract:
- * get the scope from `getClientScope()` and filter EVERY query by
- * `scope.clientIds`, so a client can only ever see their own projects.
+ * A signed-in client's projects, the ones waiting on them first. Every client
+ * page follows the same contract: get the scope from `getClientScope()` and
+ * read through src/lib/services/client-portal.ts, which filters EVERY query by
+ * `scope.clientIds`.
  */
 export default async function ClientHomePage() {
   const scope = await getClientScope();
   if (!scope) redirect("/client/login");
 
-  const [clients, projects] = await Promise.all([
+  const [client, cards] = await Promise.all([
     // One record per person; if older duplicates are still linked, the oldest is theirs.
-    db.client.findMany({
+    db.client.findFirst({
       where: { id: { in: scope.clientIds } },
       orderBy: { createdAt: "asc" },
       select: { clientId: true, fullName: true },
     }),
-    db.project.findMany({
-      where: { clientId: { in: scope.clientIds } },
-      orderBy: { createdAt: "desc" },
-      select: { projectId: true, projectTitle: true, status: true, createdAt: true, service: { select: { serviceName: true } } },
-    }),
+    listClientProjectCards(scope),
   ]);
 
   return (
     <div className="space-y-7">
       <PageHeader
-        title={`Welcome, ${clients[0]?.fullName.split(/\s+/)[0] ?? "there"}`}
+        title={`Welcome, ${client?.fullName.split(/\s+/)[0] ?? "there"}`}
         description={
-          clients[0] ? (
+          client ? (
             <>
-              Your Client ID: <span className="font-mono text-foreground">{clients[0].clientId}</span>
+              Your Client ID: <span className="font-mono text-foreground">{client.clientId}</span>
             </>
           ) : undefined
         }
       />
+
       <section aria-label="Your projects">
-        <h2 className="meta-label mb-2">Your projects · {projects.length}</h2>
-        {projects.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No projects yet.</p>
+        <h2 className="meta-label mb-3">Your projects · {cards.length}</h2>
+        {cards.length === 0 ? (
+          <EmptyState
+            icon={LuFolderPlus}
+            title="No projects yet"
+            description="When you order from EduCraft, your project appears here."
+            action={{ label: "Start a project", href: "/intake" }}
+          />
         ) : (
-          <ul>
-            {projects.map((p) => (
-              <li key={p.projectId} className="border-b border-border/40 last:border-0">
+          <ul className="space-y-3">
+            {cards.map((p) => (
+              <li key={p.code}>
                 <Link
-                  href={`/client/projects/${encodeURIComponent(p.projectId)}`}
-                  className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3"
+                  href={`/client/projects/${encodeURIComponent(p.code)}`}
+                  className="surface block p-4 transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:p-5"
                 >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-foreground">{p.projectTitle?.trim() || p.service.serviceName}</span>
-                    <span className="block font-mono text-xs text-muted-foreground">{p.projectId} · {formatDate(p.createdAt)}</span>
-                  </span>
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                    {p.status.replace(/_/g, " ").toLowerCase()}
-                    <LuChevronRight className="size-4" aria-hidden />
-                  </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="line-clamp-2 text-[15px] font-semibold leading-snug text-foreground">{p.title}</p>
+                      <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        {p.code} · {formatDate(p.createdAt)}
+                      </p>
+                    </div>
+                    <LuChevronRight className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
+                  </div>
+                  <p className="mt-3 text-sm text-muted-foreground">{p.progress.headline}</p>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zone" aria-hidden>
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${p.progress.percent}%` }} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    {p.nextAction ? (
+                      <span className="rounded-full bg-gold/15 px-2.5 py-1 font-medium text-gold">{p.nextAction}</span>
+                    ) : (
+                      <span className="text-muted-foreground">{p.progress.steps.find((s) => s.state === "current")?.label ?? "Up to date"}</span>
+                    )}
+                    {p.countdown.date && p.progress.tone !== "done" && p.progress.tone !== "closed" ? (
+                      <span className={cn("text-muted-foreground", p.countdown.tone === "danger" && "text-danger")}>
+                        Expected {formatDate(p.countdown.date)}
+                      </span>
+                    ) : null}
+                  </div>
                 </Link>
               </li>
             ))}

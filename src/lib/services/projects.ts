@@ -14,6 +14,7 @@ import {
 } from "@/lib/services/ambassador-commission";
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
+import { formatNaira } from "@/lib/utils";
 import { proBonoFinancials } from "@/lib/pro-bono";
 import {
   MAX_REVISIONS,
@@ -25,6 +26,9 @@ import {
 } from "@/lib/pipeline";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
+import { statusFeedEntry } from "@/lib/client-updates";
+import { recordUpdate } from "@/lib/services/client-updates";
+import { notifyClient } from "@/lib/services/client-notify";
 import type { CreateProjectInput } from "@/lib/validations/projects";
 
 export { TRANSITIONS, allowedTransitions } from "@/lib/pipeline";
@@ -240,13 +244,76 @@ export class TransitionError extends Error {}
 
 interface TransitionOptions {
   note?: string;
-  changedById: string;
+  /** Null for moves the system makes on its own (e.g. a release that delivers). */
+  changedById: string | null;
+}
+
+/** What the client hears about a status change (in-app always; email for the ones that need them). */
+async function notifyClientOfStatus(
+  projectDbId: string,
+  code: string,
+  from: ProjectStatus,
+  to: ProjectStatus,
+  deliveryUnlocked: boolean
+): Promise<void> {
+  if (to === "IN_PROGRESS" && from === "ASSIGNED") {
+    await notifyClient(projectDbId, { title: "Work started", message: `Your specialist has started on ${code}.` });
+  } else if (to === "AWAITING_CLIENT_INPUT") {
+    await notifyClient(projectDbId, {
+      title: "We need something from you",
+      message: `Your specialist needs something from you to continue ${code}.`,
+      type: "warning",
+      tab: "messages",
+      email: {
+        kind: "awaiting-input",
+        heading: "We need something from you",
+        lines: [
+          "Your specialist needs something from you to keep going. Open your project to see what, and reply there or on WhatsApp.",
+          "Your delivery date waits while we wait for you.",
+        ],
+        ctaLabel: "Open your project",
+      },
+    });
+  } else if (to === "APPROVED") {
+    await notifyClient(projectDbId, {
+      title: "Quality check passed",
+      message: deliveryUnlocked
+        ? `${code} passed our quality check. We're preparing your delivery.`
+        : `${code} passed our quality check. Pay your balance to unlock delivery.`,
+      type: "success",
+      tab: deliveryUnlocked ? "progress" : "payments",
+      email: deliveryUnlocked
+        ? undefined
+        : {
+            kind: "balance-due",
+            heading: "Your project passed our quality check",
+            lines: ["Pay your balance to unlock delivery. You can pay from the Payments tab of your dashboard."],
+            ctaLabel: "Pay your balance",
+          },
+    });
+  } else if (to === "DELIVERED") {
+    await notifyClient(projectDbId, {
+      title: from === "SUPERVISOR_CORRECTIONS" ? "Corrections delivered" : "Your project has been delivered",
+      message: `${code} has been delivered.`,
+      type: "success",
+      email: {
+        kind: "delivered",
+        heading: from === "SUPERVISOR_CORRECTIONS" ? "Your corrections are done" : "Your project has been delivered",
+        lines: ["Thank you for choosing EduCraft. Your dashboard keeps everything for this project."],
+        ctaLabel: "Open your project",
+      },
+    });
+  } else if (to === "SUPERVISOR_CORRECTIONS" || to === "COMPLETED" || to === "CANCELLED" || to === "REFUNDED") {
+    const feed = statusFeedEntry(from, to);
+    if (feed) await notifyClient(projectDbId, { title: feed.title, message: feed.body ?? `${code}: ${feed.title.toLowerCase()}.` });
+  }
 }
 
 /**
  * Move a project to `to`, enforcing {@link TRANSITIONS} and writing a
  * ProjectStatusLog in the same transaction. Side effects for specific
- * targets (delivery date, deadline resume) are applied here too.
+ * targets (delivery date, deadline resume) are applied here too, and the
+ * client's feed line (client wording only) is written with it.
  */
 export async function transitionProject(
   idOrCode: string,
@@ -273,6 +340,7 @@ export async function transitionProject(
       isProBono: true,
       deadlinePausedAt: true,
       internalDeadline: true,
+      expectedDeliveryAt: true,
       worker: { select: { userId: true } },
       files: { where: { category: "from_worker" }, select: { id: true } },
       _count: { select: { files: true } },
@@ -309,7 +377,7 @@ export async function transitionProject(
   const blocked = rule.guard?.(candidate);
   if (blocked) throw new TransitionError(blocked);
 
-  const data: Prisma.ProjectUpdateInput = { status: to };
+  const data: Prisma.ProjectUpdateManyMutationInput = { status: to };
   const now = new Date();
 
   // A brief is optional: many projects have nothing beyond the client's
@@ -324,9 +392,11 @@ export async function transitionProject(
   if (to === "COMPLETED") data.finalCompletionDate = now;
   if (to === "APPROVED") data.qaStatus = "Passed";
 
-  // A pro bono job has no balance to wait for: approval unlocks delivery
-  // straight away, logged as its own step so the timeline stays honest.
-  const skipBalance = to === "APPROVED" && project.isProBono;
+  // Nothing left to collect at approval: a pro bono job has no balance, and a
+  // client may have paid the balance early (Chapters 3+ need it). Delivery
+  // unlocks straight away, logged as its own step so the timeline stays honest.
+  const balanceAlreadyPaid = project.balanceStatus === "Verified";
+  const skipBalance = to === "APPROVED" && (project.isProBono || balanceAlreadyPaid);
   if (skipBalance) data.status = "BALANCE_VERIFIED";
 
   let flaggedForFounder = false;
@@ -360,33 +430,56 @@ export async function transitionProject(
         project.internalDeadline.getTime() + pausedDays * 86_400_000
       );
     }
+    // The client's date waits for them too.
+    if (project.expectedDeliveryAt && pausedDays > 0) {
+      data.expectedDeliveryAt = new Date(project.expectedDeliveryAt.getTime() + pausedDays * 86_400_000);
+    }
   }
 
-  await db.$transaction([
-    db.project.update({ where: { id: project.id }, data }),
-    db.projectStatusLog.create({
-      data: {
-        projectId: project.id,
-        fromStatus: project.status,
-        toStatus: to,
-        changedById,
-        notes: note ?? rule.action,
-      },
-    }),
-    ...(skipBalance
-      ? [
-          db.projectStatusLog.create({
-            data: {
-              projectId: project.id,
-              fromStatus: "APPROVED" as const,
-              toStatus: "BALANCE_VERIFIED" as const,
-              changedById,
-              notes: "Pro bono: no balance to collect",
-            },
-          }),
-        ]
-      : []),
-  ]);
+  const feed = statusFeedEntry(project.status, to);
+
+  await db.$transaction(
+    async (tx) => {
+      // Compare-and-set: only move a project still in the status we read. A
+      // double click or a webhook racing an admin can then never apply a move
+      // twice (or on top of a move someone else just made).
+      const moved = await tx.project.updateMany({ where: { id: project.id, status: project.status }, data });
+      if (moved.count !== 1) {
+        throw new TransitionError("This project changed while you were working on it. Refresh and try again.");
+      }
+      const log = await tx.projectStatusLog.create({
+        data: {
+          projectId: project.id,
+          fromStatus: project.status,
+          toStatus: to,
+          changedById,
+          notes: note ?? rule.action,
+        },
+        select: { id: true },
+      });
+      if (skipBalance) {
+        await tx.projectStatusLog.create({
+          data: {
+            projectId: project.id,
+            fromStatus: "APPROVED",
+            toStatus: "BALANCE_VERIFIED",
+            changedById,
+            notes: project.isProBono ? "Pro bono: no balance to collect" : "Balance already paid",
+          },
+        });
+      }
+      if (feed) {
+        await recordUpdate(tx, {
+          projectId: project.id,
+          kind: "STATUS",
+          title: feed.title,
+          body: feed.body,
+          dedupeKey: `status:${log.id}`,
+        });
+      }
+    },
+    { timeout: 15_000, maxWait: 10_000 }
+  );
 
   // ── Notifications ──
   const adminLink = `/admin/projects/${project.projectId}`;
@@ -398,9 +491,10 @@ export async function transitionProject(
       link: adminLink,
     });
   }
-  if (to === "SUBMITTED" && project.status === "IN_PROGRESS") {
+  // Every submission needs a reviewer, including a resubmission after a revision.
+  if (to === "SUBMITTED") {
     await notifyAdmins({
-      title: "Work submitted",
+      title: project.status === "REVISION_NEEDED" ? "Revised work submitted" : "Work submitted",
       message: `${project.projectId} has been submitted and needs a QA reviewer.`,
       type: "info",
       link: "/admin/qa",
@@ -422,6 +516,8 @@ export async function transitionProject(
       link: "/worker/projects",
     });
   }
+
+  await notifyClientOfStatus(project.id, project.projectId, project.status, to, skipBalance);
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -445,14 +541,20 @@ export async function holdProject(
     throw new TransitionError(`Cannot ${to.toLowerCase()} a project that is ${project.status}`);
   }
 
+  const feed = statusFeedEntry(project.status, to);
   await db.$transaction(async (tx) => {
     await tx.project.update({ where: { id: project.id }, data: { status: to } });
-    await tx.projectStatusLog.create({
+    const log = await tx.projectStatusLog.create({
       data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
+      select: { id: true },
     });
     // A cancelled or refunded job earns no commission — drop it and its expense.
     if (to === "CANCELLED" || to === "REFUNDED") await releaseCommission(tx, project.id);
+    if (feed) {
+      await recordUpdate(tx, { projectId: project.id, kind: "STATUS", title: feed.title, body: feed.body, dedupeKey: `status:${log.id}` });
+    }
   });
+  if (feed) await notifyClient(project.id, { title: feed.title, message: `${project.projectId}: ${feed.title.toLowerCase()}.` });
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -542,7 +644,7 @@ export async function verifyPayment(
   const paidOn = paymentDate ? new Date(paymentDate) : now;
   const amount = leg === "downpayment" ? project.downpaymentAmount : project.balanceAmount;
 
-  const data: Prisma.ProjectUpdateInput =
+  const data: Prisma.ProjectUpdateManyMutationInput =
     leg === "downpayment"
       ? {
           downpaymentStatus: "Verified",
@@ -564,42 +666,76 @@ export async function verifyPayment(
 
   if (advance) data.status = advance;
 
-  const writes: Prisma.PrismaPromise<unknown>[] = [
-    db.project.update({ where: { id: project.id }, data }),
-    db.payment.create({
-      data: {
-        paymentId: await nextId("PAYMENT"),
-        type: leg === "downpayment" ? "CLIENT_DOWNPAYMENT" : "CLIENT_BALANCE",
-        direction: "INFLOW",
-        projectId: project.id,
-        personName: project.client.fullName,
-        personRole: "Client",
-        amount,
-        paymentMethod: paymentMethod || null,
-        reference: reference || null,
-        notes: notes || null,
-        confirmedById: changedById,
-        status: "Confirmed",
-        date: paidOn,
-      },
-    }),
-  ];
+  const paymentId = await nextId("PAYMENT");
+  const legLabel = leg === "downpayment" ? "downpayment" : "balance";
 
-  if (advance) {
-    writes.push(
-      db.projectStatusLog.create({
-        data: {
-          projectId: project.id,
-          fromStatus: project.status,
-          toStatus: advance,
-          changedById,
-          notes: `${leg === "downpayment" ? "Downpayment" : "Balance"} verified`,
+  await db.$transaction(
+    async (tx) => {
+      // Claim the leg: only one verifier can move it from "Paid", so two admins
+      // (or an admin and a Paystack confirmation) can never record it twice.
+      const claimed = await tx.project.updateMany({
+        where: {
+          id: project.id,
+          ...(leg === "downpayment" ? { downpaymentStatus: "Paid" } : { balanceStatus: "Paid" }),
+          ...(advance ? { status: project.status } : {}),
         },
-      })
-    );
-  }
+        data,
+      });
+      if (claimed.count !== 1) {
+        throw new TransitionError("That payment was just verified by someone else. Refresh the page.");
+      }
+      const payment = await tx.payment.create({
+        data: {
+          paymentId,
+          type: leg === "downpayment" ? "CLIENT_DOWNPAYMENT" : "CLIENT_BALANCE",
+          direction: "INFLOW",
+          projectId: project.id,
+          personName: project.client.fullName,
+          personRole: "Client",
+          amount,
+          paymentMethod: paymentMethod || null,
+          reference: reference || null,
+          notes: notes || null,
+          confirmedById: changedById,
+          status: "Confirmed",
+          date: paidOn,
+        },
+        select: { id: true },
+      });
+      if (advance) {
+        await tx.projectStatusLog.create({
+          data: {
+            projectId: project.id,
+            fromStatus: project.status,
+            toStatus: advance,
+            changedById,
+            notes: `${leg === "downpayment" ? "Downpayment" : "Balance"} verified`,
+          },
+        });
+      }
+      await recordUpdate(tx, {
+        projectId: project.id,
+        kind: "PAYMENT",
+        title: "Payment received",
+        body: `Your ${legLabel} of ${formatNaira(amount)} is confirmed.`,
+        dedupeKey: `payment:${payment.id}`,
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 }
+  );
 
-  await db.$transaction(writes);
+  await notifyClient(project.id, {
+    title: "Payment received",
+    message: `Your ${legLabel} for ${project.projectId} is confirmed.`,
+    type: "success",
+    tab: "payments",
+    email: {
+      kind: "payment",
+      heading: "Payment received",
+      lines: [`Your ${legLabel} of ${formatNaira(amount)} is confirmed. Thank you.`, "Your receipt is in the Payments tab of your dashboard."],
+      ctaLabel: "View your receipt",
+    },
+  });
 
   // A verified downpayment on a referred project is the "conversion" moment.
   if (leg === "downpayment" && project.ambassador?.userId) {
@@ -721,6 +857,7 @@ export async function assignWorker(
     data.workerAcceptedDate = now;
   }
 
+  const assignedFeed = statusFeedEntry(project.status, "ASSIGNED");
   await db.$transaction([
     db.project.update({ where: { id: project.id }, data }),
     db.projectStatusLog.create({
@@ -732,7 +869,30 @@ export async function assignWorker(
         notes: isFirstAssignment ? "Worker assigned" : "Worker reassigned",
       },
     }),
+    // The client hears once that a specialist is on it; hand-offs stay internal.
+    ...(isFirstAssignment && assignedFeed
+      ? [
+          db.projectUpdate.createMany({
+            data: [
+              {
+                projectId: project.id,
+                kind: "STATUS" as const,
+                title: assignedFeed.title,
+                body: assignedFeed.body ?? null,
+                dedupeKey: `assigned:${project.id}`,
+              },
+            ],
+            skipDuplicates: true,
+          }),
+        ]
+      : []),
   ]);
+  if (isFirstAssignment) {
+    await notifyClient(project.id, {
+      title: "Specialist assigned",
+      message: `A specialist in your field is now on ${project.projectId}.`,
+    });
+  }
 
   await notifyUsers([worker.userId], {
     title: isFirstAssignment ? "New project assigned" : "Project reassigned to you",
@@ -989,6 +1149,7 @@ export async function createProjectManual(
             : Prisma.JsonNull,
         clientDeadline,
         internalDeadline,
+        expectedDeliveryAt: clientDeadline ?? internalDeadline,
         ...(proBono
           ? { ...proBonoFinancials(), proBonoReason: input.proBonoReason?.trim() || null }
           : {
@@ -1044,6 +1205,13 @@ export async function createProjectManual(
           ? `Pro bono project created manually by admin: ${input.proBonoReason?.trim()}`
           : "Project created manually by admin",
       },
+    });
+    await recordUpdate(tx, {
+      projectId: project.id,
+      kind: "STATUS",
+      title: "Order received",
+      body: proBono ? "Your project is confirmed. No payment needed." : "We have your order.",
+      dedupeKey: `created:${project.id}`,
     });
 
     return project;

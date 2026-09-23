@@ -12,8 +12,9 @@ import { TimelineTab } from "@/components/projects/tabs/TimelineTab";
 import { FinancialsTab } from "@/components/projects/tabs/FinancialsTab";
 import { FilesTab } from "@/components/projects/tabs/FilesTab";
 import { NotesTab } from "@/components/projects/tabs/NotesTab";
-import { ClientUpdateTab } from "@/components/projects/tabs/ClientUpdateTab";
+import { ClientMessagesTab } from "@/components/projects/tabs/ClientMessagesTab";
 import { getResearchSummary } from "@/lib/services/research-summary";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,10 @@ export default async function ProjectDetailPage({
     listAllocatableAmbassadors(),
   ]);
   if (!project) notFound();
-  const researchSummary = await getResearchSummary(project.id);
+  const [researchSummary, unreadFromClient] = await Promise.all([
+    getResearchSummary(project.id),
+    db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
+  ]);
 
   const tabs: ProjectTab[] = [
     { id: "requirements", label: "Requirements", content: <RequirementsTab project={project} /> },
@@ -55,15 +59,9 @@ export default async function ProjectDetailPage({
     },
     { id: "files", label: "Files", content: <FilesTab project={project} /> },
     {
-      id: "client-update",
-      label: "Client update",
-      content: (
-        <ClientUpdateTab
-          clientFullName={project.client.fullName}
-          projectCode={project.projectId}
-          summary={researchSummary}
-        />
-      ),
+      id: "messages",
+      label: unreadFromClient > 0 ? `Messages · ${unreadFromClient}` : "Messages",
+      content: <ClientMessagesTab project={project} researchSummary={researchSummary} />,
     },
     {
       id: "notes",
