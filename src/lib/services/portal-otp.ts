@@ -4,16 +4,18 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { clientCodeEmail } from "@/lib/emails/client-code";
 import { realEmail } from "@/lib/client-email";
-import { normalizeWorkerIdInput } from "@/lib/id-format";
+import { normalizeClientIdInput, normalizeWorkerIdInput } from "@/lib/id-format";
+import { maskEmail, type CodeRequestResult, type CodeRequestStatus } from "@/lib/code-request";
 import {
   hashIp,
   CODE_TTL_MS,
   MAX_ATTEMPTS,
-  RESEND_COOLDOWN_MS,
-  MAX_CODES_PER_WINDOW,
   WINDOW_MS,
   PASSWORD_MIN,
   PASSWORD_MAX,
+  sendClientCode,
+  waitBeforeNewCode,
+  type RequestCodeResult,
   type SendFn,
 } from "@/lib/services/client-otp";
 
@@ -22,9 +24,16 @@ import {
  *
  * A person is identified by the email on their Worker / Ambassador record, and
  * ownership of that inbox is proven with a code (same rules as client sign-in:
- * the code goes only to the address already on file, every answer is identical
- * whether or not the account exists, codes are hashed, single use, 10 minutes,
- * 5 tries, rate limited per email and per IP).
+ * the code goes only to the address already on file, codes are hashed, single
+ * use, 10 minutes, 5 tries, rate limited per email and per IP).
+ *
+ * /login/set-password is the forgot-password page for all three kinds of login:
+ * it works out whether the email or ID is a worker's, an ambassador's or a
+ * client's. A client's gets a client code (`sendClientCode`) and the form then
+ * saves a client password. Anything else is told plainly (not registered, an
+ * application under review, a suspended account…): the founder's call, Sept
+ * 2026, see `src/lib/code-request.ts`. The per-IP cap is what stops that being
+ * used to test long lists of addresses.
  *
  * A valid code sets the password of the single User behind that email. If a
  * worker also has an ambassador record on the same email (or the reverse), both
@@ -73,73 +82,86 @@ interface PortalAccount {
   ambassadorId: string | null;
 }
 
-/** The single row, or null when there is none or it is ambiguous (two records on one email). */
-function only<T>(rows: T[]): T | null {
-  return rows.length === 1 ? rows[0] : null;
+type Refusal = Exclude<CodeRequestStatus, "sent" | "wait">;
+
+type Lookup =
+  | { ok: true; account: PortalAccount; typedEmail: boolean }
+  | { ok: false; status: Refusal }
+  /** Not a worker or ambassador, but a client has this email: send a client code instead. */
+  | { ok: false; status: "client"; email: string };
+
+/** Why no code was sent: logged (Vercel runtime logs) and told to the caller as `status`. */
+function refuse(status: Refusal, reason: string): Lookup {
+  console.warn(`[portal-otp] no code sent (${status}): ${reason}`);
+  return { ok: false, status };
 }
 
-/** Why no code was sent. Server log only: the caller always gets the same answer. */
-function refuse(reason: string): null {
-  console.warn(`[portal-otp] no code sent: ${reason}`);
-  return null;
-}
+const sameEmail = (email: string) => ({ email: { equals: email, mode: "insensitive" as const } });
 
 /**
  * Who is behind an email or an EC-A-/ECW- ID. The PROFILES decide: the worker
  * and ambassador records that carry this email, and the one login they already
  * sit on (a person's worker login may use a different email than the record).
- * Null when nobody qualifies (unknown, suspended, staff/client email, records on
- * two different logins).
+ * Otherwise says why nobody qualifies (unknown, suspended, pending, a client's
+ * or staff email, records on two different logins).
  */
-async function findAccount(input: string): Promise<PortalAccount | null> {
+async function lookupAccount(input: string): Promise<Lookup> {
   const value = (input ?? "").trim();
 
   let email: string | null = null;
+  let typedEmail = false;
   if (/^EC-A-\d{3,8}$/i.test(value)) {
     const row = await db.ambassador.findUnique({ where: { ambassadorId: value.toUpperCase() }, select: { email: true } });
-    email = realEmail(row?.email);
+    if (!row) return refuse("not_registered", "no ambassador has that ID");
+    email = realEmail(row.email);
+    if (!email) return refuse("no_email", "the ambassador record has no usable email");
   } else if (normalizeWorkerIdInput(value)) {
     const row = await db.worker.findUnique({ where: { workerId: normalizeWorkerIdInput(value)! }, select: { email: true } });
-    email = realEmail(row?.email);
+    if (!row) return refuse("not_registered", "no worker has that ID");
+    email = realEmail(row.email);
+    if (!email) return refuse("no_email", "the worker record has no usable email");
   } else {
     email = realEmail(value);
+    if (!email) return refuse("invalid", "not an email or a worker/ambassador ID");
+    typedEmail = true;
   }
-  if (!email) return refuse("no usable email");
 
   const [workers, ambassadors] = await Promise.all([
     db.worker.findMany({
-      where: { email: { equals: email, mode: "insensitive" }, status: { in: ["Active", "On Break"] } },
+      where: { ...sameEmail(email), status: { in: ["Active", "On Break"] } },
       select: { id: true, fullName: true, userId: true },
       take: 2,
     }),
     db.ambassador.findMany({
-      where: { email: { equals: email, mode: "insensitive" }, status: "Active" },
+      where: { ...sameEmail(email), status: "Active" },
       select: { id: true, fullName: true, userId: true },
       take: 2,
     }),
   ]);
-  const worker = only(workers);
-  const ambassador = only(ambassadors);
-  if (!worker && !ambassador) return refuse("no active worker or ambassador record with that email");
+  if (workers.length > 1 || ambassadors.length > 1) return refuse("needs_admin", "two active worker or ambassador records share that email");
+  const worker = workers[0] ?? null;
+  const ambassador = ambassadors[0] ?? null;
+  if (!worker && !ambassador) return classifyNoActiveProfile(email);
 
   const fullName = worker?.fullName ?? ambassador?.fullName ?? "there";
   const linked = Array.from(new Set([worker?.userId, ambassador?.userId].filter((id): id is string => Boolean(id))));
-  if (linked.length > 1) return refuse("worker and ambassador records sit on two different logins");
+  if (linked.length > 1) return refuse("needs_admin", "worker and ambassador records sit on two different logins");
 
   const base = { email, fullName, workerId: worker?.id ?? null, ambassadorId: ambassador?.id ?? null };
+  const found = (account: PortalAccount): Lookup => ({ ok: true, account, typedEmail });
 
   // 1. A record is already on a login: that is their login, whatever its email.
   if (linked.length === 1) {
     const login = await db.user.findUnique({ where: { id: linked[0] }, select: { id: true, email: true, role: true, isActive: true } });
     if (!login || !login.isActive || (login.role !== "WORKER" && login.role !== "AMBASSADOR")) {
-      return refuse("the login their record is on is inactive or not a worker/ambassador login");
+      return refuse("needs_admin", "the login their record is on is inactive or not a worker/ambassador login");
     }
     // The code only proves the inbox it was sent to. Never let it set the password of a
     // login under a different email: an admin has to align the record and the login first.
     if (login.email.toLowerCase() !== email) {
-      return refuse("their record's email differs from the email of the login it is linked to (admin must align them)");
+      return refuse("needs_admin", "their record's email differs from the email of the login it is linked to (admin must align them)");
     }
-    return { ...base, loginEmail: login.email, userId: login.id, reclaim: false };
+    return found({ ...base, loginEmail: login.email, userId: login.id, reclaim: false });
   }
 
   // 2. Neither record has a login yet: use the login with this email if there is one.
@@ -153,11 +175,11 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
       ambassadorProfile: { select: { id: true } },
     },
   });
-  if (!user) return { ...base, loginEmail: email, userId: null, reclaim: false };
-  if (user.role !== "WORKER" && user.role !== "AMBASSADOR") return refuse("that email belongs to a staff or client login");
+  if (!user) return found({ ...base, loginEmail: email, userId: null, reclaim: false });
+  if (user.role !== "WORKER" && user.role !== "AMBASSADOR") return refuse("needs_admin", "that email belongs to a staff or client login");
   if (user.isActive) {
-    if (user.workerProfile || user.ambassadorProfile) return refuse("that email's login already owns a different profile");
-    return { ...base, loginEmail: email, userId: user.id, reclaim: false };
+    if (user.workerProfile || user.ambassadorProfile) return refuse("needs_admin", "that email's login already owns a different profile");
+    return found({ ...base, loginEmail: email, userId: user.id, reclaim: false });
   }
 
   // An inactive login: a pending applicant (leave alone), a suspended person (has a profile,
@@ -166,10 +188,37 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
     db.workerApplication.count({ where: { userId: user.id, status: "PENDING" } }),
     db.ambassadorApplication.count({ where: { userId: user.id, status: "PENDING" } }),
   ]);
-  if (user.workerProfile || user.ambassadorProfile || pendingWorker || pendingAmbassador) {
-    return refuse("that email's login is inactive (pending application or suspended)");
-  }
-  return { ...base, loginEmail: email, userId: user.id, reclaim: true };
+  if (pendingWorker || pendingAmbassador) return refuse("pending", "that email's login belongs to an application under review");
+  if (user.workerProfile || user.ambassadorProfile) return refuse("needs_admin", "that email's login is inactive and holds a different profile");
+  return found({ ...base, loginEmail: email, userId: user.id, reclaim: true });
+}
+
+/** No active worker or ambassador has this email: say what it is instead (suspended, applying, a client, staff, or nobody). */
+async function classifyNoActiveProfile(email: string): Promise<Lookup> {
+  const [workers, ambassadors, user] = await Promise.all([
+    db.worker.count({ where: sameEmail(email) }),
+    db.ambassador.count({ where: sameEmail(email) }),
+    db.user.findUnique({ where: { email }, select: { id: true, role: true } }),
+  ]);
+  if (workers || ambassadors) return refuse("inactive", "their worker/ambassador record is suspended, paused or terminated");
+
+  const ownLogin = user ? [{ userId: user.id }] : [];
+  const [pendingWorker, pendingAmbassador, clients] = await Promise.all([
+    db.workerApplication.count({ where: { status: "PENDING", OR: [sameEmail(email), ...ownLogin] } }),
+    db.ambassadorApplication.count({ where: { status: "PENDING", OR: [sameEmail(email), ...ownLogin] } }),
+    db.client.count({ where: sameEmail(email) }),
+  ]);
+  if (pendingWorker || pendingAmbassador) return refuse("pending", "an application with that email is under review");
+  if (user?.role === "SUPER_ADMIN" || user?.role === "OPS_MANAGER") return refuse("unavailable", "that email belongs to a staff login");
+  // Only a real client record, never a bare leftover login: the client code needs one.
+  if (clients) return { ok: false, status: "client", email };
+  return refuse("not_registered", "no worker, ambassador, application or client has that email");
+}
+
+/** Only the verify step needs this: the account, or null for any refusal. */
+async function findAccount(input: string): Promise<PortalAccount | null> {
+  const lookup = await lookupAccount(input);
+  return lookup.ok ? lookup.account : null;
 }
 
 export async function requestPortalCode(opts: {
@@ -177,16 +226,28 @@ export async function requestPortalCode(opts: {
   ip: string;
   send: SendFn;
   defer: (work: Promise<unknown>) => void;
-}): Promise<{ limited: boolean }> {
-  if (await ipLimited(opts.ip, "portal-request")) return { limited: true };
+}): Promise<RequestCodeResult> {
+  if (await ipLimited(opts.ip, "portal-request")) return { status: "limited" };
 
-  const account = await findAccount(opts.identifier);
-  if (!account) return { limited: false };
-  await issueCode({ email: account.email, fullName: account.fullName, ip: opts.ip, send: opts.send, defer: opts.defer });
-  return { limited: false };
+  // A client (their Client ID, or an email only a client has): same page, client code.
+  const asClient = async (identifierInput: string): Promise<CodeRequestResult> => {
+    const result = await sendClientCode({ identifierInput, ip: opts.ip, send: opts.send, defer: opts.defer });
+    return result.status === "sent" || result.status === "wait" ? { ...result, account: "client" } : result;
+  };
+  if (normalizeClientIdInput(opts.identifier)) return asClient(opts.identifier);
+
+  const lookup = await lookupAccount(opts.identifier);
+  if (!lookup.ok) return lookup.status === "client" ? asClient(lookup.email) : { status: lookup.status };
+  const { account } = lookup;
+  const sentTo = lookup.typedEmail ? account.email : maskEmail(account.email);
+  const issued = await issueCode({ email: account.email, fullName: account.fullName, ip: opts.ip, send: opts.send, defer: opts.defer });
+  return { ...issued, sentTo, account: "team" };
 }
 
-/** Creates and emails a code to `email` (which must already be a trusted address on file). Silent when cooling down or over the per-email cap. */
+/**
+ * Creates and emails a code to `email` (which must already be a trusted address on file),
+ * unless one went out moments ago or this inbox is over its cap: then says how long to wait.
+ */
 async function issueCode(opts: {
   email: string;
   fullName: string;
@@ -194,16 +255,16 @@ async function issueCode(opts: {
   send: SendFn;
   defer: (work: Promise<unknown>) => void;
   purpose?: string;
-}): Promise<void> {
+}): Promise<CodeRequestResult> {
   const { email } = opts;
   const now = Date.now();
   const recent = await db.portalLoginCode.findMany({
     where: { email, createdAt: { gte: new Date(now - WINDOW_MS) } },
     orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
+    select: { createdAt: true, usedAt: true, expiresAt: true, attempts: true },
   });
-  if (recent.length >= MAX_CODES_PER_WINDOW) return;
-  if (recent[0] && now - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) return;
+  const wait = waitBeforeNewCode(recent, now);
+  if (wait) return { status: "wait", ...wait };
 
   await db.portalLoginCode.updateMany({ where: { email, usedAt: null }, data: { usedAt: new Date() } });
 
@@ -219,6 +280,7 @@ async function issueCode(opts: {
       if (!res.ok) console.error("[portal-otp] email failed:", res.error);
     })
   );
+  return { status: "sent" };
 }
 
 /** Spends a valid, unexpired code for `email`: counts the try atomically, single use. False for any failure. */
@@ -272,8 +334,8 @@ export async function findLoginForApplication(email: string, kind: "AMBASSADOR" 
 }
 
 /** Emails the proof-of-inbox code for an application to an existing login. */
-export function sendApplicationCode(opts: { email: string; fullName: string; ip: string; send: SendFn; defer: (work: Promise<unknown>) => void }): Promise<void> {
-  return issueCode({ ...opts, email: opts.email.trim().toLowerCase(), purpose: "Enter this code to confirm your email for your EduCraft application. Your current password stays the same." });
+export async function sendApplicationCode(opts: { email: string; fullName: string; ip: string; send: SendFn; defer: (work: Promise<unknown>) => void }): Promise<void> {
+  await issueCode({ ...opts, email: opts.email.trim().toLowerCase(), purpose: "Enter this code to confirm your email for your EduCraft application. Your current password stays the same." });
 }
 
 /** True when `code` is the live code for this email; spends it. */

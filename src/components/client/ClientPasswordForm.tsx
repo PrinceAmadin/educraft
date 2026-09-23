@@ -5,6 +5,7 @@ import { LuCircleAlert, LuCircleCheck, LuLoaderCircle, LuMailCheck } from "react
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatWait, type CodeRequestResult } from "@/lib/code-request";
 
 const PASSWORD_MIN = 8;
 const RESEND_SECONDS = 60;
@@ -17,6 +18,7 @@ type Step = "idle" | "code" | "done";
  */
 export function ClientPasswordForm({ clientId }: { clientId: string }) {
   const [step, setStep] = React.useState<Step>("idle");
+  const [sent, setSent] = React.useState<{ to: string; earlier: boolean } | null>(null);
   const [code, setCode] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
@@ -41,9 +43,23 @@ export function ClientPasswordForm({ clientId }: { clientId: string }) {
       });
       if (res.status === 429) return setError("Too many attempts. Please wait a few minutes and try again.");
       if (!res.ok) throw new Error();
-      setCode("");
-      setCooldown(RESEND_SECONDS);
-      setStep("code");
+      const result = (await res.json()) as CodeRequestResult;
+      const retryAfter = result.retryAfter ?? RESEND_SECONDS;
+      if (result.status === "sent") {
+        setSent({ to: result.sentTo ?? "your email", earlier: false });
+        setCode("");
+        setCooldown(RESEND_SECONDS);
+        setStep("code");
+      } else if (result.status === "wait" && result.codeStillValid) {
+        setSent({ to: result.sentTo ?? "your email", earlier: true });
+        setCooldown(retryAfter);
+        setStep("code");
+      } else if (result.status === "wait") {
+        setCooldown(retryAfter);
+        setError(`You have asked for several codes in a short time. Please try again in ${formatWait(retryAfter)}.`);
+      } else {
+        setError("We couldn't send a code to the email on your record. Please message EduCraft on WhatsApp.");
+      }
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -114,7 +130,12 @@ export function ClientPasswordForm({ clientId }: { clientId: string }) {
     <form onSubmit={save} noValidate className="max-w-sm space-y-4">
       <p className="flex items-start gap-2.5 text-sm text-foreground">
         <LuMailCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
-        We sent a code to your email. It can take a minute, so check spam too.
+        <span>
+          {sent?.earlier ? "We already sent a code to " : "We sent a code to "}
+          <strong className="font-medium [overflow-wrap:anywhere]">{sent?.to ?? "your email"}</strong>
+          {sent?.earlier ? " a short while ago, and it still works. " : ". "}
+          It can take a minute, so check spam too.
+        </span>
       </p>
       {errorBox}
       <div className="space-y-2">
@@ -150,7 +171,7 @@ export function ClientPasswordForm({ clientId }: { clientId: string }) {
           disabled={busy || cooldown > 0}
           className="text-sm font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
         >
-          {cooldown > 0 ? `Send a new code in ${cooldown}s` : "Send a new code"}
+          {cooldown > 0 ? `Send a new code in ${formatWait(cooldown)}` : "Send a new code"}
         </button>
       </div>
     </form>

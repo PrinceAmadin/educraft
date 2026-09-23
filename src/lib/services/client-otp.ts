@@ -5,6 +5,7 @@ import { clientCodeEmail } from "@/lib/emails/client-code";
 import type { MailResult } from "@/lib/mailer";
 import { realEmail } from "@/lib/client-email";
 import { normalizeClientIdInput } from "@/lib/id-format";
+import { maskEmail, type CodeRequestResult, type CodeRequestStatus } from "@/lib/code-request";
 
 /**
  * Client sign-in: Client ID (ECC-0001) or email, plus a one-time code emailed
@@ -16,9 +17,11 @@ import { normalizeClientIdInput } from "@/lib/id-format";
  * Rules that make it safe:
  *  - The code is only ever sent to the email ALREADY on the client, never to
  *    an address the visitor supplies (typing an email only looks the client up).
- *  - Every identifier gets the same response and the same work, so the form
- *    cannot be used to discover which IDs or emails exist. Email delivery is
- *    deferred so timing does not give it away either.
+ *  - Asking for a code says plainly whether the ID or email is registered (the
+ *    founder's call, Sept 2026: no "if that matches…" guesswork), see
+ *    `src/lib/code-request.ts`. The per-IP cap below is what stops the lookup
+ *    being used to test long lists of addresses. Verifying a code and signing
+ *    in with a password still fail with one answer, whatever the reason.
  *  - Codes are 6 digits, stored only as an HMAC, valid 10 minutes, single use,
  *    superseded by a newer code, and locked after 5 wrong tries.
  *  - Per-client (60 s cooldown, 3 per 15 min) and per-IP limits apply whether
@@ -98,46 +101,107 @@ async function ipLimited(ip: string, kind: "request" | "verify"): Promise<boolea
 
 export type SendFn = (message: { to: string; subject: string; html: string; text: string }) => Promise<MailResult>;
 
-export interface RequestCodeResult {
-  /** True when the caller's IP is over its cap: the only case that is not the generic answer. */
-  limited: boolean;
+/** The caller's IP is over its cap (a 429), or what the form should tell them. */
+export type RequestCodeResult = CodeRequestResult | { status: "limited" };
+
+/** A code recently issued for one inbox or client, newest first. */
+export interface RecentCode {
+  createdAt: Date;
+  usedAt: Date | null;
+  expiresAt: Date;
+  attempts: number;
 }
 
-export async function requestCode(opts: {
+/**
+ * Null when a new code may be sent now. Otherwise how long until one may (the
+ * 60 s cooldown, or the 3-per-15-minutes cap), and whether the newest code sent
+ * still works, so the form can send them to it instead of leaving them stuck.
+ * `recent` is every code created in the last WINDOW_MS, newest first.
+ */
+export function waitBeforeNewCode(recent: RecentCode[], now: number): { retryAfter: number; codeStillValid: boolean } | null {
+  let until = 0;
+  // The cap frees up when the MAX-th newest code leaves the window.
+  if (recent.length >= MAX_CODES_PER_WINDOW) until = recent[MAX_CODES_PER_WINDOW - 1].createdAt.getTime() + WINDOW_MS;
+  const latest = recent[0];
+  if (latest) until = Math.max(until, latest.createdAt.getTime() + RESEND_COOLDOWN_MS);
+  if (until <= now) return null;
+  const codeStillValid = !!latest && !latest.usedAt && latest.expiresAt.getTime() > now && latest.attempts < MAX_ATTEMPTS;
+  return { retryAfter: Math.ceil((until - now) / 1000), codeStillValid };
+}
+
+/** Why no code was sent: logged (Vercel runtime logs) and told to the caller. */
+function refused(status: Exclude<CodeRequestStatus, "sent" | "wait">, reason: string): CodeRequestResult {
+  console.warn(`[client-otp] no code sent (${status}): ${reason}`);
+  return { status };
+}
+
+/**
+ * An email that no client has: a staff address, a worker's or ambassador's, or nobody's.
+ * "team" only when the team page will recognise it too (a worker/ambassador record or a
+ * pending application), never for a bare leftover login, so the two pages never send
+ * someone back and forth.
+ */
+async function classifyNonClientEmail(email: string): Promise<CodeRequestResult> {
+  const user = await db.user.findUnique({ where: { email }, select: { id: true, role: true } });
+  if (user?.role === "SUPER_ADMIN" || user?.role === "OPS_MANAGER") return refused("unavailable", "that email belongs to a staff login");
+  const match = { email: { equals: email, mode: "insensitive" as const } };
+  const pending = { status: "PENDING" as const, OR: [match, ...(user ? [{ userId: user.id }] : [])] };
+  const [workers, ambassadors, workerApps, ambassadorApps] = await Promise.all([
+    db.worker.count({ where: match }),
+    db.ambassador.count({ where: match }),
+    db.workerApplication.count({ where: pending }),
+    db.ambassadorApplication.count({ where: pending }),
+  ]);
+  if (workers || ambassadors || workerApps || ambassadorApps) return refused("team", "that email is on a worker/ambassador record or application");
+  return refused("not_registered", "no client has that email");
+}
+
+interface ClientCodeRequest {
   identifierInput: string;
   ip: string;
   send: SendFn;
   /** Runs the (slow) email send after the response, e.g. `waitUntil`. */
   defer: (work: Promise<unknown>) => void;
-}): Promise<RequestCodeResult> {
-  if (await ipLimited(opts.ip, "request")) return { limited: true };
+}
 
+export async function requestCode(opts: ClientCodeRequest): Promise<RequestCodeResult> {
+  if (await ipLimited(opts.ip, "request")) return { status: "limited" };
+  return sendClientCode(opts);
+}
+
+/**
+ * Everything after the per-IP check. Also used by the forgot-password page
+ * (portal-otp.ts) when the email or ID it was given turns out to be a client's;
+ * that page has already counted the request against its own IP cap.
+ */
+export async function sendClientCode(opts: ClientCodeRequest): Promise<CodeRequestResult> {
   const identifier = readIdentifier(opts.identifierInput);
-  if (!identifier) return { limited: false };
+  if (!identifier) return refused("invalid", "not a Client ID or an email");
 
   const client = await findClient(identifier);
-  const email = realEmail(client?.email);
-  if (!client || !email) {
-    console.warn("[client-otp] no code sent: unknown Client ID/email or no usable email on the client");
-    return { limited: false };
+  if (!client) {
+    return identifier.kind === "id" ? refused("not_registered", "no client has that Client ID") : classifyNonClientEmail(identifier.email);
   }
+  const email = realEmail(client.email);
+  if (!email) return refused("no_email", "the client has no usable email on record");
 
   // An address that belongs to an admin, worker or ambassador account is never a
-  // client sign-in address: refuse quietly rather than mix the two.
-  const owner = await db.user.findUnique({ where: { email }, select: { role: true } });
-  if (owner && owner.role !== "CLIENT") {
-    console.warn("[client-otp] no code sent: that client email belongs to a non-client login");
-    return { limited: false };
-  }
+  // client sign-in address: an admin has to give the client another email.
+  const owner = await db.user.findUnique({ where: { email }, select: { role: true, isActive: true } });
+  if (owner && owner.role !== "CLIENT") return refused("needs_admin", "that client email belongs to a non-client login");
+  // A switched-off client login can never be signed into (resolveClientUser refuses it), so don't send a dead code.
+  if (owner && !owner.isActive) return refused("inactive", "the client login is switched off");
+
+  const sentTo = identifier.kind === "email" ? email : maskEmail(email);
 
   const now = Date.now();
   const recent = await db.clientLoginCode.findMany({
     where: { clientId: client.id, createdAt: { gte: new Date(now - WINDOW_MS) } },
     orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
+    select: { createdAt: true, usedAt: true, expiresAt: true, attempts: true },
   });
-  if (recent.length >= MAX_CODES_PER_WINDOW) return { limited: false };
-  if (recent[0] && now - recent[0].createdAt.getTime() < RESEND_COOLDOWN_MS) return { limited: false };
+  const wait = waitBeforeNewCode(recent, now);
+  if (wait) return { status: "wait", sentTo, ...wait };
 
   // A new code cancels every earlier one.
   await db.clientLoginCode.updateMany({
@@ -167,7 +231,7 @@ export async function requestCode(opts: {
       if (!res.ok) console.error("[client-otp] email failed:", res.error);
     })
   );
-  return { limited: false };
+  return { status: "sent", sentTo };
 }
 
 // ── Verify a code ────────────────────────────────────────────

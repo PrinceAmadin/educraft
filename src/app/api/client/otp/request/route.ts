@@ -19,10 +19,10 @@ const schema = z
  *
  * Emails a one-time sign-in code to the address stored on that client. A typed
  * email only finds the client; the code still goes to the address on record,
- * never to one the caller chose. The answer is the same whether or not the
- * client exists, and the email is sent after the response, so neither the
- * message nor the timing reveals which IDs or emails are real. The only
- * different answer is 429 for an IP that is asking too often.
+ * never to one the caller chose. Answers 200 `{ status, sentTo?, retryAfter?,
+ * codeStillValid? }` (`CodeRequestResult`): "sent", or why not (not registered,
+ * a team email, no email on record, wait before asking again…), so the form can
+ * say so plainly. 429 when the IP is asking too often.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -33,16 +33,16 @@ export async function POST(req: NextRequest) {
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
 
   try {
-    const { limited } = await requestCode({
+    const result = await requestCode({
       identifierInput: (parsed.data.identifier ?? parsed.data.clientId)!,
       ip,
       send: sendMail,
       defer: (work) => waitUntil(work.catch(() => {})),
     });
-    if (limited) {
+    if (result.status === "limited") {
       return NextResponse.json({ error: "Too many attempts. Please wait a few minutes and try again." }, { status: 429 });
     }
-    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/client/otp/request]", error instanceof Error ? error.message : error);
     return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });

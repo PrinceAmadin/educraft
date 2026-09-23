@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Logo } from "@/components/shared/Logo";
 import { ClientLoginForm } from "@/app/(auth)/client/login/client-login-form";
 import { normalizeClientIdInput } from "@/lib/id-format";
+import { realEmail } from "@/lib/client-email";
 
 export const metadata: Metadata = {
   title: "Client sign in",
@@ -20,8 +21,9 @@ export default function ClientLoginPage({
 }: {
   searchParams: { id?: string; callbackUrl?: string };
 }) {
-  // The intake success page hands over the Client ID; only a well-formed one is used.
-  const initialId = normalizeClientIdInput(searchParams.id ?? "") ?? "";
+  // The intake success page hands over the Client ID, the forgot-password page the ID or email
+  // a client just set a password for. Only a well-formed ID or email is used.
+  const initialId = normalizeClientIdInput(searchParams.id ?? "") ?? realEmail(searchParams.id) ?? "";
   return (
     <div className="w-full max-w-[400px]">
       <div className="mb-9">

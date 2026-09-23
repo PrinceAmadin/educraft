@@ -1,40 +1,102 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { LuCircleAlert, LuExternalLink, LuLoaderCircle, LuMailCheck } from "react-icons/lu";
+import { LuCircleAlert, LuExternalLink, LuInfo, LuLoaderCircle, LuMailCheck } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CLIENT_ID_EXAMPLE, normalizeClientIdInput } from "@/lib/id-format";
+import { EDUCRAFT_WHATSAPP_URL, formatWait, type CodeRequestResult } from "@/lib/code-request";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESEND_SECONDS = 60;
 const PASSWORD_MIN = 8;
 
 type Step = "signin" | "request" | "setup";
+type Alert = { tone: "error" | "info"; body: React.ReactNode };
 
 /** In-app browsers (WhatsApp, Facebook, Instagram) keep their own sign-in, separate from Chrome/Safari. */
 const IN_APP_BROWSER = /WhatsApp|FBAN|FBAV|Instagram/i;
 
+const inlineLink = "font-medium underline underline-offset-4";
+
+const contactUs = (
+  <a href={EDUCRAFT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className={inlineLink}>
+    message EduCraft on WhatsApp
+  </a>
+);
+
+/** What to tell a client when no code went out. `typed` is the Client ID or email they entered (already tidied). */
+function refusal(result: CodeRequestResult, typed: string): Alert {
+  const isEmail = typed.includes("@");
+  const shown = <strong className="font-medium [overflow-wrap:anywhere]">{typed}</strong>;
+  switch (result.status) {
+    case "invalid":
+      return { tone: "error", body: `Enter your Client ID (like ${CLIENT_ID_EXAMPLE}) or your email.` };
+    case "not_registered":
+      return {
+        tone: "error",
+        body: isEmail ? (
+          <>{shown} is not registered as a client. Use the email you gave when you placed your order, or your Client ID.</>
+        ) : (
+          <>
+            No client has the ID <strong className="font-mono font-medium">{typed}</strong>. Check the ID on your order
+            confirmation, or use your email instead.
+          </>
+        ),
+      };
+    case "team":
+      return {
+        tone: "info",
+        body: (
+          <>
+            {shown} belongs to an EduCraft team account. Set your password on the{" "}
+            <Link href={`/login/set-password?email=${encodeURIComponent(typed)}`} className={inlineLink}>
+              team sign-in page
+            </Link>{" "}
+            instead.
+          </>
+        ),
+      };
+    case "no_email":
+      return { tone: "error", body: <>There is no email on your client record yet, so we can&apos;t send a code. Please {contactUs} to add one.</> };
+    case "needs_admin":
+      return {
+        tone: "error",
+        body: <>This email is also used by an EduCraft team account, so it can&apos;t open the client dashboard. Please {contactUs} to put a different email on your orders.</>,
+      };
+    case "inactive":
+      return { tone: "error", body: <>This client account is switched off. Please {contactUs}.</> };
+    case "unavailable":
+      return { tone: "error", body: <>This email can&apos;t be used for client sign-in. Please {contactUs}.</> };
+    default:
+      return { tone: "error", body: "Something went wrong. Please try again." };
+  }
+}
+
 /**
  * Returning clients: Client ID (or email) + password. First time (or forgot
  * password): the code goes to the email already on the client, never to a
- * typed address, and proves ownership before a password can be set. The
- * wording never says whether an ID or email exists.
+ * typed address, and proves ownership before a password can be set. Asking for
+ * a code says plainly when the ID or email is not registered.
  */
 export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { initialId?: string; callbackUrl?: string }) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>("signin");
   const [identifier, setIdentifier] = React.useState(initialId);
   const [inAppBrowser, setInAppBrowser] = React.useState(false);
+  const [sent, setSent] = React.useState<{ to: string; earlier: boolean } | null>(null);
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [code, setCode] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [alert, setAlert] = React.useState<Alert | null>(null);
   const [cooldown, setCooldown] = React.useState(0);
+
+  const fail = (body: React.ReactNode) => setAlert({ tone: "error", body });
 
   React.useEffect(() => {
     setInAppBrowser(IN_APP_BROWSER.test(navigator.userAgent));
@@ -52,7 +114,7 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
     const id = normalizeClientIdInput(raw);
     if (id) return id;
     if (EMAIL_PATTERN.test(raw)) return raw.toLowerCase();
-    setError(`Enter your Client ID (like ${CLIENT_ID_EXAMPLE}) or your email.`);
+    fail(`Enter your Client ID (like ${CLIENT_ID_EXAMPLE}) or your email.`);
     return null;
   }
 
@@ -66,24 +128,24 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
 
   async function signInSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setAlert(null);
     const id = idOrError();
     if (!id) return;
     if (!password) {
-      setError("Enter your password.");
+      fail("Enter your password.");
       return;
     }
     setBusy(true);
     const ok = await login(id, password);
     if (!ok) {
       setBusy(false);
-      setError("That Client ID or email and password did not match. If this is your first time, or you forgot your password, use the link below.");
+      fail("That Client ID or email and password did not match. If this is your first time, or you forgot your password, use the link below.");
     }
   }
 
   async function sendCode(e?: React.FormEvent) {
     e?.preventDefault();
-    setError(null);
+    setAlert(null);
     const id = idOrError();
     if (!id) return;
     setBusy(true);
@@ -94,16 +156,34 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
         body: JSON.stringify({ identifier: id }),
       });
       if (res.status === 429) {
-        setError("Too many attempts. Please wait a few minutes and try again.");
+        fail("Too many attempts. Please wait a few minutes and try again.");
         return;
       }
       if (!res.ok) throw new Error();
+      const result = (await res.json()) as CodeRequestResult;
+      const retryAfter = result.retryAfter ?? RESEND_SECONDS;
       setIdentifier(id);
-      setCode("");
-      setCooldown(RESEND_SECONDS);
-      setStep("setup");
+
+      if (result.status === "sent") {
+        setSent({ to: result.sentTo ?? id, earlier: false });
+        setCode("");
+        setCooldown(RESEND_SECONDS);
+        setStep("setup");
+      } else if (result.status === "wait" && result.codeStillValid) {
+        // One went out moments ago and still works: send them to it rather than leave them waiting.
+        setSent({ to: result.sentTo ?? id, earlier: true });
+        setCooldown(retryAfter);
+        setStep("setup");
+      } else if (result.status === "wait") {
+        setCooldown(retryAfter);
+        fail(`You have asked for several codes in a short time. Please try again in ${formatWait(retryAfter)}.`);
+      } else {
+        // Back to the ID field, so the message sits next to what they typed.
+        setStep("request");
+        setAlert(refusal(result, id));
+      }
     } catch {
-      setError("Something went wrong. Please try again.");
+      fail("Something went wrong. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -111,10 +191,10 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
 
   async function setupSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    if (!/^\d{6}$/.test(code)) return setError("Enter the 6-digit code from your email.");
-    if (password.length < PASSWORD_MIN) return setError(`Your password needs at least ${PASSWORD_MIN} characters.`);
-    if (password !== confirm) return setError("The two passwords do not match.");
+    setAlert(null);
+    if (!/^\d{6}$/.test(code)) return fail("Enter the 6-digit code from your email.");
+    if (password.length < PASSWORD_MIN) return fail(`Your password needs at least ${PASSWORD_MIN} characters.`);
+    if (password !== confirm) return fail("The two passwords do not match.");
     setBusy(true);
     try {
       const res = await fetch("/api/client/password/set", {
@@ -124,26 +204,33 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(data?.error ?? "Something went wrong. Please try again.");
+        fail(data?.error ?? "Something went wrong. Please try again.");
         setBusy(false);
         return;
       }
       if (!(await login(identifier, password))) {
         setBusy(false);
         setStep("signin");
-        setError("Your password is saved. Please sign in.");
+        setAlert({ tone: "info", body: "Your password is saved. Please sign in." });
       }
     } catch {
       setBusy(false);
-      setError("Something went wrong. Please try again.");
+      fail("Something went wrong. Please try again.");
     }
   }
 
-  const errorBox = error ? (
-    <div role="alert" className="flex items-start gap-2.5 rounded-lg bg-danger/10 px-3.5 py-3 text-sm text-danger">
-      <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-      <span>{error}</span>
-    </div>
+  const alertBox = alert ? (
+    alert.tone === "error" ? (
+      <div role="alert" className="flex items-start gap-2.5 rounded-lg bg-danger/10 px-3.5 py-3 text-sm text-danger">
+        <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>{alert.body}</span>
+      </div>
+    ) : (
+      <div role="status" className="flex items-start gap-2.5 rounded-lg bg-zone px-3.5 py-3 text-sm text-foreground">
+        <LuInfo className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+        <span>{alert.body}</span>
+      </div>
+    )
   ) : null;
 
   const idField = (
@@ -158,7 +245,7 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
         autoCapitalize="none"
         inputMode="email"
         spellCheck={false}
-        aria-invalid={!!error}
+        aria-invalid={alert?.tone === "error"}
       />
     </div>
   );
@@ -186,7 +273,7 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
     return (
       <form onSubmit={signInSubmit} noValidate className="space-y-5">
         {inAppHint}
-        {errorBox}
+        {alertBox}
         {idField}
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
@@ -196,7 +283,7 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            aria-invalid={!!error}
+            aria-invalid={alert?.tone === "error"}
           />
         </div>
         <Button type="submit" size="lg" className="w-full" disabled={busy}>
@@ -208,7 +295,7 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
             type="button"
             className={link}
             onClick={() => {
-              setError(null);
+              setAlert(null);
               setPassword("");
               setStep("request");
             }}
@@ -223,19 +310,19 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
   if (step === "request") {
     return (
       <form onSubmit={sendCode} noValidate className="space-y-5">
-        {errorBox}
+        {alertBox}
         {idField}
         <p className="text-xs text-muted-foreground">
           We email a 6-digit code to the address you used at intake. Enter it to choose your password, and you will not need a code again.
         </p>
         <Button type="submit" size="lg" className="w-full" disabled={busy}>
-          {spinner("Sending…", "Email me a code")}
+          {spinner("Checking…", "Email me a code")}
         </Button>
         <button
           type="button"
           className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           onClick={() => {
-            setError(null);
+            setAlert(null);
             setStep("signin");
           }}
         >
@@ -245,16 +332,24 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
     );
   }
 
+  const isId = !identifier.includes("@");
   return (
     <form onSubmit={setupSubmit} noValidate className="space-y-5">
       <div className="flex items-start gap-3 rounded-lg bg-zone px-4 py-3.5 text-sm text-foreground">
         <LuMailCheck className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
         <p className="leading-relaxed">
-          If <span className="font-mono">{identifier}</span> is registered, we have sent a 6-digit code to the email
-          used at intake. It can take a minute, so check your spam folder too.
+          {sent?.earlier ? "We already sent a code to " : "We sent a 6-digit code to "}
+          <strong className="font-medium [overflow-wrap:anywhere]">{sent?.to ?? identifier}</strong>
+          {isId ? (
+            <>
+              , the email on <span className="font-mono">{identifier}</span>
+            </>
+          ) : null}
+          {sent?.earlier ? `${isId ? "," : ""} a short while ago, and it still works. ` : ". "}
+          It can take a minute, so check your spam folder too.
         </p>
       </div>
-      {errorBox}
+      {alertBox}
       <div className="space-y-2">
         <Label htmlFor="code">6-digit code</Label>
         <Input
@@ -300,13 +395,14 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
           disabled={busy || cooldown > 0}
           className="font-medium text-primary underline-offset-4 hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
         >
-          {cooldown > 0 ? `Send a new code in ${cooldown}s` : "Send a new code"}
+          {cooldown > 0 ? `Send a new code in ${formatWait(cooldown)}` : "Send a new code"}
         </button>
         <button
           type="button"
           onClick={() => {
             setStep("signin");
-            setError(null);
+            setAlert(null);
+            setSent(null);
             setCode("");
             setPassword("");
             setConfirm("");
