@@ -60,7 +60,9 @@ export function ClientPaymentsPanel({
               ? "Your downpayment starts the work."
               : project.status === "APPROVED"
                 ? "Your project passed our quality check. The balance unlocks delivery."
-                : "Paying the balance now unlocks Chapter 3 onwards and your final document as soon as each is ready."}
+                : project.balanceUnlocks
+                  ? `Paying the balance now unlocks ${project.balanceUnlocks} for download as soon as ${project.balanceUnlockCount === 1 ? "it's" : "each is"} ready.`
+                  : "Paying the balance now means your delivery is ready to go as soon as it passes our quality check."}
           </p>
           {preview ? (
             <p className="text-sm font-medium text-foreground">

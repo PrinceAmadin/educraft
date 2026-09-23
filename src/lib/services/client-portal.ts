@@ -106,6 +106,10 @@ export interface ClientProjectView {
   canPayBalance: boolean;
   /** Messages from EduCraft the client has not opened yet. */
   unreadMessages: number;
+  /** What paying the balance opens for download, in the order's own words ("Chapters 3 to 5 and your complete project"). */
+  balanceUnlocks: string | null;
+  /** How many items that is (for "it's" vs "each is"). */
+  balanceUnlockCount: number;
 }
 
 async function heldFromFor(projectDbId: string, status: ProjectStatus): Promise<ProjectStatus | null> {
@@ -154,7 +158,33 @@ function toView(row: ViewRow, heldFrom: ProjectStatus | null, unreadMessages: nu
     canPayDownpayment: downpaymentDue(row),
     canPayBalance: balancePayable(row),
     unreadMessages,
+    balanceUnlocks: null,
+    balanceUnlockCount: 0,
   };
+}
+
+/** "Chapter 3", "Chapter 4", "Complete project" -> "Chapters 3 to 4 and your complete project". */
+export function describeUnlocks(titles: string[]): string | null {
+  if (titles.length === 0) return null;
+  const chapters = titles
+    .map((t) => /^Chapter (\d+)$/.exec(t))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => Number(m[1]))
+    .sort((a, b) => a - b);
+  const others = titles.filter((t) => !/^Chapter \d+$/.test(t)).map((t) => `your ${t.toLowerCase()}`);
+  const and = (items: string[]) => (items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+  const parts: string[] = [];
+  if (chapters.length === 1) parts.push(`Chapter ${chapters[0]}`);
+  else if (chapters.length > 1) {
+    const consecutive = chapters.every((c, i) => i === 0 || c === chapters[i - 1] + 1);
+    parts.push(
+      consecutive
+        ? `Chapters ${chapters[0]} to ${chapters[chapters.length - 1]}`
+        : `Chapters ${others.length ? chapters.join(", ") : and(chapters.map(String))}`
+    );
+  }
+  parts.push(...others);
+  return and(parts);
 }
 
 async function unreadFromEduCraft(projectDbIds: string[]): Promise<Map<string, number>> {
@@ -173,16 +203,44 @@ export async function getClientProjectView(scope: ClientScope, code: string): Pr
     select: viewSelect,
   });
   if (!row) return null;
-  const [heldFrom, unread] = await Promise.all([heldFromFor(row.id, row.status), unreadFromEduCraft([row.id])]);
-  return toView(row, heldFrom, unread.get(row.id) ?? 0);
+  await ensureDeliverables(row.id);
+  const [heldFrom, unread, balanceItems] = await Promise.all([
+    heldFromFor(row.id, row.status),
+    unreadFromEduCraft([row.id]),
+    db.projectDeliverable.findMany({
+      where: { projectId: row.id, archivedAt: null, access: "BALANCE" },
+      orderBy: { sortOrder: "asc" },
+      select: { title: true },
+    }),
+  ]);
+  return {
+    ...toView(row, heldFrom, unread.get(row.id) ?? 0),
+    balanceUnlocks: describeUnlocks(balanceItems.map((d) => d.title)),
+    balanceUnlockCount: balanceItems.length,
+  };
 }
+
+export type ClientCardGroup = "active" | "awaiting_payment" | "finished" | "closed";
 
 export interface ClientProjectCard extends ClientProjectView {
   /** What the client should do next, if anything ("Pay your balance"). */
   nextAction: string | null;
+  /** Which section of the dashboard it sits in. */
+  group: ClientCardGroup;
 }
 
-/** The client's projects, the ones waiting on them first. */
+function cardGroup(view: ClientProjectView): ClientCardGroup {
+  if (view.status === "CANCELLED" || view.status === "REFUNDED") return "closed";
+  if (view.status === "DELIVERED" || view.status === "COMPLETED") return "finished";
+  if (view.canPayDownpayment) return "awaiting_payment";
+  return "active";
+}
+
+/**
+ * The client's projects: work under way first (those waiting on the client at
+ * the top), then orders not paid for yet, then delivered, then closed. Newest
+ * first within each.
+ */
 export async function listClientProjectCards(scope: ClientScope): Promise<ClientProjectCard[]> {
   const rows = await db.project.findMany({
     where: { clientId: { in: scope.clientIds } },
@@ -198,10 +256,16 @@ export async function listClientProjectCards(scope: ClientScope): Promise<Client
       else if (view.status === "AWAITING_CLIENT_INPUT") nextAction = "We need something from you";
       else if (view.unreadMessages > 0) nextAction = view.unreadMessages === 1 ? "1 new message" : `${view.unreadMessages} new messages`;
       else if (view.status === "APPROVED" && view.canPayBalance) nextAction = "Pay your balance to unlock delivery";
-      return { ...view, nextAction };
+      return { ...view, nextAction, group: cardGroup(view) };
     })
   );
-  return cards.sort((a, b) => Number(Boolean(b.nextAction)) - Number(Boolean(a.nextAction)));
+  const rank: Record<ClientCardGroup, number> = { active: 0, awaiting_payment: 1, finished: 2, closed: 3 };
+  return cards.sort(
+    (a, b) =>
+      rank[a.group] - rank[b.group] ||
+      Number(Boolean(b.nextAction)) - Number(Boolean(a.nextAction)) ||
+      b.createdAt.localeCompare(a.createdAt)
+  );
 }
 
 // ── Payments ─────────────────────────────────────────────────
@@ -347,6 +411,14 @@ export interface ClientDocument {
   current: ClientDocumentVersion | null;
   /** Older releases, newest first: shown by release number only. */
   earlier: ClientDocumentVersion[];
+  /** For an item not released yet: when it will open, in client words. */
+  notReadyHint: string;
+}
+
+function notReadyHint(access: string, project: { downpaymentStatus: string; balanceStatus: string }): string {
+  if (access === "BALANCE" && project.balanceStatus !== "Verified") return "Not ready yet · downloads once your balance is paid";
+  if (access === "DOWNPAYMENT" && project.downpaymentStatus !== "Verified") return "Not ready yet · downloads once your downpayment is in";
+  return "Not ready yet · we'll let you know the moment it is";
 }
 
 /**
@@ -395,6 +467,7 @@ export async function getClientDocuments(projectDbId: string): Promise<ClientDoc
       lockReason: gate.state === "locked" ? gate.reason : null,
       current: versions[0] ?? null,
       earlier: versions.slice(1),
+      notReadyHint: notReadyHint(d.access, project),
     };
   });
 }

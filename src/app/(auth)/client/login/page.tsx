@@ -54,7 +54,7 @@ export default async function ClientLoginPage({
       )}
 
       <p className="mt-9 text-sm text-muted-foreground">
-        Also a worker or ambassador? One login opens all your dashboards.{" "}
+        Also a specialist or ambassador with EduCraft? One login opens all your dashboards.{" "}
         <Link href="/login" className="font-medium text-primary underline-offset-4 hover:underline">
           Sign in here
         </Link>

@@ -77,19 +77,22 @@ async function ProgressTab({ view, preview }: { view: ClientProjectView; preview
           {tone === "done" ? <LuCircleCheck className="mt-0.5 size-4 shrink-0 text-success" aria-hidden /> : null}
           {progress.headline}
         </p>
-        <div className="mt-4 flex items-center gap-3">
-          <div
-            className="h-2 flex-1 overflow-hidden rounded-full bg-card"
-            role="progressbar"
-            aria-valuenow={progress.percent}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label="Project progress"
-          >
-            <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${progress.percent}%` }} />
+        {/* Nothing has started before the downpayment: no progress to show yet. */}
+        {view.status !== "NEW" ? (
+          <div className="mt-4 flex items-center gap-3">
+            <div
+              className="h-2 flex-1 overflow-hidden rounded-full bg-card"
+              role="progressbar"
+              aria-valuenow={progress.percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Project progress"
+            >
+              <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${progress.percent}%` }} />
+            </div>
+            <span className="font-mono text-sm tabular-nums text-foreground">{progress.percent}%</span>
           </div>
-          <span className="font-mono text-sm tabular-nums text-foreground">{progress.percent}%</span>
-        </div>
+        ) : null}
         {view.canPayDownpayment && !preview ? (
           <div className="mt-4">
             <ClientPayButton projectCode={view.code} leg="downpayment" label={`Pay ${formatNaira(view.downpaymentAmount)} to start`} />

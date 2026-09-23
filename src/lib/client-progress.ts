@@ -63,6 +63,22 @@ const LABELS: Record<ClientStepKey, string> = {
   delivered: "Delivered",
 };
 
+/**
+ * What the step on screen is doing right now. A step that is still under way
+ * must not read as done: "Specialist assigned" while we are still choosing one
+ * told clients something that wasn't true yet.
+ */
+const CURRENT_LABELS: Record<ClientStepKey, string> = {
+  received: "Order received",
+  payment: "Downpayment due",
+  assigned: "Choosing your specialist",
+  research: "Gathering sources",
+  writing: "Writing",
+  quality: "In our quality check",
+  balance: "Balance due",
+  delivered: "Preparing your delivery",
+};
+
 const ORDER: ClientStepKey[] = ["received", "payment", "assigned", "research", "writing", "quality", "balance", "delivered"];
 
 /** The step a status is working on (for closed statuses: the last one reached). */
@@ -171,7 +187,7 @@ export function clientProgress(input: ProgressInput): ClientProgress {
         detail = `${input.chapters.ready} of ${input.chapters.total} chapters ready`;
       }
     }
-    return { key, label: LABELS[key], state, detail };
+    return { key, label: state === "current" ? CURRENT_LABELS[key] : LABELS[key], state, detail };
   });
 
   const doneCount = steps.filter((s) => s.state === "done").length;
@@ -202,6 +218,8 @@ export function deliveryCountdown(input: {
   const date = input.expectedDeliveryAt;
   if (FINISHED.includes(input.status)) return { date, label: "Delivered", tone: "success" };
   if (input.status === "CANCELLED" || input.status === "REFUNDED") return { date: null, label: "", tone: "normal" };
+  // Nothing has started before the downpayment: a date here would be a promise we haven't made.
+  if (input.status === "NEW") return { date: null, label: "Your delivery date is set once your downpayment is in.", tone: "normal" };
   if (input.deadlinePausedAt) {
     return { date, label: "Paused while we wait for you. The date moves on by the days paused.", tone: "gold" };
   }

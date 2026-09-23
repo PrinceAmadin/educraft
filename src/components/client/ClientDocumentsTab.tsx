@@ -154,7 +154,7 @@ function DocumentRow({
           <p className="text-[15px] font-medium text-foreground">{d.title}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {d.state === "not-ready"
-              ? "Not ready yet"
+              ? d.notReadyHint
               : d.state === "locked" && d.lockReason
                 ? LOCK_TEXT[d.lockReason]
                 : `Ready${d.current && d.current.releaseNo > 1 ? ` · version ${d.current.releaseNo}` : ""} · ${formatDate(d.current?.releasedAt)}`}
