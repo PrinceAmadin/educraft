@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth, navRoleForUser, portalsForUser, ROLE_LABELS } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isPersonRole } from "@/lib/roles";
+import { linkClientOrders } from "@/lib/services/account-links";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import type { NavRole } from "@/lib/constants";
 
@@ -20,6 +21,10 @@ export default async function DashboardLayout({
   // fresh sign-in. The switcher offers each one they hold in good standing.
   let portals: NavRole[] = [role];
   if (isPersonRole(session.user.role)) {
+    // The email is the person: any order placed with it since the last visit joins
+    // this login now, so its client dashboard appears without signing in again.
+    const me = await db.user.findUnique({ where: { id: session.user.id }, select: { email: true, isActive: true } });
+    if (me?.isActive) await linkClientOrders(session.user.id, me.email);
     const profiles = await db.user.findUnique({
       where: { id: session.user.id },
       select: {

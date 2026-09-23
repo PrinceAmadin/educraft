@@ -30,7 +30,7 @@ import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
 import { statusFeedEntry } from "@/lib/client-updates";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyClient } from "@/lib/services/client-notify";
-import { provedLoginForEmail } from "@/lib/services/account-links";
+import { loginForEmail } from "@/lib/services/account-links";
 import type { CreateProjectInput } from "@/lib/validations/projects";
 
 export { TRANSITIONS, allowedTransitions } from "@/lib/pipeline";
@@ -1153,8 +1153,8 @@ export async function createProjectManual(
   // Ids generated up front so the transaction only does writes.
   const newProjectId = await nextId("PROJECT");
   const newClientId = input.clientMode === "new" ? await nextId("CLIENT") : null;
-  // A person with a proved EduCraft login (worker, ambassador, client) sees it in the same dashboard.
-  const ownerLoginId = input.clientMode === "new" ? await provedLoginForEmail(input.email) : null;
+  // A person with an EduCraft login with this email (worker, ambassador, client) sees it in the same dashboard.
+  const ownerLoginId = input.clientMode === "new" ? await loginForEmail(input.email) : null;
 
   const created = await db.$transaction(async (tx) => {
     let clientId: string;

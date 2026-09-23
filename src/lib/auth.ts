@@ -57,9 +57,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
 
-        // Client orders placed with this email join the same login (only once an
-        // emailed code has proved the inbox, see account-links.ts).
-        if (user.emailVerifiedAt && user.role !== "SUPER_ADMIN" && user.role !== "OPS_MANAGER") {
+        // The email is the person: client orders placed with it join this login
+        // (see account-links.ts). Staff never hold client orders.
+        if (user.role !== "SUPER_ADMIN" && user.role !== "OPS_MANAGER") {
           await linkClientOrders(user.id, user.email);
         }
 

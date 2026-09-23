@@ -2,16 +2,20 @@ import { db } from "@/lib/db";
 import { PERSON_ROLES } from "@/lib/roles";
 
 /**
- * One login per person: client orders placed with a person's email join the
- * login that email belongs to, whether they signed up as a client, a worker or
- * an ambassador. Only for a login whose email an emailed code has proved
- * (`emailVerifiedAt`): anyone can type an email into the order form or a
- * worker application, so the inbox is the proof, never the typing.
+ * The email is the person (founder's rule, Sept 2026): every client order
+ * placed with an email belongs to the login with that email, whether that
+ * person signed up as a client, a worker or an ambassador, and they reach it
+ * by switching dashboards. One person, one login, one dashboard.
  *
- * Staff logins never collect client orders.
+ * Only ACTIVE logins collect orders, and a login only becomes active once it is
+ * trusted: a client login after an emailed code, a worker or ambassador login
+ * when an admin approves the application (or after an emailed code on the
+ * forgot-password page). A pending or rejected applicant's login is switched
+ * off, so it never picks up anyone's orders. Staff logins never hold client
+ * orders.
  */
 
-/** Attach this person's unclaimed client records (same email) to their login. */
+/** Attach every unclaimed client record with this email to the login. */
 export async function linkClientOrders(userId: string, email: string): Promise<void> {
   await db.client.updateMany({
     where: { email: { equals: email, mode: "insensitive" }, userId: null },
@@ -19,21 +23,12 @@ export async function linkClientOrders(userId: string, email: string): Promise<v
   });
 }
 
-/**
- * The login a brand-new client record should join, if its email already
- * belongs to a proved worker, ambassador or client login. Null otherwise (the
- * record waits until someone proves the inbox with a code).
- */
-export async function provedLoginForEmail(email: string | null | undefined): Promise<string | null> {
+/** The active worker, ambassador or client login with this email, if any: a new client record joins it straight away. */
+export async function loginForEmail(email: string | null | undefined): Promise<string | null> {
   const address = email?.trim();
   if (!address) return null;
   const user = await db.user.findFirst({
-    where: {
-      email: { equals: address, mode: "insensitive" },
-      emailVerifiedAt: { not: null },
-      isActive: true,
-      role: { in: [...PERSON_ROLES] },
-    },
+    where: { email: { equals: address, mode: "insensitive" }, isActive: true, role: { in: [...PERSON_ROLES] } },
     select: { id: true },
   });
   return user?.id ?? null;

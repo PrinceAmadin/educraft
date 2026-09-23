@@ -427,7 +427,7 @@ export async function verifyPassword(opts: {
     return null;
   }
 
-  // Orders join a login only once its inbox is proved (client logins always are).
-  if (user.role === "CLIENT" || user.emailVerifiedAt) await linkClientRows(user.id, user.email);
+  // The email is the person: every order placed with it joins this login.
+  await linkClientRows(user.id, user.email);
   return { userId: user.id, email: user.email, name: user.displayName ?? client.fullName, role: user.role };
 }

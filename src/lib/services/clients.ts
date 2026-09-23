@@ -2,7 +2,7 @@ import { realEmail } from "@/lib/client-email";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { isStaffRole } from "@/lib/roles";
-import { provedLoginForEmail } from "@/lib/services/account-links";
+import { loginForEmail } from "@/lib/services/account-links";
 import { TransitionError } from "@/lib/services/projects";
 
 export const CLIENT_PAGE_SIZE = 20;
@@ -246,7 +246,7 @@ export async function updateClientEmail(id: string, rawEmail: string) {
   }
 
   const unlink = client.userId && client.user?.email !== email;
-  const joinLogin = await provedLoginForEmail(email);
+  const joinLogin = await loginForEmail(email);
   return db.client.update({
     where: { id },
     data: { email, ...(joinLogin ? { userId: joinLogin } : unlink ? { userId: null } : {}) },

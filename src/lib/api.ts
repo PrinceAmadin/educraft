@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { clientIdsForUser } from "@/lib/services/client-otp";
 import { isClientSessionExpired, isPersonRole } from "@/lib/roles";
+import { linkClientOrders } from "@/lib/services/account-links";
 
 const ADMIN_ROLES = ["SUPER_ADMIN", "OPS_MANAGER"];
 
@@ -134,6 +135,11 @@ export async function getClientScope(): Promise<ClientScope | null> {
   const session = await auth();
   if (!session?.user || !isPersonRole(session.user.role)) return null;
   if (isClientSessionExpired(session.user)) return null;
+  // The email is the person: orders placed with it since the last page join this
+  // login first, so every client page and API sees them straight away.
+  const me = await db.user.findUnique({ where: { id: session.user.id }, select: { email: true, isActive: true } });
+  if (!me?.isActive) return null;
+  await linkClientOrders(session.user.id, me.email);
   const clientIds = await clientIdsForUser(session.user.id);
   // A client-first login keeps its dashboard (empty) even with no orders yet.
   if (session.user.role !== "CLIENT" && clientIds.length === 0) return null;

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { provedLoginForEmail } from "@/lib/services/account-links";
+import { loginForEmail } from "@/lib/services/account-links";
 import { nextId } from "@/lib/services/projects";
 import type { SubmittedContact } from "@/lib/submitted-contact";
 import { recordUpdate } from "@/lib/services/client-updates";
@@ -277,9 +277,9 @@ export async function submitIntake(
   }
 
   const newClientId = returningClient ? null : await nextId("CLIENT");
-  // A person who already has a proved EduCraft login (worker, ambassador or an
-  // earlier client login) sees this order in the same dashboard straight away.
-  const ownerLoginId = returningClient ? null : await provedLoginForEmail(typedEmail);
+  // A person who already has an EduCraft login with this email (worker, ambassador
+  // or client) sees this order in the same dashboard straight away.
+  const ownerLoginId = returningClient ? null : await loginForEmail(typedEmail);
   const newProjectId = await nextId("PROJECT");
 
   const created = await db.$transaction(
