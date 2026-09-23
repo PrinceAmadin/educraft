@@ -235,6 +235,8 @@ export interface RerunRequestRow {
   workerName: string;
   reviewerName: string | null;
   rerunsUsed: number;
+  /** The current research is shown in the client's dashboard: a re-run removes it until shared again. */
+  sharedWithClient: boolean;
 }
 
 export async function listRerunRequests(): Promise<{ pending: RerunRequestRow[]; recent: RerunRequestRow[] }> {
@@ -242,7 +244,9 @@ export async function listRerunRequests(): Promise<{ pending: RerunRequestRow[];
     orderBy: { createdAt: "desc" },
     take: 60,
     include: {
-      project: { select: { id: true, projectId: true, projectTitle: true } },
+      project: {
+        select: { id: true, projectId: true, projectTitle: true, researchJob: { select: { releasedToClientAt: true } } },
+      },
       requestedBy: { select: { displayName: true, email: true, workerProfile: { select: { fullName: true } } } },
       reviewedBy: { select: { displayName: true, email: true } },
     },
@@ -272,6 +276,7 @@ export async function listRerunRequests(): Promise<{ pending: RerunRequestRow[];
     workerName: r.requestedBy.workerProfile?.fullName ?? r.requestedBy.displayName ?? r.requestedBy.email,
     reviewerName: r.reviewedBy ? (r.reviewedBy.displayName ?? r.reviewedBy.email) : null,
     rerunsUsed: rerunsByProject.get(r.project.id) ?? 0,
+    sharedWithClient: Boolean(r.project.researchJob?.releasedToClientAt),
   }));
 
   return {

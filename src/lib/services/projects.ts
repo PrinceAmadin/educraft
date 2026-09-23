@@ -21,6 +21,7 @@ import {
   TRANSITIONS,
   allowedTransitions,
   canHold,
+  finalAwaitingRelease,
   type AdminHold,
   type TransitionCandidate,
 } from "@/lib/pipeline";
@@ -224,6 +225,11 @@ const detailInclude = {
     include: { changedBy: { select: { displayName: true, email: true } } },
   },
   payments: { orderBy: { date: "desc" } },
+  // For the delivery guard (see toCandidate): has a complete document been uploaded, and released?
+  deliverables: {
+    where: { kind: "FINAL", archivedAt: null },
+    select: { versions: { select: { releaseNo: true } } },
+  },
 } satisfies Prisma.ProjectInclude;
 
 export type ProjectDetail = Prisma.ProjectGetPayload<{ include: typeof detailInclude }>;
@@ -344,6 +350,10 @@ export async function transitionProject(
       worker: { select: { userId: true } },
       files: { where: { category: "from_worker" }, select: { id: true } },
       _count: { select: { files: true } },
+      deliverables: {
+        where: { kind: "FINAL", archivedAt: null },
+        select: { versions: { select: { releaseNo: true } } },
+      },
     },
   });
 
@@ -367,6 +377,7 @@ export async function transitionProject(
     serviceId: project.serviceId,
     hasRequirementDetail,
     workerFileCount: project.files.length,
+    finalAwaitingRelease: finalAwaitingRelease(project.deliverables),
   };
 
   const rule = allowedTransitions(candidate).find((r) => r.to === to);
@@ -476,6 +487,24 @@ export async function transitionProject(
           body: feed.body,
           dedupeKey: `status:${log.id}`,
         });
+      }
+      // A revision sends the uploaded complete document back to the worker with the note.
+      if (to === "REVISION_NEEDED") {
+        const returned = await tx.deliverableVersion.updateMany({
+          where: { status: "SUBMITTED", deliverable: { projectId: project.id, kind: "FINAL" } },
+          data: {
+            status: "RETURNED",
+            reviewNote: note?.trim() || "Returned by the quality check.",
+            reviewedById: changedById,
+            reviewedAt: now,
+          },
+        });
+        if (returned.count > 0) {
+          await tx.projectDeliverable.updateMany({
+            where: { projectId: project.id, kind: "FINAL", status: "IN_REVIEW" },
+            data: { status: "CHANGES_REQUESTED" },
+          });
+        }
       }
     },
     { timeout: 15_000, maxWait: 10_000 }
@@ -749,10 +778,43 @@ export async function verifyPayment(
   // The job is now confirmed — email its ambassador if they haven't been yet
   // (a public-intake referral, or an allocation saved without emailing).
   if (leg === "downpayment") await emailPendingCommission(project.id);
+  // Balance in and the complete document already released: that is delivery.
+  if (advance === "BALANCE_VERIFIED") await deliverIfFinalReleased(project.id);
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
   return detail;
+}
+
+/**
+ * Delivers a project that is fully paid (BALANCE_VERIFIED) once its complete
+ * document has been released to the client. Called after a release and after
+ * a balance is verified, whichever comes second. Never throws: the caller's
+ * own action already succeeded.
+ */
+export async function deliverIfFinalReleased(projectDbId: string): Promise<boolean> {
+  try {
+    const project = await db.project.findUnique({
+      where: { id: projectDbId },
+      select: {
+        status: true,
+        deliverables: {
+          where: { kind: "FINAL", archivedAt: null },
+          select: { versions: { where: { releaseNo: { not: null } }, select: { id: true }, take: 1 } },
+        },
+      },
+    });
+    if (!project || project.status !== "BALANCE_VERIFIED") return false;
+    if (!project.deliverables.some((d) => d.versions.length > 0)) return false;
+    await transitionProject(projectDbId, "DELIVERED", {
+      changedById: null,
+      note: "Delivered: balance paid and the complete document released",
+    });
+    return true;
+  } catch (error) {
+    if (!(error instanceof TransitionError)) console.error("[deliverIfFinalReleased]", error);
+    return false;
+  }
 }
 
 /**

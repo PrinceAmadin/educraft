@@ -66,6 +66,8 @@ export interface ActionCounts {
   clientMessagesWaiting: number;
   /** Of those, waiting more than a day. */
   clientMessagesOverADay: number;
+  /** Chapters and documents uploaded and waiting for an admin to release or return. */
+  documentsToReview: number;
 }
 
 export interface DashboardSummary {

@@ -69,6 +69,14 @@ function buildItems(actions: ActionCounts): ActionItem[] {
       severity: "attention",
     },
     {
+      key: "documents",
+      icon: IconQAQueue,
+      label: "Chapters and documents to review and release",
+      count: actions.documentsToReview,
+      href: "/admin/client-inbox#documents",
+      severity: "attention",
+    },
+    {
       key: "downpayments",
       icon: IconVerifyPayment,
       label: "Downpayments marked paid, awaiting verification",

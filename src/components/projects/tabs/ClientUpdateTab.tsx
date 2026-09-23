@@ -15,10 +15,17 @@ import type { ResearchSummary } from "@/lib/services/research-summary";
 export function ClientUpdateTab({
   clientFullName,
   projectCode,
+  clientId,
+  documentsUrl,
+  shared,
   summary,
 }: {
   clientFullName: string;
   projectCode: string;
+  clientId: string;
+  documentsUrl: string;
+  /** The research is visible in the client's Documents tab (so the link has something to show). */
+  shared: boolean;
   summary: ResearchSummary | null;
 }) {
   const [text, setText] = React.useState("");
@@ -31,11 +38,13 @@ export function ClientUpdateTab({
       buildClientResearchMessage({
         clientFullName,
         projectCode,
+        clientId,
+        documentsUrl,
         summary,
         greeting: greetingForHour(nigeriaHour()),
       })
     );
-  }, [clientFullName, projectCode, summary]);
+  }, [clientFullName, projectCode, clientId, documentsUrl, summary]);
 
   async function copy() {
     try {
@@ -64,6 +73,11 @@ export function ClientUpdateTab({
           Filled in from this project&apos;s research results. Edit anything you like, then copy. Only
           management can see this.
         </p>
+        {!shared ? (
+          <p className="mt-2 rounded-xl bg-gold/10 p-3 text-xs text-foreground">
+            Share the research from the Documents tab first, so the client finds the papers when they open the link.
+          </p>
+        ) : null}
       </div>
       <Textarea
         value={text}

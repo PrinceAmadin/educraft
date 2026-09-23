@@ -37,6 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: { code: strin
       authorUserId: guard.scope.userId,
       side: "CLIENT",
       body: parsed.data.body,
+      attachments: parsed.data.attachments,
     });
     return NextResponse.json({ message }, { status: 201 });
   } catch (error) {

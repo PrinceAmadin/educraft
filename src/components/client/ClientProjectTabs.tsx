@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LuActivity, LuMessageCircle, LuWallet } from "react-icons/lu";
+import { LuActivity, LuFileText, LuMessageCircle, LuWallet } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { cn } from "@/lib/utils";
 
@@ -7,11 +7,11 @@ import { cn } from "@/lib/utils";
  * The tabs of a client's project page. Links (?tab=), so the server renders
  * only the open tab. On phones every tab is an equal column (icon over a short
  * label) so all of them fit a 320px screen without sideways scrolling; from
- * `sm` up it is the usual segmented bar. Requirements and Documents join as
- * those features ship.
+ * `sm` up it is the usual segmented bar. Requirements joins when it ships.
  */
 export const CLIENT_TABS = [
   { key: "progress", label: "Progress", icon: LuActivity },
+  { key: "documents", label: "Documents", icon: LuFileText },
   { key: "payments", label: "Payments", icon: LuWallet },
   { key: "messages", label: "Messages", icon: LuMessageCircle },
 ] as const satisfies readonly { key: string; label: string; icon: IconType }[];

@@ -21,7 +21,7 @@ import { notifyUsers, type NotificationType } from "@/lib/services/notifications
  * notification must not undo or fail the action that triggered it.
  */
 
-export type ClientTab = "progress" | "payments" | "messages";
+export type ClientTab = "progress" | "documents" | "payments" | "messages";
 
 export interface ClientNotice {
   title: string;

@@ -8,7 +8,7 @@ import { QaReviewPanel } from "@/components/qa/QaReviewPanel";
 import { QaStartReview } from "@/components/qa/QaStartReview";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { deadlineInfo, formatDate } from "@/lib/utils";
-import { safeHref } from "@/lib/safe-href";
+import { fileHref } from "@/lib/files/links";
 import type { ProjectStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +41,7 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
   const info = deadlineInfo(deadline);
   const workerFiles = project.files.filter((f) => f.category === "from_worker");
   const otherFiles = project.files.filter((f) => f.category !== "from_worker");
+  const routeBase = `/api/admin/projects/${encodeURIComponent(project.projectId)}`;
 
   const inReview = project.status === "IN_QA_REVIEW";
   const submitted = project.status === "SUBMITTED";
@@ -119,8 +120,8 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
       <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
         {/* Left: files */}
         <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <FileGroup title="Submitted work" files={workerFiles} emptyHint="No worker files uploaded." />
-          {otherFiles.length > 0 ? <FileGroup title="Other files" files={otherFiles} /> : null}
+          <FileGroup title="Submitted work" files={workerFiles} routeBase={routeBase} emptyHint="No worker files uploaded." />
+          {otherFiles.length > 0 ? <FileGroup title="Other files" files={otherFiles} routeBase={routeBase} /> : null}
         </aside>
 
         {/* Right: review */}
@@ -167,10 +168,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function FileGroup({
   title,
   files,
+  routeBase,
   emptyHint,
 }: {
   title: string;
-  files: { id: string; fileName: string; fileUrl: string; createdAt: Date }[];
+  files: { id: string; fileName: string; fileUrl: string; storage: string; createdAt: Date }[];
+  routeBase: string;
   emptyHint?: string;
 }) {
   return (
@@ -182,10 +185,10 @@ function FileGroup({
         <ul className="mt-2 space-y-1.5">
           {files.map((f) => (
             <li key={f.id}>
-              {safeHref(f.fileUrl) ? (
+              {fileHref(f, routeBase) ? (
                 <a
-                  href={safeHref(f.fileUrl)!}
-                  target="_blank"
+                  href={fileHref(f, routeBase)!}
+                  target={f.storage === "PRIVATE_BLOB" ? undefined : "_blank"}
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 rounded-md p-1.5 text-sm text-foreground transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
                 >

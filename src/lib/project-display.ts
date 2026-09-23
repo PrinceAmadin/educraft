@@ -152,4 +152,5 @@ export const FILE_CATEGORY_LABELS: Record<string, string> = {
   supervisor_correction: "Supervisor corrections",
   ch34_data: "Chapter 3/4 data",
   department_outline: "Department outline",
+  message_attachment: "Sent in messages",
 };

@@ -1,6 +1,6 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { nextId } from "@/lib/services/projects";
+import { deliverIfFinalReleased, nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { emailPendingCommission } from "@/lib/services/ambassador-commission";
 import { alertPaidIntakeFailed, alertPaidOrder } from "@/lib/services/team-alerts";
@@ -437,6 +437,8 @@ async function creditProjectPayment(
     });
   }
   if (leg === "downpayment") await emailPendingCommission(project.id);
+  // Balance in and the complete document already released: that is delivery.
+  if (advance === "BALANCE_VERIFIED") await deliverIfFinalReleased(project.id);
 
   return { status: "confirmed" };
 }

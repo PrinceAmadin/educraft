@@ -28,3 +28,23 @@ export function waLink(number: string, message: string): string {
 export function educraftWaLink(message: string): string {
   return waLink(EDUCRAFT_WHATSAPP, message);
 }
+
+/** "OYEWOLE Tunde" -> "Oyewole": a greeting shouldn't shout. */
+export function greetingName(fullName: string): string {
+  const word = fullName.trim().split(/\s+/)[0] ?? "";
+  if (!word) return "there";
+  return word === word.toUpperCase() ? word[0] + word.slice(1).toLowerCase() : word;
+}
+
+/** The message an admin sends when a chapter or the complete document is on the client's dashboard. */
+export function documentReadyMessage(input: {
+  fullName: string;
+  title: string;
+  isFinal: boolean;
+  projectCode: string;
+  clientId: string;
+  documentsUrl: string;
+}): string {
+  const what = input.isFinal ? `Your complete project (${input.title})` : input.title;
+  return `Hi ${greetingName(input.fullName)}, ${what} for your project ${input.projectCode} is ready on your EduCraft dashboard: ${input.documentsUrl}\nSign in with your Client ID ${input.clientId}.`;
+}

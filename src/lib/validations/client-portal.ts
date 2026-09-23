@@ -6,9 +6,24 @@ export const MESSAGE_MAX_LENGTH = 2000;
 /** The signed-in client paying a leg of their own project. */
 export const clientPaySchema = z.object({ leg: z.enum(["downpayment", "balance"]) });
 
-export const messageBodySchema = z.object({
-  body: z.string().trim().min(1, "Write a message first.").max(MESSAGE_MAX_LENGTH, `Keep messages under ${MESSAGE_MAX_LENGTH} characters.`),
-});
+/** Files one message can carry. */
+export const MESSAGE_MAX_ATTACHMENTS = 5;
+
+export const messageBodySchema = z
+  .object({
+    body: z.string().trim().max(MESSAGE_MAX_LENGTH, `Keep messages under ${MESSAGE_MAX_LENGTH} characters.`).default(""),
+    attachments: z
+      .array(
+        z.object({
+          pathname: z.string().trim().min(10).max(300),
+          ticket: z.string().trim().min(10).max(100),
+          fileName: z.string().trim().min(1).max(200),
+        })
+      )
+      .max(MESSAGE_MAX_ATTACHMENTS, `Attach up to ${MESSAGE_MAX_ATTACHMENTS} files at a time.`)
+      .default([]),
+  })
+  .refine((m) => m.body.length > 0 || m.attachments.length > 0, "Write a message first.");
 
 /** An update an admin posts to the client's activity feed. */
 export const manualUpdateSchema = z.object({

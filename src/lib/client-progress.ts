@@ -48,6 +48,8 @@ export interface ProgressInput {
   research: "none" | "running" | "done";
   /** For ON_HOLD / DISPUTED: the status the project was in before the hold. */
   heldFrom?: ProjectStatus | null;
+  /** Chapters released to the client so far, for "2 of 5 chapters ready". */
+  chapters?: { ready: number; total: number } | null;
 }
 
 const LABELS: Record<ClientStepKey, string> = {
@@ -165,6 +167,9 @@ export function clientProgress(input: ProgressInput): ClientProgress {
       if (key === "payment") detail = "Pay your downpayment to start";
       if (key === "balance") detail = "Pay your balance to unlock delivery";
       if (key === "writing" && effective === "AWAITING_CLIENT_INPUT") detail = "Waiting for you";
+      else if (key === "writing" && input.chapters && input.chapters.total > 0 && input.chapters.ready > 0) {
+        detail = `${input.chapters.ready} of ${input.chapters.total} chapters ready`;
+      }
     }
     return { key, label: LABELS[key], state, detail };
   });

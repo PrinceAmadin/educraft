@@ -21,6 +21,9 @@ const TARGETS = [
   "src/lib/client-updates.ts",
   "src/lib/emails/client-update.ts",
   "src/lib/receipts.ts",
+  "src/lib/deliverables.ts",
+  "src/lib/client-research-message.ts",
+  "src/lib/services/client-research.ts",
 ];
 
 // Whole words. "AI" is matched case-sensitively so "said" or "again" never trip it.

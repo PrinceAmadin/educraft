@@ -9,6 +9,7 @@ import { ClientActivityFeed } from "@/components/client/ClientActivityFeed";
 import { ClientPaymentsPanel } from "@/components/client/ClientPaymentsPanel";
 import { ClientPayButton } from "@/components/client/ClientPayButton";
 import { MessageThread } from "@/components/messages/MessageThread";
+import { ClientDocumentsTab } from "@/components/client/ClientDocumentsTab";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
 /**
@@ -50,6 +51,7 @@ export async function ClientProjectScreen({
       />
 
       {tab === "progress" ? <ProgressTab view={view} preview={preview} /> : null}
+      {tab === "documents" ? <ClientDocumentsTab view={view} basePath={basePath} preview={preview} /> : null}
       {tab === "payments" ? <PaymentsTab view={view} preview={preview} returnedFromPaystack={returnedFromPaystack} /> : null}
       {tab === "messages" ? <MessagesTab view={view} preview={preview} /> : null}
     </div>
@@ -170,7 +172,8 @@ async function MessagesTab({ view, preview }: { view: ClientProjectView; preview
   return (
     <section className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Questions about your project? Write to the EduCraft team here. We&apos;ll reply on this page and let you know.
+        Questions about your project? Write to the EduCraft team here, and attach files if you need to. We&apos;ll reply
+        on this page and let you know.
       </p>
       <MessageThread
         endpoint={`/api/client/projects/${encodeURIComponent(view.code)}/messages`}
@@ -179,6 +182,8 @@ async function MessagesTab({ view, preview }: { view: ClientProjectView; preview
         otherName="EduCraft"
         emptyHint="No messages yet."
         readOnly={preview}
+        uploadEndpoint={`/api/client/projects/${encodeURIComponent(view.code)}/upload`}
+        filesBase={`/api/client/projects/${encodeURIComponent(view.code)}/files`}
       />
     </section>
   );

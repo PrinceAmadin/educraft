@@ -9,7 +9,7 @@ const PRIMARY_CATEGORIES = ["from_client", "from_worker", "qa_reviewed", "delive
 
 export function FilesTab({ project }: { project: ProjectDetail }) {
   const byCategory = new Map<string, ProjectDetail["files"]>();
-  for (const file of project.files) {
+  for (const file of project.files.filter((f) => !f.deletedAt)) {
     const list = byCategory.get(file.category) ?? [];
     list.push(file);
     byCategory.set(file.category, list);
@@ -47,7 +47,7 @@ export function FilesTab({ project }: { project: ProjectDetail }) {
                   Nothing in this category yet.
                 </p>
               ) : (
-                <FileList files={files} />
+                <FileList files={files} routeBase={`/api/admin/projects/${encodeURIComponent(project.projectId)}`} />
               )}
             </div>
           </section>

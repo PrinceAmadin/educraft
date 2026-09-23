@@ -40,6 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       authorUserId: guard.session.userId,
       side: "ADMIN",
       body: parsed.data.body,
+      attachments: parsed.data.attachments,
     });
     return NextResponse.json({ message }, { status: 201 });
   } catch (error) {

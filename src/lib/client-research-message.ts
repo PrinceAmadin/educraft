@@ -17,14 +17,18 @@ const papers = (n: number) => (n === 1 ? "1 paper" : `${n} papers`);
 const are = (n: number) => (n === 1 ? "is" : "are");
 
 /**
- * The message management copies to the client once research is done. Written
- * to be accurate about what was actually done: paywalled papers were reviewed
- * by their details and abstracts, not read in full — so it doesn't say
- * otherwise.
+ * The message management copies to the client once research is done and
+ * shared to their dashboard. Written to be accurate about what was actually
+ * done: paywalled papers were reviewed by their details and abstracts, not
+ * read in full, so it doesn't say otherwise. It links the client's dashboard
+ * (Documents tab), never the Drive folder.
  */
 export function buildClientResearchMessage(input: {
   clientFullName: string;
   projectCode: string;
+  clientId: string;
+  /** The client's Documents tab. */
+  documentsUrl: string;
   summary: ResearchSummary;
   greeting: string;
 }): string {
@@ -41,16 +45,14 @@ export function buildClientResearchMessage(input: {
   const lines: string[] = [
     `${greeting} ${firstName},`,
     "",
-    `The worker on your project has finished gathering research papers for your work. We've put together ${papers(s.total)} closely tied to your project topic:`,
+    `Your specialist has finished gathering research papers for your work. We've put together ${papers(s.total)} closely tied to your project topic:`,
     "",
     `• ${papers(s.core)} ${are(s.core)} core, the strong foundation for your project`,
     `• ${papers(s.closelyRelated)} ${are(s.closelyRelated)} closely related to your project`,
   ];
 
   if (s.withPdf > 0) {
-    lines.push(`• ${papers(s.withPdf)} ${are(s.withPdf)} free and downloadable with the link below:`);
-    if (s.driveFolderLink) lines.push(s.driveFolderLink);
-    lines.push("  Show the link to your supervisor, it's a direct compilation of your project's papers.");
+    lines.push(`• ${papers(s.withPdf)} ${are(s.withPdf)} free and downloadable from your EduCraft dashboard.`);
   }
   if (s.referenceOnly > 0) {
     lines.push(
@@ -60,7 +62,11 @@ export function buildClientResearchMessage(input: {
 
   lines.push(
     "",
-    `I'll keep you posted on your project and share feedback regularly. You can track your project any time using your project ID: ${projectCode}`
+    `Everything is in the Documents tab of your dashboard, with the full reference list as a Word file to show your supervisor:`,
+    input.documentsUrl,
+    `Sign in with your Client ID ${input.clientId}.`,
+    "",
+    `I'll keep you posted on your project (${projectCode}) and share feedback regularly.`
   );
   return lines.join("\n");
 }

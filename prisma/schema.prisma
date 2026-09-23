@@ -459,6 +459,7 @@ model Project {
   researchRerunRequests ResearchRerunRequest[]
   clientUpdates        ProjectUpdate[]
   messages             ProjectMessage[]
+  deliverables         ProjectDeliverable[]
 
   @@index([status])
   @@index([clientId])
@@ -470,21 +471,131 @@ model Project {
   @@index([createdAt])
 }
 
+enum FileStorage {
+  EXTERNAL_LINK // a pasted link (older worker submissions)
+  PUBLIC_BLOB // the public intake-uploads store (unguessable URL)
+  PRIVATE_BLOB // the private store: only reachable through our download routes
+}
+
 model ProjectFile {
   id         String   @id @default(cuid())
   projectId  String
   project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   fileName   String
+  /// For PRIVATE_BLOB this is the store's URL, which needs a credential: always
+  /// link to a download route instead (see src/lib/files/links.ts).
   fileUrl    String
   fileSize   Int?
+  /// The content type we decided from the file's extension and first bytes.
   fileType   String?
   // from_client, from_worker, qa_reviewed, delivered,
-  // supervisor_correction, ch34_data, department_outline
+  // supervisor_correction, ch34_data, department_outline, message_attachment
   category   String
   uploadedBy String?
+  /// WORKER / ADMIN / CLIENT for files uploaded to the private store.
+  uploaderRole String?
+  storage      FileStorage @default(EXTERNAL_LINK)
+  /// Private-store path, unique so one upload can never be registered twice.
+  blobPathname String?     @unique
+  /// An admin hid it from the worker (kept for the record).
+  hiddenFromWorkerAt DateTime?
+  deletedAt          DateTime?
+  deliverableId String?
+  deliverable   ProjectDeliverable? @relation(fields: [deliverableId], references: [id])
+  messageId     String?
+  message       ProjectMessage?     @relation(fields: [messageId], references: [id])
+  version       DeliverableVersion?
   createdAt  DateTime @default(now())
 
   @@index([projectId, category])
+  @@index([deliverableId])
+  @@index([messageId])
+}
+
+// ─── DELIVERABLES ───────────────────────────────────────
+// What a project hands the client (Chapter 1..N, the complete document,
+// slides, a proposal). The worker uploads versions, an admin reviews and
+// releases them, and the client downloads a released version once its
+// payment rule allows (src/lib/files/policy.ts).
+
+enum DeliverableKind {
+  CHAPTER
+  FINAL
+  OTHER
+}
+
+enum DeliverableStatus {
+  NOT_STARTED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  RELEASED
+}
+
+/// When a released version may be downloaded by the client.
+enum DeliverableAccess {
+  DOWNPAYMENT // once the downpayment is verified
+  BALANCE // once the balance is verified
+  ALWAYS // released early by a super admin (a pricing decision)
+  WITHHELD // an admin is holding it back
+}
+
+enum VersionStatus {
+  SUBMITTED // waiting for an admin
+  RELEASED // the client can see it (subject to access)
+  RETURNED // sent back to the worker with a note
+  SUPERSEDED // a newer upload replaced it before review
+}
+
+model ProjectDeliverable {
+  id            String            @id @default(cuid())
+  projectId     String
+  project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// ch1..chN, final, proposal, slides, or x-<n> for ones an admin added.
+  key           String
+  kind          DeliverableKind
+  chapter       Int?
+  /// Client-facing name ("Chapter 1", "Complete project").
+  title         String
+  sortOrder     Int
+  status        DeliverableStatus @default(NOT_STARTED)
+  access        DeliverableAccess
+  accessSetById String?
+  accessSetAt   DateTime?
+  archivedAt    DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  versions DeliverableVersion[]
+  files    ProjectFile[]
+
+  @@unique([projectId, key])
+  @@index([projectId, sortOrder])
+}
+
+model DeliverableVersion {
+  id              String             @id @default(cuid())
+  deliverableId   String
+  deliverable     ProjectDeliverable @relation(fields: [deliverableId], references: [id], onDelete: Cascade)
+  /// Internal upload count (1, 2, 3...). Clients only ever see releaseNo.
+  version         Int
+  /// Set on release: the client's "version 1, 2".
+  releaseNo       Int?
+  fileId          String             @unique
+  file            ProjectFile        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  status          VersionStatus      @default(SUBMITTED)
+  submittedById   String
+  submittedByRole String // WORKER or ADMIN
+  workerNote      String?
+  /// The admin's note when returning it (the worker sees it).
+  reviewNote      String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  releasedAt      DateTime?
+  createdAt       DateTime           @default(now())
+
+  @@unique([deliverableId, version])
+  @@unique([deliverableId, releaseNo])
+  @@index([status, createdAt])
 }
 
 model ProjectStatusLog {
@@ -816,6 +927,12 @@ model ResearchJob {
   queriesExhausted Boolean @default(false)
 
   errorMessage String?
+
+  /// Shared with the client by an admin: their Documents tab then lists the
+  /// papers and the references file. A re-run deletes the job, so it has to
+  /// be shared again.
+  releasedToClientAt   DateTime?
+  releasedToClientById String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1160,6 +1277,7 @@ model ProjectMessage {
   /// When the other side opened the thread after this was sent.
   readAt       DateTime?
   createdAt    DateTime    @default(now())
+  files        ProjectFile[]
 
   @@index([projectId, createdAt])
   @@index([authorSide, readAt])

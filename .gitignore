@@ -26,3 +26,6 @@ Educraft_Ambassador/
 /Traqly/
 
 .vercel
+
+# Private files kept on disk by the local development driver (PRIVATE_FILES_DRIVER=local)
+.private-files/

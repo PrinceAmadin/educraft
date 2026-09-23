@@ -1,5 +1,7 @@
 import type { MessageSide } from "@prisma/client";
 import { db } from "@/lib/db";
+import { MESSAGE_TARGET } from "@/lib/files/paths";
+import { checkUploadedFile, UploadCheckError, type CheckedUpload, type UploadedFileInput } from "@/lib/files/register";
 import { notifyAdmins } from "@/lib/services/notifications";
 import { notifyClient } from "@/lib/services/client-notify";
 import { MESSAGE_MAX_LENGTH } from "@/lib/validations/client-portal";
@@ -29,6 +31,8 @@ export interface ThreadMessage {
   createdAt: string;
   /** Admin view: who on the team wrote it. The client always sees "EduCraft". */
   authorName: string | null;
+  /** Files sent with it; download through the viewer's own files route. */
+  attachments: { id: string; fileName: string; fileSize: number | null }[];
 }
 
 /**
@@ -59,6 +63,7 @@ export async function getThread(
       body: true,
       createdAt: true,
       author: { select: { displayName: true, email: true } },
+      files: { where: { deletedAt: null }, orderBy: { createdAt: "asc" }, select: { id: true, fileName: true, fileSize: true } },
     },
   });
   return rows.map((r) => ({
@@ -67,6 +72,7 @@ export async function getThread(
     body: r.body,
     createdAt: r.createdAt.toISOString(),
     authorName: viewer === "ADMIN" ? r.author.displayName ?? r.author.email : null,
+    attachments: r.files,
   }));
 }
 
@@ -75,9 +81,12 @@ export async function postMessage(input: {
   authorUserId: string;
   side: MessageSide;
   body: string;
+  /** Files the author just uploaded for this message (checked before anything is saved). */
+  attachments?: UploadedFileInput[];
 }): Promise<ThreadMessage> {
   const body = input.body.trim();
-  if (!body) throw new MessageError("Write a message first.");
+  const uploads = input.attachments ?? [];
+  if (!body && uploads.length === 0) throw new MessageError("Write a message first.");
   if (body.length > MESSAGE_MAX_LENGTH) throw new MessageError(`Keep messages under ${MESSAGE_MAX_LENGTH} characters.`);
 
   const project = await db.project.findUnique({ where: { id: input.projectDbId }, select: { id: true, projectId: true } });
@@ -92,12 +101,60 @@ export async function postMessage(input: {
     }
   }
 
-  const row = await db.projectMessage.create({
-    data: { projectId: project.id, authorUserId: input.authorUserId, authorSide: input.side, body },
-    select: { id: true, authorSide: true, body: true, createdAt: true, author: { select: { displayName: true, email: true } } },
+  const checked: CheckedUpload[] = [];
+  for (const upload of uploads) {
+    try {
+      checked.push(
+        await checkUploadedFile(upload, {
+          userId: input.authorUserId,
+          projectDbId: project.id,
+          purpose: "message",
+          targetId: MESSAGE_TARGET,
+        })
+      );
+    } catch (error) {
+      if (error instanceof UploadCheckError) throw new MessageError(error.message);
+      throw error;
+    }
+  }
+
+  const row = await db.$transaction(async (tx) => {
+    const message = await tx.projectMessage.create({
+      data: { projectId: project.id, authorUserId: input.authorUserId, authorSide: input.side, body },
+      select: { id: true },
+    });
+    for (const f of checked) {
+      await tx.projectFile.create({
+        data: {
+          projectId: project.id,
+          fileName: f.fileName,
+          fileUrl: f.url,
+          fileSize: f.size,
+          fileType: f.contentType,
+          category: "message_attachment",
+          uploadedBy: input.authorUserId,
+          uploaderRole: input.side === "CLIENT" ? "CLIENT" : "ADMIN",
+          storage: "PRIVATE_BLOB",
+          blobPathname: f.pathname,
+          messageId: message.id,
+        },
+      });
+    }
+    return tx.projectMessage.findUniqueOrThrow({
+      where: { id: message.id },
+      select: {
+        id: true,
+        authorSide: true,
+        body: true,
+        createdAt: true,
+        author: { select: { displayName: true, email: true } },
+        files: { orderBy: { createdAt: "asc" }, select: { id: true, fileName: true, fileSize: true } },
+      },
+    });
   });
 
-  const preview = body.length > 140 ? `${body.slice(0, 137)}…` : body;
+  const text = body || (checked.length === 1 ? `Sent a file: ${checked[0].fileName}` : `Sent ${checked.length} files`);
+  const preview = text.length > 140 ? `${text.slice(0, 137)}…` : text;
   if (input.side === "CLIENT") {
     await notifyAdmins({
       title: "New message from a client",
@@ -125,6 +182,7 @@ export async function postMessage(input: {
     body: row.body,
     createdAt: row.createdAt.toISOString(),
     authorName: input.side === "ADMIN" ? row.author.displayName ?? row.author.email : null,
+    attachments: row.files,
   };
 }
 

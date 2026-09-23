@@ -8,6 +8,9 @@ import { AdminUpdatesList } from "@/components/projects/client/AdminUpdatesList"
 import { ExpectedDeliveryEditor } from "@/components/projects/client/ExpectedDeliveryEditor";
 import { ClientUpdateTab } from "@/components/projects/tabs/ClientUpdateTab";
 import { toWaNumber, waLink } from "@/lib/whatsapp";
+import { siteUrl } from "@/lib/site-url";
+import { clientProjectPath } from "@/lib/services/client-notify";
+import { db } from "@/lib/db";
 import type { ProjectDetail } from "@/lib/services/projects";
 import type { ResearchSummary } from "@/lib/services/research-summary";
 
@@ -26,9 +29,10 @@ export async function ClientMessagesTab({
   project: ProjectDetail;
   researchSummary: ResearchSummary | null;
 }) {
-  const [messages, updates] = await Promise.all([
+  const [messages, updates, research] = await Promise.all([
     getThread(project.id, "ADMIN", { markRead: false }),
     listUpdates(project.id, { includeHidden: true, take: 60 }),
+    db.researchJob.findUnique({ where: { projectId: project.id }, select: { releasedToClientAt: true } }),
   ]);
   const firstName = project.client.fullName.trim().split(/\s+/)[0] || "the client";
   const wa = toWaNumber(project.client.phone);
@@ -70,6 +74,8 @@ export async function ClientMessagesTab({
           initial={messages}
           otherName={firstName}
           emptyHint="No messages yet. Anything you write here reaches the client's dashboard and email."
+          uploadEndpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/upload`}
+          filesBase={`/api/admin/projects/${encodeURIComponent(project.projectId)}/files`}
         />
       </section>
 
@@ -98,7 +104,14 @@ export async function ClientMessagesTab({
       </section>
 
       <section className="space-y-4">
-        <ClientUpdateTab clientFullName={project.client.fullName} projectCode={project.projectId} summary={researchSummary} />
+        <ClientUpdateTab
+          clientFullName={project.client.fullName}
+          projectCode={project.projectId}
+          clientId={project.client.clientId}
+          documentsUrl={`${siteUrl()}${clientProjectPath(project.projectId, "documents")}`}
+          shared={Boolean(research?.releasedToClientAt)}
+          summary={researchSummary}
+        />
       </section>
     </div>
   );

@@ -168,7 +168,7 @@ export function RequirementsTab({ project }: { project: ProjectDetail }) {
               className="py-8"
             />
           ) : (
-            <FileList files={clientFiles} />
+            <FileList files={clientFiles} routeBase={`/api/admin/projects/${encodeURIComponent(project.projectId)}`} />
           )}
         </div>
       </section>

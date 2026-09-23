@@ -13,6 +13,8 @@ import { FinancialsTab } from "@/components/projects/tabs/FinancialsTab";
 import { FilesTab } from "@/components/projects/tabs/FilesTab";
 import { NotesTab } from "@/components/projects/tabs/NotesTab";
 import { ClientMessagesTab } from "@/components/projects/tabs/ClientMessagesTab";
+import { DocumentsTab } from "@/components/projects/tabs/DocumentsTab";
+import { listDeliverablesForAdmin } from "@/lib/services/deliverables";
 import { getResearchSummary } from "@/lib/services/research-summary";
 import { db } from "@/lib/db";
 
@@ -40,10 +42,13 @@ export default async function ProjectDetailPage({
     listAllocatableAmbassadors(),
   ]);
   if (!project) notFound();
-  const [researchSummary, unreadFromClient] = await Promise.all([
+  const [researchSummary, unreadFromClient, deliverables] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
+    listDeliverablesForAdmin(project.id),
   ]);
+  const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED")).length;
+  const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
   const tabs: ProjectTab[] = [
     { id: "requirements", label: "Requirements", content: <RequirementsTab project={project} /> },
@@ -54,8 +59,13 @@ export default async function ProjectDetailPage({
       content: <FinancialsTab
           project={project}
           ambassadors={ambassadors}
-          canProBono={session?.user?.role === "SUPER_ADMIN"}
+          canProBono={isSuperAdmin}
         />,
+    },
+    {
+      id: "documents",
+      label: toReview > 0 ? `Documents · ${toReview}` : "Documents",
+      content: <DocumentsTab project={project} deliverables={deliverables} isSuperAdmin={isSuperAdmin} />,
     },
     { id: "files", label: "Files", content: <FilesTab project={project} /> },
     {

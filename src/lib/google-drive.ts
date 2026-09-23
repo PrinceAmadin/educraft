@@ -189,3 +189,24 @@ export async function createDocInFolder(
   }
   return { id: json.id, webViewLink: json.webViewLink };
 }
+
+/**
+ * A Drive file's bytes as a stream, for handing a research PDF to a client
+ * through our own download route (they never get the Drive link). Null when
+ * Drive has no such file.
+ */
+export async function downloadDriveFile(fileId: string): Promise<{ stream: ReadableStream<Uint8Array>; size: number | null } | null> {
+  if (!/^[A-Za-z0-9_-]{10,100}$/.test(fileId)) return null;
+  const token = await getAccessToken();
+  const res = await fetch(`${DRIVE_API_BASE}/files/${fileId}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok || !res.body) {
+    const body = await res.text().catch(() => "");
+    throw new GoogleDriveError(`Drive download failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+  const length = Number(res.headers.get("content-length"));
+  return { stream: res.body as ReadableStream<Uint8Array>, size: Number.isFinite(length) && length > 0 ? length : null };
+}

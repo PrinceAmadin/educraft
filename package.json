@@ -20,6 +20,7 @@
     "migrate:ambassador-panel": "dotenv -e .env.local -- tsx scripts/migrate-ambassador-panel.ts",
     "migrate:ids": "dotenv -e .env.local -- tsx scripts/migrate-id-formats.ts",
     "check:client-copy": "tsx scripts/check-client-copy.ts",
+    "check:client-access": "tsx scripts/check-client-access.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
     "catalogue:sync": "dotenv -e .env.local -- tsx scripts/sync-service-catalogue.ts"
   },
@@ -41,6 +42,7 @@
     "@react-three/fiber": "^8.17.10",
     "@vercel/blob": "^2.8.0",
     "@vercel/functions": "^3.9.8",
+    "@vercel/oidc": "^3.8.8",
     "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",

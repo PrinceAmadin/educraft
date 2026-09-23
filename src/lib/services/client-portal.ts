@@ -9,6 +9,8 @@ import {
 } from "@/lib/client-progress";
 import { balancePayable, downpaymentDue } from "@/lib/payment-rules";
 import { resyncPaystackReference } from "@/lib/services/paystack-payments";
+import { ensureDeliverables } from "@/lib/services/deliverables";
+import { deliverableGate, type LockReason } from "@/lib/files/policy";
 
 /**
  * Everything a client page reads comes through here. Two rules:
@@ -60,6 +62,10 @@ const viewSelect = {
   createdAt: true,
   service: { select: { serviceName: true } },
   researchJob: { select: { status: true } },
+  deliverables: {
+    where: { archivedAt: null, kind: "CHAPTER" },
+    select: { versions: { where: { releaseNo: { not: null } }, select: { id: true }, take: 1 } },
+  },
 } as const;
 
 type ViewRow = {
@@ -78,6 +84,7 @@ type ViewRow = {
   createdAt: Date;
   service: { serviceName: string };
   researchJob: { status: string } | null;
+  deliverables: { versions: { id: string }[] }[];
 };
 
 export interface ClientProjectView {
@@ -119,6 +126,10 @@ function toView(row: ViewRow, heldFrom: ProjectStatus | null, unreadMessages: nu
     balanceStatus: row.balanceStatus,
     research: researchState(row.researchJob),
     heldFrom,
+    chapters: {
+      ready: row.deliverables.filter((d) => d.versions.length > 0).length,
+      total: row.deliverables.length,
+    },
   });
   const countdown = deliveryCountdown({
     expectedDeliveryAt: row.expectedDeliveryAt,
@@ -316,4 +327,74 @@ export async function getReceiptData(scope: ClientScope, code: string, paymentDb
     paidToDate,
     remaining: Math.max(0, project.price - paidToDate),
   };
+}
+
+// ── Documents ────────────────────────────────────────────────
+
+export interface ClientDocumentVersion {
+  fileId: string;
+  releaseNo: number;
+  releasedAt: string;
+}
+
+export interface ClientDocument {
+  id: string;
+  title: string;
+  isFinal: boolean;
+  state: "not-ready" | "open" | "locked";
+  lockReason: LockReason | null;
+  /** The newest released version (null until one is released). */
+  current: ClientDocumentVersion | null;
+  /** Older releases, newest first: shown by release number only. */
+  earlier: ClientDocumentVersion[];
+}
+
+/**
+ * The project's chapters and documents as the client sees them: only
+ * released versions, numbered by release (never internal upload counts),
+ * with the payment lock applied by the same rule the download route uses.
+ */
+export async function getClientDocuments(projectDbId: string): Promise<ClientDocument[]> {
+  await ensureDeliverables(projectDbId);
+  const project = await db.project.findUnique({
+    where: { id: projectDbId },
+    select: {
+      status: true,
+      downpaymentStatus: true,
+      balanceStatus: true,
+      deliverables: {
+        where: { archivedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          id: true,
+          title: true,
+          kind: true,
+          access: true,
+          versions: {
+            where: { releaseNo: { not: null }, file: { deletedAt: null } },
+            orderBy: { releaseNo: "desc" },
+            select: { releaseNo: true, releasedAt: true, fileId: true },
+          },
+        },
+      },
+    },
+  });
+  if (!project) return [];
+  return project.deliverables.map((d) => {
+    const versions = d.versions.map((v) => ({
+      fileId: v.fileId,
+      releaseNo: v.releaseNo ?? 0,
+      releasedAt: (v.releasedAt ?? new Date(0)).toISOString(),
+    }));
+    const gate = deliverableGate(versions.length > 0, d.access, project);
+    return {
+      id: d.id,
+      title: d.title,
+      isFinal: d.kind === "FINAL",
+      state: gate.state === "hidden" ? "not-ready" : gate.state,
+      lockReason: gate.state === "locked" ? gate.reason : null,
+      current: versions[0] ?? null,
+      earlier: versions.slice(1),
+    };
+  });
 }

@@ -1,12 +1,12 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { WORKER_FILE_WHERE } from "@/lib/services/file-access";
 import { transitionProject, TransitionError } from "@/lib/services/projects";
 import {
   workerMetrics,
   WORKER_ACTIVE_STATUSES,
   type WorkerProjectFacts,
 } from "@/lib/worker-metrics";
-import type { SubmitWorkInput } from "@/lib/validations/worker";
 
 /** The Worker row for the signed-in worker user. */
 export async function getWorkerByUserId(userId: string) {
@@ -199,7 +199,12 @@ const assignmentSelect = {
       university: { select: { abbreviation: true, name: true } },
     },
   },
-  files: { orderBy: { createdAt: "desc" } },
+  // Never message attachments (client <-> EduCraft only) or files an admin hid.
+  files: {
+    where: WORKER_FILE_WHERE,
+    orderBy: { createdAt: "desc" },
+    select: { id: true, fileName: true, fileUrl: true, storage: true, category: true, deliverableId: true, createdAt: true },
+  },
 } satisfies Prisma.ProjectSelect;
 
 export type WorkerAssignment = Prisma.ProjectGetPayload<{ select: typeof assignmentSelect }>;
@@ -236,49 +241,6 @@ export async function acceptAssignment(
     data: { workerAccepted: true, workerAcceptedDate: new Date() },
   });
   await transitionProject(project.id, "IN_PROGRESS", { changedById: userId });
-}
-
-export async function submitWork(
-  workerId: string,
-  idOrCode: string,
-  input: SubmitWorkInput,
-  userId: string
-): Promise<{ status: string }> {
-  const project = await db.project.findFirst({
-    where: { workerId, OR: [{ id: idOrCode }, { projectId: idOrCode }] },
-    select: { id: true, projectId: true, status: true },
-  });
-  if (!project) throw new TransitionError("Assignment not found");
-  if (project.status !== "IN_PROGRESS" && project.status !== "REVISION_NEEDED") {
-    throw new TransitionError("You can only submit while a project is in progress");
-  }
-
-  await db.projectFile.create({
-    data: {
-      projectId: project.id,
-      fileName: input.fileName?.trim() || deriveName(input.fileUrl, project.projectId),
-      fileUrl: input.fileUrl.trim(),
-      category: "from_worker",
-      uploadedBy: userId,
-    },
-  });
-
-  const detail = await transitionProject(project.id, "SUBMITTED", {
-    changedById: userId,
-    note: input.note?.trim() || undefined,
-  });
-
-  return { status: detail.status };
-}
-
-function deriveName(url: string, projectId: string): string {
-  try {
-    const last = new URL(url).pathname.split("/").filter(Boolean).pop();
-    if (last && /\.[a-z0-9]{2,5}$/i.test(last)) return decodeURIComponent(last);
-  } catch {
-    /* fall through */
-  }
-  return `${projectId}-submission`;
 }
 
 // ── Earnings ─────────────────────────────────────────────────

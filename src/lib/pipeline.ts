@@ -32,6 +32,12 @@ export interface TransitionCandidate {
   hasRequirementDetail: boolean;
   /** Files uploaded in the `from_worker` category. */
   workerFileCount: number;
+  /**
+   * A complete document has been uploaded (Documents tab) but never released
+   * to the client. Delivery waits for the release; projects that only ever
+   * had a pasted link are not held up.
+   */
+  finalAwaitingRelease?: boolean;
 }
 
 export const MAX_REVISIONS = 3;
@@ -104,7 +110,16 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
       guard: (p) => (p.balanceStatus === "Verified" ? null : "Balance is not verified yet"),
     },
   ],
-  BALANCE_VERIFIED: [{ to: "DELIVERED", action: "Deliver" }],
+  BALANCE_VERIFIED: [
+    {
+      to: "DELIVERED",
+      action: "Deliver",
+      guard: (p) =>
+        p.finalAwaitingRelease
+          ? "Release the complete document to the client first (Documents tab). Releasing it delivers the project."
+          : null,
+    },
+  ],
   DELIVERED: [
     { to: "SUPERVISOR_CORRECTIONS", action: "Log supervisor corrections", requiresNote: true },
     { to: "COMPLETED", action: "Mark completed" },
@@ -161,6 +176,7 @@ export function toCandidate(project: {
   departmentOutline: string | null;
   additionalData: unknown;
   files: { category: string }[];
+  deliverables?: { versions: { releaseNo: number | null }[] }[];
 }): TransitionCandidate {
   const hasRequirementDetail =
     Boolean(project.specialInstructions?.trim()) ||
@@ -180,5 +196,13 @@ export function toCandidate(project: {
     serviceId: project.serviceId,
     hasRequirementDetail,
     workerFileCount: project.files.filter((f) => f.category === "from_worker").length,
+    finalAwaitingRelease: finalAwaitingRelease(project.deliverables ?? []),
   };
+}
+
+/** True when a complete document was uploaded but no version of it has been released. */
+export function finalAwaitingRelease(finals: { versions: { releaseNo: number | null }[] }[]): boolean {
+  const uploaded = finals.some((d) => d.versions.length > 0);
+  const released = finals.some((d) => d.versions.some((v) => v.releaseNo != null));
+  return uploaded && !released;
 }

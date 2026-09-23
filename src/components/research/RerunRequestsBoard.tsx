@@ -24,6 +24,7 @@ export interface RerunRequestItem {
   workerName: string;
   reviewerName: string | null;
   rerunsUsed: number;
+  sharedWithClient: boolean;
 }
 
 const STATUS_BADGE: Record<RerunRequestItem["status"], { label: string; variant: "warning" | "success" | "danger" | "neutral" }> = {
@@ -92,6 +93,13 @@ function PendingCard({ item }: { item: RerunRequestItem }) {
       <blockquote className="whitespace-pre-wrap break-words rounded-xl bg-zone p-3 text-sm text-foreground">
         {item.reason}
       </blockquote>
+
+      {item.sharedWithClient ? (
+        <p className="rounded-xl bg-gold/10 p-3 text-xs text-foreground">
+          The client already has this research list in their dashboard. A re-run replaces it, and the new list shows
+          only after you share it again.
+        </p>
+      ) : null}
 
       {error ? (
         <p role="alert" className="flex items-start gap-2 text-sm text-danger">

@@ -1,6 +1,7 @@
 import type { ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { countUnansweredThreads } from "@/lib/services/client-messages";
+import { countVersionsToReview } from "@/lib/services/deliverables";
 import { CLOSED_STATUSES, PIPELINE_STATUSES, type PipelineStatus } from "@/lib/status";
 import type {
   ActionCounts,
@@ -201,7 +202,7 @@ export async function getDashboardSummary(now: Date = new Date()): Promise<Dashb
     createdAt: log.createdAt.toISOString(),
   }));
 
-  const clientThreads = await countUnansweredThreads();
+  const [clientThreads, documentsToReview] = await Promise.all([countUnansweredThreads(), countVersionsToReview()]);
 
   const actions: ActionCounts = {
     downpaymentsToVerify,
@@ -212,6 +213,7 @@ export async function getDashboardSummary(now: Date = new Date()): Promise<Dashb
     revisionEscalations,
     clientMessagesWaiting: clientThreads.total,
     clientMessagesOverADay: clientThreads.overADay,
+    documentsToReview,
   };
 
   const thisMonth = revenueThisMonth._sum.amount ?? 0;

@@ -5,10 +5,13 @@ import { ArrowLeft } from "lucide-react";
 import { LuFile, LuDownload, LuTriangleAlert } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerAssignment, getWorkerByUserId } from "@/lib/services/worker-portal";
+import { canSubmitDeliverable, listDeliverablesForWorker, whySubmitClosed } from "@/lib/services/deliverables";
 import { OrderDetailsNotice } from "@/components/projects/OrderDetailsNotice";
-import { safeHref } from "@/lib/safe-href";
+import { fileHref } from "@/lib/files/links";
 import { WorkerAssignmentActions } from "@/components/worker/WorkerAssignmentActions";
 import { ResearchPanel } from "@/components/worker/ResearchPanel";
+import { WorkerDeliverablesPanel } from "@/components/worker/WorkerDeliverablesPanel";
+import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuInbox } from "react-icons/lu";
@@ -34,7 +37,13 @@ const REFERENCING_LABELS: Record<string, string> = {
   CUSTOM: "Custom",
 };
 
-export default async function WorkerAssignmentPage({ params }: { params: { id: string } }) {
+export default async function WorkerAssignmentPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams: { tab?: string };
+}) {
   const session = await auth();
   const worker = session?.user ? await getWorkerByUserId(session.user.id) : null;
   if (!worker) {
@@ -47,8 +56,24 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
   const deadline = project.internalDeadline ?? project.clientDeadline;
   const info = deadlineInfo(deadline);
   const clientFiles = project.files.filter((f) => f.category === "from_client" || f.category === "department_outline");
-  const mySubmissions = project.files.filter((f) => f.category === "from_worker");
+  // Links pasted before uploads existed; new work lives in Documents.
+  const earlierLinks = project.files.filter((f) => f.category === "from_worker" && !f.deliverableId);
   const showRevisionFeedback = project.status === "REVISION_NEEDED" && project.qaNotes;
+  const routeBase = `/api/worker/projects/${encodeURIComponent(project.projectId)}`;
+
+  const deliverables = (await listDeliverablesForWorker(project.id)).map((d) => {
+    const open = canSubmitDeliverable(d.kind, project.status);
+    return {
+      id: d.id,
+      title: d.title,
+      kind: d.kind,
+      status: d.status,
+      versions: d.versions,
+      canSubmit: open,
+      closedReason: open ? null : whySubmitClosed(d.kind, project.status),
+      goesToQa: d.kind === "FINAL" && (project.status === "IN_PROGRESS" || project.status === "REVISION_NEEDED"),
+    };
+  });
 
   return (
     <div className="space-y-5">
@@ -110,13 +135,6 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
         </dl>
       </div>
 
-      <OrderDetailsNotice
-        audience="worker"
-        additionalData={project.additionalData}
-        client={{ ...project.client, phone: "", email: null }}
-        universityName={project.client.university?.name ?? ""}
-      />
-
       {showRevisionFeedback ? (
         <div className="rounded-2xl bg-danger/10 p-4">
           <p className="flex items-center gap-2 text-sm font-semibold text-danger">
@@ -129,45 +147,62 @@ export default async function WorkerAssignmentPage({ params }: { params: { id: s
 
       <WorkerAssignmentActions projectCode={project.projectId} status={project.status} />
 
-      <ResearchPanel projectCode={project.projectId} />
-
-      {project.departmentOutline || project.specialInstructions ? (
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">Requirements</h2>
-          {project.departmentOutline ? (
-            <div className="mt-2">
-              <p className="meta-label">
-                Department outline
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">
-                {project.departmentOutline}
-              </p>
-            </div>
-          ) : null}
-          {project.specialInstructions ? (
-            <div className="mt-3">
-              <p className="meta-label">
-                Special instructions
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">
-                {project.specialInstructions}
-              </p>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <FileGroup title="From client" files={clientFiles} emptyHint="No files from the client." />
-        <FileGroup title="My submissions" files={mySubmissions} emptyHint="You haven't submitted anything yet." />
-      </div>
-
-      {project.qaNotes && !showRevisionFeedback ? (
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">QA feedback</h2>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{project.qaNotes}</p>
-        </section>
-      ) : null}
+      <ProjectTabs
+        initial={searchParams.tab}
+        tabs={[
+          {
+            id: "brief",
+            label: "Brief",
+            content: (
+              <div className="space-y-5">
+                <OrderDetailsNotice
+                  audience="worker"
+                  additionalData={project.additionalData}
+                  client={{ ...project.client, phone: "", email: null }}
+                  universityName={project.client.university?.name ?? ""}
+                />
+                {project.departmentOutline || project.specialInstructions ? (
+                  <section className="surface p-4">
+                    <h2 className="text-sm font-semibold text-foreground">Requirements</h2>
+                    {project.departmentOutline ? (
+                      <div className="mt-2">
+                        <p className="meta-label">Department outline</p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{project.departmentOutline}</p>
+                      </div>
+                    ) : null}
+                    {project.specialInstructions ? (
+                      <div className="mt-3">
+                        <p className="meta-label">Special instructions</p>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{project.specialInstructions}</p>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+                <FileGroup title="From client" files={clientFiles} routeBase={routeBase} emptyHint="No files from the client." />
+                {project.qaNotes && !showRevisionFeedback ? (
+                  <section className="surface p-4">
+                    <h2 className="text-sm font-semibold text-foreground">QA feedback</h2>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{project.qaNotes}</p>
+                  </section>
+                ) : null}
+              </div>
+            ),
+          },
+          { id: "research", label: "Research", content: <ResearchPanel projectCode={project.projectId} /> },
+          {
+            id: "documents",
+            label: "Documents",
+            content: (
+              <div className="space-y-8">
+                <WorkerDeliverablesPanel projectCode={project.projectId} deliverables={deliverables} />
+                {earlierLinks.length > 0 ? (
+                  <FileGroup title="Earlier submissions (links)" files={earlierLinks} routeBase={routeBase} emptyHint="" />
+                ) : null}
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -186,10 +221,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function FileGroup({
   title,
   files,
+  routeBase,
   emptyHint,
 }: {
   title: string;
-  files: { id: string; fileName: string; fileUrl: string; createdAt: Date }[];
+  files: { id: string; fileName: string; fileUrl: string; storage: string; createdAt: Date }[];
+  routeBase: string;
   emptyHint: string;
 }) {
   return (
@@ -199,29 +236,32 @@ function FileGroup({
         <p className="mt-2 text-xs text-muted-foreground">{emptyHint}</p>
       ) : (
         <ul className="mt-2 space-y-1.5">
-          {files.map((f) => (
-            <li key={f.id}>
-              {safeHref(f.fileUrl) ? (
-                <a
-                  href={safeHref(f.fileUrl)!}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 rounded-md p-1.5 text-sm text-foreground transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
-                >
-                  <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
-                  <LuDownload className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                </a>
-              ) : (
-                <p className="flex items-center gap-2 p-1.5 text-sm text-foreground">
-                  <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
-                  <span className="text-xs text-danger">Unsafe link hidden</span>
-                </p>
-              )}
-              <p className="pl-8 text-[11px] text-subtle">{formatDate(f.createdAt)}</p>
-            </li>
-          ))}
+          {files.map((f) => {
+            const href = fileHref(f, routeBase);
+            return (
+              <li key={f.id}>
+                {href ? (
+                  <a
+                    href={href}
+                    target={f.storage === "PRIVATE_BLOB" ? undefined : "_blank"}
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-md p-1.5 text-sm text-foreground transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
+                  >
+                    <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
+                    <LuDownload className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  </a>
+                ) : (
+                  <p className="flex items-center gap-2 p-1.5 text-sm text-foreground">
+                    <LuFile className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{f.fileName}</span>
+                    <span className="text-xs text-danger">Unsafe link hidden</span>
+                  </p>
+                )}
+                <p className="pl-8 text-[11px] text-subtle">{formatDate(f.createdAt)}</p>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
