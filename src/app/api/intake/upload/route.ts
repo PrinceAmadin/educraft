@@ -25,7 +25,11 @@ const ALLOWED_TYPES = [
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  // Always name this store's token: once a second (private) Blob store is
+  // connected to the project, the SDK's own guess (OIDC + BLOB_STORE_ID) could
+  // otherwise point these public intake uploads at the wrong store.
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) {
     return NextResponse.json({ error: "File upload is not available right now." }, { status: 503 });
   }
 
@@ -38,6 +42,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await handleUpload({
+      token,
       body,
       request: req,
       onBeforeGenerateToken: async (pathname) => {
