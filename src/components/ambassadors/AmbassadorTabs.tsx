@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export type AmbassadorTab = "dashboard" | "roster" | "directory" | "commissions" | "leaderboard" | "schools" | "core" | "sub" | "applications" | "tracking" | "sponsorship" | "manage";
+export type AmbassadorTab = "dashboard" | "roster" | "directory" | "network" | "commissions" | "leaderboard" | "schools" | "core" | "sub" | "applications" | "tracking" | "sponsorship" | "manage";
 
 /** `short` is the phone label, so the seven tabs scroll less at 375px. */
 const TABS: { key: AmbassadorTab; href: string; label: string; short?: string }[] = [
   { key: "dashboard", href: "/admin/ambassadors", label: "Dashboard" },
   { key: "directory", href: "/admin/ambassadors/list", label: "Directory" },
+  { key: "network", href: "/admin/ambassadors/network", label: "Network" },
   { key: "roster", href: "/admin/ambassadors/roster", label: "Slots" },
   { key: "commissions", href: "/admin/ambassadors/commissions", label: "Commissions" },
   { key: "leaderboard", href: "/admin/ambassadors/leaderboard", label: "Leaderboard" },
