@@ -1,4 +1,5 @@
 import type { ProjectStatus } from "@prisma/client";
+import { CORRECTION_LIMIT_MESSAGE, MAX_CORRECTION_ROUNDS, roundsSoFar } from "@/lib/operations/corrections";
 
 /**
  * The project pipeline state machine — pure, no database. Both the API
@@ -38,6 +39,11 @@ export interface TransitionCandidate {
    * had a pasted link are not held up.
    */
   finalAwaitingRelease?: boolean;
+  /**
+   * Supervisor correction rounds so far. Three are part of the service; a
+   * fourth is a new order, so the move into corrections is refused at three.
+   */
+  correctionRounds?: number;
 }
 
 export const MAX_REVISIONS = 3;
@@ -121,7 +127,12 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
     },
   ],
   DELIVERED: [
-    { to: "SUPERVISOR_CORRECTIONS", action: "Log supervisor corrections", requiresNote: true },
+    {
+      to: "SUPERVISOR_CORRECTIONS",
+      action: "Log supervisor corrections",
+      requiresNote: true,
+      guard: (p) => ((p.correctionRounds ?? 0) >= MAX_CORRECTION_ROUNDS ? CORRECTION_LIMIT_MESSAGE : null),
+    },
     { to: "COMPLETED", action: "Mark completed" },
   ],
   SUPERVISOR_CORRECTIONS: [{ to: "DELIVERED", action: "Re-deliver" }],
@@ -177,6 +188,8 @@ export function toCandidate(project: {
   additionalData: unknown;
   files: { category: string }[];
   deliverables?: { versions: { releaseNo: number | null }[] }[];
+  supervisorCorrectionCount?: number;
+  _count?: { correctionRounds?: number };
 }): TransitionCandidate {
   const hasRequirementDetail =
     Boolean(project.specialInstructions?.trim()) ||
@@ -197,6 +210,7 @@ export function toCandidate(project: {
     hasRequirementDetail,
     workerFileCount: project.files.filter((f) => f.category === "from_worker").length,
     finalAwaitingRelease: finalAwaitingRelease(project.deliverables ?? []),
+    correctionRounds: roundsSoFar(project._count?.correctionRounds ?? 0, project.supervisorCorrectionCount ?? 0),
   };
 }
 

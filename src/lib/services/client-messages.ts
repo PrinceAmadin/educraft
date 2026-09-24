@@ -2,7 +2,7 @@ import type { MessageSide } from "@prisma/client";
 import { db } from "@/lib/db";
 import { MESSAGE_TARGET } from "@/lib/files/paths";
 import { checkUploadedFile, UploadCheckError, type CheckedUpload, type UploadedFileInput } from "@/lib/files/register";
-import { notifyAdmins } from "@/lib/services/notifications";
+import { notifyOperations } from "@/lib/services/notifications";
 import { notifyClient } from "@/lib/services/client-notify";
 import { MESSAGE_MAX_LENGTH } from "@/lib/validations/client-portal";
 
@@ -156,7 +156,7 @@ export async function postMessage(input: {
   const text = body || (checked.length === 1 ? `Sent a file: ${checked[0].fileName}` : `Sent ${checked.length} files`);
   const preview = text.length > 140 ? `${text.slice(0, 137)}…` : text;
   if (input.side === "CLIENT") {
-    await notifyAdmins({
+    await notifyOperations({
       title: "New message from a client",
       message: `${project.projectId}: ${preview}`,
       type: "info",

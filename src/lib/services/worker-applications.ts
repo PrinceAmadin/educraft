@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { Prisma, type ApplicationStatus, type WorkerApplication } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { alertWorkerApplication } from "@/lib/services/team-alerts";
 import { sendMail } from "@/lib/mailer";
 import { siteUrl } from "@/lib/site-url";
@@ -118,7 +118,7 @@ export async function submitWorkerApplication(
     // The team's Gmail (Settings > Email alerts), sent after the response. Queued
     // before anything else can throw, so a saved application is always emailed.
     alertWorkerApplication(application.id, { existingLogin: Boolean(ownLogin) });
-    await notifyAdmins({
+    await notifyOperations({
       title: "New worker application",
       message: `${input.fullName.trim()} applied to join as a worker.`,
       type: "info",

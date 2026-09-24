@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuGraduationCap } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerDetail } from "@/lib/services/workers";
+import { getWorkerProfileOps } from "@/lib/services/operations/workers-ops";
 import { getLinkedAmbassador } from "@/lib/services/linked-profiles";
 import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
 import { WorkerStatusControl } from "@/components/workers/WorkerStatusControl";
@@ -12,7 +13,10 @@ import { WorkerProjectHistory } from "@/components/workers/WorkerProjectHistory"
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { EditWorkerDialog } from "@/components/workers/EditWorkerDialog";
 import { DeleteWorkerButton } from "@/components/workers/DeleteWorkerButton";
-import { formatDateTime, formatNaira } from "@/lib/utils";
+import { WorkerProfileOps } from "@/components/operations/WorkerProfileOps";
+import { WorkerCooActions } from "@/components/operations/WorkerCooActions";
+import { toWaNumber, waLink, greetingName } from "@/lib/whatsapp";
+import { cn, formatDate, formatDateTime, formatNaira, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -25,20 +29,26 @@ export async function generateMetadata({
   return { title: data ? data.worker.fullName : "Worker not found" };
 }
 
-function pct(v: number | null) {
-  return v == null ? "—" : `${v}%`;
-}
+const ACTIVITY_TEXT: Record<string, string> = {
+  Active: "text-success",
+  Busy: "text-gold",
+  Inactive: "text-danger",
+  "On Break": "text-muted-foreground",
+  Suspended: "text-danger",
+  Terminated: "text-subtle",
+};
 
-export default async function WorkerDetailPage({ params }: { params: { id: string } }) {
-  const [data, session] = await Promise.all([getWorkerDetail(params.id), auth()]);
-  if (!data) notFound();
+export default async function WorkerDetailPage({ params, searchParams }: { params: { id: string }; searchParams: { flag?: string } }) {
+  const [data, ops, session] = await Promise.all([getWorkerDetail(params.id), getWorkerProfileOps(params.id), auth()]);
+  if (!data || !ops) notFound();
 
   const { worker, metrics } = data;
   const linked = await getLinkedAmbassador(worker.userId);
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  const wa = toWaNumber(worker.phone);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
       <Link
         href="/admin/workers"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
@@ -48,13 +58,18 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
       </Link>
 
       {/* Header */}
-      <div className="surface p-4 sm:p-5">
+      <div className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="font-display text-xl font-bold tracking-tight text-foreground">
-              {worker.fullName}
-            </h1>
-            <p className="mt-0.5 font-mono text-xs text-muted-foreground">{worker.workerId}</p>
+            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{worker.fullName}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              <span className={cn("font-medium", ACTIVITY_TEXT[ops.activity])}>{ops.activity}</span>
+              {" · "}Joined {formatDate(worker.createdAt)}
+              {" · "}
+              <span className="font-mono text-xs">{worker.workerId}</span>
+              {ops.lastActiveAt ? ` · last active ${timeAgo(ops.lastActiveAt)}` : ""}
+              {worker.isQaReviewer ? " · QA reviewer" : ""}
+            </p>
             {linked ? (
               <div className="mt-2">
                 <LinkedProfileLink linked={linked} />
@@ -78,18 +93,14 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
                 notes: worker.notes,
               }}
             />
-            <CreateLoginControl
-              endpoint={`/api/admin/workers/${worker.id}/login`}
-              hasLogin={Boolean(worker.userId)}
-              prefillEmail={worker.email ?? ""}
-            />
+            <CreateLoginControl endpoint={`/api/admin/workers/${worker.id}/login`} hasLogin={Boolean(worker.userId)} prefillEmail={worker.email ?? ""} />
             <WorkerStatusControl workerId={worker.id} current={worker.status} />
             {isSuperAdmin ? <DeleteWorkerButton workerId={worker.id} fullName={worker.fullName} /> : null}
           </div>
         </div>
 
-        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 border-t border-border pt-4 text-sm sm:grid-cols-3">
-          <Field icon={LuPhone} label="Phone">
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-4 rounded-2xl bg-zone p-5 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <Field icon={LuPhone} label="WhatsApp">
             <a href={`tel:${worker.phone}`} className="hover:text-primary">
               {worker.phone}
             </a>
@@ -103,69 +114,83 @@ export default async function WorkerDetailPage({ params }: { params: { id: strin
               <span className="text-subtle">Not provided</span>
             )}
           </Field>
-          <Field icon={LuGraduationCap} label="Education">
-            {worker.educationLevel || <span className="text-subtle">—</span>}
-          </Field>
+          <Field icon={LuGraduationCap} label="Academic background">{worker.educationLevel || <span className="text-subtle">—</span>}</Field>
+          <div>
+            <dt className="meta-label">Load</dt>
+            <dd className={cn("mt-0.5 font-mono tabular-nums", metrics.atCapacity ? "text-danger" : "text-foreground")}>
+              {metrics.load} · max {worker.maxConcurrentProjects}
+            </dd>
+          </div>
+          <div className="sm:col-span-2 lg:col-span-4">
+            <dt className="meta-label">Departments</dt>
+            <dd className="mt-1">
+              {worker.specialties.length > 0 ? (
+                <ul className="flex flex-wrap gap-1.5">
+                  {worker.specialties.map((t, i) => (
+                    <li key={t} className="rounded-full bg-card px-2.5 py-0.5 text-xs text-foreground shadow-soft">
+                      {t}
+                      {i === 0 ? <span className="text-muted-foreground"> (primary)</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="text-sm text-subtle">None recorded</span>
+              )}
+              {worker.skills.length > 0 ? <p className="mt-1.5 text-[13px] text-muted-foreground">Skills: {worker.skills.join(", ")}</p> : null}
+            </dd>
+          </div>
         </dl>
 
         {worker.updatedBy ? (
-          <p className="mt-3 text-xs text-subtle">
+          <p className="text-xs text-subtle">
             Last updated by {worker.updatedByRole === "worker" ? "the worker" : "an admin"}
-            {worker.updatedBy.displayName ? ` (${worker.updatedBy.displayName})` : ""} ·{" "}
-            {formatDateTime(worker.updatedAt)}
+            {worker.updatedBy.displayName ? ` (${worker.updatedBy.displayName})` : ""} · {formatDateTime(worker.updatedAt)}
           </p>
         ) : null}
-
-        <TagRow label="Specialties" tags={worker.specialties} />
-        <TagRow label="Skills" tags={worker.skills} />
       </div>
 
-      {/* Performance */}
-      <section>
-        <h2 className="mb-2 text-sm font-semibold text-foreground">Performance</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <Stat label="Completed" value={String(metrics.completedProjects)} />
-          <Stat label="Active load" value={metrics.load} tone={metrics.atCapacity ? "danger" : "default"} />
-          <Stat label="On-time" value={pct(metrics.onTimeRate)} />
-          <Stat label="Revisions" value={pct(metrics.revisionRate)} />
-          <Stat
-            label="Avg delivery"
-            value={metrics.avgDeliveryDays != null ? `${metrics.avgDeliveryDays}d` : "—"}
-          />
-          <Stat label="Rating" value={metrics.rating != null ? `${metrics.rating.toFixed(1)}/5` : "—"} />
-        </div>
-      </section>
+      <WorkerCooActions
+        workerId={worker.id}
+        status={worker.status}
+        maxConcurrentProjects={worker.maxConcurrentProjects}
+        isQaReviewer={worker.isQaReviewer}
+        whatsappHref={wa ? waLink(wa, `Hi ${greetingName(worker.fullName)}, this is EduCraft.`) : null}
+        openFlag={searchParams.flag === "1"}
+      />
 
-      {/* Earnings + bank */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">Earnings</h2>
+      <WorkerProfileOps workerId={worker.id} data={ops} />
+
+      {/* Lifetime figures and bank details, as before */}
+      <div className="grid gap-x-10 gap-y-8 lg:grid-cols-2">
+        <section>
+          <h2 className="text-[15px] font-semibold text-foreground">Lifetime</h2>
           <dl className="mt-2 space-y-2 text-sm">
+            <Line label="Completed projects" value={String(metrics.completedProjects)} />
+            <Line label="Revision rate" value={metrics.revisionRate != null ? `${metrics.revisionRate}%` : "—"} />
+            <Line label="Average delivery" value={metrics.avgDeliveryDays != null ? `${metrics.avgDeliveryDays} days` : "—"} />
             <Line label="Total earned (completed)" value={formatNaira(metrics.totalEarned)} />
             <Line label="Total paid" value={formatNaira(metrics.totalPaid)} />
             <Line label="Outstanding balance" value={formatNaira(metrics.payoutBalance)} strong />
           </dl>
         </section>
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">Bank details</h2>
+        <section>
+          <h2 className="text-[15px] font-semibold text-foreground">Bank details</h2>
           <dl className="mt-2 space-y-2 text-sm">
             <Line label="Bank" value={worker.bankName || "—"} />
             <Line label="Account number" value={worker.accountNumber || "—"} mono />
             <Line label="Account name" value={worker.accountName || "—"} />
           </dl>
+          {worker.notes ? (
+            <>
+              <h3 className="mt-6 text-[15px] font-semibold text-foreground">Record notes</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{worker.notes}</p>
+            </>
+          ) : null}
         </section>
       </div>
 
-      {worker.notes ? (
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">Notes</h2>
-          <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{worker.notes}</p>
-        </section>
-      ) : null}
-
-      {/* Project history */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">Project history</h2>
+        <h2 className="text-[15px] font-semibold text-foreground">Project history</h2>
         <WorkerProjectHistory projects={worker.projects} />
       </section>
     </div>
@@ -192,74 +217,11 @@ function Field({
   );
 }
 
-function TagRow({ label, tags }: { label: string; tags: string[] }) {
+function Line({ label, value, strong, mono }: { label: string; value: string; strong?: boolean; mono?: boolean }) {
   return (
-    <div className="mt-3 border-t border-border pt-3">
-      <p className="meta-label">{label}</p>
-      {tags.length > 0 ? (
-        <ul className="mt-1.5 flex flex-wrap gap-1.5">
-          {tags.map((t) => (
-            <li
-              key={t}
-              className="rounded-full bg-elevated px-2.5 py-0.5 text-xs text-foreground"
-            >
-              {t}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-1 text-sm text-subtle">None recorded</p>
-      )}
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "danger";
-}) {
-  return (
-    <div className="rounded-xl bg-zone p-3">
-      <p className="meta-label">
-        {label}
-      </p>
-      <p
-        className={`mt-1 font-mono text-lg font-medium tabular-nums ${
-          tone === "danger" ? "text-danger" : "text-foreground"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function Line({
-  label,
-  value,
-  strong,
-  mono,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-border pb-2 last:border-0">
+    <div className="flex items-center justify-between gap-4 border-b border-border/70 pb-2 last:border-0">
       <dt className={strong ? "font-medium text-foreground" : "text-muted-foreground"}>{label}</dt>
-      <dd
-        className={`${mono ? "font-mono" : ""} tabular-nums ${
-          strong ? "font-semibold text-foreground" : "text-foreground"
-        }`}
-      >
-        {value}
-      </dd>
+      <dd className={`${mono ? "font-mono" : ""} tabular-nums ${strong ? "font-semibold text-foreground" : "text-foreground"}`}>{value}</dd>
     </div>
   );
 }

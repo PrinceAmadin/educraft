@@ -86,9 +86,11 @@ export function NotificationBell() {
         >
           <Bell className="h-[18px] w-[18px]" aria-hidden />
           {unread > 0 ? (
-            <span className="absolute right-1.5 top-1.5 flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-danger opacity-75 animate-pulse-dot" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-danger" />
+            <span
+              aria-hidden
+              className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 font-mono text-[10px] font-semibold leading-none text-white"
+            >
+              {unread > 99 ? "99+" : unread}
             </span>
           ) : null}
         </button>

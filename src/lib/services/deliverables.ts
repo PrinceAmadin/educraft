@@ -7,7 +7,7 @@ import { siteUrl } from "@/lib/site-url";
 import { documentReadyMessage, toWaNumber, waLink } from "@/lib/whatsapp";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyClient, clientProjectPath } from "@/lib/services/client-notify";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { deliverIfFinalReleased, transitionProject } from "@/lib/services/projects";
 
 /**
@@ -308,7 +308,7 @@ export async function submitVersion(input: {
     await transitionProject(project.id, "SUBMITTED", { changedById: input.userId, note: note ?? undefined });
     movedToQa = true;
   } else {
-    await notifyAdmins({
+    await notifyOperations({
       title: `${deliverable.title} ready for review`,
       message: `${project.projectId}: the specialist uploaded ${deliverable.title}. Review and release it to the client.`,
       type: "info",

@@ -4,7 +4,7 @@ import { loginForEmail } from "@/lib/services/account-links";
 import { nextId } from "@/lib/services/projects";
 import type { SubmittedContact } from "@/lib/submitted-contact";
 import { recordUpdate } from "@/lib/services/client-updates";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates } from "@/lib/services/settings";
 import {
   resolveParentCommission,
@@ -428,7 +428,7 @@ export async function submitIntake(
     { timeout: 15_000 }
   );
 
-  await notifyAdmins({
+  await notifyOperations({
     title: proBono ? "New pro bono project submitted" : "New project submitted",
     message: `${created.projectId}: ${input.fullName.trim()} submitted ${input.projectTitle?.trim() || "a project"} through ${proBono ? "a pro bono link" : "the intake form"}.`,
     type: "info",

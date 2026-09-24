@@ -25,7 +25,12 @@ import {
   type AdminHold,
   type TransitionCandidate,
 } from "@/lib/pipeline";
-import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
+import { notifyFinance, notifyOperations, notifyRole, notifyUsers } from "@/lib/services/notifications";
+import { stageByKey } from "@/lib/operations/pipeline-stages";
+import { roundsSoFar } from "@/lib/operations/corrections";
+import { completeOpenRound, openCorrectionRound } from "@/lib/services/operations/supervisor-corrections";
+import { reopenQaReviewOnResubmit } from "@/lib/services/operations/qa-reviews";
+import { onProjectDelivered } from "@/lib/services/operations/ambassador-hooks";
 import { monthKeyOf, projectNetInflow, syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
 import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
@@ -45,15 +50,20 @@ export type { TransitionRule, TransitionCandidate } from "@/lib/pipeline";
 export const PAGE_SIZE = 20;
 
 export type PaymentFilter = "Unpaid" | "Partial" | "Paid";
-export type ProjectFlag = "at-risk" | "overdue" | "revision-escalated";
+export type ProjectFlag = "at-risk" | "overdue" | "revision-escalated" | "flagged";
 
 export interface ProjectListFilters {
   status?: ProjectStatus;
+  /** A pipeline stage (a group of statuses) from the operations bar. */
+  stage?: string;
   serviceId?: string;
   universityId?: string;
   /** A worker id, or the literal "unassigned". */
   workerId?: string;
+  /** The client's department, matched loosely. */
+  department?: string;
   payment?: PaymentFilter;
+  deadline?: "overdue" | "week" | "at-risk";
   from?: string;
   to?: string;
   q?: string;
@@ -95,13 +105,26 @@ function buildWhere(filters: ProjectListFilters, now: Date): Prisma.ProjectWhere
   const and: Prisma.ProjectWhereInput[] = [];
 
   if (filters.status) and.push({ status: filters.status });
+  if (filters.stage) {
+    const stage = stageByKey(filters.stage);
+    if (stage) and.push({ status: { in: [...stage.statuses] } });
+  }
   if (filters.serviceId) and.push({ serviceId: filters.serviceId });
   if (filters.universityId) and.push({ client: { universityId: filters.universityId } });
+  if (filters.department) and.push({ client: { department: { contains: filters.department, mode: "insensitive" } } });
 
   if (filters.workerId === "unassigned") and.push({ workerId: null });
   else if (filters.workerId) and.push({ workerId: filters.workerId });
 
   if (filters.payment) and.push(paymentWhere(filters.payment));
+
+  if (filters.deadline === "overdue") {
+    and.push({ status: { in: OPEN_STATUSES }, internalDeadline: { lt: now } });
+  } else if (filters.deadline === "week") {
+    and.push({ status: { in: OPEN_STATUSES }, internalDeadline: { gte: now, lt: new Date(now.getTime() + 7 * 86_400_000) } });
+  } else if (filters.deadline === "at-risk") {
+    and.push({ status: { in: OPEN_STATUSES }, OR: [{ atRisk: true }, { internalDeadline: { lt: new Date(now.getTime() + 3 * 86_400_000) } }] });
+  }
 
   if (filters.from) and.push({ createdAt: { gte: new Date(filters.from) } });
   if (filters.to) {
@@ -129,6 +152,8 @@ function buildWhere(filters: ProjectListFilters, now: Date): Prisma.ProjectWhere
     and.push({ status: { in: OPEN_STATUSES }, internalDeadline: { lt: now } });
   } else if (filters.flag === "revision-escalated") {
     and.push({ status: { in: OPEN_STATUSES }, revisionCount: { gte: 3 } });
+  } else if (filters.flag === "flagged") {
+    and.push({ atRisk: true });
   }
 
   return and.length ? { AND: and } : {};
@@ -146,9 +171,14 @@ const listSelect = {
   clientDeadline: true,
   internalDeadline: true,
   createdAt: true,
-  client: { select: { id: true, fullName: true, university: { select: { abbreviation: true } } } },
+  atRisk: true,
+  revisionCount: true,
+  client: { select: { id: true, fullName: true, department: true, university: { select: { abbreviation: true } } } },
   service: { select: { serviceName: true } },
   worker: { select: { id: true, fullName: true } },
+  ambassador: { select: { fullName: true, tier: true } },
+  // When the project entered its current status, for the "days in status" column.
+  statusLog: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
 } satisfies Prisma.ProjectSelect;
 
 export type ProjectListRow = Prisma.ProjectGetPayload<{ select: typeof listSelect }>;
@@ -233,6 +263,8 @@ const detailInclude = {
     where: { kind: "FINAL", archivedAt: null },
     select: { versions: { select: { releaseNo: true } } },
   },
+  // For the correction-limit guard (see toCandidate).
+  _count: { select: { correctionRounds: true } },
 } satisfies Prisma.ProjectInclude;
 
 export type ProjectDetail = Prisma.ProjectGetPayload<{ include: typeof detailInclude }>;
@@ -350,9 +382,11 @@ export async function transitionProject(
       deadlinePausedAt: true,
       internalDeadline: true,
       expectedDeliveryAt: true,
+      qaFirstPassDate: true,
+      supervisorCorrectionCount: true,
       worker: { select: { userId: true } },
       files: { where: { category: "from_worker" }, select: { id: true } },
-      _count: { select: { files: true } },
+      _count: { select: { files: true, correctionRounds: true } },
       deliverables: {
         where: { kind: "FINAL", archivedAt: null },
         select: { versions: { select: { releaseNo: true } } },
@@ -381,6 +415,8 @@ export async function transitionProject(
     hasRequirementDetail,
     workerFileCount: project.files.length,
     finalAwaitingRelease: finalAwaitingRelease(project.deliverables),
+    // Three supervisor-correction rounds are in the service; the guard refuses a fourth.
+    correctionRounds: roundsSoFar(project._count.correctionRounds, project.supervisorCorrectionCount),
   };
 
   const rule = allowedTransitions(candidate).find((r) => r.to === to);
@@ -402,9 +438,14 @@ export async function transitionProject(
     data.specialInstructions = note.trim();
   }
 
-  if (to === "DELIVERED") data.deliveryDate = now;
+  // The delivery date is the FIRST delivery: on-time rates and delivery times are
+  // measured on it. A re-delivery after supervisor corrections is in the status
+  // log and the correction rounds, and must not make an on-time project look late.
+  if (to === "DELIVERED" && project.status !== "SUPERVISOR_CORRECTIONS") data.deliveryDate = now;
   if (to === "COMPLETED") data.finalCompletionDate = now;
   if (to === "APPROVED") data.qaStatus = "Passed";
+  // Approved without ever being sent back: the QA first-pass stamp the COO's rates count.
+  if (to === "APPROVED" && project.revisionCount === 0 && !project.qaFirstPassDate) data.qaFirstPassDate = now;
 
   // Nothing left to collect at approval: a pro bono job has no balance, and a
   // client may have paid the balance early (Chapters 3+ need it). Delivery
@@ -473,6 +514,13 @@ export async function transitionProject(
       });
       // Completed: every leg owed (worker, ambassador, Core, HOG, COO) becomes a payout record for the month.
       if (to === "COMPLETED") await reconcileProjectPayouts(tx, project.id, { month: monthKeyOf(now) });
+      // Supervisor corrections are counted in rounds: one opens on the way in, and closes on re-delivery.
+      if (to === "SUPERVISOR_CORRECTIONS") {
+        await openCorrectionRound(tx, project.id, { clientNote: note?.trim() || null, createdById: changedById, now });
+      }
+      if (project.status === "SUPERVISOR_CORRECTIONS" && to === "DELIVERED") await completeOpenRound(tx, project.id, now);
+      // A resubmission after a revision reopens the QA review as its next round.
+      if (to === "SUBMITTED" && project.status === "REVISION_NEEDED") await reopenQaReviewOnResubmit(tx, project.id);
       if (skipBalance) {
         await tx.projectStatusLog.create({
           data: {
@@ -518,7 +566,7 @@ export async function transitionProject(
   // ── Notifications ──
   const adminLink = `/admin/projects/${project.projectId}`;
   if (flaggedForFounder) {
-    await notifyAdmins({
+    await notifyOperations({
       title: "Revision cap reached",
       message: `${project.projectId} has hit ${MAX_REVISIONS} revisions and needs founder review.`,
       type: "urgent",
@@ -527,13 +575,15 @@ export async function transitionProject(
   }
   // Every submission needs a reviewer, including a resubmission after a revision.
   if (to === "SUBMITTED") {
-    await notifyAdmins({
+    await notifyOperations({
       title: project.status === "REVISION_NEEDED" ? "Revised work submitted" : "Work submitted",
       message: `${project.projectId} has been submitted and needs a QA reviewer.`,
       type: "info",
       link: "/admin/qa",
     });
   }
+  // A delivered referral: the ambassador hears, and the client's referrer is on record (Phase 3 hooks in here).
+  if (to === "DELIVERED") await onProjectDelivered(project.id);
   if (to === "REVISION_NEEDED") {
     await notifyUsers([project.worker?.userId], {
       title: "Revision needed",
@@ -1147,12 +1197,13 @@ export async function assignWorker(
 
   const worker = await db.worker.findUnique({
     where: { id: workerId },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, fullName: true },
   });
   if (!worker) throw new TransitionError("Worker not found");
+  const newWorkerName = worker.fullName;
 
   const previousWorker = project.workerId
-    ? await db.worker.findUnique({ where: { id: project.workerId }, select: { userId: true } })
+    ? await db.worker.findUnique({ where: { id: project.workerId }, select: { userId: true, fullName: true } })
     : null;
 
   const now = new Date();
@@ -1179,6 +1230,18 @@ export async function assignWorker(
         toStatus: (data.status as ProjectStatus | undefined) ?? project.status,
         changedById,
         notes: isFirstAssignment ? "Worker assigned" : "Worker reassigned",
+      },
+    }),
+    // The COO's timeline: who was put on it (and who came off).
+    db.projectNote.create({
+      data: {
+        projectId: project.id,
+        kind: "REASSIGN",
+        authorType: "SYSTEM",
+        authorId: changedById,
+        content: isFirstAssignment
+          ? `Assigned to ${newWorkerName}`
+          : `Reassigned${previousWorker?.fullName ? ` from ${previousWorker.fullName}` : ""} to ${newWorkerName}`,
       },
     }),
     // The client hears once that a specialist is on it; hand-offs stay internal.

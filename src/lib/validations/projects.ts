@@ -9,14 +9,17 @@ const referencingValues = Object.values(ReferencingStyle) as [ReferencingStyle, 
 /** Parses raw `searchParams` into safe {@link ProjectListFilters}. */
 export const projectListParamsSchema = z.object({
   status: z.enum(statusValues).optional().catch(undefined),
+  stage: z.enum(["new", "confirmed", "assigned", "in_progress", "qa", "approved", "delivered", "corrections"]).optional().catch(undefined),
   service: z.string().min(1).optional().catch(undefined),
   university: z.string().min(1).optional().catch(undefined),
   worker: z.string().min(1).optional().catch(undefined),
+  dept: z.string().trim().min(1).max(120).optional().catch(undefined),
   payment: z.enum(["Unpaid", "Partial", "Paid"]).optional().catch(undefined),
+  deadline: z.enum(["overdue", "week", "at-risk"]).optional().catch(undefined),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined),
   q: z.string().trim().min(1).max(120).optional().catch(undefined),
-  flag: z.enum(["at-risk", "overdue", "revision-escalated"]).optional().catch(undefined),
+  flag: z.enum(["at-risk", "overdue", "revision-escalated", "flagged"]).optional().catch(undefined),
   page: z.coerce.number().int().positive().optional().catch(undefined),
 });
 

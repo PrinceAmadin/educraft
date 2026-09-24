@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { LuArrowRight } from "react-icons/lu";
+import { LuArrowRight, LuFlag } from "react-icons/lu";
 import { ProjectRowMenu, ProjectRowMenuButton } from "@/components/projects/ProjectRowMenu";
+import { QuickAssignDialog } from "@/components/operations/QuickAssignDialog";
+import { DaysInStatus } from "@/components/operations/DaysInStatus";
 import {
   Table,
   TableBody,
@@ -20,6 +22,10 @@ import {
 } from "@/lib/project-display";
 import { cn, deadlineInfo, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectListRow } from "@/lib/services/projects";
+import type { StatusAge } from "@/lib/operations/pipeline-stages";
+
+/** A list row with how long it has sat in its status (computed by the page from the expected hours). */
+export type ProjectListRowWithAge = ProjectListRow & { age: StatusAge };
 
 const DEADLINE_TEXT = {
   none: "text-muted-foreground",
@@ -39,20 +45,27 @@ function DeadlineCell({ row }: { row: ProjectListRow }) {
   const info = deadlineInfo(deadline);
   return (
     <div className="whitespace-nowrap">
-      <div className="text-foreground">{formatDate(deadline)}</div>
-      {info.daysLeft !== null ? (
-        <div className={cn("text-xs", DEADLINE_TEXT[info.urgency])}>{info.label}</div>
-      ) : null}
+      <div className={cn(info.urgency === "overdue" ? "text-danger" : "text-foreground")}>{info.urgency === "overdue" ? "Overdue" : formatDate(deadline)}</div>
+      {info.daysLeft !== null ? <div className={cn("text-xs", DEADLINE_TEXT[info.urgency])}>{info.urgency === "overdue" ? formatDate(deadline) : info.label}</div> : null}
     </div>
   );
+}
+
+function tierLabel(tier: string): string {
+  return tier.charAt(0) + tier.slice(1).toLowerCase();
+}
+
+function canQuickAssign(row: ProjectListRow): boolean {
+  return row.status === "REQUIREMENTS_CONFIRMED" && !row.worker;
 }
 
 /**
  * Projects list. On desktop the table is the content — no container around
  * it, a clean header row and faint dividers. On phones each project becomes a
- * soft surface rather than a table row.
+ * soft surface rather than a table row. An unassigned, confirmed project gets
+ * an Assign button right on the row.
  */
-export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
+export function ProjectsTable({ rows }: { rows: ProjectListRowWithAge[] }) {
   return (
     <>
       {/* Mobile: surfaces */}
@@ -78,37 +91,33 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
                   <span className="flex items-center gap-2 font-mono text-sm font-medium text-foreground">
                     <AccentDot accent={accent} />
                     {row.projectId}
+                    {row.atRisk ? <LuFlag className="size-3.5 text-danger" aria-label="At risk" /> : null}
                   </span>
                   <StatusBadge status={row.status} short />
                 </div>
 
-                <p className="mt-2 truncate text-sm text-foreground">
-                  {row.projectTitle ?? "Untitled project"}
-                </p>
+                <p className="mt-2 truncate text-sm text-foreground">{row.projectTitle ?? "Untitled project"}</p>
                 <p className="mt-0.5 text-[13px] text-muted-foreground">
                   {row.client.fullName}
-                  {row.client.university?.abbreviation ? ` · ${row.client.university.abbreviation}` : ""}{" "}
-                  · {row.service.serviceName}
+                  {row.client.department ? ` · ${row.client.department}` : ""} · {row.service.serviceName}
                 </p>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+                  <span className="text-muted-foreground">{row.worker ? row.worker.fullName : "Unassigned"}</span>
+                  <span className={DEADLINE_TEXT[info.urgency]}>{info.daysLeft !== null ? info.label : "No deadline"}</span>
                   <span className="text-muted-foreground">
-                    {row.worker ? row.worker.fullName : "Unassigned"}
+                    <DaysInStatus age={row.age} className="text-xs" /> in status
                   </span>
-                  <span className={DEADLINE_TEXT[info.urgency]}>
-                    {info.daysLeft !== null ? info.label : "No deadline"}
-                  </span>
+                  <span className="text-muted-foreground">{row.ambassador ? `via ${row.ambassador.fullName}` : "Direct"}</span>
                   <span className="font-mono tabular-nums text-foreground">{row.isProBono ? "Pro bono" : formatNaira(row.price)}</span>
-                  <span
-                    className={cn(
-                      "inline-flex items-center rounded-full border px-2 py-0.5 font-medium",
-                      PAYMENT_BADGE[standing]
-                    )}
-                  >
-                    {paymentStandingLabel(row)}
-                  </span>
+                  <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 font-medium", PAYMENT_BADGE[standing])}>{paymentStandingLabel(row)}</span>
                 </div>
               </Link>
+              {canQuickAssign(row) ? (
+                <div className="mt-2 pl-1">
+                  <QuickAssignDialog projectCode={row.projectId} />
+                </div>
+              ) : null}
             </li>
           );
         })}
@@ -125,10 +134,13 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
               <TableHead>Status</TableHead>
               <TableHead>Worker</TableHead>
               <TableHead>Deadline</TableHead>
-              <TableHead className="text-right">Price</TableHead>
+              <TableHead>Ambassador</TableHead>
+              <TableHead className="text-right">
+                <span title="Days in current status">Days</span>
+              </TableHead>
               <TableHead>Payment</TableHead>
               <TableHead>
-                <span className="sr-only">Quick actions</span>
+                <span className="sr-only">Actions</span>
               </TableHead>
               <TableHead>
                 <span className="sr-only">Open</span>
@@ -142,65 +154,69 @@ export function ProjectsTable({ rows }: { rows: ProjectListRow[] }) {
 
               return (
                 <ProjectRowMenu key={row.id} row={row}>
-                <TableRow>
-                  <TableCell>
-                    <span className="flex items-center gap-2">
-                      <AccentDot accent={accent} />
+                  <TableRow>
+                    <TableCell>
+                      <span className="flex items-center gap-2">
+                        <AccentDot accent={accent} />
+                        <Link
+                          href={`/admin/projects/${row.projectId}`}
+                          className="font-mono text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
+                        >
+                          {row.projectId}
+                        </Link>
+                        {row.atRisk ? <LuFlag className="size-3.5 text-danger" aria-label="At risk" /> : null}
+                      </span>
+                      {row.projectTitle ? <div className="mt-0.5 max-w-[22ch] truncate pl-3.5 text-xs text-muted-foreground">{row.projectTitle}</div> : null}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {row.client.fullName}
+                      <div className="text-xs text-muted-foreground">
+                        {[row.client.university?.abbreviation, row.client.department].filter(Boolean).join(" · ") || "—"}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{row.service.serviceName}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={row.status} short />
+                    </TableCell>
+                    <TableCell className="text-sm">{row.worker ? row.worker.fullName : <span className="text-subtle">Unassigned</span>}</TableCell>
+                    <TableCell className="text-sm">
+                      <DeadlineCell row={row} />
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {row.ambassador ? (
+                        <>
+                          {row.ambassador.fullName}
+                          <div className="text-xs text-muted-foreground">{tierLabel(row.ambassador.tier)}</div>
+                        </>
+                      ) : (
+                        <span className="text-subtle">Direct</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DaysInStatus age={row.age} />
+                    </TableCell>
+                    <TableCell>
+                      <span className={cn("inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium", PAYMENT_BADGE[standing])}>
+                        {paymentStandingLabel(row)}
+                      </span>
+                      <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">{row.isProBono ? "Pro bono" : formatNaira(row.price)}</div>
+                    </TableCell>
+                    <TableCell>
+                      <span className="flex items-center gap-1">
+                        {canQuickAssign(row) ? <QuickAssignDialog projectCode={row.projectId} /> : null}
+                        <ProjectRowMenuButton row={row} />
+                      </span>
+                    </TableCell>
+                    <TableCell>
                       <Link
                         href={`/admin/projects/${row.projectId}`}
-                        className="font-mono text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
+                        aria-label={`Open ${row.projectId}`}
+                        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
-                        {row.projectId}
+                        <LuArrowRight className="size-4" aria-hidden />
                       </Link>
-                    </span>
-                    {row.projectTitle ? (
-                      <div className="mt-0.5 max-w-[22ch] truncate pl-3.5 text-xs text-muted-foreground">
-                        {row.projectTitle}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {row.client.fullName}
-                    {row.client.university?.abbreviation ? (
-                      <div className="text-xs text-muted-foreground">{row.client.university.abbreviation}</div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{row.service.serviceName}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={row.status} short />
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {row.worker ? row.worker.fullName : <span className="text-subtle">Unassigned</span>}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    <DeadlineCell row={row} />
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {row.isProBono ? "Pro bono" : formatNaira(row.price)}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={cn(
-                        "inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium",
-                        PAYMENT_BADGE[standing]
-                      )}
-                    >
-                      {paymentStandingLabel(row)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <ProjectRowMenuButton row={row} />
-                  </TableCell>
-                  <TableCell>
-                    <Link
-                      href={`/admin/projects/${row.projectId}`}
-                      aria-label={`Open ${row.projectId}`}
-                      className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <LuArrowRight className="size-4" aria-hidden />
-                    </Link>
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                  </TableRow>
                 </ProjectRowMenu>
               );
             })}

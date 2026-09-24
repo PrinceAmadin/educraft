@@ -23,15 +23,36 @@ const ALL_STATUSES: ProjectStatus[] = [
 
 const FILTER_KEYS = [
   "status",
+  "stage",
   "service",
   "university",
   "worker",
+  "dept",
   "payment",
+  "deadline",
   "from",
   "to",
   "q",
   "flag",
 ] as const;
+
+const STAGE_LABELS: Record<string, string> = {
+  new: "New requirements",
+  confirmed: "Confirmed",
+  assigned: "Assigned",
+  in_progress: "In progress",
+  qa: "QA review",
+  approved: "Approved",
+  delivered: "Delivered",
+  corrections: "Corrections",
+};
+
+const FLAG_LABELS: Record<string, string> = {
+  "at-risk": "Near deadline",
+  overdue: "Overdue",
+  "revision-escalated": "Past the revision cap",
+  flagged: "Flagged at risk",
+};
 
 /** Search and filters, set directly on the page — the fields carry the affordance. */
 export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
@@ -137,11 +158,30 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
           <option value="Paid">Paid in full</option>
         </FilterSelect>
 
-        <div className="col-span-2 grid grid-cols-2 gap-3 sm:col-span-3 lg:col-span-2">
+        <FilterSelect label="Deadline" value={searchParams.get("deadline") ?? ""} onChange={(v) => commit({ deadline: v || null })}>
+          <option value="">Any deadline</option>
+          <option value="overdue">Overdue</option>
+          <option value="week">Due this week</option>
+          <option value="at-risk">At risk (3 days or flagged)</option>
+        </FilterSelect>
+
+        <div className="col-span-2 grid grid-cols-2 gap-3 sm:col-span-3 lg:col-span-1">
           <FilterDate label="From" value={searchParams.get("from") ?? ""} onChange={(v) => commit({ from: v || null })} />
           <FilterDate label="To" value={searchParams.get("to") ?? ""} onChange={(v) => commit({ to: v || null })} />
         </div>
       </div>
+
+      {searchParams.get("stage") || searchParams.get("flag") || searchParams.get("dept") ? (
+        <div className="flex flex-wrap gap-2">
+          {searchParams.get("stage") ? (
+            <Chip label={`Stage: ${STAGE_LABELS[searchParams.get("stage") as string] ?? searchParams.get("stage")}`} onClear={() => commit({ stage: null })} />
+          ) : null}
+          {searchParams.get("flag") ? (
+            <Chip label={FLAG_LABELS[searchParams.get("flag") as string] ?? (searchParams.get("flag") as string)} onClear={() => commit({ flag: null })} />
+          ) : null}
+          {searchParams.get("dept") ? <Chip label={`Department: ${searchParams.get("dept")}`} onClear={() => commit({ dept: null })} /> : null}
+        </div>
+      ) : null}
 
       {activeCount > 0 ? (
         <div className="flex items-center justify-between">
@@ -162,6 +202,17 @@ export function ProjectsFilterBar({ facets }: { facets: FilterFacets }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function Chip({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 py-1 pl-3 pr-1 text-[13px] font-medium text-primary">
+      {label}
+      <button type="button" onClick={onClear} aria-label={`Clear ${label}`} className="rounded-full p-1 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <LuX className="size-3.5" aria-hidden />
+      </button>
+    </span>
   );
 }
 
