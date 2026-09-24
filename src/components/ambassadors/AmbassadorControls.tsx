@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { LuCircleAlert } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { TIER_LADDER } from "@/lib/ambassador";
 import { SELECTABLE_AMBASSADOR_STATUSES } from "@/lib/validations/ambassadors";
 import type { AmbassadorTier } from "@prisma/client";
 
@@ -23,9 +22,9 @@ export function AmbassadorControls({
 }) {
   const router = useRouter();
   const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState<"status" | "tier" | "slotAction" | null>(null);
+  const [busy, setBusy] = React.useState<"status" | "slotAction" | null>(null);
 
-  async function patch(field: "status" | "tier" | "slotAction", value: string) {
+  async function patch(field: "status" | "slotAction", value: string) {
     setBusy(field);
     setError(null);
     try {
@@ -68,25 +67,6 @@ export function AmbassadorControls({
           {statusOptions.map((s) => (
             <option key={s} value={s}>
               {s}
-            </option>
-          ))}
-        </Select>
-      </label>
-
-      <label className="block">
-        <span className="mb-1 block meta-label">
-          Tier
-        </span>
-        <Select
-          defaultValue={tier}
-          disabled={busy !== null}
-          onChange={(e) => patch("tier", e.target.value)}
-          className="h-10 w-40 text-sm"
-          aria-label="Ambassador tier"
-        >
-          {TIER_LADDER.map((t) => (
-            <option key={t.tier} value={t.tier}>
-              {t.label} ({t.rate}%)
             </option>
           ))}
         </Select>

@@ -4,13 +4,19 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuBuilding2, LuBellRing, LuCalendarClock } from "react-icons/lu";
 import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
+import { getDirectoryDetail, listSubCandidates } from "@/lib/services/ambassador-platform/directory";
+import { DirectoryProfile } from "@/components/ambassadors/platform/DirectoryProfile";
+import { SuspendControl } from "@/components/ambassadors/platform/SuspendControl";
+import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
+import { AmbassadorNotes } from "@/components/ambassadors/platform/AmbassadorNotes";
+import { LuLink, LuUserPlus } from "react-icons/lu";
 import { getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { getLinkedWorker } from "@/lib/services/linked-profiles";
 import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
-import { ParentAssignment, SubAmbassadorsList } from "@/components/ambassadors/ParentAssignment";
+import { ParentAssignment } from "@/components/ambassadors/ParentAssignment";
 import { MessageAmbassadorButton } from "@/components/ambassadors/MessageAmbassadorButton";
 import { EditAmbassadorDialog } from "@/components/ambassadors/EditAmbassadorDialog";
 import { DeleteAmbassadorButton } from "@/components/ambassadors/DeleteAmbassadorButton";
@@ -19,8 +25,6 @@ import { db } from "@/lib/db";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { AdminAnalytics } from "@/components/ambassador-analytics/AdminAnalytics";
-import { EmptyState } from "@/components/shared/EmptyState";
-import { LuUsers } from "react-icons/lu";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import { isProvisional, provisionalDaysLeft } from "@/lib/ambassador";
 import type { ProjectStatus } from "@prisma/client";
@@ -46,9 +50,9 @@ export default async function AmbassadorDetailPage({
   const data = await getAmbassadorDetail(params.id);
   if (!data) notFound();
 
-  const { ambassador, metrics, progress, payouts, parentCommission } = data;
+  const { ambassador, metrics, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, defaultParentRate, linkedWorker, session, universities] = await Promise.all([
+  const [parentCandidates, defaultParentRate, linkedWorker, session, universities, platform, subCandidates] = await Promise.all([
     listParentCandidates(ambassador.id),
     getDefaultParentCommissionRate(),
     getLinkedWorker(ambassador.userId),
@@ -57,7 +61,10 @@ export default async function AmbassadorDetailPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true, abbreviation: true },
     }),
+    getDirectoryDetail(ambassador.id),
+    listSubCandidates(ambassador.id),
   ]);
+  if (!platform) notFound();
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
   return (
@@ -79,6 +86,7 @@ export default async function AmbassadorDetailPage({
                 {ambassador.fullName}
               </h1>
               <TierBadge tier={ambassador.tier} />
+              <ActivityBadge status={platform.activity} />
               <StatusPill
                 status={ambassador.status}
                 provisionalUntil={ambassador.provisionalUntil}
@@ -121,6 +129,7 @@ export default async function AmbassadorDetailPage({
               hasLogin={Boolean(ambassador.userId)}
               prefillEmail={ambassador.email ?? ""}
             />
+            <SuspendControl ambassadorId={ambassador.id} fullName={ambassador.fullName} status={ambassador.status} />
             <AmbassadorControls
               ambassadorId={ambassador.id}
               status={ambassador.status}
@@ -173,7 +182,23 @@ export default async function AmbassadorDetailPage({
               activatedAt={ambassador.activatedAt}
             />
           </Field>
+          <Field icon={LuLink} label="Referral code">
+            <span className="font-mono">{ambassador.referralCode}</span>
+            <span className="block text-xs text-muted-foreground">
+              {ambassador.level ? `${ambassador.level} · ` : ""}Joined {formatDate(ambassador.createdAt)}
+            </span>
+          </Field>
+          <Field icon={LuUserPlus} label="Referred by">
+            {platform.recruitedByType === "HOG"
+              ? `Direct recruitment by HOG${platform.recruiterName ? ` (${platform.recruiterName})` : ""}`
+              : platform.recruitedByType === "AMBASSADOR"
+                ? `Ambassador${platform.recruiterName ? ` ${platform.recruiterName}` : ""}`
+                : platform.recruitedByType === "APPLICATION"
+                  ? "Applied at /apply"
+                  : "Not recorded"}
+          </Field>
         </dl>
+        <AmbassadorNotes ambassadorId={ambassador.id} notes={platform.notes} />
       </div>
 
       <nav aria-label="Ambassador sections" className="inline-flex gap-1 rounded-xl bg-zone p-1">
@@ -216,81 +241,45 @@ export default async function AmbassadorDetailPage({
         candidates={parentCandidates}
         defaultRate={defaultParentRate}
       />
-      <SubAmbassadorsList subs={ambassador.children} parentCommission={parentCommission} />
+      <DirectoryProfile detail={platform} subCandidates={subCandidates} />
 
-      {/* Tier progress */}
+      {/* Legacy commission ledger (job allocations) + bank details */}
       <section className="surface p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-foreground">Tier progress</h2>
-          {progress.eligibleForPromotion ? (
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-              Eligible to promote
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {progress.next
-            ? `${progress.payingClients}/${progress.payingClients + progress.toNext} paying clients to ${progress.nextLabel}`
-            : `Top tier — ${progress.payingClients} paying clients`}
-        </p>
-        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-border" aria-hidden>
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${progress.percent}%` }}
-          />
+        <h2 className="text-sm font-semibold text-foreground">Commission ledger</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">Job allocations on this ambassador&apos;s projects; the Finance payout queue pays from here.</p>
+        <dl className="mt-2 space-y-2 text-sm">
+          <Line label="Revenue generated" value={formatNaira(metrics.revenueGenerated)} />
+          <Line label="Total earned (completed)" value={formatNaira(metrics.commissionEarned)} />
+          <Line label="Total paid" value={formatNaira(metrics.commissionPaid)} />
+          <Line label="Outstanding balance" value={formatNaira(metrics.commissionBalance)} strong />
+        </dl>
+        {parentCommission ? (
+          <dl className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
+            <Line label="Core override earned" value={formatNaira(parentCommission.totalEarned)} />
+            <Line label="Core override paid" value={formatNaira(parentCommission.totalPaid)} />
+          </dl>
+        ) : null}
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="meta-label">
+            Bank details
+          </p>
+          <dl className="mt-1.5 space-y-1.5 text-sm">
+            <Line label="Bank" value={ambassador.bankName || "—"} />
+            <Line label="Account number" value={ambassador.accountNumber || "—"} mono />
+            <Line label="Account name" value={ambassador.accountName || "—"} />
+          </dl>
         </div>
       </section>
 
-      {/* Performance + commission */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">Performance</h2>
-          <dl className="mt-2 space-y-2 text-sm">
-            <Line label="Total referrals" value={String(metrics.referrals)} />
-            <Line label="Paying clients" value={String(metrics.payingClients)} />
-            <Line
-              label="Referrals who paid"
-              value={metrics.payingClientRate != null ? `${metrics.payingClientRate}%` : "—"}
-            />
-            <Line label="Revenue generated" value={formatNaira(metrics.revenueGenerated)} strong />
-          </dl>
-        </section>
-        <section className="surface p-4">
-          <h2 className="text-sm font-semibold text-foreground">Commission</h2>
-          <dl className="mt-2 space-y-2 text-sm">
-            <Line label="Total earned (completed)" value={formatNaira(metrics.commissionEarned)} />
-            <Line label="Total paid" value={formatNaira(metrics.commissionPaid)} />
-            <Line label="Outstanding balance" value={formatNaira(metrics.commissionBalance)} strong />
-          </dl>
-          <div className="mt-3 border-t border-border pt-3">
-            <p className="meta-label">
-              Bank details
-            </p>
-            <dl className="mt-1.5 space-y-1.5 text-sm">
-              <Line label="Bank" value={ambassador.bankName || "—"} />
-              <Line label="Account number" value={ambassador.accountNumber || "—"} mono />
-              <Line label="Account name" value={ambassador.accountName || "—"} />
-            </dl>
-          </div>
-        </section>
-      </div>
-
-      {/* Referral history */}
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">
-          Referral history
-          <span className="ml-2 font-mono text-xs text-muted-foreground">
-            {ambassador.referredClients.length}
-          </span>
-        </h2>
-        {ambassador.referredClients.length === 0 ? (
-          <EmptyState
-            icon={LuUsers}
-            title="No referrals yet"
-            description="Clients who sign up with this ambassador's code appear here."
-            className="py-8"
-          />
-        ) : (
+      {/* Referred clients (Client.referredById) */}
+      {ambassador.referredClients.length > 0 ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">
+            Referred clients
+            <span className="ml-2 font-mono text-xs text-muted-foreground">
+              {ambassador.referredClients.length}
+            </span>
+          </h2>
           <ul className="divide-y divide-border/80">
             {ambassador.referredClients.map((c) => (
               <li key={c.id}>
@@ -320,8 +309,8 @@ export default async function AmbassadorDetailPage({
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      ) : null}
 
       {/* Payout history */}
       <section className="space-y-3">

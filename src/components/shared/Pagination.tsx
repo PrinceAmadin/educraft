@@ -10,11 +10,14 @@ export function Pagination({
   pageCount,
   total,
   pageSize,
+  noun = "project",
 }: {
   page: number;
   pageCount: number;
   total: number;
   pageSize: number;
+  /** What is being counted, singular: "project", "ambassador". */
+  noun?: string;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -22,7 +25,7 @@ export function Pagination({
   if (pageCount <= 1) {
     return (
       <p className="text-[13px] text-muted-foreground">
-        {total} project{total === 1 ? "" : "s"}
+        {total} {noun}{total === 1 ? "" : "s"}
       </p>
     );
   }

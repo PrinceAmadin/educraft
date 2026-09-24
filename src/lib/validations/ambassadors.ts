@@ -32,7 +32,7 @@ export type CreateAmbassadorInput = z.infer<typeof createAmbassadorSchema>;
 export const updateAmbassadorSchema = z
   .object({
     status: z.enum(statusValues).optional(),
-    tier: z.enum(tierValues).optional(),
+    /** No `tier`: since Phase 3 it is derived from lifetime conversions (`recountAmbassador`), never set by hand. */
     fullName: z.string().trim().min(2, "Enter the ambassador's full name").max(120).optional(),
     // Optional on the record: ambassadors from the old panel never gave one.
     phone: phoneSchema.optional().or(z.literal("")),
@@ -43,6 +43,8 @@ export const updateAmbassadorSchema = z
     bankName: z.string().trim().max(80).optional().or(z.literal("")),
     accountNumber: z.string().trim().max(20).optional().or(z.literal("")),
     accountName: z.string().trim().max(120).optional().or(z.literal("")),
+    /** The HOG's free-text note on the ambassador (Phase 3 directory). */
+    notes: z.string().trim().max(1000).optional().or(z.literal("")),
     /**
      * Founder override on the 30-day provisional slot: "confirm" makes it
      * permanent now, "reinstate" gives a lapsed ambassador a fresh window.

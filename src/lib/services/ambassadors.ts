@@ -532,7 +532,6 @@ export async function updateAmbassador(id: string, input: UpdateAmbassadorInput)
     data.provisionalUntil = provisionalDeadline();
     data.provisionalWarnedAt = null;
   }
-  if (input.tier) data.tier = input.tier;
   if (input.fullName !== undefined) data.fullName = input.fullName;
   if (input.phone !== undefined) data.phone = blank(input.phone);
   if (input.universityId !== undefined) {
@@ -545,6 +544,7 @@ export async function updateAmbassador(id: string, input: UpdateAmbassadorInput)
   if (input.bankName !== undefined) data.bankName = blank(input.bankName);
   if (input.accountNumber !== undefined) data.accountNumber = blank(input.accountNumber);
   if (input.accountName !== undefined) data.accountName = blank(input.accountName);
+  if (input.notes !== undefined) data.notes = blank(input.notes);
 
   const writes: Prisma.PrismaPromise<unknown>[] = [];
   const oldEmail = ambassador.email?.trim().toLowerCase() ?? null;
