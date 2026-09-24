@@ -25,7 +25,8 @@ type Db = Tx | typeof db;
 
 export class PayoutError extends Error {}
 
-export type PayoutLeg = "WORKER" | "AMBASSADOR" | "PARENT" | "HOG" | "COO";
+/** BONUS: an ambassador quarterly bonus (Phase 3) — no project behind it, keyed by `bonusKey`. */
+export type PayoutLeg = "WORKER" | "AMBASSADOR" | "PARENT" | "HOG" | "COO" | "BONUS";
 export type RecipientType = "WORKER" | "AMBASSADOR" | "EXECUTIVE";
 export type ExecRecipient = "HOG" | "COO";
 
@@ -827,7 +828,7 @@ export async function markBonusPaid(id: string, input: MarkPaidInput): Promise<M
 /** Owed and paid by leg for a month — the finance figures other pages read (never Payment OUTFLOW sums). */
 export async function payoutTotalsForMonth(month: string): Promise<{ owed: number; paid: number; unpaid: number; byLeg: Record<PayoutLeg, number> }> {
   const rows = await db.payoutRecord.groupBy({ by: ["leg", "status"], where: { month, status: { not: "CANCELLED" } }, _sum: { amount: true } });
-  const byLeg: Record<PayoutLeg, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0 };
+  const byLeg: Record<PayoutLeg, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0, BONUS: 0 };
   let owed = 0;
   let paid = 0;
   for (const r of rows) {

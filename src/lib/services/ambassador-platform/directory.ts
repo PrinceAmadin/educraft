@@ -186,7 +186,10 @@ export interface ChallengeView {
   label: string;
   actualCount: number;
   targetCount: number;
+  /** Exclusive end of the window. */
   endDate: string;
+  /** The last day that counts, for display. */
+  lastDay: string;
   extensionGranted: boolean;
   extensionEndDate: string | null;
   completed: boolean;
@@ -287,6 +290,8 @@ export async function getChallengeView(ambassadorId: string, month: string = cur
       actualCount: actual,
       targetCount: target,
       endDate: endDate.toISOString(),
+      // Midday of the last day, so it reads the same date in UTC (Vercel) and WAT (a Lagos laptop).
+      lastDay: new Date(endDate.getTime() - 12 * 3_600_000).toISOString(),
       extensionGranted: row?.extensionGranted ?? false,
       extensionEndDate: row?.extensionEndDate?.toISOString() ?? null,
       completed,

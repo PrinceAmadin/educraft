@@ -94,7 +94,7 @@ export async function getMonthFigures(month: string): Promise<MonthFigures> {
 }
 
 function sumFigures(rows: MonthFigures[], label: string): MonthFigures {
-  const byLeg: Record<PayoutLeg, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0 };
+  const byLeg: Record<PayoutLeg, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0, BONUS: 0 };
   for (const r of rows) for (const k of Object.keys(byLeg) as PayoutLeg[]) byLeg[k] += r.payouts.byLeg[k];
   const sum = (f: (r: MonthFigures) => number) => Math.round(rows.reduce((s, r) => s + f(r), 0) * 100) / 100;
   return {

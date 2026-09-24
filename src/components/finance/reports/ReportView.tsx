@@ -101,6 +101,7 @@ function Totals({ f, title }: { f: MonthFigures; title: string }) {
           <Row label="Workers (40%)" value={money(f.payouts.byLeg.WORKER)} />
           <Row label="Ambassadors" value={money(f.payouts.byLeg.AMBASSADOR)} />
           <Row label="Core overrides" value={money(f.payouts.byLeg.PARENT)} />
+          <Row label="Ambassador quarterly bonuses" value={money(f.payouts.byLeg.BONUS ?? 0)} />
           <Row label="Head of Growth (2.5%)" value={money(f.payouts.byLeg.HOG)} />
           <Row label="Chief Operating Officer (2.5%)" value={money(f.payouts.byLeg.COO)} />
           <Row label="Founder draws distributed" value={money(f.founderDraws)} />

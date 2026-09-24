@@ -159,7 +159,7 @@ export function DirectoryProfile({ detail, subCandidates }: { detail: DirectoryD
 }
 
 function ChallengeLine({ ch }: { ch: DirectoryDetail["quarter"]["challenge"] }) {
-  const end = formatDate(ch.extensionGranted && ch.extensionEndDate ? ch.extensionEndDate : ch.endDate);
+  const end = formatDate(ch.lastDay);
   if (ch.state === "COMPLETED") return <span className="text-success">Completed — {ch.actualCount}/{ch.targetCount}</span>;
   if (ch.state === "EXPIRED") return <span className="text-muted-foreground">Missed — {ch.actualCount}/{ch.targetCount} by {end}</span>;
   return (

@@ -88,3 +88,33 @@ export const updateReferralSchema = z
     notes: z.string().trim().max(500).optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to update");
+
+// ── Commissions (Section 4) ──────────────────────────────────────────────
+const monthKey = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Use YYYY-MM");
+/** "Q3-2026" */
+export const quarterKeySchema = z.string().regex(/^Q[1-4]-\d{4}$/, "Use Q3-2026");
+
+export const commissionMonthQuerySchema = z.object({
+  month: monthKey.optional().catch(undefined),
+});
+
+export const commissionHistoryQuerySchema = z.object({
+  q: z.string().trim().min(1).max(120).optional().catch(undefined),
+  month: monthKey.optional().catch(undefined),
+  status: z.enum(["PENDING", "PAID"]).optional().catch(undefined),
+  tier: z.enum(tierValues).optional().catch(undefined),
+  page: z.coerce.number().int().positive().optional().catch(undefined),
+});
+export type CommissionHistoryQuery = z.infer<typeof commissionHistoryQuerySchema>;
+
+export const quarterQuerySchema = z.object({
+  quarter: quarterKeySchema.optional().catch(undefined),
+});
+
+export const processQuarterSchema = z.object({
+  quarter: quarterKeySchema,
+});
+
+export const extendChallengeSchema = z.object({
+  quarter: quarterKeySchema,
+});
