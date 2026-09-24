@@ -116,11 +116,17 @@ export function CooPayoutPanel({ data }: { data: CooPayoutView }) {
                         {w.lines.map((l) => (
                           <li key={l.recordId} className="flex flex-wrap items-center justify-between gap-x-4 text-muted-foreground">
                             <span>
-                              <Link href={`/admin/projects/${l.projectCode}`} className="font-mono text-foreground hover:underline">
-                                {l.projectCode}
-                              </Link>
-                              {" · "}
-                              {l.serviceName} · {l.clientName}
+                              {l.projectCode ? (
+                                <>
+                                  <Link href={`/admin/projects/${l.projectCode}`} className="font-mono text-foreground hover:underline">
+                                    {l.projectCode}
+                                  </Link>
+                                  {" · "}
+                                  {l.serviceName} · {l.clientName}
+                                </>
+                              ) : (
+                                l.basis
+                              )}
                             </span>
                             <span className="font-mono tabular-nums text-foreground">{formatNaira(l.amount)}</span>
                           </li>

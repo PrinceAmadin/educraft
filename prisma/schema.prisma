@@ -260,6 +260,7 @@ model Client {
   referredById     String?
   referredBy       Ambassador? @relation(fields: [referredById], references: [id])
   referralCodeUsed String?
+  ambassadorReferrals AmbassadorReferral[]
   status           String      @default("Active")
   notes            String?
   createdAt        DateTime    @default(now())
@@ -514,6 +515,7 @@ model Project {
   payments    Payment[]
   payoutRecords     PayoutRecord[]
   bucketAllocations BucketAllocationLog[]
+  referral          AmbassadorReferral?
   researchJob ResearchJob?
   references  Reference[]
   researchRunLogs      ResearchRunLog[]
@@ -817,10 +819,40 @@ model Ambassador {
   /// their sub-ambassadors.
   subReferredProjects  Project[] @relation("ProjectParentAmbassador")
 
+  // ── Phase 3 (Ambassador Platform) ──
+  /// Cached from AmbassadorReferral: submitted referrals, conversions (a
+  /// referred project whose downpayment was confirmed) and what the payout
+  /// engine owes them. `recountAmbassador` recomputes all three; the tier is
+  /// derived from lifetimeConversions and never set by hand.
+  lifetimeReferrals   Int       @default(0)
+  lifetimeConversions Int       @default(0)
+  lifetimeEarnings    Float     @default(0)
+  /// Last referral submitted for them, and last conversion — the activity
+  /// label (Active / Dormant / Inactive / New) is derived from these at read
+  /// time; `status` stays the account state (Active / Suspended / Terminated).
+  lastReferralAt      DateTime?
+  lastConversionAt    DateTime?
+  /// Who brought them in: the HOG (User.id) or another ambassador (Ambassador.id).
+  recruitedBy         String?
+  /// "HOG" | "AMBASSADOR" | "APPLICATION"
+  recruitedByType     String?
+  notes               String?
+  suspendedAt         DateTime?
+  suspendedBy         String?
+  /// Year 2: the Growth Associate whose cluster they belong to.
+  growthAssociateId   String?
+  growthAssociate     GrowthAssociate? @relation("GrowthAssociateCluster", fields: [growthAssociateId], references: [id])
+
+  referrals           AmbassadorReferral[]
+  quarterlyChallenges AmbassadorQuarterlyChallenge[]
+  tierLogs            AmbassadorTierLog[]
+
   @@index([universityId])
   @@index([status])
   @@index([parentId])
   @@index([provisionalUntil])
+  @@index([growthAssociateId])
+  @@index([lastConversionAt])
 }
 
 /// One-time codes that let a worker / ambassador set or reset the password of
@@ -888,6 +920,9 @@ model Payment {
   ambassadorId       String?
   ambassador         Ambassador?  @relation("PaymentAmbassador", fields: [ambassadorId], references: [id])
   isAmbassadorDriven Boolean      @default(false)
+  /// Phase 3: the AmbassadorReferral this payment converted (set on the confirmed downpayment).
+  referralId    String?
+  referral      AmbassadorReferral? @relation(fields: [referralId], references: [id])
   notes         String?
   date          DateTime         @default(now())
   createdAt     DateTime         @default(now())
@@ -899,6 +934,7 @@ model Payment {
   @@index([projectId])
   @@index([date])
   @@index([source, status])
+  @@index([referralId])
 }
 
 // ─── EXPENSES ───────────────────────────────────────────
@@ -1515,8 +1551,11 @@ model PayoutRecord {
   /// Worker.id, Ambassador.id, or the role string "HOG" / "COO" (the payee user is resolved when paid).
   recipientId   String
   recipientName String
-  projectId     String
-  project       Project  @relation(fields: [projectId], references: [id])
+  /// Null for an ambassador bonus (quarterly challenge, Platinum per-client): those carry `bonusKey`.
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+  /// "challenge:Q3-2026:<ambassadorId>" | "platinum:Q3-2026:<ambassadorId>" — one row per bonus.
+  bonusKey      String?  @unique
   amount        Float
   basis         String
   /// PENDING, PAID, CANCELLED
@@ -1597,4 +1636,142 @@ model PayoutSubmission {
   revisions     Json     @default("[]")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+// ─── PHASE 3: AMBASSADOR PLATFORM ────────────────────────
+
+/// A student an ambassador brought in. Logged by the HOG on their behalf, or
+/// created by the intake when a project arrives with the ambassador's code.
+/// CONVERTED when the project's downpayment is confirmed — that is the only
+/// event that counts toward the tier.
+model AmbassadorReferral {
+  id             String     @id @default(cuid())
+  ambassadorId   String
+  ambassador     Ambassador @relation(fields: [ambassadorId], references: [id])
+  clientName     String
+  clientWhatsapp String?
+  school         String?
+  clientId       String?
+  client         Client?    @relation(fields: [clientId], references: [id])
+  /// Set once the project exists in WorkBase; one referral per project.
+  projectId      String?    @unique
+  project        Project?   @relation(fields: [projectId], references: [id])
+  /// PENDING, CONVERTED, LOST, CANCELLED
+  status         String     @default("PENDING")
+  /// HOG (logged by hand), INTAKE (the client used the code), ADMIN (new-project form), BACKFILL
+  source         String     @default("HOG")
+  submittedAt    DateTime   @default(now())
+  convertedAt    DateTime?
+  /// Project value at the time of conversion.
+  projectValue   Float?
+  notes          String?
+  createdById    String?
+  payments       Payment[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([ambassadorId, status])
+  @@index([convertedAt])
+  @@index([submittedAt])
+}
+
+/// One row per ambassador per quarter once they have a conversion in it (or
+/// the HOG grants an extension): 10 conversions in the window earns ₦35,000.
+model AmbassadorQuarterlyChallenge {
+  id               String     @id @default(cuid())
+  ambassadorId     String
+  ambassador       Ambassador @relation(fields: [ambassadorId], references: [id])
+  /// "Q3-2026"
+  quarter          String
+  startDate        DateTime
+  endDate          DateTime
+  extensionGranted Boolean    @default(false)
+  extensionEndDate DateTime?
+  extensionBy      String?
+  targetCount      Int        @default(10)
+  actualCount      Int        @default(0)
+  completed        Boolean    @default(false)
+  completedAt      DateTime?
+  bonusPaid        Boolean    @default(false)
+  bonusAmount      Float      @default(35000)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@unique([ambassadorId, quarter])
+  @@index([quarter])
+}
+
+/// Every tier change, so the leaderboard can say "Tier up!" for the month it happened.
+model AmbassadorTierLog {
+  id           String     @id @default(cuid())
+  ambassadorId String
+  ambassador   Ambassador @relation(fields: [ambassadorId], references: [id])
+  fromTier     String
+  toTier       String
+  conversions  Int
+  createdAt    DateTime   @default(now())
+
+  @@index([ambassadorId, createdAt])
+  @@index([createdAt])
+}
+
+/// A student-union or faculty partnership the HOG manages.
+model Partnership {
+  id               String    @id @default(cuid())
+  organisationName String
+  school           String
+  faculty          String?
+  contactPerson    String?
+  contactWhatsapp  String?
+  /// ACTIVE, INACTIVE, IN_NEGOTIATION
+  status           String    @default("ACTIVE")
+  commitmentAmount Float     @default(0)
+  /// "GROUP_ACCESS" | "PHYSICAL_ACCESS" | "BOTH"
+  whatWeReceive    String?
+  startDate        DateTime?
+  renewalDate      DateTime?
+  notes            String?
+  createdBy        String
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([status])
+  @@index([renewalDate])
+}
+
+/// What the HOG posted to the ambassador community and when (the Monday /
+/// Wednesday / Friday rhythm), for the calendar and the consistency figures.
+model AmbassadorContentLog {
+  id          String   @id @default(cuid())
+  /// MONDAY_FLIER, WEDS_CHECKIN, FRIDAY_SPOTLIGHT, OTHER
+  contentType String
+  postedAt    DateTime @default(now())
+  /// ISO week, "2026-W38"
+  week        String
+  note        String?
+  loggedBy    String
+  createdAt   DateTime @default(now())
+
+  @@index([week])
+  @@index([postedAt])
+}
+
+/// Year 2: a cluster manager above Core ambassadors, recruited by the HOG.
+/// Schema only — the UI is a Coming Soon page until Year 2 activates it.
+model GrowthAssociate {
+  id               String       @id @default(cuid())
+  userId           String?
+  name             String
+  whatsapp         String
+  school           String
+  recruitedBy      String
+  /// INACTIVE, ACTIVE
+  status           String       @default("INACTIVE")
+  clusterName      String?
+  lifetimeEarnings Float        @default(0)
+  isActive         Boolean      @default(false)
+  activatedAt      DateTime?
+  clusterAmbassadors Ambassador[] @relation("GrowthAssociateCluster")
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 }

@@ -274,10 +274,11 @@ export async function calculateMonthlyPayouts(month: string): Promise<CalculateR
 export interface PayoutLine {
   recordId: string;
   leg: PayoutLeg;
-  projectDbId: string;
-  projectCode: string;
-  serviceName: string;
-  clientName: string;
+  /** Null for an ambassador bonus (quarterly challenge / Platinum): no project behind it. */
+  projectDbId: string | null;
+  projectCode: string | null;
+  serviceName: string | null;
+  clientName: string | null;
   amount: number;
   basis: string;
   completedAt: string | null;
@@ -382,13 +383,13 @@ function toLine(r: RecordRow): PayoutLine {
   return {
     recordId: r.id,
     leg: r.leg as PayoutLeg,
-    projectDbId: r.project.id,
-    projectCode: r.project.projectId,
-    serviceName: r.project.service.serviceName,
-    clientName: r.project.client.fullName,
+    projectDbId: r.project?.id ?? null,
+    projectCode: r.project?.projectId ?? null,
+    serviceName: r.project?.service.serviceName ?? null,
+    clientName: r.project?.client.fullName ?? null,
     amount: r.amount,
     basis: r.basis,
-    completedAt: r.project.finalCompletionDate?.toISOString() ?? null,
+    completedAt: r.project?.finalCompletionDate?.toISOString() ?? null,
     status: r.status as "PENDING" | "PAID",
     paidAt: r.paidAt?.toISOString() ?? null,
   };
@@ -406,7 +407,7 @@ function groupBase(recipientId: string, name: string, lines: PayoutLine[]): Grou
     total,
     paid,
     unpaid,
-    projectCount: new Set(lines.map((l) => l.projectDbId)).size,
+    projectCount: new Set(lines.map((l) => l.projectDbId).filter((x): x is string => x != null)).size,
     status: unpaid === 0 ? "PAID" : paid === 0 ? "UNPAID" : "PARTLY",
     paidAt: paidDates.length ? paidDates.sort().at(-1)! : null,
   };
@@ -418,7 +419,7 @@ function sectionTotals(groups: GroupBase[]): SectionTotals {
     paid: groups.reduce((s, g) => s + g.paid, 0),
     unpaid: groups.reduce((s, g) => s + g.unpaid, 0),
     recipients: groups.length,
-    projects: new Set(groups.flatMap((g) => g.lines.map((l) => l.projectDbId))).size,
+    projects: new Set(groups.flatMap((g) => g.lines.map((l) => l.projectDbId)).filter((x): x is string => x != null)).size,
   };
 }
 
@@ -709,7 +710,7 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
         const claimed = await tx.payoutRecord.updateMany({ where: { id: { in: ids }, status: "PENDING" }, data: { status: "PAID" } });
         if (claimed.count !== ids.length) throw new PayoutError("Someone else just recorded part of this payout. Refresh the page.");
 
-        const projectCount = new Set(rows.map((r) => r.projectId)).size;
+        const projectCount = new Set(rows.map((r) => r.projectId).filter((x): x is string => x != null)).size;
         const payment = await tx.payment.create({
           data: {
             paymentId: firstNumber > 0 ? formatId("PAYMENT", firstNumber + minted++) : await nextId("PAYMENT"),
@@ -732,7 +733,7 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
           data: { paidAt: paidOn, paidById: input.paidById, paidToUserId: userId, paymentId: payment.id },
         });
         // The project flags the portals and the old queue read.
-        const byLeg = (leg: PayoutLeg) => rows.filter((r) => r.leg === leg).map((r) => r.projectId);
+        const byLeg = (leg: PayoutLeg) => rows.filter((r) => r.leg === leg).map((r) => r.projectId).filter((x): x is string => x != null);
         const workerProjects = byLeg("WORKER");
         const ambProjects = byLeg("AMBASSADOR");
         const parentProjects = byLeg("PARENT");

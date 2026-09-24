@@ -144,12 +144,18 @@ export function PayoutSection({
                     {g.lines.map((l) => (
                       <li key={l.recordId} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 text-[13px]">
                         <span className="min-w-0 text-muted-foreground">
-                          <Link href={`/admin/projects/${l.projectCode}?tab=financials`} className="font-mono text-foreground hover:underline">
-                            {l.projectCode}
-                          </Link>
-                          {" · "}
-                          {l.serviceName} · {l.clientName}
-                          <span className="ml-1 text-subtle">· {l.basis}</span>
+                          {l.projectCode ? (
+                            <>
+                              <Link href={`/admin/projects/${l.projectCode}?tab=financials`} className="font-mono text-foreground hover:underline">
+                                {l.projectCode}
+                              </Link>
+                              {" · "}
+                              {l.serviceName} · {l.clientName}
+                              <span className="ml-1 text-subtle">· {l.basis}</span>
+                            </>
+                          ) : (
+                            <span className="text-foreground">{l.basis}</span>
+                          )}
                         </span>
                         <span className="font-mono tabular-nums text-foreground">
                           {formatNaira(l.amount)}

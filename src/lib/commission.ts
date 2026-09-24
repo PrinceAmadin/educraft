@@ -26,7 +26,7 @@ export const MIN_PARENT_COMMISSION_RATE = 0;
 export const MAX_PARENT_COMMISSION_RATE = 50;
 
 /** Max sub-ambassadors one parent can have, and how deep the chain goes. */
-export const MAX_SUB_AMBASSADORS = 5;
+export const MAX_SUB_AMBASSADORS = 10;
 
 /** Tiers whose parent-commission has "activated" (CLAUDE.md: requires Silver+). */
 export const PARENT_ACTIVATION_TIERS = ["SILVER", "GOLD", "PLATINUM"] as const;

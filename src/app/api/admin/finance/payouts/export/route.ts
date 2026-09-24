@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const data = await getPayoutMonth(month);
     const rows: string[][] = [["Month", "Recipient type", "Recipient", "Code", "Project", "Client", "Service", "Leg", "Basis", "Amount (NGN)", "Status", "Paid on"]];
     const push = (type: string, name: string, code: string, line: PayoutLine) =>
-      rows.push([month, type, name, code, line.projectCode, line.clientName, line.serviceName, line.leg, line.basis, String(line.amount), line.status, line.paidAt ? line.paidAt.slice(0, 10) : ""]);
+      rows.push([month, type, name, code, line.projectCode ?? "", line.clientName ?? "", line.serviceName ?? "", line.leg, line.basis, String(line.amount), line.status, line.paidAt ? line.paidAt.slice(0, 10) : ""]);
     for (const g of data.workers) for (const l of g.lines) push("Worker", g.name, g.code, l);
     for (const g of data.ambassadors) for (const l of g.lines) push("Ambassador", g.name, g.code, l);
     for (const g of data.executives) for (const l of g.lines) push("Executive", g.name, g.recipientId, l);
