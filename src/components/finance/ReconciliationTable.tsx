@@ -7,7 +7,7 @@ import { LuCheck, LuCircleAlert, LuLoaderCircle, LuRefreshCw } from "react-icons
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { cn, formatDateTime, formatNaira } from "@/lib/utils";
-import { isReconciled, type ReconciliationRow } from "@/lib/services/paystack-payments";
+import { isReconciled, type ReconciliationRow } from "@/lib/paystack-reconciliation";
 
 export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
   const router = useRouter();
