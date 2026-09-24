@@ -30,7 +30,7 @@ export interface CoreOption {
  * level, Core or Sub (and whose), a note, and a previewed BLE-LAG-847 code.
  * The server keeps the previewed code when it is still free.
  */
-export function NewAmbassadorDialog({ universities, cores }: { universities: UniversityOption[]; cores: CoreOption[] }) {
+export function NewAmbassadorDialog({ universities, cores, partnerships = [] }: { universities: UniversityOption[]; cores: CoreOption[]; partnerships?: { id: string; organisationName: string; school: string }[] }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [created, setCreated] = React.useState<{ ambassadorId: string; referralCode: string; fullName: string } | null>(null);
@@ -55,6 +55,7 @@ export function NewAmbassadorDialog({ universities, cores }: { universities: Uni
             <NewForm
               universities={universities}
               cores={cores}
+              partnerships={partnerships}
               onCreated={(c) => {
                 setCreated(c);
                 router.refresh();
@@ -111,11 +112,13 @@ function Created({ ambassadorId, referralCode, fullName, onClose }: { ambassador
 function NewForm({
   universities,
   cores,
+  partnerships,
   onCreated,
   onCancel,
 }: {
   universities: UniversityOption[];
   cores: CoreOption[];
+  partnerships: { id: string; organisationName: string; school: string }[];
   onCreated: (c: { ambassadorId: string; referralCode: string; fullName: string }) => void;
   onCancel: () => void;
 }) {
@@ -130,7 +133,7 @@ function NewForm({
     formState: { errors, isSubmitting },
   } = useForm<CreateDirectoryAmbassadorInput>({
     resolver: zodResolver(createDirectoryAmbassadorSchema),
-    defaultValues: { fullName: "", phone: "", email: "", universityId: "", department: "", level: "", isCore: true, coreAmbassadorId: "", notes: "", referralCode: "" },
+    defaultValues: { fullName: "", phone: "", email: "", universityId: "", department: "", level: "", isCore: true, coreAmbassadorId: "", partnershipId: "", notes: "", referralCode: "" },
   });
 
   const isCore = watch("isCore");
@@ -235,6 +238,19 @@ function NewForm({
               </Select>
               {cores.length === 0 ? <p className="text-xs text-muted-foreground">No Core is at Silver yet, so a Sub cannot be placed. Add them as a Core for now.</p> : null}
             </div>
+          </Field>
+        ) : null}
+
+        {partnerships.length > 0 ? (
+          <Field label="Came in through" htmlFor="na-channel" error={errors.partnershipId?.message} hint="Their projects count on the partnership">
+            <Select id="na-channel" {...register("partnershipId")}>
+              <option value="">Direct recruitment by the HOG</option>
+              {partnerships.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.organisationName} ({p.school})
+                </option>
+              ))}
+            </Select>
           </Field>
         ) : null}
 

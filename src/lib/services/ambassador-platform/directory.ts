@@ -404,7 +404,9 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
       ? db.user.findUnique({ where: { id: a.recruitedBy }, select: { displayName: true, execProfile: { select: { fullName: true } } } }).then((u) => u?.execProfile?.fullName ?? u?.displayName ?? null)
       : a.recruitedBy && a.recruitedByType === "AMBASSADOR"
         ? db.ambassador.findUnique({ where: { id: a.recruitedBy }, select: { fullName: true } }).then((x) => x?.fullName ?? null)
-        : Promise.resolve(null),
+        : a.recruitedBy && a.recruitedByType === "PARTNERSHIP"
+          ? db.partnership.findUnique({ where: { id: a.recruitedBy }, select: { organisationName: true } }).then((x) => x?.organisationName ?? null)
+          : Promise.resolve(null),
   ]);
   const conversions = a.lifetimeConversions;
   return {
@@ -471,6 +473,8 @@ export async function listSubCandidates(coreId: string): Promise<{ id: string; a
 export async function createDirectoryAmbassador(input: CreateDirectoryAmbassadorInput, createdById: string): Promise<{ id: string; ambassadorId: string; referralCode: string }> {
   const uni = await db.university.findUnique({ where: { id: input.universityId }, select: { id: true, abbreviation: true } });
   if (!uni) throw new DirectoryError("Pick a university from the list");
+  const partnership = input.partnershipId ? await db.partnership.findUnique({ where: { id: input.partnershipId }, select: { id: true } }) : null;
+  if (input.partnershipId && !partnership) throw new DirectoryError("That partnership no longer exists");
   let core: { id: string; fullName: string; tier: AmbassadorTier; parentId: string | null; status: string; _count: { children: number } } | null = null;
   if (!input.isCore) {
     core = await db.ambassador.findUnique({ where: { id: input.coreAmbassadorId || "" }, select: { id: true, fullName: true, tier: true, parentId: true, status: true, _count: { select: { children: true } } } });
@@ -496,8 +500,8 @@ export async function createDirectoryAmbassador(input: CreateDirectoryAmbassador
           tier: calculateTier(0),
           status: "Active",
           notes: input.notes || null,
-          recruitedBy: createdById,
-          recruitedByType: "HOG",
+          recruitedBy: partnership ? partnership.id : createdById,
+          recruitedByType: partnership ? "PARTNERSHIP" : "HOG",
           parentId: core?.id ?? null,
           bankName: input.bankName || null,
           accountNumber: input.accountNumber || null,

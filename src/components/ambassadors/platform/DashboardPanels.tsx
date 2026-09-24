@@ -45,7 +45,7 @@ export function AttentionPanel({ attention }: { attention: AttentionCounts }) {
   if (attention.nearPromotion > 0) lines.push({ tone: "boost", text: `${n(attention.nearPromotion, "ambassador")} approaching a tier promotion (within 2 conversions)`, href: "/admin/ambassadors/list?near=1", cta: "View near-promotion" });
   if (attention.platinumBonus > 0) lines.push({ tone: "boost", text: `${n(attention.platinumBonus, "Platinum ambassador")} eligible for the quarterly bonus payout`, href: "/admin/ambassadors/list?tier=PLATINUM", cta: "View Platinum" });
   if (attention.readySubTeams > 0) lines.push({ tone: "info", text: `${n(attention.readySubTeams, "ambassador")} ready to activate a sub-team (Silver+, no Subs yet)`, href: "/admin/ambassadors/list?ready=1", cta: "View ready" });
-  if (attention.renewalsDue > 0) lines.push({ tone: "warn", text: `${n(attention.renewalsDue, "partnership")} up for renewal within 30 days`, href: "/admin/ambassadors/partnerships", cta: "View partnerships" });
+  if (attention.renewalsDue > 0) lines.push({ tone: "warn", text: `${n(attention.renewalsDue, "partnership")} due for renewal (within 30 days or overdue)`, href: "/admin/ambassadors/partnerships", cta: "View partnerships" });
 
   return (
     <section aria-labelledby="attention-heading" className="rounded-2xl bg-zone p-5 sm:p-7">

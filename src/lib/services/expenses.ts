@@ -306,7 +306,13 @@ export async function createExpense(input: CreateExpenseInput, loggedById: strin
 }
 
 /** The HOG's student-union sponsorship, paid from the Growth Fund against the quarterly budget. */
-export async function createSponsorshipExpense(input: SponsorshipExpenseInput, loggedById: string, loggedByRole: string): Promise<{ id: string; approvalStatus: string; budget: GrowthFundQuarter }> {
+export async function createSponsorshipExpense(
+  input: SponsorshipExpenseInput,
+  loggedById: string,
+  loggedByRole: string,
+  /** Phase 3: the partnership this payment is for (its term commitment or a renewal). */
+  opts: { partnershipId?: string } = {}
+): Promise<{ id: string; approvalStatus: string; budget: GrowthFundQuarter }> {
   const approvalStatus = expenseNeedsApproval(input.amount, loggedByRole) ? "PENDING_APPROVAL" : "AUTO_APPROVED";
   const row = await db.$transaction(async (tx) => {
     const created = await tx.expense.create({
@@ -319,6 +325,7 @@ export async function createSponsorshipExpense(input: SponsorshipExpenseInput, l
         kind: "SPONSORSHIP",
         bucketSource: "GROWTH_FUND",
         approvalStatus,
+        partnershipId: opts.partnershipId ?? null,
         ...(input.notes ? { frequency: null } : {}),
       },
       select: { id: true, description: true, amount: true, date: true },

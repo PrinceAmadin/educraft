@@ -193,6 +193,8 @@ export default async function AmbassadorDetailPage({
               ? `Direct recruitment by HOG${platform.recruiterName ? ` (${platform.recruiterName})` : ""}`
               : platform.recruitedByType === "AMBASSADOR"
                 ? `Ambassador${platform.recruiterName ? ` ${platform.recruiterName}` : ""}`
+                : platform.recruitedByType === "PARTNERSHIP"
+                  ? `Through a partnership${platform.recruiterName ? ` (${platform.recruiterName})` : ""}`
                 : platform.recruitedByType === "APPLICATION"
                   ? "Applied at /apply"
                   : "Not recorded"}

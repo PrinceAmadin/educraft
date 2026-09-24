@@ -968,6 +968,10 @@ model Expense {
   /// expense per project (or subsystem) per day, amount kept in step with the
   /// AiUsageLog rows behind it. Locks the row against manual deletion.
   aiUsageKey     String?   @unique
+  /// Phase 3: the partnership this sponsorship paid for (a term's commitment
+  /// or a renewal), so the partnership shows what it has cost the Growth Fund.
+  partnershipId  String?
+  partnership    Partnership? @relation(fields: [partnershipId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
 
   @@index([date])
@@ -975,6 +979,7 @@ model Expense {
   @@index([projectId])
   @@index([kind, date])
   @@index([bucketSource, approvalStatus])
+  @@index([partnershipId])
 }
 
 // ─── NOTIFICATIONS ──────────────────────────────────────
@@ -1734,6 +1739,8 @@ model Partnership {
   createdBy        String
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  /// The sponsorship expenses (Growth Fund) paid for this partnership's terms.
+  expenses         Expense[]
 
   @@index([status])
   @@index([renewalDate])

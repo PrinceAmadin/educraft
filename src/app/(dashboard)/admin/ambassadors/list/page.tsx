@@ -11,6 +11,7 @@ import { NewAmbassadorDialog } from "@/components/ambassadors/platform/NewAmbass
 import { db } from "@/lib/db";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
 import { directoryActivityCounts, directoryFilterOptions, listDirectory, listCoreOptions } from "@/lib/services/ambassador-platform/directory";
+import { partnershipOptions } from "@/lib/services/ambassador-platform/partnerships";
 import { directoryQuerySchema } from "@/lib/validations/ambassador-platform";
 
 export const metadata: Metadata = { title: "Ambassador directory" };
@@ -25,13 +26,14 @@ export default async function AmbassadorDirectoryPage({ searchParams }: { search
   const flat = Object.fromEntries(Object.entries(searchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
   const query = directoryQuerySchema.parse(flat);
   const now = new Date();
-  const [result, options, universities, cores, pendingApplications, activity] = await Promise.all([
+  const [result, options, universities, cores, pendingApplications, activity, partnerships] = await Promise.all([
     listDirectory(query, now),
     directoryFilterOptions(),
     db.university.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, abbreviation: true } }),
     listCoreOptions(),
     db.ambassadorApplication.count({ where: { status: "PENDING" } }),
     directoryActivityCounts(now),
+    partnershipOptions(),
   ]);
 
   return (
@@ -42,7 +44,7 @@ export default async function AmbassadorDirectoryPage({ searchParams }: { search
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <BroadcastAction />
-            <NewAmbassadorDialog universities={universities} cores={cores.filter((c) => c.subCount < MAX_SUB_AMBASSADORS)} />
+            <NewAmbassadorDialog universities={universities} cores={cores.filter((c) => c.subCount < MAX_SUB_AMBASSADORS)} partnerships={partnerships} />
           </div>
         }
       />
@@ -50,8 +52,8 @@ export default async function AmbassadorDirectoryPage({ searchParams }: { search
 
       <section className={STATS_GRID} aria-label="Network activity">
         <StatsCard label="Ambassadors" value={String(activity.total)} detail="Open accounts" icon={LuUsers} />
-        <StatsCard label="Active" value={String(activity.ACTIVE)} detail="Converted in the last 30 days" icon={LuCircleCheck} tone="success" />
-        <StatsCard label="Dormant" value={String(activity.DORMANT)} detail="Last conversion 30–60 days ago" icon={LuMoonStar} tone="gold" />
+        <StatsCard label="Active" value={String(activity.ACTIVE)} detail="Referred or converted in the last 30 days" icon={LuCircleCheck} tone="success" />
+        <StatsCard label="Dormant" value={String(activity.DORMANT)} detail="Last activity 30–60 days ago" icon={LuMoonStar} tone="gold" />
         <StatsCard label="New" value={String(activity.NEW)} detail="Joined in the last 30 days" icon={LuSparkles} />
       </section>
 

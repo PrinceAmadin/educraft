@@ -42,6 +42,8 @@ export const createDirectoryAmbassadorSchema = z
     isCore: z.boolean().default(true),
     coreAmbassadorId: z.string().trim().optional().or(z.literal("")),
     notes: z.string().trim().max(1000).optional().or(z.literal("")),
+    /** Came in through a partnership (Section 6): counts their projects on it. Blank = direct recruitment by the HOG. */
+    partnershipId: z.string().trim().optional().or(z.literal("")),
     /** The code the modal previewed (BLE-LAG-847). Used if still free, else a fresh one is drawn. */
     referralCode: z.string().trim().regex(/^[A-Z]{3}-[A-Z]{3}-\d{3}$/, "Codes look like BLE-LAG-847").optional().or(z.literal("")),
     bankName: z.string().trim().max(80).optional().or(z.literal("")),
@@ -117,4 +119,50 @@ export const processQuarterSchema = z.object({
 
 export const extendChallengeSchema = z.object({
   quarter: quarterKeySchema,
+});
+
+// ── Partnerships (Section 6) ─────────────────────────────────────────────
+const optionalDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional().or(z.literal(""));
+export const PARTNERSHIP_STATUS_VALUES = ["ACTIVE", "IN_NEGOTIATION", "INACTIVE"] as const;
+export const WHAT_WE_RECEIVE_VALUES = ["GROUP_ACCESS", "PHYSICAL_ACCESS", "BOTH"] as const;
+
+const partnershipFields = {
+  organisationName: z.string().trim().min(2, "Enter the organisation's name").max(160),
+  school: z.string().trim().min(2, "Enter the school or university").max(120),
+  faculty: z.string().trim().max(120).optional().or(z.literal("")),
+  contactPerson: z.string().trim().max(120).optional().or(z.literal("")),
+  contactWhatsapp: z.string().trim().max(30).optional().or(z.literal("")),
+  commitmentAmount: z.coerce.number().int("Whole naira only").min(0, "Cannot be negative").max(100_000_000),
+  whatWeReceive: z.enum(WHAT_WE_RECEIVE_VALUES).optional().or(z.literal("")),
+  status: z.enum(PARTNERSHIP_STATUS_VALUES),
+  startDate: optionalDate,
+  renewalDate: optionalDate,
+  notes: z.string().trim().max(2000).optional().or(z.literal("")),
+};
+
+const renewalAfterStart = (v: { startDate?: string; renewalDate?: string }, ctx: z.RefinementCtx) => {
+  if (v.startDate && v.renewalDate && v.renewalDate <= v.startDate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["renewalDate"], message: "The renewal date must be after the start date" });
+  }
+};
+
+/** "Add partnership". */
+export const createPartnershipSchema = z.object(partnershipFields).superRefine(renewalAfterStart);
+export type CreatePartnershipInput = z.infer<typeof createPartnershipSchema>;
+
+/** Edit: any subset of the fields. */
+export const updatePartnershipSchema = z
+  .object(Object.fromEntries(Object.entries(partnershipFields).map(([k, v]) => [k, (v as z.ZodTypeAny).optional()])) as { [K in keyof typeof partnershipFields]: z.ZodOptional<(typeof partnershipFields)[K]> })
+  .superRefine(renewalAfterStart)
+  .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to update");
+export type UpdatePartnershipInput = z.infer<typeof updatePartnershipSchema>;
+
+/** "Renew": the next term's payment (0 = nothing paid now) and its renewal date. */
+export const renewPartnershipSchema = z.object({
+  amount: z.coerce.number().int("Whole naira only").min(0).max(100_000_000),
+  renewalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"),
+});
+
+export const linkPartnershipAmbassadorSchema = z.object({
+  ambassadorId: z.string().min(1, "Pick an ambassador"),
 });

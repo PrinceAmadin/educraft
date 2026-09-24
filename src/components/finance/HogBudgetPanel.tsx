@@ -1,4 +1,5 @@
 import type { HogBudget } from "@/lib/services/expenses";
+import { FINANCE_DEFAULTS } from "@/lib/finance/commission-config";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
 /**
@@ -6,7 +7,7 @@ import { cn, formatDate, formatNaira } from "@/lib/utils";
  * from the Growth Fund, with the recent spending under it. Shared by the
  * Expenses page (CFO) and the HOG's own page.
  */
-export function HogBudgetPanel({ budget, title = "HOG sponsorship budget" }: { budget: HogBudget; title?: string }) {
+export function HogBudgetPanel({ budget, title = "HOG sponsorship budget", showApprovalRule = false }: { budget: HogBudget; title?: string; showApprovalRule?: boolean }) {
   const pct = budget.budget > 0 ? Math.min(100, Math.round((budget.spent / budget.budget) * 100)) : 0;
   return (
     <section aria-labelledby="hog-budget-heading" className="rounded-2xl bg-zone p-5 sm:p-7">
@@ -33,6 +34,11 @@ export function HogBudgetPanel({ budget, title = "HOG sponsorship budget" }: { b
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-elevated" role="img" aria-label={`${pct}% of the budget spent`}>
         <div className={cn("h-full rounded-full", budget.remaining < 0 ? "bg-danger" : pct >= 80 ? "bg-gold" : "bg-primary")} style={{ width: `${pct}%` }} />
       </div>
+      {showApprovalRule ? (
+        <p className="mt-2 text-[13px] text-muted-foreground">
+          Up to {formatNaira(FINANCE_DEFAULTS.expenseApprovalThreshold)}: the HOG approves independently. Above {formatNaira(FINANCE_DEFAULTS.expenseApprovalThreshold)}: the CEO&apos;s approval is required.
+        </p>
+      ) : null}
       {budget.pendingCount > 0 ? (
         <p className="mt-2 text-[13px] text-gold">
           {budget.pendingCount} sponsorship{budget.pendingCount === 1 ? "" : "s"} awaiting the founder&apos;s approval (not counted yet).

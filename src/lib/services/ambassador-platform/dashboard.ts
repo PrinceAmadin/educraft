@@ -6,6 +6,7 @@ import { lastWeeks, weekStart } from "@/lib/ambassadors/weeks";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { weekRhythm, type WeekRhythm } from "@/lib/services/ambassador-platform/content";
 import { weeklySpotlight, type Spotlight } from "@/lib/services/ambassador-platform/leaderboard";
+import { renewalDueWhere } from "@/lib/services/ambassador-platform/partnerships";
 
 /**
  * The Ambassador Dashboard (Phase 3 Section 1): "what is the network doing
@@ -115,7 +116,7 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
     db.ambassadorReferral.findMany({ where: { status: { not: "CANCELLED" }, OR: [{ submittedAt: { gte: weeks[0].start } }, { convertedAt: { gte: weeks[0].start } }] }, select: { ambassadorId: true, submittedAt: true, convertedAt: true, status: true } }),
     db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED", convertedAt: { gte: qStart } }, _count: { _all: true } }),
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: quarterKey, bonusPaid: true }, select: { ambassadorId: true } }),
-    db.partnership.count({ where: { status: "ACTIVE", renewalDate: { gte: now, lte: new Date(now.getTime() + 30 * DAY) } } }),
+    db.partnership.count({ where: renewalDueWhere(now) }),
     weekRhythm(now),
   ]);
 
