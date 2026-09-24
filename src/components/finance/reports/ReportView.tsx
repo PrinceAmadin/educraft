@@ -1,9 +1,16 @@
 import type { AnnualReport, FinanceReport, MonthFigures, MonthlyReport, SemesterReport } from "@/lib/services/finance/reports";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
-function Row({ label, value, strong, tone }: { label: string; value: string; strong?: boolean; tone?: "success" | "danger" }) {
+function Row({ label, value, strong, tone, stack }: { label: string; value: string; strong?: boolean; tone?: "success" | "danger"; stack?: boolean }) {
   return (
-    <div className={cn("flex items-center justify-between gap-3 py-1.5 text-sm", strong && "mt-1.5 border-t border-border pt-3")}>
+    <div
+      className={cn(
+        "py-1.5 text-sm",
+        // A long value (a comparison) sits under its label on phones and beside it from sm.
+        stack ? "flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3" : "flex items-center justify-between gap-3",
+        strong && "mt-1.5 border-t border-border pt-3"
+      )}
+    >
       <span className={strong ? "font-medium text-foreground" : "text-muted-foreground"}>{label}</span>
       <span className={cn("font-mono tabular-nums", strong ? "font-semibold" : "", tone === "success" ? "text-success" : tone === "danger" ? "text-danger" : "text-foreground")}>{value}</span>
     </div>
@@ -141,12 +148,12 @@ function Monthly({ r }: { r: MonthlyReport }) {
         <Row label="Overdue (more than 7 days)" value={`${r.outstanding.overdueCount} · ${money(r.outstanding.overdueAmount)}`} />
       </Section>
       <Section title={`Compared with ${r.previous.label}`}>
-        <Row label="Revenue" value={`${money(r.previous.revenue)} → ${money(f.revenue)} · ${change(r.comparison.revenue)}`} />
-        <Row label="Payouts owed" value={`${money(r.previous.payouts.owed)} → ${money(f.payouts.owed)} · ${change(r.comparison.payouts)}`} />
-        <Row label="Net retained" value={`${money(r.previous.retained)} → ${money(f.retained)} · ${change(r.comparison.retained)}`} />
-        <Row label="Operating expenses" value={`${money(r.previous.operatingExpenses)} → ${money(f.operatingExpenses)} · ${change(r.comparison.operatingExpenses)}`} />
-        <Row label="Net profit" value={`${money(r.previous.netProfit)} → ${money(f.netProfit)} · ${change(r.comparison.netProfit)}`} />
-        <Row label="Projects completed" value={`${r.previous.completed} → ${f.completed} · ${change(r.comparison.completed)}`} />
+        <Row label="Revenue" value={`${money(r.previous.revenue)} → ${money(f.revenue)} · ${change(r.comparison.revenue)}`} stack />
+        <Row label="Payouts owed" value={`${money(r.previous.payouts.owed)} → ${money(f.payouts.owed)} · ${change(r.comparison.payouts)}`} stack />
+        <Row label="Net retained" value={`${money(r.previous.retained)} → ${money(f.retained)} · ${change(r.comparison.retained)}`} stack />
+        <Row label="Operating expenses" value={`${money(r.previous.operatingExpenses)} → ${money(f.operatingExpenses)} · ${change(r.comparison.operatingExpenses)}`} stack />
+        <Row label="Net profit" value={`${money(r.previous.netProfit)} → ${money(f.netProfit)} · ${change(r.comparison.netProfit)}`} stack />
+        <Row label="Projects completed" value={`${r.previous.completed} → ${f.completed} · ${change(r.comparison.completed)}`} stack />
       </Section>
     </>
   );
