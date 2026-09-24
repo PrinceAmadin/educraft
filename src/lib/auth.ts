@@ -5,8 +5,13 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { authConfig } from "@/lib/auth.config";
 import { verifyPassword } from "@/lib/services/client-otp";
-import { primaryPortal, type Portal } from "@/lib/roles";
+import { isStaffRole, primaryPortal, type Portal } from "@/lib/roles";
+import { EXEC_ROLE_LABELS } from "@/lib/rbac";
 import { linkClientOrders } from "@/lib/services/account-links";
+
+// Landing route per role lives with the rest of the access rules (edge-safe);
+// re-exported here because every caller already imports it from `@/lib/auth`.
+export { homeForRole } from "@/lib/rbac";
 
 // One sign-in page for everyone: the first field takes an email, or a client's
 // Client ID (ECC-0001).
@@ -18,6 +23,15 @@ const credentialsSchema = z.object({
 function requestIp(request: Request | undefined): string {
   const forwarded = request?.headers?.get("x-forwarded-for")?.split(",")[0]?.trim();
   return forwarded || request?.headers?.get("x-real-ip") || "unknown";
+}
+
+/** Records the sign-in (Team & Roles shows an invited executive as pending until their first). Never blocks a sign-in. */
+async function touchSignIn(userId: string): Promise<void> {
+  try {
+    await db.user.update({ where: { id: userId }, data: { lastSignInAt: new Date() } });
+  } catch (error) {
+    console.error("[auth] could not record sign-in time", error);
+  }
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -38,13 +52,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // after repeated wrong passwords). A Client ID is always a client.
         const clientSignIn = async () => {
           const client = await verifyPassword({ identifierInput: identifier, password, ip: requestIp(request) });
-          return client ? { id: client.userId, email: client.email, name: client.name, role: client.role } : null;
+          if (!client) return null;
+          await touchSignIn(client.userId);
+          return { id: client.userId, email: client.email, name: client.name, role: client.role };
         };
         if (!identifier.includes("@")) return clientSignIn();
 
         const user = await db.user.findUnique({
           where: { email: identifier.toLowerCase() },
           include: {
+            execProfile: { select: { fullName: true } },
             workerProfile: { select: { fullName: true, status: true } },
             ambassadorProfile: { select: { fullName: true, status: true } },
             clientProfiles: { select: { fullName: true }, take: 1 },
@@ -57,15 +74,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
 
+        await touchSignIn(user.id);
+
         // The email is the person: client orders placed with it join this login
         // (see account-links.ts). Staff never hold client orders.
-        if (user.role !== "SUPER_ADMIN" && user.role !== "OPS_MANAGER") {
+        if (!isStaffRole(user.role)) {
           await linkClientOrders(user.id, user.email);
         }
 
-        // Explicit display name wins; then the role profile's own name; the
-        // email local-part is a last resort, not a design.
+        // An executive's record names them (Team & Roles edits it); then the
+        // explicit display name; then the role profile's own name; the email
+        // local-part is a last resort, not a design.
         const name =
+          user.execProfile?.fullName ??
           user.displayName ??
           user.workerProfile?.fullName ??
           user.ambassadorProfile?.fullName ??
@@ -129,23 +150,6 @@ export function portalsForUser(
   return [primary, ...found.filter((p) => p !== primary)];
 }
 
-/** Landing route for each role after sign-in. */
-export function homeForRole(role: string | undefined) {
-  switch (role) {
-    case "SUPER_ADMIN":
-    case "OPS_MANAGER":
-      return "/admin";
-    case "WORKER":
-      return "/worker";
-    case "AMBASSADOR":
-      return "/ambassador";
-    case "CLIENT":
-      return "/client";
-    default:
-      return "/";
-  }
-}
-
 export type NavRoleFromUser = "admin" | "worker" | "ambassador" | "client";
 
 export function navRoleForUser(role: string | undefined): NavRoleFromUser {
@@ -162,7 +166,7 @@ export function navRoleForUser(role: string | undefined): NavRoleFromUser {
 }
 
 export const ROLE_LABELS: Record<string, string> = {
-  SUPER_ADMIN: "Super Admin",
+  ...EXEC_ROLE_LABELS,
   OPS_MANAGER: "Operations Manager",
   WORKER: "Worker",
   AMBASSADOR: "Ambassador",

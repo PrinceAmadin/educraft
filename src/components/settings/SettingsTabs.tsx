@@ -1,17 +1,28 @@
 import Link from "next/link";
+import { canAccessRoute } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { key: "general", href: "/admin/settings", label: "General" },
   { key: "services", href: "/admin/settings/services", label: "Services" },
-  { key: "team", href: "/admin/settings/team", label: "Team" },
+  { key: "team", href: "/admin/settings/team", label: "Team & roles" },
+  { key: "bank", href: "/admin/settings/bank", label: "Bank details" },
 ] as const;
 
-/** Segmented control on a zone — the active tab lifts as a surface. */
-export function SettingsTabs({ active }: { active: "general" | "services" | "team" }) {
+export type SettingsTab = (typeof TABS)[number]["key"];
+
+/**
+ * Segmented control on a zone — the active tab lifts as a surface. Only the
+ * tabs this role may open are offered (an executive sees just Bank details,
+ * and then no control at all: one tab is not a choice).
+ */
+export function SettingsTabs({ active, role }: { active: SettingsTab; role: string | undefined | null }) {
+  const tabs = TABS.filter((tab) => canAccessRoute(role, tab.href));
+  if (tabs.length < 2) return null;
+
   return (
     <nav aria-label="Settings sections" className="no-scrollbar inline-flex max-w-full gap-1 overflow-x-auto rounded-xl bg-zone p-1">
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const isActive = tab.key === active;
         return (
           <Link

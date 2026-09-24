@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { realEmail } from "@/lib/client-email";
 
 /**
- * The client's sign-in email: shows whether a code can be sent, and lets an admin
- * set or fix it (a mistyped intake address otherwise locks the client out).
+ * The client's sign-in email: shows whether a code can be sent, and lets the
+ * founder set or fix it (a mistyped intake address otherwise locks the client
+ * out). `readOnly` for the CFO and COO, whose Clients tab is view-only.
  */
-export function ClientEmailEditor({ clientId, email }: { clientId: string; email: string | null }) {
+export function ClientEmailEditor({ clientId, email, readOnly = false }: { clientId: string; email: string | null; readOnly?: boolean }) {
   const router = useRouter();
   const usable = realEmail(email);
   const [editing, setEditing] = React.useState(false);
@@ -52,9 +53,11 @@ export function ClientEmailEditor({ clientId, email }: { clientId: string; email
           ) : (
             <span className="text-subtle">{email ? "Placeholder, no real email" : "Not provided"}</span>
           )}
-          <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
-            {usable ? "Change" : "Add email"}
-          </button>
+          {!readOnly ? (
+            <button type="button" onClick={() => setEditing(true)} className="text-xs font-medium text-primary underline-offset-4 hover:underline">
+              {usable ? "Change" : "Add email"}
+            </button>
+          ) : null}
         </div>
         <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground">
           {usable ? (

@@ -27,8 +27,17 @@ datasource db {
 
 // ─── AUTH & USERS ───────────────────────────────────────
 
+/// Who can open which part of HQ. SUPER_ADMIN (the founder) sees everything;
+/// CO_CEO_CFO, HOG and COO are the executives, each confined to their own
+/// domain (the route table in `src/lib/rbac.ts` is the source of truth).
+/// OPS_MANAGER predates the executive roles: no login holds it and nothing
+/// offers it any more, but the value stays so old rows and migrations keep
+/// their meaning; it is treated exactly like COO.
 enum UserRole {
   SUPER_ADMIN
+  CO_CEO_CFO
+  HOG
+  COO
   OPS_MANAGER
   WORKER
   AMBASSADOR
@@ -51,11 +60,17 @@ model User {
   /// dashboards) only once this is set: a password alone proves nothing about
   /// the inbox, since worker and ambassador applicants type their own email.
   emailVerifiedAt DateTime?
+  /// Last successful password sign-in. Null means they have never signed in:
+  /// Team & Roles lists an invited executive as pending until this is set.
+  lastSignInAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   workerProfile     Worker?
   ambassadorProfile Ambassador?
+  /// The executive record (name, title, bank details) for SUPER_ADMIN /
+  /// CO_CEO_CFO / HOG / COO logins. Kept off `User` so auth stays lean.
+  execProfile       ExecProfile?
   /// One Client row per person since Sept 2026 (a returning email joins it);
   /// older duplicates, if any, are all linked to the same User.
   clientProfiles    Client[]
@@ -75,6 +90,27 @@ model User {
   workerRecordsUpdated        Worker[]             @relation("WorkerUpdatedBy")
 
   @@index([role])
+}
+
+/// An executive's display name, title and bank details. One per executive
+/// login (SUPER_ADMIN, CO_CEO_CFO, HOG, COO); created when they are invited
+/// from Settings > Team & Roles and removed when they are taken off the team.
+/// Separate from `User` so the auth system stays clean; the topbar greets by
+/// `fullName`, and the Phase 2 payout engine will pay to these bank details.
+model ExecProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName      String
+  /// "Co-CEO & Chief Financial Officer", "Head of Growth", "Chief Operating Officer"
+  title         String
+  email         String
+  phone         String?
+  bankName      String?
+  accountNumber String?
+  accountName   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 // ─── UNIVERSITIES ───────────────────────────────────────

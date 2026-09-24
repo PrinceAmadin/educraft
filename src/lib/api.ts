@@ -2,10 +2,9 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { clientIdsForUser } from "@/lib/services/client-otp";
-import { isClientSessionExpired, isPersonRole } from "@/lib/roles";
+import { isClientSessionExpired, isPersonRole, isStaffRole } from "@/lib/roles";
+import { effectiveRole } from "@/lib/rbac";
 import { linkClientOrders } from "@/lib/services/account-links";
-
-const ADMIN_ROLES = ["SUPER_ADMIN", "OPS_MANAGER"];
 
 export interface AdminSession {
   userId: string;
@@ -13,8 +12,12 @@ export interface AdminSession {
 }
 
 /**
- * Guard for `/api/admin/*` handlers. Returns the session on success, or a
- * ready-to-return NextResponse (401/403) that the caller should return as-is.
+ * Guard for `/api/admin/*` handlers: any member of staff. Which domain a
+ * staff login may call is decided before this runs, by the middleware's
+ * `canCallAdminApi` table; handlers that must never serve another domain
+ * even if that table is edited use {@link requireAdminRoles} on top.
+ * Returns the session on success, or a ready-to-return NextResponse
+ * (401/403) that the caller should return as-is.
  */
 export async function requireAdmin(): Promise<
   { ok: true; session: AdminSession } | { ok: false; response: NextResponse }
@@ -24,7 +27,7 @@ export async function requireAdmin(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  if (!ADMIN_ROLES.includes(session.user.role)) {
+  if (!isStaffRole(session.user.role)) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
@@ -32,8 +35,24 @@ export async function requireAdmin(): Promise<
 }
 
 /**
+ * Guard for a handler that belongs to particular roles — marking payouts paid
+ * (founder + CFO), editing a client (founder). SUPER_ADMIN always passes.
+ */
+export async function requireAdminRoles(
+  allowed: readonly string[]
+): Promise<{ ok: true; session: AdminSession } | { ok: false; response: NextResponse }> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+  const role = effectiveRole(guard.session.role);
+  if (role !== "SUPER_ADMIN" && !allowed.includes(role)) {
+    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+  return guard;
+}
+
+/**
  * Guard for founder-only actions — team management, pricing changes. Stricter
- * than {@link requireAdmin}: OPS_MANAGER is turned away with 403.
+ * than {@link requireAdmin}: every other role is turned away with 403.
  */
 export async function requireSuperAdmin(): Promise<
   { ok: true; session: AdminSession } | { ok: false; response: NextResponse }

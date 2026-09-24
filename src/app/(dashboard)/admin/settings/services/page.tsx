@@ -16,11 +16,11 @@ export default async function ServiceSettingsPage() {
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Company details, service catalogue, and team access.
+          Company details, service catalogue, team access and bank details.
         </p>
       </div>
 
-      <SettingsTabs active="services" />
+      <SettingsTabs active="services" role={session?.user?.role} />
 
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">

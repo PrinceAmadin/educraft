@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { badRequest, requireAdmin, serverError } from "@/lib/api";
+import { badRequest, requireSuperAdmin, serverError } from "@/lib/api";
 import { ClientEmailError, updateClientEmail } from "@/lib/services/clients";
 
 const bodySchema = z.object({ email: z.string().trim().email("Enter a valid email").max(160) });
 
-/** Sets the address the client's sign-in code is sent to. Admin/ops only. */
+/** Sets the address the client's sign-in code is sent to. Founder only: the Clients tab is read-only for every other role. */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const guard = await requireAdmin();
+  const guard = await requireSuperAdmin();
   if (!guard.ok) return guard.response;
 
   let body: unknown;

@@ -17,11 +17,11 @@ export default async function SettingsPage() {
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Company details, service catalogue, and team access.
+          Company details, service catalogue, team access and bank details.
         </p>
       </div>
 
-      <SettingsTabs active="general" />
+      <SettingsTabs active="general" role={session?.user?.role} />
 
       <GeneralSettingsForm settings={settings} canEditPricing={canEditPricing} />
 

@@ -23,17 +23,16 @@ import { cn } from "@/lib/utils";
  * Bottom navigation for < 768px. Max 5 slots; admin's 5th is a "More" sheet
  * holding every route that doesn't fit.
  */
-export function MobileNav({ role }: { role: NavRole }) {
+export function MobileNav({ role, userRole }: { role: NavRole; userRole?: string }) {
   const pathname = usePathname();
-  const { mobile, sections, home } = navForRole(role);
+  const { mobile, sections, home } = navForRole(role, userRole);
   const [moreOpen, setMoreOpen] = React.useState(false);
   const { canInstall, promptInstall } = usePwa();
   const push = usePush();
 
   const primaryHrefs = new Set(mobile.map((i) => i.href));
-  const overflow = sections
-    .flatMap((s) => s.items)
-    .filter((i) => !primaryHrefs.has(i.href));
+  const allItems = sections.flatMap((s) => s.items);
+  const overflow = allItems.filter((i) => !primaryHrefs.has(i.href));
 
   return (
     <>
@@ -45,8 +44,8 @@ export function MobileNav({ role }: { role: NavRole }) {
           {mobile.map((item) => {
             const isMore = item.href === "#more";
             const active = isMore
-              ? overflow.some((o) => isActive(pathname, o))
-              : isActive(pathname, item);
+              ? overflow.some((o) => isActive(pathname, o, allItems))
+              : isActive(pathname, item, mobile);
 
             const inner = (
               <>
@@ -97,7 +96,7 @@ export function MobileNav({ role }: { role: NavRole }) {
 
           <ul className="grid grid-cols-2 gap-2 p-4">
             {overflow.map((item) => {
-              const active = isActive(pathname, item);
+              const active = isActive(pathname, item, allItems);
               return (
                 <li key={item.href}>
                   <SheetClose asChild>

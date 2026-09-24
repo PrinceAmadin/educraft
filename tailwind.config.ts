@@ -74,6 +74,8 @@ const config: Config = {
         danger: { DEFAULT: token("danger"), foreground: token("danger-foreground") },
         destructive: { DEFAULT: token("danger"), foreground: token("danger-foreground") },
         info: { DEFAULT: token("info"), foreground: token("info-foreground") },
+        /* Role chips: the COO's colour (teal, gold and green come from the tokens above) */
+        purple: { DEFAULT: token("purple"), foreground: token("purple-foreground") },
       },
 
       /* Elevation — theme-aware, defined as CSS variables in globals.css.

@@ -14,6 +14,8 @@ interface DashboardShellProps {
   defaultRole: NavRole;
   /** Every dashboard this login can open (more than one for a person who is, say, a worker and a client). */
   portals: NavRole[];
+  /** The login's `User.role` — for staff it decides which admin tabs exist at all. */
+  userRole: string;
   name: string;
   email: string;
   roleLabel: string;
@@ -26,7 +28,7 @@ const PORTAL_ROLE_LABELS: Partial<Record<NavRole, string>> = { worker: "Worker",
  * Chooses the sidebar and nav from the URL, so one login can move between its
  * worker, ambassador and client dashboards (the account menu switches).
  */
-export function DashboardShell({ defaultRole, portals, name, email, roleLabel, children }: DashboardShellProps) {
+export function DashboardShell({ defaultRole, portals, userRole, name, email, roleLabel, children }: DashboardShellProps) {
   const pathname = usePathname();
   const role = portals.find((p) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)) ?? defaultRole;
   // With more than one dashboard, the badge names the one on screen.
@@ -34,10 +36,10 @@ export function DashboardShell({ defaultRole, portals, name, email, roleLabel, c
 
   return (
     <div className="flex min-h-screen bg-background">
-      <Sidebar role={role} />
+      <Sidebar role={role} userRole={userRole} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar role={role} portals={portals} name={name} email={email} roleLabel={label} />
+        <Topbar role={role} userRole={userRole} portals={portals} name={name} email={email} roleLabel={label} />
 
         {/* pb-24 clears the fixed mobile bottom nav */}
         <main className="flex-1 px-4 pb-24 pt-6 md:px-6 md:pb-10 lg:px-8">
@@ -49,7 +51,7 @@ export function DashboardShell({ defaultRole, portals, name, email, roleLabel, c
         </main>
       </div>
 
-      <MobileNav role={role} />
+      <MobileNav role={role} userRole={userRole} />
     </div>
   );
 }

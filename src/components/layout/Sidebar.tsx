@@ -17,21 +17,27 @@ import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "educraft:sidebar-collapsed";
 
-export function isActive(pathname: string, item: NavItem) {
-  // AI usage lives under /admin/finance but has its own nav entry — don't light up both.
-  if (item.href === "/admin/finance" && pathname.startsWith("/admin/finance/ai-usage")) return false;
-  if (item.alsoActiveUnder && (pathname === item.alsoActiveUnder || pathname.startsWith(`${item.alsoActiveUnder}/`))) {
-    return true;
-  }
-  if (item.matchNested) {
-    return pathname === item.href || pathname.startsWith(`${item.href}/`);
-  }
-  return pathname === item.href;
+const under = (pathname: string, root: string) => pathname === root || pathname.startsWith(`${root}/`);
+
+function matches(pathname: string, item: NavItem) {
+  if (item.alsoActiveUnder && under(pathname, item.alsoActiveUnder)) return true;
+  return item.matchNested ? under(pathname, item.href) : pathname === item.href;
 }
 
-export function Sidebar({ role }: { role: NavRole }) {
+/**
+ * Is this entry the one for the current page? When `siblings` is given, a more
+ * specific entry wins — "Payout queue" and "AI usage" both live under
+ * /admin/finance, and only they light up on their own pages, not "Finance".
+ */
+export function isActive(pathname: string, item: NavItem, siblings?: NavItem[]) {
+  if (!matches(pathname, item)) return false;
+  return !siblings?.some((s) => s !== item && s.href.length > item.href.length && matches(pathname, s));
+}
+
+export function Sidebar({ role, userRole }: { role: NavRole; userRole?: string }) {
   const pathname = usePathname();
-  const { sections, home } = navForRole(role);
+  const { sections, home } = navForRole(role, userRole);
+  const allItems = React.useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const [collapsed, setCollapsed] = React.useState(false);
 
   React.useEffect(() => {
@@ -95,7 +101,7 @@ export function Sidebar({ role }: { role: NavRole }) {
               {section.heading && collapsed && <div className="mb-2 h-2" aria-hidden />}
               <ul className="space-y-1">
                 {section.items.map((item) => {
-                  const active = isActive(pathname, item);
+                  const active = isActive(pathname, item, allItems);
                   const link = (
                     <Link
                       href={item.href}

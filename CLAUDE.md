@@ -49,6 +49,7 @@ npm run db:seed                # Seed database
 npm run db:studio              # Open Prisma Studio
 npm run db:generate            # Regenerate Prisma client
 npm run catalogue:sync         # Dry-run: service prices vs prisma/catalogue.ts (add -- --apply to write)
+npm run check:rbac             # Access rules vs the executive tab matrix (no DB) — run after touching rbac.ts / sidebar-config.ts
 
 # Build
 npm run build                  # Production build
@@ -59,13 +60,35 @@ npm run lint                   # Lint check
 
 ## User Roles
 
-| Role | Access | Route Prefix |
-|---|---|---|
-| SUPER_ADMIN | Everything | `/admin` |
-| OPS_MANAGER | Same as admin except: no delete, no pricing changes, no founder financials | `/admin` |
-| WORKER | Own assignments, earnings, stats only | `/worker` |
-| AMBASSADOR | Own referrals, commissions, leaderboard only | `/ambassador` |
-| CLIENT | (Future) Own projects, status, downloads | `/client` |
+Four executive roles run HQ (RBAC Phase 1, Sept 2026 — spec: `DATA/EDUCRAFT_RBAC/EDUCRAFT_Phase1_RBAC_Build.md`). Each executive sees only their own domain's tabs and is silently sent home from any other; the Super Admin sees everything and is the only one who assigns roles (Settings > Team & roles).
+
+| Role | Who | What they see | Home |
+|---|---|---|---|
+| SUPER_ADMIN | Prince Amadin (CEO & Chief Product Officer) | Everything. The only role that assigns roles, edits services/pricing, edits clients | `/admin` (Command Center) |
+| CO_CEO_CFO | Jubilee Abiodun (Co-CEO & CFO) | Finance (full), Payout queue, AI usage, Finance reports, Clients (read-only), Bank details | `/admin/finance` |
+| HOG | Ayomidele Smith Oyomire (Head of Growth) | Ambassadors, Growth, Growth reports, Bank details | `/admin/ambassadors` |
+| COO | Emmanuel Mebawondu (Chief Operating Officer) | Projects, QA Review, Research approvals, Client inbox, Workers, Clients (read-only), Payout queue (review only, cannot mark paid), Operations reports, Bank details | `/admin/projects` |
+| WORKER | | Own assignments, earnings, stats only | `/worker` |
+| AMBASSADOR | | Own referrals, commissions, leaderboard only | `/ambassador` |
+| CLIENT | | Own projects, status, downloads | `/client` |
+
+`OPS_MANAGER` is retired: the enum value stays (no login holds it, nothing offers it) and `effectiveRole()` in `src/lib/rbac.ts` treats it as COO.
+
+### Tab matrix (source of truth: `ROUTE_PERMISSIONS` in `src/lib/rbac.ts`; `npm run check:rbac` enforces it)
+
+| Tab / route | SUPER_ADMIN | CO_CEO_CFO | HOG | COO |
+|---|---|---|---|---|
+| Command Center `/admin` | Full | — | — | — |
+| Projects `/admin/projects` · QA `/admin/qa` · Research approvals `/admin/research-requests` · Client inbox `/admin/client-inbox` · Workers `/admin/workers` | Full | — | — | Full |
+| Clients `/admin/clients` | Full | Read-only | — | Read-only |
+| Ambassadors `/admin/ambassadors` · Growth `/admin/growth` | Full | — | Full | — |
+| Finance `/admin/finance` (incl. expenses, reconciliation) · AI usage `/admin/finance/ai-usage` | Full | Full | — | — |
+| Payout queue `/admin/finance/payouts` | Full | Full | — | Review only |
+| Reports `/admin/reports/finance` / `growth` / `operations` (`/admin/reports` forwards each role to theirs) | All three | Finance | Growth | Operations |
+| Settings: General `/admin/settings` · Team & roles `/admin/settings/team` · Services `/admin/settings/services` | Full | — | — | — |
+| Bank details `/admin/settings/bank` | Everyone's | Own | Own | Own |
+
+Anything under `/admin` that no row names is SUPER_ADMIN only (fail closed). `/api/admin/*` is judged by the same table (`API_PERMISSIONS`, method-aware: the CFO and COO may only GET `/api/admin/clients`; marking payouts paid is founder + CFO).
 
 ## Brand Design System
 
@@ -193,12 +216,64 @@ EduCraft uses a 45%/55% split payment:
 - Client pays 45% downpayment upfront (work begins)
 - Client pays 55% balance after QA approval (delivery unlocked)
 
-**Revenue split per project:**
-- Worker: 40% of total price
-- Ambassador: 10–15% (based on tier)
-- EduCraft: remaining 45–50%
+**Revenue split per project (v2.0, Sept 2026 — the section below is the source of truth and overrides the earlier "40% / 10–15% / 45–50%" split):** workers 40%, ambassadors 15% in total (the referrer's tier rate, the rest to their Core), HOG 2.5%, COO 2.5%, EduCraft retains 40% and splits it into four buckets.
 
 Commission is paid to ambassadors immediately when the client pays the downpayment (not on project completion).
+
+## EduCraft Commission Structure (v2.0 — September 2026)
+
+Recorded for Phase 2 (the Finance Platform's payout engine and bucket manager); Phase 1 built no commission logic, so the live code still runs the earlier rules where noted. Cashflow reference: `EduCraft_Cashflow_v2.0.docx` (founder's Downloads).
+
+### Revenue Split (per project, no Growth Associate)
+- Workers:              40% of project value
+- Ambassador:           15% of project value (EduCraft always pays 15% total)
+- HOG (Ayomidele):      2.5% of project value (all ambassador-driven projects)
+- COO (Emmanuel):       2.5% of project value (all delivered projects)
+- EduCraft retains:     40% of project value
+
+### Ambassador Tier Rates (lifetime conversions = paying clients referred)
+- Bronze (0–5):         10%
+- Silver (6–15):        12%
+- Gold (16–30):         15%
+- Platinum (31+):       15% + ₦3,000 quarterly bonus per client referred
+
+### Core/Sub Override (EduCraft always pays 15% total)
+- Sub at Bronze → Core override: 5%   (Sub: 10%, Core: 5%)
+- Sub at Silver → Core override: 3%   (Sub: 12%, Core: 3%)
+- Sub at Gold/Platinum → Core: 0%     (Sub: 15%, Core: 0%)
+- Max 10 Sub-Ambassadors per Core
+- Core must be Silver+ to activate sub-team
+
+### Growth Associates (Year 2 — currently inactive)
+- Earn: 2% from EduCraft's retained share
+- When active: EduCraft retains 38% instead of 40%
+
+### EduCraft Bucket Allocation (from the 40% retained share)
+- Operations Reserve:   37.5% of retained = 15% of total revenue
+- Growth Fund:          17.5% of retained = 7% of total revenue
+- Reinvestment Fund:    17.5% of retained = 7% of total revenue
+- Founder Distribution: 27.5% of retained = 11% of total revenue
+
+### Founder Monthly Draw (revenue-tiered, 50/50 split)
+- Below ₦500K/month:          ₦0 each
+- ₦500K–₦999,999:             ₦25,000 each
+- ₦1M–₦2,499,999:             ₦75,000 each
+- ₦2.5M–₦4,999,999:           ₦150,000 each
+- ₦5M–₦9,999,999:             ₦300,000 each
+- ₦10M+:                      ₦500,000+ each (reviewed quarterly)
+
+### Executive Performance Bonuses
+#### HOG
+- Ambassador activation rate > 30%/month:    ₦50,000
+- New school to 10+ active clients:          ₦30,000
+- Per ambassador completing quarterly challenge: ₦10,000
+- New client target exceeded by > 20%:       ₦75,000
+
+#### COO
+- QA first-pass rate > 85%/month:            ₦30,000
+- On-time delivery rate > 97%:               ₦30,000
+- Zero supervisor rejections in a month:     ₦50,000
+- Client satisfaction > 90% positive:        ₦25,000
 
 ## Intake Forms
 
@@ -234,9 +309,9 @@ When creating or checking .docx files:
 
 ## Ambassador System
 
-**Tiers:** Bronze (10%), Silver (12%, 6+ conversions), Gold (15%, 16+ conversions), Platinum (15% + quarterly bonus, 31+)
+**Tiers (lifetime paying clients referred):** Bronze 0–5 → 10%, Silver 6–15 → 12%, Gold 16–30 → 15%, Platinum 31+ → 15% + ₦3,000 quarterly bonus per client referred.
 
-**Parent-child chain:** Ambassadors can recruit sub-ambassadors. Parent gets 5% from sub's referrals. Max 1 level deep, max 5 subs, requires Silver tier to activate.
+**Core/Sub chain (v2.0 — EduCraft always pays 15% in total):** Sub at Bronze → Sub 10% + Core 5%; Sub at Silver → Sub 12% + Core 3%; Sub at Gold/Platinum → Sub 15% + Core 0%. Max 10 subs per Core, one level deep, the Core must be Silver+. *The live code still runs the earlier rule (parent rate set by an admin in Settings, max 5 subs — `src/lib/ambassador.ts`); the Phase 2 payout engine replaces it with this table.*
 
 **Recruitment:** Waitlist group → Registration every 2 weeks → Auto-generated kit with personalised referral link → 30-Day Activation Challenge → Ambassador Hub community
 
@@ -382,4 +457,5 @@ Update this section as you build:
 - [x] Forgot password says who you are (Sept 2026, founder's call: no "if that matches an account…" guesswork) — `/login/set-password` is the one forgot-password page for workers, ambassadors AND clients: `POST /api/portal/otp/request` works out which the email or ID (EC-A-/ECW-/ECC-) belongs to; a client's gets a client code (`sendClientCode` in `client-otp.ts`) and the answer says `account: "client"`, so the form saves via `/api/client/password/set` and signs them into `/client`. Both request endpoints answer 200 `CodeRequestResult` (`src/lib/code-request.ts`): `sent` (+ `sentTo`, masked when an ID was typed), `wait` (60 s cooldown / 3 per 15 min, with `retryAfter` and `codeStillValid`, so the form goes to the code step when the last code still works), or a reason: `not_registered`, `invalid`, `no_email`, `pending` (application under review), `inactive`, `team` (client page only: links to the forgot-password page with `?email=`), `needs_admin`, `unavailable` (staff; never reset publicly). A page only points to another when a real record exists there (a bare leftover login never counts), so nobody bounces between pages. The per-IP cap (10 requests / 15 min) is now what stops the lookup being used to test lists of emails; code checks and password sign-in still fail with one answer.
 - [x] One login, one dashboard for clients, workers and ambassadors (Sept 2026) — founder's call: a person is one login whatever mix of client orders, worker record and ambassador record they hold, with "Switch to client / worker / ambassador dashboard" in the account menu. `User.role` is only the dashboard they land on first (what they registered as); which dashboards open is read from the profiles on every load (`portalsForUser` in `auth.ts`, used by the `(dashboard)` layout: worker Active/On Break, ambassador Active, at least one linked `Client` row). `src/lib/roles.ts` (pure, used by middleware) holds the rules: staff (SUPER_ADMIN/OPS_MANAGER) stay in /admin only and never hold client orders; WORKER/AMBASSADOR/CLIENT logins pass the middleware into all three roots and each portal checks the real profile server-side (`requirePortalProfile` for /worker and /ambassador, `getClientScope` in `api.ts` for /client and its APIs; `requireWorker`/`requireAmbassador`/`requireClient` likewise), so a worker without orders is sent home from /client and a client without a worker record from /worker. **The email is the person (founder's rule, 2026-09-23):** every client order placed with an email joins the ACTIVE worker/ambassador/client login with that email (`src/lib/services/account-links.ts`: `loginForEmail` when a client is created at intake, by an admin or when an admin sets a client's email; `linkClientOrders` at sign-in, on every dashboard load in the `(dashboard)` layout, and first thing in `getClientScope`, so a new order shows on the next page without signing in again). Only active logins count: worker/ambassador logins are switched off until an admin approves the application (or the person uses an emailed code), client logins only exist after a code, so a pending or rejected applicant never collects anyone's orders. (It first required an emailed code before linking; the founder's own worker+ambassador email then couldn't see its order, and he set the rule to "the Gmail is the identifier".) `User.emailVerifiedAt` is still recorded whenever a code is used, but no longer gates linking. **Sign-in:** `/login` is the one sign-in page for everyone (email or Client ID + password; clients go through `verifyPassword` with its lockout); `/client/login` still works. A client code or client password for an order whose email is a worker's or ambassador's login now signs in to that one login (it used to say "ask an admin"); a client applying as a worker or ambassador gets the application code and the application joins their client login, approval adds the profile. **Sign-in pages no longer bounce a signed-in browser** to its current dashboard (that sent the founder, still signed in as admin, to the admin workers list when "signing in as a worker"): `/login` and `/client/login` show "You're already signed in as X" with Go to my dashboard / Sign out (which clears the device). A client-first login keeps the 14-day limit everywhere (`isClientSessionExpired`). Verified locally with a 34-check run against the real NextAuth endpoints (both sign-in pages, Client ID, shared dashboards, proved vs unproved linking, client applying as a worker end to end, staff separation, no admin access for workers or clients).
 - [x] Client dashboard honesty pass (Sept 2026) — prompted by the founder's test client help.educraft@gmail.com showing four projects: they were all placed with that email (one client per person), so access was right, but the dashboard read as broken. `/client` now groups cards: In progress (paid, not finished), Waiting for your downpayment (no bar, no date, "Pay ₦X to start"), Delivered, Closed (`group` from `listClientProjectCards`). The step on screen uses in-progress wording (`CURRENT_LABELS` in `client-progress.ts`: "Choosing your specialist", never a past-tense "Specialist assigned" before it happened); an unpaid order shows no delivery date ("set once your downpayment is in") and no progress bar. The Payments tab says what the balance unlocks from the order's own deliverables (`describeUnlocks`, e.g. "Chapters 3 to 5 and your complete project", or just "Chapter 5"), and Documents says when an unreleased item opens (`notReadyHint`). Older projects got their Updates feed filled from real history with `npm run feed:backfill` (dry run; `-- --apply` writes; same dedupe keys as the live code, so re-runs add nothing; applied once: 21 lines on 8 projects).
+- [x] RBAC Phase 1 — executive roles (Sept 2026) — built from `DATA/EDUCRAFT_RBAC/EDUCRAFT_Phase1_RBAC_Build.md`, one step at a time with a live check after each (sign-in through the real NextAuth endpoints as all four roles; see the "User Roles" section above for the matrix). **Schema:** `UserRole` gained `CO_CEO_CFO`, `HOG`, `COO` (`OPS_MANAGER` kept but retired ≡ COO); `ExecProfile` (name, title, email, phone, bank details) per executive login; `User.lastSignInAt` (stamped by `touchSignIn` on every password sign-in) is what makes an invited executive "pending" on Team & roles. `prisma/seed.ts` seeds the three executives with placeholder emails (jubilee@ / ayomidele@ / emmanuel@educraft.com — change them on Team & roles) and the one-time password `EduCraft2026!` (a re-seed never resets a password, role or bank details) plus the founder's own `ExecProfile`. Migrations were written by hand with `prisma migrate diff` and applied with `npm run db:deploy`, because `prisma migrate dev` refuses a non-interactive shell. **Rules:** `src/lib/rbac.ts` (pure, edge-safe): `ROUTE_PERMISSIONS`, `API_PERMISSIONS`, `canAccessRoute`, `canCallAdminApi`, `homeForRole` (re-exported from `auth.ts`), `effectiveRole`, `ROLE_BADGE`, `canMarkPayoutsPaid`, `clientsReadOnly`, `showsAiBalance`; `src/lib/roles.ts` `STAFF_ROLES` now lists all five staff values, so `isStaffRole` keeps executives out of client linking and password lookups. **Enforcement, three layers:** `src/middleware.ts` (matcher now includes `/api/admin/:path*`; pages → silent redirect to the role's home, APIs → 401/403 JSON; stamps `x-educraft-pathname`), `(dashboard)/admin/layout.tsx` (re-runs the table server-side from that header), and each handler (`requireAdmin` = any staff, `requireAdminRoles([...])` e.g. payouts founder + CFO, `requireSuperAdmin` for team/services/pricing/client edits; `/api/dashboard/summary` = whoever may open the Command Center). **Sidebar:** `src/lib/sidebar-config.ts` (every tab names its roles; per-role bottom nav; empty sections vanish; hidden tabs are not in the DOM), `navForRole("admin", userRole)`; `isActive` now lets the most specific entry win (Payout queue / AI usage under Finance). `npm run check:rbac` (`scripts/check-rbac.ts`, no DB) proves sidebar ⇄ route table, homes reachable, fail-closed, API rules, mobile nav ⊆ visible tabs — run it after touching `rbac.ts` or `sidebar-config.ts`. **Topbar:** executive's name (from `ExecProfile`, read fresh each load) + `RoleChip` (CEO teal · CFO gold · HOG green · COO purple; `--purple` token added in `globals.css`/Tailwind), Claude balance bolt only for SUPER_ADMIN/CFO, account-menu Settings points executives at Bank details. **Team & roles** (`/admin/settings/team`, `TeamRoles.tsx`, `src/lib/services/team.ts`, `validations/team.ts`): list with role chips and Pending sign-in / Switched off badges; Invite (creates login + record, one-time password shown once with Copy credentials — nothing emailed in Phase 1); Edit (name, role among CO_CEO_CFO/HOG/COO, title, email, phone; Reset password; Switch off/on login; Remove from team = role → WORKER, record deleted, login optionally switched off). SUPER_ADMIN can never be assigned, demoted or removed here; nobody can switch off or remove themselves. Routes: `GET/POST /api/admin/team`, `PATCH/DELETE /api/admin/team/[id]`, `POST /api/admin/team/[id]/reset-password` (the old `/api/admin/settings/team*` + `TeamManager` are gone). **Bank details:** `/admin/settings/bank` (`BankDetailsForm`, own only; SUPER_ADMIN everyone's) + `PATCH /api/admin/settings/bank` (`userId` only for SUPER_ADMIN); `SettingsTabs` takes `role` and hides itself when only one tab applies. **Reports** are three pages (`/admin/reports/finance|operations|growth`, each its slice of `getMonthlyReport` with its own month picker path and CSV/PDF via `ReportExportButtons include=`); `/admin/reports` forwards by role. `/admin/growth` is a real page carrying the Phase 3 scope (`InProgressNotice`). **Read-only Clients** for CFO/COO: `ClientEmailEditor`/`ClientNotes` `readOnly`, and `PATCH /api/admin/clients/[id]/email|notes` are `requireSuperAdmin`. **Payout queue** for the COO: review only (`PayoutQueue canMarkPaid`), no mark-paid controls, `POST /api/admin/finance/payouts` refuses with 403. Interpretations to know: `/admin/client-inbox` was not in the matrix and is treated as delivery (COO); the COO's "submit payout list" is Phase 2's payout engine; admin notifications (`notifyAdmins`) still go only to SUPER_ADMIN/OPS_MANAGER — routing payment/application/research alerts to the CFO/HOG/COO is for Phases 2–4. **Phase 2 next: the Finance Platform** (Revenue Tracker, Payout Engine computing every recipient's share from the v2.0 structure incl. HOG/COO 2.5% and the Core/Sub override, Bucket Manager on the 40% retained share, Founder Draws by revenue tier, financial reports), consuming the constants under "EduCraft Commission Structure".
 - [ ] Production deployment

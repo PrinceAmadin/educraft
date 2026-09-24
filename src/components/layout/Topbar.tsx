@@ -10,6 +10,8 @@ import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { AiBalanceIndicator } from "@/components/layout/AiBalanceIndicator";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { RoleChip } from "@/components/layout/RoleChip";
+import { canAccessRoute, showsAiBalance } from "@/lib/rbac";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,8 @@ import { initials } from "@/lib/utils";
 
 interface TopbarProps {
   role: NavRole;
+  /** The login's `User.role`: which executive this is, if any. */
+  userRole?: string;
   /** Dashboards this login can open; a switcher shows when there is more than one. */
   portals?: NavRole[];
   name: string;
@@ -64,11 +68,13 @@ const PORTAL_LABELS: Record<string, string> = {
   client: "Client dashboard",
 };
 
-export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarProps) {
-  const { home } = navForRole(role);
+export function Topbar({ role, userRole, portals = [], name, email, roleLabel }: TopbarProps) {
+  const { home } = navForRole(role, userRole);
   const otherPortals = portals.filter((p) => p !== role && PORTAL_LABELS[p]);
   const { canInstall, promptInstall } = usePwa();
   const push = usePush();
+  // The project search lands on /admin/projects, so only roles who own that page get it.
+  const canSearchProjects = role === "admin" && canAccessRoute(userRole, "/admin/projects");
 
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 bg-background/80 px-4 backdrop-blur-md md:px-6">
@@ -77,8 +83,8 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
         <LogoLockup href={home} size="xs" />
       </div>
 
-      {/* Desktop search: admins only. Searches projects by ID, title or client name. */}
-      {role === "admin" ? (
+      {/* Desktop search: founder and COO. Searches projects by ID, title or client name. */}
+      {canSearchProjects ? (
         <form action="/admin/projects" method="get" role="search" className="hidden flex-1 md:block">
           <label className="relative block max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
@@ -94,7 +100,7 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
       ) : null}
 
       <div className="ml-auto flex items-center gap-1">
-        {role === "admin" ? (
+        {canSearchProjects ? (
           <Button
             variant="ghost"
             size="icon-sm"
@@ -112,7 +118,8 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
 
         <ThemeToggle />
 
-        {role === "admin" ? <AiBalanceIndicator /> : null}
+        {/* Claude credit: only the founder and the CFO, who pay for it */}
+        {role === "admin" && showsAiBalance(userRole) ? <AiBalanceIndicator /> : null}
 
         <NotificationBell />
 
@@ -122,6 +129,11 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
               className="ml-1 flex items-center gap-2 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               aria-label="Account menu"
             >
+              {/* Who is signed in, and as what: the executive's name from lg up, the role chip from sm up */}
+              {role === "admin" ? (
+                <span className="hidden max-w-[180px] truncate text-sm font-medium text-foreground lg:inline">{name}</span>
+              ) : null}
+              <RoleChip role={userRole} className="hidden sm:inline-flex" />
               <Avatar>
                 <AvatarFallback>{initials(name)}</AvatarFallback>
               </Avatar>
@@ -130,7 +142,10 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-semibold text-foreground">{name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-sm font-semibold text-foreground">{name}</span>
+                  <RoleChip role={userRole} />
+                </span>
                 <span className="truncate text-xs text-muted-foreground">{email}</span>
                 <Badge variant="neutral" className="mt-1 w-fit">
                   {roleLabel}
@@ -140,7 +155,8 @@ export function Topbar({ role, portals = [], name, email, roleLabel }: TopbarPro
             <DropdownMenuSeparator />
             {role === "admin" ? (
               <DropdownMenuItem asChild>
-                <Link href="/admin/settings">
+                {/* General settings are the founder's; an executive's own settings page is Bank details */}
+                <Link href={canAccessRoute(userRole, "/admin/settings") ? "/admin/settings" : "/admin/settings/bank"}>
                   <Settings />
                   Settings
                 </Link>

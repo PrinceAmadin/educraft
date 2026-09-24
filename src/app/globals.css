@@ -47,6 +47,8 @@
     --danger-foreground: 0 0% 100%;
     --info: 217 85% 50%;
     --info-foreground: 0 0% 100%;
+    --purple: 262 52% 47%; /* the COO's role chip — deep enough to read as text */
+    --purple-foreground: 0 0% 100%;
 
     --border: 216 12% 92%; /* #E8EAED — only when genuinely needed */
     --border-hover: 216 12% 82%;
@@ -126,6 +128,8 @@
     --danger-foreground: 0 0% 100%;
     --info: 217 91% 62%;
     --info-foreground: 0 0% 100%;
+    --purple: 262 85% 76%;
+    --purple-foreground: 224 52% 5%;
 
     --border: 214 41% 20%; /* #1E3048 — barely visible, used sparingly */
     --border-hover: 212 38% 29%;

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, navRoleForUser, portalsForUser, ROLE_LABELS } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { isPersonRole } from "@/lib/roles";
+import { isPersonRole, isStaffRole } from "@/lib/roles";
 import { linkClientOrders } from "@/lib/services/account-links";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import type { NavRole } from "@/lib/constants";
@@ -15,6 +15,14 @@ export default async function DashboardLayout({
   if (!session?.user) redirect("/login");
 
   const role = navRoleForUser(session.user.role);
+
+  // An executive is greeted by the name on their record, read fresh so a
+  // correction on Team & Roles shows without signing in again.
+  let name = session.user.name ?? "EduCraft";
+  if (isStaffRole(session.user.role)) {
+    const exec = await db.execProfile.findUnique({ where: { userId: session.user.id }, select: { fullName: true } });
+    if (exec) name = exec.fullName;
+  }
 
   // One person can be a worker, an ambassador and a client on the same login: ask
   // the database which, so a newly linked or approved role appears without a
@@ -45,7 +53,8 @@ export default async function DashboardLayout({
     <DashboardShell
       defaultRole={role}
       portals={portals}
-      name={session.user.name ?? "EduCraft"}
+      userRole={session.user.role}
+      name={name}
       email={session.user.email ?? ""}
       roleLabel={ROLE_LABELS[session.user.role] ?? "Member"}
     >

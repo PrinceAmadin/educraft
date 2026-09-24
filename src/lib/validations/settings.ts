@@ -93,11 +93,4 @@ export const updateServiceSchema = createServiceSchema
   .partial();
 export type UpdateServiceInput = z.infer<typeof updateServiceSchema>;
 
-export const createTeamMemberSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Enter a valid email").max(160),
-  displayName: z.string().trim().min(1, "Enter a name").max(120),
-  phone: phoneSchema.optional().or(blank),
-  password: z.string().min(8, "At least 8 characters").max(72),
-  role: z.enum(["SUPER_ADMIN", "OPS_MANAGER"]),
-});
-export type CreateTeamMemberInput = z.infer<typeof createTeamMemberSchema>;
+// The executive team's schemas live in `validations/team.ts`.

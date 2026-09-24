@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { canAccessRoute } from "@/lib/rbac";
 import { getDashboardSummary } from "@/lib/services/dashboard";
 
 /** Live operational numbers — never served from a build-time or route cache. */
 export const dynamic = "force-dynamic";
-
-const ADMIN_ROLES = ["SUPER_ADMIN", "OPS_MANAGER"];
 
 export async function GET() {
   try {
@@ -15,7 +14,8 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (!ADMIN_ROLES.includes(session.user.role)) {
+    // The Command Center's numbers, so exactly who may open the Command Center.
+    if (!canAccessRoute(session.user.role, "/admin")) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

@@ -14,7 +14,12 @@ import type { PayoutGroup, PendingPayouts } from "@/lib/services/payouts";
 
 type Kind = "worker" | "ambassador";
 
-export function PayoutQueue({ data }: { data: PendingPayouts }) {
+/**
+ * What is owed, grouped by recipient. `canMarkPaid` (founder and CFO) shows
+ * the controls that record a transfer; the COO reviews the same queue with
+ * nothing to press.
+ */
+export function PayoutQueue({ data, canMarkPaid = true }: { data: PendingPayouts; canMarkPaid?: boolean }) {
   const { totals } = data;
   const grandTotal = totals.workerAmount + totals.ambassadorAmount;
 
@@ -22,13 +27,13 @@ export function PayoutQueue({ data }: { data: PendingPayouts }) {
     {
       id: "workers",
       label: `Worker payouts (${totals.workerCount})`,
-      content: <PayoutTable kind="worker" groups={data.workers} amount={totals.workerAmount} />,
+      content: <PayoutTable kind="worker" groups={data.workers} amount={totals.workerAmount} canMarkPaid={canMarkPaid} />,
     },
     {
       id: "ambassadors",
       label: `Ambassador commissions (${totals.ambassadorCount})`,
       content: (
-        <PayoutTable kind="ambassador" groups={data.ambassadors} amount={totals.ambassadorAmount} />
+        <PayoutTable kind="ambassador" groups={data.ambassadors} amount={totals.ambassadorAmount} canMarkPaid={canMarkPaid} />
       ),
     },
   ];
@@ -60,10 +65,12 @@ function PayoutTable({
   kind,
   groups,
   amount,
+  canMarkPaid,
 }: {
   kind: Kind;
   groups: PayoutGroup[];
   amount: number;
+  canMarkPaid: boolean;
 }) {
   const router = useRouter();
   const [reference, setReference] = React.useState("");
@@ -115,6 +122,13 @@ function PayoutTable({
 
   return (
     <div className="space-y-4">
+      {!canMarkPaid ? (
+        <p className="text-[13px] text-muted-foreground">
+          For review only: recording a payment is the CFO&apos;s step. Submitting the monthly payout list from here
+          arrives with the Finance Platform.
+        </p>
+      ) : null}
+      {canMarkPaid ? (
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">
           <span className="mb-1 block meta-label">
@@ -148,6 +162,7 @@ function PayoutTable({
           Mark all paid ({formatNaira(amount)})
         </Button>
       </div>
+      ) : null}
 
       {error ? (
         <p className="flex items-start gap-2 text-sm text-danger">
@@ -197,19 +212,21 @@ function PayoutTable({
               <span className="font-mono text-sm font-medium tabular-nums text-foreground">
                 {formatNaira(g.amount)}
               </span>
-              <Button
-                size="sm"
-                disabled={pending !== null}
-                onClick={() => run("one", g.id)}
-                className={cn(pending === g.id && "opacity-80")}
-              >
-                {pending === g.id ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden />
-                ) : (
-                  <Check className="size-4" aria-hidden />
-                )}
-                Pay
-              </Button>
+              {canMarkPaid ? (
+                <Button
+                  size="sm"
+                  disabled={pending !== null}
+                  onClick={() => run("one", g.id)}
+                  className={cn(pending === g.id && "opacity-80")}
+                >
+                  {pending === g.id ? (
+                    <Loader2 className="size-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Check className="size-4" aria-hidden />
+                  )}
+                  Pay
+                </Button>
+              ) : null}
             </div>
           </li>
         ))}

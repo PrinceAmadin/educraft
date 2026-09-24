@@ -1,22 +1,6 @@
 import type { LucideIcon } from "lucide-react";
-import {
-  LayoutDashboard,
-  FolderKanban,
-  Inbox,
-  Users,
-  UserCog,
-  Megaphone,
-  ClipboardCheck,
-  Wallet,
-  Zap,
-  BookCheck,
-  BarChart3,
-  Settings,
-  MousePointerClick,
-  Trophy,
-  User,
-  MoreHorizontal,
-} from "lucide-react";
+import { LayoutDashboard, FolderKanban, Users, Wallet, MousePointerClick, Trophy, User } from "lucide-react";
+import { adminHomeForRole, adminMobileNavForRole, adminNavForRole } from "@/lib/sidebar-config";
 
 export const APP_NAME = "EduCraft WorkBase";
 export const BRAND_NAME = "EduCraft";
@@ -183,6 +167,8 @@ export interface NavItem {
   matchNested?: boolean;
   /** Also light up anywhere under this path (e.g. the client's /client/projects/… pages for "/client"). */
   alsoActiveUnder?: string;
+  /** Admin tabs only: the `UserRole`s that see this entry (absent = everyone in that nav). */
+  roles?: readonly string[];
 }
 
 export interface NavSection {
@@ -190,34 +176,8 @@ export interface NavSection {
   items: NavItem[];
 }
 
-export const ADMIN_NAV: NavSection[] = [
-  {
-    items: [
-      { label: "Command Center", href: "/admin", icon: LayoutDashboard },
-      { label: "Projects", href: "/admin/projects", icon: FolderKanban, matchNested: true },
-      { label: "QA Review", href: "/admin/qa", icon: ClipboardCheck, matchNested: true },
-      { label: "Client inbox", href: "/admin/client-inbox", icon: Inbox },
-      { label: "Research approvals", href: "/admin/research-requests", icon: BookCheck },
-    ],
-  },
-  {
-    heading: "People",
-    items: [
-      { label: "Clients", href: "/admin/clients", icon: Users, matchNested: true },
-      { label: "Workers", href: "/admin/workers", icon: UserCog, matchNested: true },
-      { label: "Ambassadors", href: "/admin/ambassadors", icon: Megaphone, matchNested: true },
-    ],
-  },
-  {
-    heading: "Business",
-    items: [
-      { label: "Finance", href: "/admin/finance", icon: Wallet, matchNested: true },
-      { label: "AI usage", href: "/admin/finance/ai-usage", icon: Zap },
-      { label: "Reports", href: "/admin/reports", icon: BarChart3 },
-      { label: "Settings", href: "/admin/settings", icon: Settings, matchNested: true },
-    ],
-  },
-];
+// The admin sidebar lives in `sidebar-config.ts`: every tab there names the
+// roles that see it, and `navForRole` filters it for the signed-in executive.
 
 export const WORKER_NAV: NavSection[] = [
   {
@@ -246,15 +206,8 @@ export const AMBASSADOR_NAV: NavSection[] = [
 /**
  * Mobile bottom nav — max 5 items per the spec. 85% of users are on phones,
  * so these are the only routes reachable without opening the "More" sheet.
+ * (The admin one is per executive role, in `sidebar-config.ts`.)
  */
-export const ADMIN_MOBILE_NAV: NavItem[] = [
-  { label: "Home", href: "/admin", icon: LayoutDashboard },
-  { label: "Projects", href: "/admin/projects", icon: FolderKanban, matchNested: true },
-  { label: "QA", href: "/admin/qa", icon: ClipboardCheck, matchNested: true },
-  { label: "Finance", href: "/admin/finance", icon: Wallet, matchNested: true },
-  { label: "More", href: "#more", icon: MoreHorizontal },
-];
-
 export const WORKER_MOBILE_NAV: NavItem[] = [
   { label: "Home", href: "/worker", icon: LayoutDashboard },
   { label: "Projects", href: "/worker/projects", icon: FolderKanban, matchNested: true },
@@ -287,7 +240,12 @@ export const CLIENT_MOBILE_NAV: NavItem[] = [
 
 export type NavRole = "admin" | "worker" | "ambassador" | "client";
 
-export function navForRole(role: NavRole) {
+/**
+ * The navigation for a dashboard. For the admin area `userRole` (the login's
+ * `User.role`) decides which tabs exist at all — an executive only ever gets
+ * their own domain's, and an unknown role gets none.
+ */
+export function navForRole(role: NavRole, userRole?: string | null) {
   switch (role) {
     case "worker":
       return { sections: WORKER_NAV, mobile: WORKER_MOBILE_NAV, home: "/worker" };
@@ -296,6 +254,10 @@ export function navForRole(role: NavRole) {
     case "client":
       return { sections: CLIENT_NAV, mobile: CLIENT_MOBILE_NAV, home: "/client" };
     default:
-      return { sections: ADMIN_NAV, mobile: ADMIN_MOBILE_NAV, home: "/admin" };
+      return {
+        sections: adminNavForRole(userRole),
+        mobile: adminMobileNavForRole(userRole),
+        home: adminHomeForRole(userRole),
+      };
   }
 }

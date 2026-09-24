@@ -52,6 +52,32 @@ const SETTINGS: { key: string; value: string }[] = [
   { key: "company_account_name", value: "" },
 ];
 
+/* ── EXECUTIVES ───────────────────────────────────────────── */
+
+/** Set once at creation; the founder resets it after deployment. */
+const EXEC_DEFAULT_PASSWORD = "EduCraft2026!";
+
+const EXECUTIVES: { email: string; role: UserRole; fullName: string; title: string }[] = [
+  {
+    email: "jubilee@educraft.com", // placeholder — Prince will update
+    role: UserRole.CO_CEO_CFO,
+    fullName: "Jubilee Abiodun",
+    title: "Co-CEO & Chief Financial Officer",
+  },
+  {
+    email: "ayomidele@educraft.com", // placeholder — Prince will update
+    role: UserRole.HOG,
+    fullName: "Ayomidele Smith Oyomire",
+    title: "Head of Growth",
+  },
+  {
+    email: "emmanuel@educraft.com", // placeholder — Prince will update
+    role: UserRole.COO,
+    fullName: "Emmanuel Mebawondu",
+    title: "Chief Operating Officer",
+  },
+];
+
 async function main() {
   console.log("Seeding EduCraft WorkBase…\n");
 
@@ -136,7 +162,7 @@ async function main() {
       "\n  Admin         skipped — set SEED_ADMIN_PASSWORD in .env to create the first admin"
     );
   } else {
-    await db.user.upsert({
+    const admin = await db.user.upsert({
       where: { email: adminEmail },
       // Keep the display name in step on re-seed; never touch the password.
       update: { displayName: adminName },
@@ -147,9 +173,43 @@ async function main() {
         role: UserRole.SUPER_ADMIN,
         isActive: true,
       },
+      select: { id: true },
+    });
+    // The founder's executive record, so Settings > Team & Roles lists all four
+    // executives with a title. Bank details are never touched on re-seed.
+    await db.execProfile.upsert({
+      where: { userId: admin.id },
+      update: { fullName: adminName, title: "CEO & Chief Product Officer", email: adminEmail },
+      create: { userId: admin.id, fullName: adminName, title: "CEO & Chief Product Officer", email: adminEmail },
     });
     console.log(`\n  Admin         ${adminEmail}`);
   }
+
+  // ── Executives (RBAC Phase 1) ──
+  // Placeholder emails — the founder updates them from Settings > Team & Roles.
+  // Each gets the default password once; a re-seed never resets a password,
+  // changes a role or touches bank details, so a real login is never clobbered.
+  for (const exec of EXECUTIVES) {
+    const existing = await db.user.findUnique({ where: { email: exec.email }, select: { id: true } });
+    const user =
+      existing ??
+      (await db.user.create({
+        data: {
+          email: exec.email,
+          displayName: exec.fullName,
+          passwordHash: await bcrypt.hash(EXEC_DEFAULT_PASSWORD, 12),
+          role: exec.role,
+          isActive: true,
+        },
+        select: { id: true },
+      }));
+    await db.execProfile.upsert({
+      where: { userId: user.id },
+      update: { fullName: exec.fullName, title: exec.title, email: exec.email },
+      create: { userId: user.id, fullName: exec.fullName, title: exec.title, email: exec.email },
+    });
+  }
+  console.log(`  Executives    ${EXECUTIVES.length}`);
 
   console.log("\nDone.\n");
 }

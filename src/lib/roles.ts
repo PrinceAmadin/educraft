@@ -1,15 +1,16 @@
 /**
  * Who is who, in one place. Pure: the edge middleware imports this.
  *
- * Staff (super admin, operations manager) have the admin area only. Everyone
- * else is a person who can hold up to three profiles on ONE login: a worker
- * record, an ambassador record and client orders. `User.role` is only the
- * dashboard they land on first (what they registered as); which dashboards
- * they can open is read from the profiles they own, and each portal checks
- * that for itself.
+ * Staff (the founder and the executives — CFO, Head of Growth, COO; plus the
+ * retired OPS_MANAGER value) have the admin area only, each confined to their
+ * own domain by `rbac.ts`. Everyone else is a person who can hold up to three
+ * profiles on ONE login: a worker record, an ambassador record and client
+ * orders. `User.role` is only the dashboard they land on first (what they
+ * registered as); which dashboards they can open is read from the profiles
+ * they own, and each portal checks that for itself.
  */
 
-export const STAFF_ROLES = ["SUPER_ADMIN", "OPS_MANAGER"] as const;
+export const STAFF_ROLES = ["SUPER_ADMIN", "CO_CEO_CFO", "HOG", "COO", "OPS_MANAGER"] as const;
 export const PERSON_ROLES = ["WORKER", "AMBASSADOR", "CLIENT"] as const;
 
 export type Portal = "worker" | "ambassador" | "client";

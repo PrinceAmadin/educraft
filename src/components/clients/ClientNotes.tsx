@@ -6,12 +6,15 @@ import { LuCheck, LuCircleAlert } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+/** Internal notes on a client. `readOnly` for the CFO and COO, whose Clients tab is view-only. */
 export function ClientNotes({
   clientId,
   initialNotes,
+  readOnly = false,
 }: {
   clientId: string;
   initialNotes: string | null;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const [value, setValue] = React.useState(initialNotes ?? "");
@@ -49,22 +52,24 @@ export function ClientNotes({
     <div>
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-foreground">Internal notes</h2>
-        <span className="text-xs text-muted-foreground">Admin and ops only</span>
+        <span className="text-xs text-muted-foreground">{readOnly ? "Read-only for your role" : "Never shown to the client"}</span>
       </div>
       <textarea
         value={value}
+        readOnly={readOnly}
         onChange={(e) => {
           setValue(e.target.value);
           setState("idle");
         }}
         rows={6}
-        placeholder="Anything worth remembering about this client — preferences, payment history, sensitivities…"
+        placeholder={readOnly ? "No notes yet." : "Anything worth remembering about this client — preferences, payment history, sensitivities…"}
         className={cn(
           "mt-2 w-full rounded-lg border border-input-border bg-input p-3 text-sm text-foreground transition-colors",
           "placeholder:text-subtle",
           "focus-visible:border-ring focus-visible:bg-card focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/20"
         )}
       />
+      {readOnly ? null : (
       <div className="mt-2 flex items-center gap-3">
         <Button size="sm" onClick={save} disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save notes"}
@@ -82,6 +87,7 @@ export function ClientNotes({
           </span>
         ) : null}
       </div>
+      )}
     </div>
   );
 }

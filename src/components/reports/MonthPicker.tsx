@@ -10,11 +10,20 @@ function shiftMonth(month: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-export function MonthPicker({ month, currentMonth }: { month: string; currentMonth: string }) {
+export function MonthPicker({
+  month,
+  currentMonth,
+  basePath = "/admin/reports",
+}: {
+  month: string;
+  currentMonth: string;
+  /** The report page to reload with `?month=` — each domain's report passes its own. */
+  basePath?: string;
+}) {
   const router = useRouter();
 
   function go(next: string) {
-    router.push(`/admin/reports?month=${next}`);
+    router.push(`${basePath}?month=${next}`);
   }
 
   return (

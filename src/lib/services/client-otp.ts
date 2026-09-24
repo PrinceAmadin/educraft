@@ -146,7 +146,7 @@ function refused(status: Exclude<CodeRequestStatus, "sent" | "wait">, reason: st
  */
 async function classifyNonClientEmail(email: string): Promise<CodeRequestResult> {
   const user = await db.user.findUnique({ where: { email }, select: { id: true, role: true } });
-  if (user?.role === "SUPER_ADMIN" || user?.role === "OPS_MANAGER") return refused("unavailable", "that email belongs to a staff login");
+  if (isStaffRole(user?.role)) return refused("unavailable", "that email belongs to a staff login");
   const match = { email: { equals: email, mode: "insensitive" as const } };
   const pending = { status: "PENDING" as const, OR: [match, ...(user ? [{ userId: user.id }] : [])] };
   const [workers, ambassadors, workerApps, ambassadorApps] = await Promise.all([

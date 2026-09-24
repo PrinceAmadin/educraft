@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { badRequest, requireAdmin, serverError } from "@/lib/api";
+import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
 import { markPayouts } from "@/lib/services/payouts";
 import { TransitionError } from "@/lib/services/projects";
 import { payoutActionSchema } from "@/lib/validations/ambassadors";
 
+/** Records a transfer as paid. The founder and the CFO only: the COO sees the queue but never marks it. */
 export async function POST(req: NextRequest) {
-  const guard = await requireAdmin();
+  const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
 
   let body: unknown;

@@ -11,9 +11,12 @@ function personLabel(p: { name: string; code: string; amount: number } | null): 
   return p ? `${p.name} (${p.code}) — ${formatNaira(p.amount)}` : "—";
 }
 
-function sections(r: MonthlyReport): { title: string; rows: [string, string][] }[] {
+export type ReportSection = "revenue" | "projects" | "people";
+
+function sections(r: MonthlyReport): { key: ReportSection; title: string; rows: [string, string][] }[] {
   return [
     {
+      key: "revenue",
       title: "Revenue summary",
       rows: [
         ["Total revenue", formatNaira(r.revenue.totalRevenue)],
@@ -25,6 +28,7 @@ function sections(r: MonthlyReport): { title: string; rows: [string, string][] }
       ],
     },
     {
+      key: "projects",
       title: "Project summary",
       rows: [
         ["Total projects created", String(r.projects.created)],
@@ -41,6 +45,7 @@ function sections(r: MonthlyReport): { title: string; rows: [string, string][] }
       ],
     },
     {
+      key: "people",
       title: "People summary",
       rows: [
         ["Active workers", String(r.people.activeWorkers)],
@@ -71,18 +76,34 @@ function csvCell(value: string): string {
 /** jspdf-autotable patches this onto the doc instance after each call. */
 type WithAutoTable = JsPDFType & { lastAutoTable: { finalY: number } };
 
-export function ReportExportButtons({ report }: { report: MonthlyReport }) {
+/**
+ * CSV / PDF of a monthly report. Each domain's report page passes `include`
+ * so an executive only ever exports their own domain's numbers.
+ */
+export function ReportExportButtons({
+  report,
+  include,
+  domain = "monthly",
+}: {
+  report: MonthlyReport;
+  include?: ReportSection[];
+  /** Names the file and the heading: "finance", "operations", "growth". */
+  domain?: string;
+}) {
   const [buildingPdf, setBuildingPdf] = React.useState(false);
+  const chosen = sections(report).filter((s) => !include || include.includes(s.key));
+  const heading = `EduCraft — ${domain[0].toUpperCase()}${domain.slice(1)} report`;
+  const slug = `educraft-${domain}-report-${report.month}`;
 
   function downloadCsv() {
-    const lines: string[] = [`EduCraft monthly report`, report.monthLabel, ""];
-    for (const section of sections(report)) {
+    const lines: string[] = [heading, report.monthLabel, ""];
+    for (const section of chosen) {
       lines.push(section.title);
       for (const [label, value] of section.rows) lines.push([csvCell(label), csvCell(value)].join(","));
       lines.push("");
     }
     const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
-    triggerDownload(blob, `educraft-report-${report.month}.csv`);
+    triggerDownload(blob, `${slug}.csv`);
   }
 
   // PDF generation is client-only and the library is sizeable — loaded on
@@ -97,14 +118,14 @@ export function ReportExportButtons({ report }: { report: MonthlyReport }) {
 
       const doc = new jsPDF();
       doc.setFontSize(16);
-      doc.text("EduCraft — Monthly Report", 14, 18);
+      doc.text(heading, 14, 18);
       doc.setFontSize(11);
       doc.setTextColor(100);
       doc.text(report.monthLabel, 14, 26);
       doc.setTextColor(0);
 
       let cursorY = 32;
-      for (const section of sections(report)) {
+      for (const section of chosen) {
         autoTable(doc, {
           startY: cursorY,
           head: [[section.title, ""]],
@@ -116,7 +137,7 @@ export function ReportExportButtons({ report }: { report: MonthlyReport }) {
         cursorY = (doc as WithAutoTable).lastAutoTable.finalY + 8;
       }
 
-      doc.save(`educraft-report-${report.month}.pdf`);
+      doc.save(`${slug}.pdf`);
     } finally {
       setBuildingPdf(false);
     }

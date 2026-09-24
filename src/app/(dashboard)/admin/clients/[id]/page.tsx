@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuBuilding2, LuMegaphone } from "react-icons/lu";
+import { auth } from "@/lib/auth";
+import { clientsReadOnly } from "@/lib/rbac";
 import { getClientDetail } from "@/lib/services/clients";
 import { ClientEmailEditor } from "@/components/clients/ClientEmailEditor";
 import { ClientNotes } from "@/components/clients/ClientNotes";
@@ -21,10 +23,12 @@ export async function generateMetadata({
 }
 
 export default async function ClientDetailPage({ params }: { params: { id: string } }) {
-  const data = await getClientDetail(params.id);
+  const [session, data] = await Promise.all([auth(), getClientDetail(params.id)]);
   if (!data) notFound();
 
   const { client, stats } = data;
+  // The CFO and COO read this page; only the founder edits a client.
+  const readOnly = clientsReadOnly(session?.user?.role);
 
   return (
     <div className="space-y-5">
@@ -63,7 +67,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
             </a>
           </Field>
           <Field icon={LuMail} label="Email">
-            <ClientEmailEditor clientId={client.id} email={client.email} />
+            <ClientEmailEditor clientId={client.id} email={client.email} readOnly={readOnly} />
           </Field>
           <Field icon={LuBuilding2} label="University">
             {client.university?.name ?? "—"}
@@ -95,7 +99,7 @@ export default async function ClientDetailPage({ params }: { params: { id: strin
 
       {/* Notes */}
       <section className="surface p-4 sm:p-5">
-        <ClientNotes clientId={client.id} initialNotes={client.notes} />
+        <ClientNotes clientId={client.id} initialNotes={client.notes} readOnly={readOnly} />
       </section>
     </div>
   );
