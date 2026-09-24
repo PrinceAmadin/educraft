@@ -23,6 +23,7 @@
     "check:client-access": "tsx scripts/check-client-access.ts",
     "check:rbac": "tsx scripts/check-rbac.ts",
     "check:finance": "tsx scripts/check-finance-math.ts",
+    "check:tiers": "tsx scripts/check-ambassador-tiers.ts",
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
