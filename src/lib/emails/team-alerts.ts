@@ -87,13 +87,11 @@ export function ambassadorApplicationAlert(input: {
   slotCode: string | null;
   /** Only on applications from before the screening questions. */
   motivation: string | null;
-  pitchMessage: string | null;
+  firstWeekPlan: string | null;
   reach: string | null;
   roles: string;
   expectedReferrals: number | null;
   score: { total: number; max: number } | null;
-  /** Set only when they picked the WRONG answer — how they would sell us. */
-  serviceCheckPicked: string | null;
   /** Applied with the login they already use (a worker applying as an ambassador). */
   existingLogin: boolean;
   submittedAt: string;
@@ -119,15 +117,11 @@ export function ambassadorApplicationAlert(input: {
         label: "Expects in 30 days",
         value: input.expectedReferrals == null ? null : `${input.expectedReferrals} students`,
       },
-      {
-        label: "Service check",
-        value: input.serviceCheckPicked ? `FAILED — picked "${input.serviceCheckPicked}"` : null,
-      },
       { label: "Login", value: input.existingLogin ? "Already a worker, same login" : null },
       { label: "Submitted", value: input.submittedAt },
     ],
-    quote: input.pitchMessage
-      ? { label: "The message they'd send a stuck classmate", body: input.pitchMessage }
+    quote: input.firstWeekPlan
+      ? { label: "Their first move in week one", body: input.firstWeekPlan }
       : { label: "Why they want to be an ambassador", body: input.motivation },
     actionLabel: "Review application",
     actionUrl: input.reviewUrl,

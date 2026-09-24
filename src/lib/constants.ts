@@ -121,20 +121,6 @@ export const REACH_SIZES = [
   { value: "OVER_400", label: "More than 400" },
 ] as const;
 
-/**
- * Every distractor is a real EduCraft service, so the question can only be
- * answered by someone who read what we do. A wrong answer is a liability, not
- * noise: it is how that person would sell us on their campus.
- */
-export const SERVICE_CHECK_OPTIONS = [
-  { value: "PROJECT", label: "Write a final year project" },
-  { value: "EDITING", label: "Edit and format a document you already wrote" },
-  { value: "EXAMS", label: "Sit or write exams and tests for a student" },
-  { value: "SLIDES", label: "Design presentation slides" },
-] as const;
-
-export const SERVICE_CHECK_CORRECT = "EXAMS";
-
 export const REFERENCING_STYLES = [
   { value: "APA_7TH", label: "APA 7th" },
   { value: "APA_6TH", label: "APA 6th" },

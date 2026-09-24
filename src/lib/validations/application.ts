@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { phoneSchema } from "@/lib/validations/clients";
-import { REACH_ROLES, REACH_SIZES, SERVICE_CHECK_OPTIONS } from "@/lib/constants";
+import { REACH_ROLES, REACH_SIZES } from "@/lib/constants";
 
 const values = <T extends readonly { value: string }[]>(opts: T) =>
   opts.map((o) => o.value) as [string, ...string[]];
@@ -27,30 +27,17 @@ export const ambassadorApplicationSchema = z
       .trim()
       .min(5, "Name at least one group or page")
       .max(200, "Keep it under 200 characters"),
-    // ── The job: a work sample beats a statement of intent ──
-    serviceCheck: z.enum(values(SERVICE_CHECK_OPTIONS), {
-      errorMap: () => ({ message: "Pick the one we do not do" }),
-    }),
-    pitchMessage: z
-      .string()
-      .trim()
-      .min(40, "Write the message you'd really send — at least 40 characters")
-      .max(600, "Keep it under 600 characters"),
-    objectionReply: z
-      .string()
-      .trim()
-      .min(20, "Give them a real answer — at least 20 characters")
-      .max(300, "Keep it under 300 characters"),
-    clientUpsetReply: z
-      .string()
-      .trim()
-      .min(20, "Say what you'd actually do — at least 20 characters")
-      .max(300, "Keep it under 300 characters"),
-    expectedReferrals: z.coerce
-      .number({ invalid_type_error: "Enter a number" })
-      .int("Enter a whole number")
-      .min(0, "Enter a number")
-      .max(500, "Enter a realistic number"),
+    // ── What they commit to ──
+    // Empty must stay empty: z.coerce.number() reads "" as 0, so a blank box
+    // would pass as an honest "nobody" and the required marker would be a lie.
+    expectedReferrals: z.preprocess(
+      (v) => (v === "" || v == null ? undefined : v),
+      z.coerce
+        .number({ required_error: "Enter a number", invalid_type_error: "Enter a number" })
+        .int("Enter a whole number")
+        .min(0, "Enter a number")
+        .max(500, "Enter a realistic number")
+    ),
     firstWeekPlan: z
       .string()
       .trim()

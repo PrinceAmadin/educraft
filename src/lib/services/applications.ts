@@ -138,10 +138,6 @@ export async function submitApplication(
         reachRoles: input.reachRoles,
         reachSize: input.reachSize,
         reachGroups: input.reachGroups.trim(),
-        serviceCheck: input.serviceCheck,
-        pitchMessage: input.pitchMessage.trim(),
-        objectionReply: input.objectionReply.trim(),
-        clientUpsetReply: input.clientUpsetReply.trim(),
         expectedReferrals: input.expectedReferrals,
         firstWeekPlan: input.firstWeekPlan.trim(),
         bankName: input.bankName.trim(),
@@ -183,12 +179,16 @@ export interface ApplicationRow {
   reachRoles: string[];
   reachSize: string | null;
   reachGroups: string | null;
+  expectedReferrals: number | null;
+  firstWeekPlan: string | null;
+  /**
+   * Retired Sept 2026 — the form stopped asking these. Kept on the row so an
+   * application submitted while they were live is still readable in full.
+   */
   serviceCheck: string | null;
   pitchMessage: string | null;
   objectionReply: string | null;
   clientUpsetReply: string | null;
-  expectedReferrals: number | null;
-  firstWeekPlan: string | null;
   /** Triage only — sorts the pile, never decides it. Null for legacy rows. */
   score: ApplicationScore | null;
   bankName: string | null;
@@ -264,10 +264,6 @@ export async function listApplications(
       reachRoles: r.reachRoles,
       reachSize: r.reachSize,
       reachGroups: r.reachGroups,
-      serviceCheck: r.serviceCheck,
-      pitchMessage: r.pitchMessage,
-      objectionReply: r.objectionReply,
-      clientUpsetReply: r.clientUpsetReply,
       expectedReferrals: r.expectedReferrals,
       firstWeekPlan: r.firstWeekPlan,
     };
@@ -280,6 +276,10 @@ export async function listApplications(
     department: r.department,
     level: r.level,
     motivation: r.motivation,
+    serviceCheck: r.serviceCheck,
+    pitchMessage: r.pitchMessage,
+    objectionReply: r.objectionReply,
+    clientUpsetReply: r.clientUpsetReply,
     ...answers,
     score: isLegacyApplication(answers) ? null : scoreApplication(answers),
     bankName: r.bankName,

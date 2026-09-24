@@ -478,7 +478,7 @@ function ScoreChip({ row }: { row: ApplicationRow }) {
   return (
     <span
       className={`rounded-full px-2 py-0.5 font-mono text-xs font-medium ${SCORE_CHIP[row.score.band]}`}
-      title="Reach, roles, commitment and effort — a sort order, not a verdict"
+      title="Reach, roles and commitment — a sort order, not a verdict"
     >
       {row.score.total}/{row.score.max}
     </span>
@@ -500,13 +500,14 @@ function ReachLine({ row }: { row: ApplicationRow }) {
 /** Collapsed: only worth opening for the ones being seriously considered. */
 function AnswersDisclosure({ row }: { row: ApplicationRow }) {
   const answers = [
-    { label: "If they say it's a scam", value: row.objectionReply },
-    { label: "If a referred student is upset", value: row.clientUpsetReply },
-    { label: "Week one", value: row.firstWeekPlan },
     {
       label: "Expects in 30 days",
       value: row.expectedReferrals == null ? null : `${row.expectedReferrals} students`,
     },
+    { label: "Week one", value: row.firstWeekPlan },
+    // Retired Sept 2026. Still shown for an application that answered them.
+    { label: "If they say it's a scam", value: row.objectionReply },
+    { label: "If a referred student is upset", value: row.clientUpsetReply },
   ].filter((a) => a.value);
   if (answers.length === 0) return null;
   return (

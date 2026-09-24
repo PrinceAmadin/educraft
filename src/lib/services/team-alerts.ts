@@ -11,13 +11,8 @@ import {
 } from "@/lib/emails/team-alerts";
 import { getAlertEmails } from "@/lib/services/settings";
 import { statusLabel } from "@/lib/status";
-import { REACH_ROLES, SERVICE_CHECK_CORRECT } from "@/lib/constants";
-import {
-  isLegacyApplication,
-  reachSizeLabel,
-  scoreApplication,
-  serviceCheckLabel,
-} from "@/lib/ambassador-score";
+import { REACH_ROLES } from "@/lib/constants";
+import { isLegacyApplication, reachSizeLabel, scoreApplication } from "@/lib/ambassador-score";
 import { formatDate, formatNaira } from "@/lib/utils";
 
 /**
@@ -105,10 +100,6 @@ export function alertAmbassadorApplication(applicationId: string, { existingLogi
         reachRoles: true,
         reachSize: true,
         reachGroups: true,
-        serviceCheck: true,
-        pitchMessage: true,
-        objectionReply: true,
-        clientUpsetReply: true,
         expectedReferrals: true,
         firstWeekPlan: true,
         createdAt: true,
@@ -126,7 +117,7 @@ export function alertAmbassadorApplication(applicationId: string, { existingLogi
       level: app.level,
       slotCode: app.slotCode,
       motivation: app.motivation,
-      pitchMessage: app.pitchMessage,
+      firstWeekPlan: app.firstWeekPlan,
       reach: reachSizeLabel(app.reachSize),
       roles: app.reachRoles
         .filter((r) => r !== "NONE")
@@ -136,9 +127,6 @@ export function alertAmbassadorApplication(applicationId: string, { existingLogi
       // The founder triages from Gmail, so the alert carries the same verdict
       // the applications list shows.
       score: isLegacyApplication(app) ? null : scoreApplication(app),
-      // Only worth a line when they got it wrong.
-      serviceCheckPicked:
-        app.serviceCheck && app.serviceCheck !== SERVICE_CHECK_CORRECT ? serviceCheckLabel(app.serviceCheck) : null,
       existingLogin,
       submittedAt: watDateTime(app.createdAt),
       reviewUrl: `${siteUrl()}/admin/ambassadors/applications`,

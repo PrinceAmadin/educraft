@@ -12,20 +12,13 @@ import { Field } from "@/components/forms/Field";
 import { FormSection } from "@/components/forms/FormSection";
 import { StepShell } from "@/components/forms/StepShell";
 import { OTHER_UNIVERSITY, UniversityCombobox, type UniversityOption } from "@/components/forms/UniversityCombobox";
-import {
-  ACADEMIC_LEVELS,
-  NIGERIAN_BANKS,
-  REACH_ROLES,
-  REACH_SIZES,
-  SERVICE_CHECK_OPTIONS,
-} from "@/lib/constants";
+import { ACADEMIC_LEVELS, NIGERIAN_BANKS, REACH_ROLES, REACH_SIZES } from "@/lib/constants";
 import { ambassadorApplicationSchema, type AmbassadorApplicationInput } from "@/lib/validations/application";
 
 const STEPS = [
   { id: "about", label: "About you" },
   { id: "login", label: "Your login" },
   { id: "campus", label: "Your campus & reach" },
-  { id: "job", label: "The job" },
   { id: "payment", label: "Payment & agreement" },
 ];
 
@@ -33,12 +26,14 @@ const STEPS = [
 const STEP_FIELDS: (keyof AmbassadorApplicationInput)[][] = [
   ["fullName", "phone"],
   ["email", "password", "confirmPassword"],
-  ["universityId", "otherUniversity", "department", "level", "reachRoles", "reachSize", "reachGroups"],
   [
-    "serviceCheck",
-    "pitchMessage",
-    "objectionReply",
-    "clientUpsetReply",
+    "universityId",
+    "otherUniversity",
+    "department",
+    "level",
+    "reachRoles",
+    "reachSize",
+    "reachGroups",
     "expectedReferrals",
     "firstWeekPlan",
   ],
@@ -46,7 +41,7 @@ const STEP_FIELDS: (keyof AmbassadorApplicationInput)[][] = [
 ];
 
 /**
- * Ambassador application, five short pages. No outer container — each page
+ * Ambassador application, four short pages. No outer container — each page
  * carries one titled section, and the fields carry the affordance.
  */
 export function ApplyForm({
@@ -89,10 +84,6 @@ export function ApplyForm({
       reachRoles: [],
       reachSize: undefined,
       reachGroups: "",
-      serviceCheck: undefined,
-      pitchMessage: "",
-      objectionReply: "",
-      clientUpsetReply: "",
       expectedReferrals: undefined,
       firstWeekPlan: "",
       bankName: "",
@@ -102,7 +93,6 @@ export function ApplyForm({
     },
   });
 
-  const pitchMessage = watch("pitchMessage") ?? "";
   const [step, setStep] = React.useState(0);
 
   // The schema's cross-field rules (superRefine) never run on a partial trigger,
@@ -341,72 +331,14 @@ export function ApplyForm({
                 />
               </Field>
             </FormSection>
-          </div>,
-
-          <div key="job" className="space-y-8">
-            <FormSection title="What EduCraft does">
-              <p className="text-sm leading-relaxed text-muted-foreground">
-                EduCraft writes and designs academic work for students: final year projects and theses, seminar and IT
-                reports, term papers, presentations and CVs. The student pays 45% to start and 55% after the work
-                passes our quality check. You earn 10&ndash;15% of what your referral pays.
-              </p>
-
-              <Field
-                label="Which of these does EduCraft NOT do?"
-                required
-                htmlFor="a-service-check"
-                error={errors.serviceCheck?.message as string | undefined}
-              >
-                <Select id="a-service-check" {...register("serviceCheck")}>
-                  <option value="">Choose one</option>
-                  {SERVICE_CHECK_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </FormSection>
 
             <FormSection
-              title="The job"
-              description="Four short answers. We read these properly, so write them yourself."
+              title="Your first 30 days"
+              description="A new slot is provisional: one confirmed order inside 30 days makes it permanently yours."
             >
-              <Field
-                label="A final-year student in your department tells you they're stuck on their project. Write the exact message you'd send them."
-                required
-                htmlFor="a-pitch"
-                error={errors.pitchMessage?.message as string | undefined}
-                hint={
-                  pitchMessage.length
-                    ? `${pitchMessage.length}/600 characters`
-                    : "Write it the way you'd really send it — WhatsApp voice is fine."
-                }
-              >
-                <Textarea id="a-pitch" rows={5} maxLength={600} {...register("pitchMessage")} />
-              </Field>
-
-              <Field
-                label="They reply: &ldquo;How do I know this is not a scam?&rdquo; What do you say?"
-                required
-                htmlFor="a-objection"
-                error={errors.objectionReply?.message as string | undefined}
-              >
-                <Textarea id="a-objection" rows={3} maxLength={300} {...register("objectionReply")} />
-              </Field>
-
-              <Field
-                label="A student you referred messages you upset — their deadline is close and they think the work is late. What do you do?"
-                required
-                htmlFor="a-upset"
-                error={errors.clientUpsetReply?.message as string | undefined}
-              >
-                <Textarea id="a-upset" rows={3} maxLength={300} {...register("clientUpsetReply")} />
-              </Field>
-
               <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
                 <Field
-                  label="How many students do you expect to bring in your first 30 days?"
+                  label="How many final-year students do you expect to bring in your first 30 days?"
                   required
                   htmlFor="a-expected"
                   error={errors.expectedReferrals?.message as string | undefined}

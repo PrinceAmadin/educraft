@@ -140,17 +140,16 @@ model AmbassadorApplication {
   reachRoles      String[]          @default([])
   reachSize       String?
   reachGroups     String?
-  /// Which service they picked as the one EduCraft does NOT do. Getting this
-  /// wrong is a liability, not noise: it's how they'd sell us on campus.
-  serviceCheck    String?
-  /// The work sample: the message they'd really send a stuck classmate.
-  pitchMessage    String?
-  /// "How do I know this isn't a scam?" and the upset-client scenario.
-  objectionReply  String?
-  clientUpsetReply String?
   /// What they committed to in their first 30 days, and week one's first move.
   expectedReferrals Int?
   firstWeekPlan   String?
+  /// Retired Sept 2026: the form asked these for one day and stopped. The
+  /// columns stay so an application submitted in that window still reads in
+  /// full — nothing writes them any more.
+  serviceCheck    String?
+  pitchMessage    String?
+  objectionReply  String?
+  clientUpsetReply String?
   /// Payment details, captured at application time so approval needs no
   /// follow-up — mirrors the fields already on Ambassador.
   bankName        String?
