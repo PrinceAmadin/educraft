@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { sqlTable } from "@/lib/db-schema";
 import { readClicks } from "@/lib/services/ambassador-tracking";
 import { getPeakHours, NIGERIA_TZ, watDayStart, type InsightVoice, type PeakHoursData } from "@/lib/click-tracking/peak-hours";
 import { getRegionName } from "@/lib/click-tracking/region-names";
@@ -169,7 +170,7 @@ export async function getOverview(ambassadorId: string, slotCode: string): Promi
         to_char((("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE ${NIGERIA_TZ}::text)::date, 'YYYY-MM-DD') AS d,
         COUNT(*)::int AS total,
         (COUNT(*) FILTER (WHERE quality = 'UNIQUE'))::int AS uniq
-      FROM "ClickEvent"
+      FROM ${sqlTable("ClickEvent")}
       WHERE "ambassadorId" = ${ambassadorId}::text
         AND "timestamp" >= ${weekStart.toISOString()}::timestamp
         AND "isTestClick" = false AND "archivedAt" IS NULL

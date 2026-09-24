@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { sqlTable } from "@/lib/db-schema";
 
 /**
  * "When do people actually click this link?" Ported from Traqly's
@@ -74,7 +75,7 @@ async function fetchBuckets(ambassadorId: string, since: Date, until?: Date): Pr
       EXTRACT(DOW  FROM ("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE ${NIGERIA_TZ}::text)::int AS day_index,
       EXTRACT(HOUR FROM ("timestamp" AT TIME ZONE 'UTC') AT TIME ZONE ${NIGERIA_TZ}::text)::int AS hour,
       COUNT(*)::int AS clicks
-    FROM "ClickEvent"
+    FROM ${sqlTable("ClickEvent")}
     WHERE "ambassadorId" = ${ambassadorId}::text
       AND "timestamp" >= ${since.toISOString()}::timestamp
       AND (${until ? until.toISOString() : null}::timestamp IS NULL OR "timestamp" < ${until ? until.toISOString() : null}::timestamp)

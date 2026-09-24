@@ -1,5 +1,6 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { sqlTable } from "@/lib/db-schema";
 import { getCommissionRates } from "@/lib/services/settings";
 import {
   CommissionError,
@@ -1601,7 +1602,7 @@ export async function nextId(kind: IdKind): Promise<string> {
   const { table, column, pattern } = ID_SOURCE[kind];
   const rows = await db.$queryRaw<{ max: number | null }[]>(
     Prisma.sql`SELECT MAX(CAST(substring(${Prisma.raw(`"${column}"`)} FROM ${pattern}::text) AS INTEGER)) AS max
-               FROM ${Prisma.raw(`"${table}"`)}`
+               FROM ${sqlTable(table)}`
   );
   const highest = rows[0]?.max ?? 0;
 

@@ -1,5 +1,6 @@
 import { Prisma, type DeliverableAccess, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { sqlTable } from "@/lib/db-schema";
 import { deliverableTemplate, orderedChapters } from "@/lib/deliverables";
 import { deliverableGate, type Gate } from "@/lib/files/policy";
 import { checkUploadedFile, type UploadedFileInput } from "@/lib/files/register";
@@ -257,7 +258,7 @@ export async function submitVersion(input: {
   const versionId = await db.$transaction(
     async (tx) => {
       // One at a time per deliverable while the version number is chosen.
-      await tx.$queryRaw`SELECT id FROM "ProjectDeliverable" WHERE id = ${deliverable.id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM ${sqlTable("ProjectDeliverable")} WHERE id = ${deliverable.id} FOR UPDATE`;
       const last = await tx.deliverableVersion.aggregate({ where: { deliverableId: deliverable.id }, _max: { version: true } });
       const file = await tx.projectFile.create({
         data: {
@@ -424,7 +425,7 @@ export async function reviewVersion(input: {
 
   const releaseNo = await db.$transaction(
     async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "ProjectDeliverable" WHERE id = ${deliverable.id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM ${sqlTable("ProjectDeliverable")} WHERE id = ${deliverable.id} FOR UPDATE`;
       const last = await tx.deliverableVersion.aggregate({ where: { deliverableId: deliverable.id }, _max: { releaseNo: true } });
       const next = (last._max.releaseNo ?? 0) + 1;
       const c = await tx.deliverableVersion.updateMany({
@@ -522,7 +523,7 @@ export async function adminUploadVersion(input: {
 
   const versionId = await db.$transaction(
     async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "ProjectDeliverable" WHERE id = ${deliverable.id} FOR UPDATE`;
+      await tx.$queryRaw`SELECT id FROM ${sqlTable("ProjectDeliverable")} WHERE id = ${deliverable.id} FOR UPDATE`;
       const last = await tx.deliverableVersion.aggregate({ where: { deliverableId: deliverable.id }, _max: { version: true } });
       const file = await tx.projectFile.create({
         data: {

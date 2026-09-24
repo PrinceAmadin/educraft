@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { db } from "@/lib/db";
+import { sqlTable } from "@/lib/db-schema";
 import { readGeo } from "@/lib/click-tracking/geo-headers";
 import {
   classifyReferrer,
@@ -60,7 +61,7 @@ export async function recordClick({ slotCode, headers, isTestClick = false }: Re
   // Explicit casts: in an INSERT ... SELECT, untyped NULL parameters would
   // otherwise be inferred as text and rejected by non-text columns.
   await db.$executeRaw`
-    INSERT INTO "ClickEvent" (
+    INSERT INTO ${sqlTable("ClickEvent")} (
       id, "slotCode", "ambassadorId", "timestamp", "ipHash",
       country, city, region, "regionCode", latitude, longitude,
       device, os, browser, referrer, "referrerSource",
@@ -87,7 +88,7 @@ export async function recordClick({ slotCode, headers, isTestClick = false }: Re
       ${isTestClick}::boolean
     FROM (
       SELECT MAX("timestamp") AS last
-      FROM "ClickEvent"
+      FROM ${sqlTable("ClickEvent")}
       WHERE "slotCode" = ${slotCode}::text AND "ipHash" = ${ipHash}::text AND quality <> 'BOT'
     ) prev
   `;

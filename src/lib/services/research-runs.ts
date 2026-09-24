@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { sqlTable } from "@/lib/db-schema";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 
 /*
@@ -90,7 +91,7 @@ export async function claimRun(projectDbId: string, userId: string): Promise<Run
   return db.$transaction(async (tx) => {
     // Serialise claims per project — without this, two clicks at once would
     // both read "one free re-run left".
-    await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectDbId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM ${sqlTable("Project")} WHERE id = ${projectDbId} FOR UPDATE`;
 
     const [runsStarted, reruns, jobExists] = await Promise.all([
       tx.researchRunLog.count({ where: { projectId: projectDbId } }),
