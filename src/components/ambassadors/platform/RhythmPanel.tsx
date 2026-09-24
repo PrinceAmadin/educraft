@@ -63,6 +63,11 @@ export function RhythmPanel({ rhythm, spotlight }: { rhythm: WeekRhythm; spotlig
                 <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-success/15 text-success" aria-label="Done">
                   <LuCheck className="size-4" aria-hidden />
                 </span>
+              ) : d.type === "FRIDAY_SPOTLIGHT" ? (
+                // The winner is picked (and the post logged) on the leaderboard, next to the rankings.
+                <Button asChild size="sm" variant={d.state === "DUE_TODAY" || d.state === "MISSED" ? "default" : "outline"}>
+                  <Link href="/admin/ambassadors/leaderboard?view=week#spotlight">{d.action}</Link>
+                </Button>
               ) : (
                 <Button type="button" size="sm" variant={d.state === "DUE_TODAY" || d.state === "MISSED" ? "default" : "outline"} disabled={busy != null} onClick={() => markDone(d)}>
                   {busy === d.type ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}

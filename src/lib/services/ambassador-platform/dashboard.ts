@@ -5,6 +5,7 @@ import { AMBASSADOR_TIERS } from "@/lib/finance/commission-config";
 import { lastWeeks, weekStart } from "@/lib/ambassadors/weeks";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { weekRhythm, type WeekRhythm } from "@/lib/services/ambassador-platform/content";
+import { weeklySpotlight, type Spotlight } from "@/lib/services/ambassador-platform/leaderboard";
 
 /**
  * The Ambassador Dashboard (Phase 3 Section 1): "what is the network doing
@@ -52,16 +53,8 @@ export interface WeekPoint {
   conversions: number;
 }
 
-export interface Spotlight {
-  ambassadorId: string;
-  fullName: string;
-  school: string | null;
-  tier: AmbassadorTier;
-  thisWeek: number;
-  lastWeek: number;
-  thisMonth: number;
-  message: string;
-}
+/** The Friday spotlight is computed once, by the leaderboard service, so both pages always suggest the same person. */
+export type { Spotlight } from "@/lib/services/ambassador-platform/leaderboard";
 
 export interface AmbassadorDashboard {
   stats: DashboardStats;
@@ -87,13 +80,6 @@ function previousMonthKey(month: string): string {
 function nextMonthStart(month: string): Date {
   const [y, m] = month.split("-").map(Number);
   return new Date(Date.UTC(y, m, 1));
-}
-
-export function spotlightMessage(s: Omit<Spotlight, "message">): string {
-  const school = s.school ? ` from ${s.school}` : "";
-  const week = `${s.thisWeek} new client${s.thisWeek === 1 ? "" : "s"} this week alone.`;
-  const month = `${s.fullName.split(" ")[0]} has now referred ${s.thisMonth} client${s.thisMonth === 1 ? "" : "s"} this month.`;
-  return `This week's spotlight: ${s.fullName}${school}! ${week} ${month} Show them some love. #EduCraftAmbassador`;
 }
 
 export async function getAmbassadorDashboard(now: Date = new Date()): Promise<AmbassadorDashboard> {
@@ -181,29 +167,8 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
     conversions: weekRows.filter((r) => r.status === "CONVERTED" && r.convertedAt != null && r.convertedAt >= w.start && r.convertedAt < w.end).length,
   }));
 
-  // ── Friday spotlight: top by conversions this week, then referrals, then lifetime ──
-  const byAmb = new Map<string, { thisWeek: number; lastWeek: number; thisMonth: number; refsThisWeek: number }>();
-  for (const r of weekRows) {
-    const cur = byAmb.get(r.ambassadorId) ?? { thisWeek: 0, lastWeek: 0, thisMonth: 0, refsThisWeek: 0 };
-    if (r.submittedAt >= thisWeekStart) cur.refsThisWeek += 1;
-    if (r.status === "CONVERTED" && r.convertedAt) {
-      if (r.convertedAt >= thisWeekStart) cur.thisWeek += 1;
-      else if (r.convertedAt >= lastWeekStart) cur.lastWeek += 1;
-      if (r.convertedAt >= mStart) cur.thisMonth += 1;
-    }
-    byAmb.set(r.ambassadorId, cur);
-  }
-  const ranked = ambassadors
-    .map((a) => ({ a, s: byAmb.get(a.id) ?? { thisWeek: 0, lastWeek: 0, thisMonth: 0, refsThisWeek: 0 } }))
-    .filter(({ s }) => s.thisWeek > 0 || s.refsThisWeek > 0)
-    .sort((x, y) => y.s.thisWeek - x.s.thisWeek || y.s.refsThisWeek - x.s.refsThisWeek || y.a.lifetimeConversions - x.a.lifetimeConversions);
-  const top = ranked[0];
-  const spotlight: Spotlight | null = top
-    ? (() => {
-        const base = { ambassadorId: top.a.id, fullName: top.a.fullName, school: top.a.university?.abbreviation ?? null, tier: top.a.tier, thisWeek: top.s.thisWeek, lastWeek: top.s.lastWeek, thisMonth: top.s.thisMonth };
-        return { ...base, message: spotlightMessage(base) };
-      })()
-    : null;
+  // ── Friday spotlight (shared with the leaderboard) ──
+  const spotlight = (await weeklySpotlight(now)).top;
 
   return {
     stats: {
