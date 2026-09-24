@@ -37,13 +37,30 @@ export const verifyPaymentBodySchema = z.object({
   notes: z.string().trim().max(1000).optional().or(z.literal("")),
 });
 
+/** "The client says they've paid": the leg goes to Paid and finance verifies it. Details are optional here. */
 export const markPaymentBodySchema = z.object({
   leg: z.enum(["downpayment", "balance"]),
+  paymentMethod: z.string().trim().max(60).optional().or(z.literal("")),
+  reference: z.string().trim().max(120).optional().or(z.literal("")),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .or(z.literal("")),
+  notes: z.string().trim().max(1000).optional().or(z.literal("")),
+});
+
+/** Finance refusing a marked payment: the leg goes back to Unpaid. */
+export const rejectPaymentBodySchema = z.object({
+  leg: z.enum(["downpayment", "balance"]),
+  note: z.string().trim().min(3, "Say why").max(1000),
 });
 
 export const holdBodySchema = z.object({
   to: z.enum(["ON_HOLD", "CANCELLED", "REFUNDED", "DISPUTED"]),
   note: z.string().trim().min(3, "A reason is required").max(1000),
+  /** REFUNDED only: what was sent back to the client. Defaults to everything they paid. */
+  refundAmount: z.coerce.number().nonnegative().optional(),
 });
 
 export const assignWorkerBodySchema = z.object({

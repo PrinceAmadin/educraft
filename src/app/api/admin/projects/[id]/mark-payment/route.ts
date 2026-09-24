@@ -18,7 +18,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!parsed.success) return badRequest("Invalid request", parsed.error.flatten());
 
   try {
-    const project = await markPaymentPaid(params.id, parsed.data.leg);
+    const project = await markPaymentPaid(params.id, parsed.data.leg, {
+      paymentMethod: parsed.data.paymentMethod || undefined,
+      reference: parsed.data.reference || undefined,
+      paymentDate: parsed.data.date || undefined,
+      notes: parsed.data.notes || undefined,
+    });
     return NextResponse.json({ status: project.status });
   } catch (error) {
     if (error instanceof TransitionError) {

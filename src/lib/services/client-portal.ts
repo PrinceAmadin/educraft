@@ -275,7 +275,8 @@ export interface ClientPaymentRow {
   receiptNo: string;
   leg: "downpayment" | "balance";
   amount: number;
-  status: "Confirmed" | "Pending";
+  /** Duplicate = paid twice (a refund is due); Refunded = sent back. Only Confirmed counts as paid. */
+  status: "Confirmed" | "Pending" | "Duplicate" | "Refunded";
   method: string | null;
   date: string;
 }
@@ -292,7 +293,12 @@ export async function getClientPayments(projectDbId: string): Promise<ClientPaym
       projectId: projectDbId,
       direction: "INFLOW",
       type: { in: ["CLIENT_DOWNPAYMENT", "CLIENT_BALANCE"] },
-      OR: [{ status: "Confirmed" }, { status: "Pending", date: { gte: new Date(Date.now() - 48 * 3_600_000) } }],
+      OR: [
+        { status: { in: ["Confirmed", "Duplicate", "Reversed"] } },
+        // A Paystack checkout still open, or a bank transfer the team is confirming.
+        { status: "Pending", source: "PAYSTACK", date: { gte: new Date(Date.now() - 48 * 3_600_000) } },
+        { status: "Pending", source: "MANUAL" },
+      ],
     },
     orderBy: { date: "desc" },
     select: { id: true, paymentId: true, type: true, amount: true, status: true, paymentMethod: true, date: true },
@@ -302,7 +308,7 @@ export async function getClientPayments(projectDbId: string): Promise<ClientPaym
     receiptNo: r.paymentId,
     leg: r.type === "CLIENT_BALANCE" ? "balance" : "downpayment",
     amount: r.amount,
-    status: r.status === "Confirmed" ? "Confirmed" : "Pending",
+    status: r.status === "Confirmed" ? "Confirmed" : r.status === "Duplicate" ? "Duplicate" : r.status === "Reversed" ? "Refunded" : "Pending",
     method: r.paymentMethod,
     date: r.date.toISOString(),
   }));
@@ -320,6 +326,7 @@ export async function reconcileClientPayments(projectDbId: string, reference?: s
       where: {
         projectId: projectDbId,
         status: "Pending",
+        source: "PAYSTACK",
         reference: reference ? reference : { not: null },
         date: { gte: new Date(Date.now() - 48 * 3_600_000) },
       },

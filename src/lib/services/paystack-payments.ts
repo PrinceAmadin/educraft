@@ -1,7 +1,8 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { deliverIfFinalReleased, nextId } from "@/lib/services/projects";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
+import { monthKeyOf, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { emailPendingCommission } from "@/lib/services/ambassador-commission";
 import { alertPaidIntakeFailed, alertPaidOrder } from "@/lib/services/team-alerts";
 import { IntakeError, submitIntake } from "@/lib/services/intake";
@@ -46,6 +47,9 @@ const LEG_ADVANCE_STATUS: Record<Leg, ProjectStatus> = {
   balance: "BALANCE_VERIFIED",
 };
 
+/** Payment rows nothing here ever moves again: confirmed, held as a duplicate, refunded, or refused. */
+const SETTLED_STATUSES = new Set(["Confirmed", "Duplicate", "Reversed", "Rejected"]);
+
 // ─────────────────────────────────────────────────────────────
 // B2 — initialize a transaction
 // ─────────────────────────────────────────────────────────────
@@ -77,6 +81,7 @@ export async function initializePaystackPayment(
       downpaymentAmount: true,
       balanceStatus: true,
       balanceAmount: true,
+      ambassadorId: true,
       client: { select: { fullName: true, email: true } },
     },
   });
@@ -120,9 +125,11 @@ export async function initializePaystackPayment(
     throw error;
   }
 
-  // Superseded by this new attempt — clear out so they don't linger as Pending forever.
+  // Earlier Paystack attempts are superseded by this one — clear them out so
+  // they don't linger as Pending forever. A bank transfer the admin marked as
+  // paid (source MANUAL) is finance's to confirm or refuse, never touched here.
   await db.payment.updateMany({
-    where: { projectId: project.id, type: LEG_PAYMENT_TYPE[leg], status: "Pending" },
+    where: { projectId: project.id, type: LEG_PAYMENT_TYPE[leg], status: "Pending", source: "PAYSTACK" },
     data: { status: "Failed" },
   });
 
@@ -138,6 +145,9 @@ export async function initializePaystackPayment(
       paymentMethod: "Paystack",
       reference,
       status: "Pending",
+      source: "PAYSTACK",
+      ambassadorId: project.ambassadorId,
+      isAmbassadorDriven: project.ambassadorId != null,
       date: new Date(),
     },
   });
@@ -288,7 +298,9 @@ async function creditProjectPayment(
 ): Promise<CreditReferenceResult> {
   const payment = await db.payment.findFirst({ where: { reference } });
   if (!payment) return { status: "no_local_record" };
-  if (payment.status === "Confirmed") return { status: "already_confirmed" };
+  // Already handled, whatever the outcome was: confirmed, held as a duplicate,
+  // refunded, or refused. Nothing here ever moves a row out of those.
+  if (SETTLED_STATUSES.has(payment.status)) return { status: "already_confirmed" };
 
   if (verified.status !== "success") {
     await db.payment.update({ where: { id: payment.id }, data: { status: "Failed" } });
@@ -306,6 +318,7 @@ async function creditProjectPayment(
       id: true,
       projectId: true,
       status: true,
+      ambassadorId: true,
       ambassador: { select: { userId: true } },
       downpaymentStatus: true,
       balanceStatus: true,
@@ -313,9 +326,27 @@ async function creditProjectPayment(
   });
   if (!project) return { status: "no_local_record" };
 
+  const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
+  const method = verified.channel ? `Paystack (${verified.channel})` : "Paystack";
+
   const legStatus = leg === "downpayment" ? project.downpaymentStatus : project.balanceStatus;
   if (legStatus === "Verified") {
-    await db.payment.update({ where: { id: payment.id }, data: { status: "Confirmed" } });
+    // Money arrived for a leg finance had already verified (a bank transfer
+    // confirmed by hand, then the Paystack checkout went through too). That
+    // is a second charge, not revenue: hold it as Duplicate for a refund and
+    // never let it into the buckets.
+    const held = await db.payment.updateMany({
+      where: { id: payment.id, status: { notIn: [...SETTLED_STATUSES] } },
+      data: { status: "Duplicate", paymentMethod: method, date: paidOn },
+    });
+    if (held.count === 1) {
+      await notifyFinance({
+        title: "Possible double payment",
+        message: `${project.projectId}: Paystack confirmed ${formatNaira(payment.amount)} for a ${leg} that was already verified. Refund it — it is held as a duplicate in the Revenue Tracker.`,
+        type: "urgent",
+        link: "/admin/finance/revenue?status=Duplicate",
+      });
+    }
     return { status: "already_confirmed" };
   }
 
@@ -328,7 +359,6 @@ async function creditProjectPayment(
       `[paystack] short payment on ${reference}: expected ${payment.amount}, Paystack confirmed ${amountNaira}`
     );
   }
-  const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
   const wantAdvance = project.status === LEG_REQUIRED_STATUS[leg] ? LEG_ADVANCE_STATUS[leg] : null;
 
   const legData: Prisma.ProjectUpdateManyMutationInput =
@@ -342,12 +372,14 @@ async function creditProjectPayment(
   const outcome = await db.$transaction(
     async (tx) => {
       const claim = await tx.payment.updateMany({
-        where: { id: payment.id, status: { not: "Confirmed" } },
+        where: { id: payment.id, status: { notIn: [...SETTLED_STATUSES] } },
         data: {
           status: "Confirmed",
           // amount stays the project's leg amount, not Paystack's gross charge —
           // the customer-borne fee on top is not EduCraft revenue.
-          paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
+          paymentMethod: method,
+          ambassadorId: project.ambassadorId,
+          isAmbassadorDriven: project.ambassadorId != null,
           date: paidOn,
         },
       });
@@ -381,12 +413,21 @@ async function creditProjectPayment(
         body: `Your ${leg} of ${formatNaira(payment.amount)} is confirmed.`,
         dedupeKey: `payment:${payment.id}`,
       });
+      // EduCraft's retained share of this money goes into the four buckets.
+      await syncProjectBuckets(tx, project.id, { reason: "PAYMENT", paymentId: payment.id, month: monthKeyOf(paidOn) });
       return { advance };
     },
     { timeout: 15_000, maxWait: 10_000 }
   );
   if (!outcome) return { status: "already_confirmed" };
   const advance = outcome.advance;
+
+  await notifyRole(["CO_CEO_CFO"], {
+    title: leg === "downpayment" ? "Downpayment received" : "Balance received",
+    message: `Paystack confirmed ${formatNaira(payment.amount)} (${leg}) for ${project.projectId}.`,
+    type: "success",
+    link: "/admin/finance/revenue",
+  });
 
   // An order submitted first (variable price) is now paid: tell the team's
   // Gmail. Queued before anything else can throw, so it is never lost.
@@ -494,42 +535,53 @@ async function processPendingIntake(
     return { status: "not_successful", paystackStatus: verified.status };
   }
 
-  // A previous webhook delivery may have already created the project and
-  // simply failed to flip the row to CONSUMED before crashing/timing out —
-  // don't create a second project for the same payment.
-  if (pending.resultProjectCode) return { status: "already_confirmed" };
-
-  let created: { projectId: string };
-  try {
-    created = await submitIntake(pending.payload as unknown as IntakeSubmitInput);
-  } catch (error) {
-    console.error(`[paystack] submitIntake failed for pending intake ${pendingIntakeId}`, error);
-    if (error instanceof IntakeError) {
-      await db.pendingIntake.update({ where: { id: pendingIntakeId }, data: { status: "FAILED" } });
-      // Paid, but no project: nothing else in HQ shows this money, so say so loudly.
-      const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
-      alertPaidIntakeFailed(pendingIntakeId, {
-        reference,
-        amountNaira: verified.amount / 100,
-        paidOn,
-        reason: error.message,
-      });
-      const form = (pending.payload ?? {}) as { fullName?: unknown; phone?: unknown };
-      const who = [form.fullName, form.phone].filter((v) => typeof v === "string" && v.trim()).join(", ");
-      await notifyAdmins({
-        title: "Payment received, order not created",
-        message: `Paystack confirmed ${reference}${who ? ` from ${who}` : ""}, but the order could not be created (${error.message}). Contact the client, then create the project by hand or refund them in Paystack.`,
-        type: "urgent",
-        link: "/admin/projects/new",
-      });
-      return { status: "missing_metadata" };
+  // A previous delivery may have created the project and then crashed or
+  // timed out before the money was recorded. The project code is remembered
+  // the moment it exists, so a retry picks that project up and never creates
+  // a second one for the same payment.
+  let projectCode = pending.resultProjectCode;
+  if (!projectCode) {
+    let created: { projectId: string };
+    try {
+      created = await submitIntake(pending.payload as unknown as IntakeSubmitInput);
+    } catch (error) {
+      console.error(`[paystack] submitIntake failed for pending intake ${pendingIntakeId}`, error);
+      if (error instanceof IntakeError) {
+        await db.pendingIntake.update({ where: { id: pendingIntakeId }, data: { status: "FAILED" } });
+        // Paid, but no project: nothing else in HQ shows this money, so say so loudly.
+        const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
+        alertPaidIntakeFailed(pendingIntakeId, {
+          reference,
+          amountNaira: verified.amount / 100,
+          paidOn,
+          reason: error.message,
+        });
+        const form = (pending.payload ?? {}) as { fullName?: unknown; phone?: unknown };
+        const who = [form.fullName, form.phone].filter((v) => typeof v === "string" && v.trim()).join(", ");
+        await notifyAdmins({
+          title: "Payment received, order not created",
+          message: `Paystack confirmed ${reference}${who ? ` from ${who}` : ""}, but the order could not be created (${error.message}). Contact the client, then create the project by hand or refund them in Paystack.`,
+          type: "urgent",
+          link: "/admin/projects/new",
+        });
+        return { status: "missing_metadata" };
+      }
+      throw error;
     }
-    throw error;
+    projectCode = created.projectId;
+    await db.pendingIntake.update({ where: { id: pendingIntakeId }, data: { resultProjectCode: projectCode } });
   }
 
   const project = await db.project.findUnique({
-    where: { projectId: created.projectId },
-    select: { id: true, projectId: true, downpaymentAmount: true, ambassador: { select: { userId: true } } },
+    where: { projectId: projectCode },
+    select: {
+      id: true,
+      projectId: true,
+      downpaymentAmount: true,
+      ambassadorId: true,
+      ambassador: { select: { userId: true } },
+      client: { select: { fullName: true } },
+    },
   });
   if (!project) return { status: "no_local_record" };
 
@@ -540,51 +592,72 @@ async function processPendingIntake(
     );
   }
   const paidOn = verified.paid_at ? new Date(verified.paid_at) : new Date();
+  const paymentId = await nextId("PAYMENT");
 
-  await db.$transaction([
-    db.project.update({
-      where: { id: project.id },
-      data: {
-        downpaymentStatus: "Verified",
-        downpaymentDate: paidOn,
-        downpaymentReference: reference,
-        status: "DOWNPAYMENT_VERIFIED",
-      },
-    }),
-    db.payment.create({
-      data: {
-        paymentId: await nextId("PAYMENT"),
-        type: "CLIENT_DOWNPAYMENT",
-        direction: "INFLOW",
+  const outcome = await db.$transaction(
+    async (tx) => {
+      // Claim the leg: a retry after a crash finds it verified and only closes the staging row.
+      const claimed = await tx.project.updateMany({
+        where: { id: project.id, downpaymentStatus: { not: "Verified" } },
+        data: {
+          downpaymentStatus: "Verified",
+          downpaymentDate: paidOn,
+          downpaymentReference: reference,
+          status: "DOWNPAYMENT_VERIFIED",
+        },
+      });
+      if (claimed.count !== 1) {
+        await tx.pendingIntake.update({
+          where: { id: pendingIntakeId },
+          data: { status: "CONSUMED", consumedAt: paidOn, resultProjectCode: project.projectId },
+        });
+        return null;
+      }
+      const payment = await tx.payment.create({
+        data: {
+          paymentId,
+          type: "CLIENT_DOWNPAYMENT",
+          direction: "INFLOW",
+          projectId: project.id,
+          personName: project.client.fullName,
+          personRole: "Client",
+          amount: project.downpaymentAmount,
+          paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
+          reference,
+          status: "Confirmed",
+          source: "PAYSTACK",
+          ambassadorId: project.ambassadorId,
+          isAmbassadorDriven: project.ambassadorId != null,
+          date: paidOn,
+        },
+        select: { id: true },
+      });
+      await tx.projectStatusLog.create({
+        data: {
+          projectId: project.id,
+          fromStatus: "NEW",
+          toStatus: "DOWNPAYMENT_VERIFIED",
+          notes: `Downpayment verified via Paystack (${reference}) — project created on payment success`,
+        },
+      });
+      await tx.pendingIntake.update({
+        where: { id: pendingIntakeId },
+        data: { status: "CONSUMED", consumedAt: paidOn, resultProjectCode: project.projectId },
+      });
+      await recordUpdate(tx, {
         projectId: project.id,
-        personRole: "Client",
-        amount: project.downpaymentAmount,
-        paymentMethod: verified.channel ? `Paystack (${verified.channel})` : "Paystack",
-        reference,
-        status: "Confirmed",
-        date: paidOn,
-      },
-    }),
-    db.projectStatusLog.create({
-      data: {
-        projectId: project.id,
-        fromStatus: "NEW",
-        toStatus: "DOWNPAYMENT_VERIFIED",
-        notes: `Downpayment verified via Paystack (${reference}) — project created on payment success`,
-      },
-    }),
-    db.pendingIntake.update({
-      where: { id: pendingIntakeId },
-      data: { status: "CONSUMED", consumedAt: paidOn, resultProjectCode: project.projectId },
-    }),
-    recordUpdate(db, {
-      projectId: project.id,
-      kind: "PAYMENT",
-      title: "Payment received",
-      body: `Your downpayment of ${formatNaira(project.downpaymentAmount)} is confirmed.`,
-      dedupeKey: `payment-ref:${reference}`,
-    }),
-  ]);
+        kind: "PAYMENT",
+        title: "Payment received",
+        body: `Your downpayment of ${formatNaira(project.downpaymentAmount)} is confirmed.`,
+        dedupeKey: `payment-ref:${reference}`,
+      });
+      // EduCraft's retained share of this money goes into the four buckets.
+      await syncProjectBuckets(tx, project.id, { reason: "PAYMENT", paymentId: payment.id, month: monthKeyOf(paidOn) });
+      return { paymentId: payment.id };
+    },
+    { timeout: 15_000, maxWait: 10_000 }
+  );
+  if (!outcome) return { status: "already_confirmed" };
 
   // A new, paid order: tell the team's Gmail (Settings > Email alerts).
   // Queued before anything else can throw, so it is never lost.
@@ -601,6 +674,12 @@ async function processPendingIntake(
     message: `Paystack confirmed the downpayment for ${project.projectId} — new project created.`,
     type: "success",
     link: `/admin/projects/${project.projectId}`,
+  });
+  await notifyRole(["CO_CEO_CFO"], {
+    title: "Downpayment received",
+    message: `Paystack confirmed ${formatNaira(project.downpaymentAmount)} for ${project.projectId} — a new order.`,
+    type: "success",
+    link: "/admin/finance/revenue",
   });
 
   await notifyClient(project.id, {
@@ -675,7 +754,15 @@ export interface ReconciliationRow {
   amount: number; // naira, Paystack's gross confirmed amount
   channel: string | null;
   paidAt: string | null;
-  ourStatus: "Confirmed" | "Pending" | "Failed" | "Missing";
+  /** Duplicate (a second charge held for refund), Reversed and Rejected are settled: nothing to sync. */
+  ourStatus: "Confirmed" | "Duplicate" | "Reversed" | "Rejected" | "Pending" | "Failed" | "Missing";
+}
+
+/** Local statuses that mean Paystack's record is fully accounted for on our side. */
+export const RECONCILED_STATUSES: ReadonlySet<ReconciliationRow["ourStatus"]> = new Set(["Confirmed", "Duplicate", "Reversed", "Rejected"]);
+
+export function isReconciled(status: ReconciliationRow["ourStatus"]): boolean {
+  return RECONCILED_STATUSES.has(status);
 }
 
 export interface PaystackReconciliation {
@@ -725,11 +812,11 @@ export async function getPaystackReconciliation(daysBack = 30): Promise<Paystack
     };
   });
 
-  rows.sort((a, b) => Number(a.ourStatus === "Confirmed") - Number(b.ourStatus === "Confirmed"));
+  rows.sort((a, b) => Number(isReconciled(a.ourStatus)) - Number(isReconciled(b.ourStatus)));
 
   return {
     rows,
-    matchedCount: rows.filter((r) => r.ourStatus === "Confirmed").length,
-    outOfSyncCount: rows.filter((r) => r.ourStatus !== "Confirmed").length,
+    matchedCount: rows.filter((r) => isReconciled(r.ourStatus)).length,
+    outOfSyncCount: rows.filter((r) => !isReconciled(r.ourStatus)).length,
   };
 }

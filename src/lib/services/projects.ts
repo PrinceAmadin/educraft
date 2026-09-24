@@ -25,7 +25,8 @@ import {
   type AdminHold,
   type TransitionCandidate,
 } from "@/lib/pipeline";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
+import { monthKeyOf, projectNetInflow, syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
 import { statusFeedEntry } from "@/lib/client-updates";
 import { recordUpdate } from "@/lib/services/client-updates";
@@ -560,31 +561,89 @@ export async function holdProject(
   idOrCode: string,
   to: AdminHold,
   note: string,
-  changedById: string
+  changedById: string,
+  /** REFUNDED: what went back to the client — defaults to everything they paid. */
+  opts: { refundAmount?: number } = {}
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
-    select: { id: true, projectId: true, status: true },
+    select: { id: true, projectId: true, status: true, client: { select: { fullName: true } } },
   });
   if (!project) throw new TransitionError("Project not found");
   if (!canHold(project.status, to)) {
     throw new TransitionError(`Cannot ${to.toLowerCase()} a project that is ${project.status}`);
   }
 
+  // Money in on this job: a refund gives it back (its own OUTFLOW row, so the
+  // month's revenue is what was actually kept); a cancellation with money in
+  // is a decision for finance, not something to reverse automatically.
+  const moneyIn = to === "CANCELLED" || to === "REFUNDED" ? await projectNetInflow(db, project.id) : 0;
+  const refund = to === "REFUNDED" ? Math.round(opts.refundAmount ?? moneyIn) : 0;
+  if (to === "REFUNDED" && refund > moneyIn) {
+    throw new TransitionError(`A refund can't exceed what the client paid (${formatNaira(moneyIn)})`);
+  }
+  const refundPaymentId = refund > 0 ? await nextId("PAYMENT") : null;
+  const now = new Date();
+
   const feed = statusFeedEntry(project.status, to);
-  await db.$transaction(async (tx) => {
-    await tx.project.update({ where: { id: project.id }, data: { status: to } });
-    const log = await tx.projectStatusLog.create({
-      data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
-      select: { id: true },
-    });
-    // A cancelled or refunded job earns no commission — drop it and its expense.
-    if (to === "CANCELLED" || to === "REFUNDED") await releaseCommission(tx, project.id);
-    if (feed) {
-      await recordUpdate(tx, { projectId: project.id, kind: "STATUS", title: feed.title, body: feed.body, dedupeKey: `status:${log.id}` });
-    }
-  });
+  await db.$transaction(
+    async (tx) => {
+      await tx.project.update({ where: { id: project.id }, data: { status: to } });
+      const log = await tx.projectStatusLog.create({
+        data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
+        select: { id: true },
+      });
+      // A cancelled or refunded job earns no commission — drop it and its expense.
+      if (to === "CANCELLED" || to === "REFUNDED") await releaseCommission(tx, project.id);
+      if (refundPaymentId) {
+        await tx.payment.create({
+          data: {
+            paymentId: refundPaymentId,
+            type: "REFUND",
+            direction: "OUTFLOW",
+            projectId: project.id,
+            personName: project.client.fullName,
+            personRole: "Client",
+            amount: refund,
+            confirmedById: changedById,
+            status: "Confirmed",
+            source: "MANUAL",
+            notes: note,
+            date: now,
+          },
+        });
+      }
+      if (to === "CANCELLED" || to === "REFUNDED") {
+        // The legs (and the money in) changed: the buckets follow.
+        await syncPaymentAmbassadorSnapshot(tx, project.id);
+        await syncProjectBuckets(tx, project.id, {
+          reason: to === "REFUNDED" ? "REFUND" : "REALLOCATION",
+          month: monthKeyOf(now),
+          recordedById: changedById,
+        });
+      }
+      if (feed) {
+        await recordUpdate(tx, { projectId: project.id, kind: "STATUS", title: feed.title, body: feed.body, dedupeKey: `status:${log.id}` });
+      }
+    },
+    { timeout: 15_000, maxWait: 10_000 }
+  );
   if (feed) await notifyClient(project.id, { title: feed.title, message: `${project.projectId}: ${feed.title.toLowerCase()}.` });
+  if (to === "REFUNDED" && refund > 0) {
+    await notifyFinance({
+      title: "Refund recorded",
+      message: `${project.projectId}: ${formatNaira(refund)} refunded to the client. The buckets have given it back.`,
+      type: "warning",
+      link: "/admin/finance/revenue",
+    });
+  } else if (to === "CANCELLED" && moneyIn > 0) {
+    await notifyFinance({
+      title: "Decision needed: cancelled with money in",
+      message: `${project.projectId} was cancelled with ${formatNaira(moneyIn)} paid. Refund it (Mark refunded) or keep it — nothing was reversed.`,
+      type: "urgent",
+      link: "/admin/finance/revenue",
+    });
+  }
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -638,16 +697,21 @@ interface VerifyPaymentOptions {
   /** ISO date (YYYY-MM-DD) the client actually paid; defaults to now. */
   paymentDate?: string;
   notes?: string;
+  /** The Revenue Tracker's row to confirm (the MANUAL Pending row mark-as-paid created). */
+  pendingPaymentId?: string;
 }
 
 /**
  * Verify a client payment leg that is marked "Paid". Sets the leg to
- * "Verified", records a confirmed inbound Payment, and — when the project is
- * sitting at the status that leg unblocks — advances it and logs the move.
+ * "Verified", confirms the Pending row that mark-as-paid created (or records
+ * a confirmed inbound Payment for a leg marked before that row existed),
+ * allocates EduCraft's retained share to the buckets, and — when the project
+ * is sitting at the status that leg unblocks — advances it and logs the move.
+ * Verifying is a finance act: the route admits the founder and the CFO.
  */
 export async function verifyPayment(
   idOrCode: string,
-  { leg, changedById, paymentMethod, reference, paymentDate, notes }: VerifyPaymentOptions
+  { leg, changedById, paymentMethod, reference, paymentDate, notes, pendingPaymentId }: VerifyPaymentOptions
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
@@ -656,6 +720,7 @@ export async function verifyPayment(
       projectId: true,
       status: true,
       client: { select: { fullName: true } },
+      ambassadorId: true,
       ambassador: { select: { userId: true } },
       downpaymentStatus: true,
       downpaymentAmount: true,
@@ -673,6 +738,7 @@ export async function verifyPayment(
   const now = new Date();
   const paidOn = paymentDate ? new Date(paymentDate) : now;
   const amount = leg === "downpayment" ? project.downpaymentAmount : project.balanceAmount;
+  const paymentType = leg === "downpayment" ? ("CLIENT_DOWNPAYMENT" as const) : ("CLIENT_BALANCE" as const);
 
   const data: Prisma.ProjectUpdateManyMutationInput =
     leg === "downpayment"
@@ -714,23 +780,76 @@ export async function verifyPayment(
       if (claimed.count !== 1) {
         throw new TransitionError("That payment was just verified by someone else. Refresh the page.");
       }
-      const payment = await tx.payment.create({
-        data: {
-          paymentId,
-          type: leg === "downpayment" ? "CLIENT_DOWNPAYMENT" : "CLIENT_BALANCE",
-          direction: "INFLOW",
-          projectId: project.id,
-          personName: project.client.fullName,
-          personRole: "Client",
-          amount,
-          paymentMethod: paymentMethod || null,
-          reference: reference || null,
-          notes: notes || null,
-          confirmedById: changedById,
-          status: "Confirmed",
-          date: paidOn,
-        },
-        select: { id: true },
+
+      // Confirm exactly the row mark-as-paid created — never a live Paystack
+      // checkout (source PAYSTACK). A leg marked before that row existed gets
+      // its Confirmed row created here, as before.
+      const pendingRows = await tx.payment.findMany({
+        where: pendingPaymentId
+          ? { id: pendingPaymentId, projectId: project.id, type: paymentType, status: "Pending", source: "MANUAL" }
+          : { projectId: project.id, type: paymentType, status: "Pending", source: "MANUAL" },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, paymentMethod: true, reference: true, notes: true },
+      });
+      if (pendingPaymentId && pendingRows.length === 0) {
+        throw new TransitionError("That payment row is no longer awaiting verification. Refresh the page.");
+      }
+      let payment: { id: string };
+      if (pendingRows.length > 0) {
+        const [row, ...stale] = pendingRows;
+        const confirmed = await tx.payment.updateMany({
+          where: { id: row.id, status: "Pending" },
+          data: {
+            status: "Confirmed",
+            amount,
+            paymentMethod: paymentMethod || row.paymentMethod,
+            reference: reference || row.reference,
+            notes: notes || row.notes,
+            confirmedById: changedById,
+            ambassadorId: project.ambassadorId,
+            isAmbassadorDriven: project.ambassadorId != null,
+            date: paidOn,
+          },
+        });
+        if (confirmed.count !== 1) {
+          throw new TransitionError("That payment was just verified by someone else. Refresh the page.");
+        }
+        if (stale.length > 0) {
+          await tx.payment.updateMany({
+            where: { id: { in: stale.map((s) => s.id) }, status: "Pending" },
+            data: { status: "Rejected", notes: "Superseded: the leg was confirmed on another row" },
+          });
+        }
+        payment = { id: row.id };
+      } else {
+        payment = await tx.payment.create({
+          data: {
+            paymentId,
+            type: paymentType,
+            direction: "INFLOW",
+            projectId: project.id,
+            personName: project.client.fullName,
+            personRole: "Client",
+            amount,
+            paymentMethod: paymentMethod || null,
+            reference: reference || null,
+            notes: notes || null,
+            confirmedById: changedById,
+            status: "Confirmed",
+            source: "MANUAL",
+            ambassadorId: project.ambassadorId,
+            isAmbassadorDriven: project.ambassadorId != null,
+            date: paidOn,
+          },
+          select: { id: true },
+        });
+      }
+      // EduCraft's retained share of this money goes into the four buckets.
+      await syncProjectBuckets(tx, project.id, {
+        reason: "PAYMENT",
+        paymentId: payment.id,
+        month: monthKeyOf(paidOn),
+        recordedById: changedById,
       });
       if (advance) {
         await tx.projectStatusLog.create({
@@ -781,6 +900,84 @@ export async function verifyPayment(
   if (leg === "downpayment") await emailPendingCommission(project.id);
   // Balance in and the complete document already released: that is delivery.
   if (advance === "BALANCE_VERIFIED") await deliverIfFinalReleased(project.id);
+  // Operations marked it paid and has been waiting on this.
+  await notifyRole(["COO"], {
+    title: "Payment confirmed",
+    message: `${project.projectId}: the ${legLabel} of ${formatNaira(amount)} is confirmed by finance${advance ? " — the project moved on" : ""}.`,
+    type: "success",
+    link: `/admin/projects/${project.projectId}`,
+  });
+
+  const detail = await getProjectDetail(project.id);
+  if (!detail) throw new TransitionError("Project vanished mid-update");
+  return detail;
+}
+
+interface RejectPaymentOptions {
+  leg: "downpayment" | "balance";
+  changedById: string;
+  note: string;
+  pendingPaymentId?: string;
+}
+
+/**
+ * Finance refusing a payment that was marked paid: the leg goes back to
+ * Unpaid and the awaiting-verification row is marked Rejected. Nothing was
+ * allocated (buckets only ever see Confirmed rows), so there is nothing to
+ * reverse.
+ */
+export async function rejectPayment(idOrCode: string, { leg, changedById, note, pendingPaymentId }: RejectPaymentOptions): Promise<ProjectDetail> {
+  const project = await db.project.findFirst({
+    where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    select: { id: true, projectId: true, status: true, downpaymentStatus: true, balanceStatus: true },
+  });
+  if (!project) throw new TransitionError("Project not found");
+  const legStatus = leg === "downpayment" ? project.downpaymentStatus : project.balanceStatus;
+  if (legStatus !== "Paid") throw new TransitionError("Only a payment marked paid can be refused");
+
+  const paymentType = leg === "downpayment" ? ("CLIENT_DOWNPAYMENT" as const) : ("CLIENT_BALANCE" as const);
+  const legLabel = leg === "downpayment" ? "downpayment" : "balance";
+
+  await db.$transaction(async (tx) => {
+    const claimed = await tx.project.updateMany({
+      where: { id: project.id, ...(leg === "downpayment" ? { downpaymentStatus: "Paid" } : { balanceStatus: "Paid" }) },
+      data:
+        leg === "downpayment"
+          ? { downpaymentStatus: "Unpaid", downpaymentDate: null, downpaymentReference: null }
+          : { balanceStatus: "Unpaid", balanceDate: null, balanceReference: null },
+    });
+    if (claimed.count !== 1) throw new TransitionError("That payment was just verified by someone else. Refresh the page.");
+    await tx.payment.updateMany({
+      where: pendingPaymentId
+        ? { id: pendingPaymentId, projectId: project.id, status: "Pending", source: "MANUAL" }
+        : { projectId: project.id, type: paymentType, status: "Pending", source: "MANUAL" },
+      data: { status: "Rejected", confirmedById: changedById, notes: `Refused: ${note}` },
+    });
+    const log = await tx.projectStatusLog.create({
+      data: { projectId: project.id, fromStatus: project.status, toStatus: project.status, changedById, notes: `${legLabel[0].toUpperCase()}${legLabel.slice(1)} payment refused: ${note}` },
+      select: { id: true },
+    });
+    await recordUpdate(tx, {
+      projectId: project.id,
+      kind: "PAYMENT",
+      title: "Payment not confirmed",
+      body: `We could not confirm your ${legLabel} payment. Please check the transfer and message us if you need help.`,
+      dedupeKey: `payment-refused:${log.id}`,
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  await notifyClient(project.id, {
+    title: "Payment not confirmed",
+    message: `Your ${legLabel} for ${project.projectId} could not be confirmed. Please check with us.`,
+    type: "warning",
+    tab: "payments",
+  });
+  await notifyRole(["COO"], {
+    title: "Payment refused by finance",
+    message: `${project.projectId}: the ${legLabel} marked paid could not be confirmed (${note}). The leg is back to unpaid.`,
+    type: "warning",
+    link: `/admin/projects/${project.projectId}`,
+  });
 
   const detail = await getProjectDetail(project.id);
   if (!detail) throw new TransitionError("Project vanished mid-update");
@@ -818,17 +1015,37 @@ export async function deliverIfFinalReleased(projectDbId: string): Promise<boole
   }
 }
 
+export interface MarkPaidDetails {
+  paymentMethod?: string;
+  reference?: string;
+  /** ISO date (YYYY-MM-DD) the client says they paid; defaults to now. */
+  paymentDate?: string;
+  notes?: string;
+}
+
 /**
- * Record that a client says they've paid — moves the leg to "Paid" (unverified)
- * and pings the admins to verify. Does not create a Payment or advance status.
+ * Record that a client says they've paid — moves the leg to "Paid"
+ * (unverified) and writes the Revenue Tracker's awaiting-verification row (a
+ * MANUAL Pending Payment) for finance to confirm or refuse. Does not advance
+ * the status and allocates nothing: buckets only ever see Confirmed money.
  */
 export async function markPaymentPaid(
   idOrCode: string,
-  leg: "downpayment" | "balance"
+  leg: "downpayment" | "balance",
+  details: MarkPaidDetails = {}
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
-    select: { id: true, projectId: true, downpaymentStatus: true, balanceStatus: true },
+    select: {
+      id: true,
+      projectId: true,
+      downpaymentStatus: true,
+      downpaymentAmount: true,
+      balanceStatus: true,
+      balanceAmount: true,
+      ambassadorId: true,
+      client: { select: { fullName: true } },
+    },
   });
   if (!project) throw new TransitionError("Project not found");
 
@@ -837,19 +1054,45 @@ export async function markPaymentPaid(
   if (legStatus === "Paid") throw new TransitionError("That payment is already marked paid");
 
   const now = new Date();
-  await db.project.update({
-    where: { id: project.id },
-    data:
-      leg === "downpayment"
-        ? { downpaymentStatus: "Paid", downpaymentDate: now }
-        : { balanceStatus: "Paid", balanceDate: now },
-  });
+  const paidOn = details.paymentDate ? new Date(details.paymentDate) : now;
+  const amount = leg === "downpayment" ? project.downpaymentAmount : project.balanceAmount;
+  const legLabel = leg === "downpayment" ? "downpayment" : "balance";
+  const paymentId = await nextId("PAYMENT");
 
-  await notifyAdmins({
+  await db.$transaction([
+    db.project.update({
+      where: { id: project.id },
+      data:
+        leg === "downpayment"
+          ? { downpaymentStatus: "Paid", downpaymentDate: paidOn }
+          : { balanceStatus: "Paid", balanceDate: paidOn },
+    }),
+    db.payment.create({
+      data: {
+        paymentId,
+        type: leg === "downpayment" ? "CLIENT_DOWNPAYMENT" : "CLIENT_BALANCE",
+        direction: "INFLOW",
+        projectId: project.id,
+        personName: project.client.fullName,
+        personRole: "Client",
+        amount,
+        paymentMethod: details.paymentMethod || null,
+        reference: details.reference || null,
+        notes: details.notes || null,
+        status: "Pending",
+        source: "MANUAL",
+        ambassadorId: project.ambassadorId,
+        isAmbassadorDriven: project.ambassadorId != null,
+        date: paidOn,
+      },
+    }),
+  ]);
+
+  await notifyFinance({
     title: "Payment awaiting verification",
-    message: `${project.projectId}: ${leg === "downpayment" ? "downpayment" : "balance"} marked paid — verify it.`,
+    message: `${project.projectId}: ${legLabel} of ${formatNaira(amount)} marked paid — confirm it in the Revenue Tracker.`,
     type: "warning",
-    link: `/admin/projects/${project.projectId}`,
+    link: "/admin/finance/revenue?status=Pending",
   });
 
   const detail = await getProjectDetail(project.id);

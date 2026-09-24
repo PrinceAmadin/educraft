@@ -7,7 +7,7 @@ import { LuCheck, LuCircleAlert, LuLoaderCircle, LuRefreshCw } from "react-icons
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { cn, formatDateTime, formatNaira } from "@/lib/utils";
-import type { ReconciliationRow } from "@/lib/services/paystack-payments";
+import { isReconciled, type ReconciliationRow } from "@/lib/services/paystack-payments";
 
 export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
   const router = useRouter();
@@ -49,7 +49,7 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
   return (
     <ul className="space-y-3">
       {rows.map((r) => {
-        const inSync = r.ourStatus === "Confirmed";
+        const inSync = isReconciled(r.ourStatus);
         const result = results[r.reference];
         return (
           <li key={r.reference} className="surface p-4 sm:flex sm:items-start sm:justify-between sm:gap-4">

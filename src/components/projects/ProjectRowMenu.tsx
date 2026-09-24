@@ -3,7 +3,9 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { MoreVertical, Loader2 } from "lucide-react";
+import { canVerifyPayments } from "@/lib/rbac";
 import { LuUserPlus, LuUserCog, LuUserMinus, LuEye, LuBanknote, LuCircleCheck } from "react-icons/lu";
 import {
   DropdownMenu,
@@ -43,6 +45,9 @@ interface RowAction {
 
 function useRowActions(row: ProjectListRow) {
   const router = useRouter();
+  const { data: session } = useSession();
+  // Verifying is a finance act (founder, CFO); everyone else marks paid and finance confirms.
+  const canVerify = canVerifyPayments(session?.user?.role);
   const [busy, setBusy] = React.useState(false);
 
   async function post(path: string) {
@@ -110,7 +115,7 @@ function useRowActions(row: ProjectListRow) {
       label: "Assign worker (needs downpayment verified)",
       icon: LuUserPlus,
       href: `/admin/projects/${row.projectId}?tab=financials`,
-      hint: "Verify the downpayment first — opens the Financials tab",
+      hint: canVerify ? "Verify the downpayment first — opens the Financials tab" : "Mark the downpayment paid first — finance verifies it",
     });
   } else if (row.status === "DOWNPAYMENT_VERIFIED") {
     assignGroup.push({
@@ -141,12 +146,11 @@ function useRowActions(row: ProjectListRow) {
     });
   }
   if (row.downpaymentStatus === "Paid" || row.balanceStatus === "Paid") {
-    paymentGroup.push({
-      key: "verify",
-      label: "Verify payment…",
-      icon: LuCircleCheck,
-      href: `/admin/projects/${row.projectId}?tab=financials`,
-    });
+    paymentGroup.push(
+      canVerify
+        ? { key: "verify", label: "Verify payment…", icon: LuCircleCheck, href: `/admin/projects/${row.projectId}?tab=financials` }
+        : { key: "verify-wait", label: "Awaiting finance verification", icon: LuCircleCheck, href: `/admin/projects/${row.projectId}?tab=financials`, hint: "Finance confirms it from the Revenue Tracker" }
+    );
   }
   if (paymentGroup.length > 0) groups.push(paymentGroup);
 

@@ -4,7 +4,7 @@ import * as React from "react";
 import { LuCheck, LuSearch } from "react-icons/lu";
 import { Input } from "@/components/ui/input";
 import {
-  COMMISSION_RATES,
+  COMMISSION_RATE_PRESETS,
   MAX_COMMISSION_RATE,
   MIN_COMMISSION_RATE,
   commissionFor,
@@ -24,7 +24,7 @@ const TIER_LABEL: Record<AllocatableAmbassador["tier"], string> = {
   PLATINUM: "Platinum",
 };
 
-const isPreset = (n: number) => (COMMISSION_RATES as readonly number[]).includes(n);
+const isPreset = (n: number) => (COMMISSION_RATE_PRESETS as readonly number[]).includes(n);
 
 // ── Ambassador list ──────────────────────────────────────────────────────
 
@@ -156,7 +156,7 @@ export function CommissionRatePicker({
         Commission rate
       </p>
       <div role="radiogroup" aria-labelledby={`${id}-label`} className="grid grid-cols-4 gap-2">
-        {COMMISSION_RATES.map((r) => (
+        {COMMISSION_RATE_PRESETS.map((r) => (
           <RateButton
             key={r}
             active={!custom && value === r}

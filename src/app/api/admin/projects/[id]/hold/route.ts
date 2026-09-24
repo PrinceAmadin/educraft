@@ -31,12 +31,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!parsed.success) return badRequest("A reason is required", parsed.error.flatten());
 
   try {
-    const project = await holdProject(
-      params.id,
-      parsed.data.to,
-      parsed.data.note,
-      guard.session.userId
-    );
+    const project = await holdProject(params.id, parsed.data.to, parsed.data.note, guard.session.userId, {
+      refundAmount: parsed.data.refundAmount,
+    });
     return NextResponse.json({ status: project.status });
   } catch (error) {
     if (error instanceof TransitionError) {

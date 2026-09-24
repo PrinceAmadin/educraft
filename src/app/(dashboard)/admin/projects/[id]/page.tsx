@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { canVerifyPayments } from "@/lib/rbac";
 import { getProjectDetail } from "@/lib/services/projects";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
@@ -60,6 +61,7 @@ export default async function ProjectDetailPage({
           project={project}
           ambassadors={ambassadors}
           canProBono={isSuperAdmin}
+          canVerify={canVerifyPayments(session?.user?.role)}
         />,
     },
     {

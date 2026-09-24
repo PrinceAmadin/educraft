@@ -255,7 +255,8 @@ export async function markProjectProBono(
       ambassadorId: true,
       ambassadorCommission: true,
       parentCommission: true,
-      _count: { select: { payments: true } },
+      // Money actually in (a marked-but-unverified or refused payment is not money).
+      _count: { select: { payments: { where: { status: { in: ["Confirmed", "Duplicate"] } } } } },
     },
   });
   if (!project) throw new ProBonoError("Project not found");
@@ -265,7 +266,7 @@ export async function markProjectProBono(
   }
   if (project._count.payments > 0) {
     throw new ProBonoError(
-      "This project already has payments recorded. Refund or remove them first, so the accounts stay true."
+      "This project already has money recorded against it. Refund it first, so the accounts stay true."
     );
   }
   const hasPaidCommission =

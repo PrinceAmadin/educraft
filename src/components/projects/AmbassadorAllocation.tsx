@@ -16,7 +16,7 @@ import {
   CommissionPreview,
   CommissionRatePicker,
 } from "@/components/ambassadors/CommissionPickers";
-import { COMMISSION_RATES } from "@/lib/commission";
+import { COMMISSION_RATE_PRESETS } from "@/lib/commission";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
 import { cn, formatNaira } from "@/lib/utils";
 
@@ -100,7 +100,7 @@ export function AmbassadorAllocation({
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(current.ambassadorId);
-  const [rate, setRate] = React.useState<number>(current.rate ?? COMMISSION_RATES[0]);
+  const [rate, setRate] = React.useState<number>(current.rate ?? COMMISSION_RATE_PRESETS[0]);
   const [notify, setNotify] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -113,7 +113,7 @@ export function AmbassadorAllocation({
   function openDialog() {
     const existing = ambassadors.find((a) => a.id === current.ambassadorId) ?? null;
     setSelectedId(current.ambassadorId);
-    setRate(current.rate ?? existing?.tierRate ?? COMMISSION_RATES[0]);
+    setRate(current.rate ?? existing?.tierRate ?? COMMISSION_RATE_PRESETS[0]);
     setNotify(existing ? Boolean(existing.email) : true);
     setError(null);
     setOpen(true);

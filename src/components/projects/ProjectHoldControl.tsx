@@ -9,6 +9,7 @@ import {
 } from "react-icons/lu";
 import type { ProjectStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
@@ -37,6 +38,7 @@ export function ProjectHoldControl({
   const router = useRouter();
   const [pendingHold, setPendingHold] = React.useState<AdminHold | null>(null);
   const [note, setNote] = React.useState("");
+  const [refundAmount, setRefundAmount] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -58,6 +60,7 @@ export function ProjectHoldControl({
       }
       setPendingHold(null);
       setNote("");
+      setRefundAmount("");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "That action could not be completed.");
@@ -114,7 +117,8 @@ export function ProjectHoldControl({
             onSubmit={(e) => {
               e.preventDefault();
               if (pendingHold && note.trim().length >= 3) {
-                call({ to: pendingHold, note: note.trim() });
+                const amount = refundAmount.trim() === "" ? undefined : Number(refundAmount);
+                call({ to: pendingHold, note: note.trim(), ...(pendingHold === "REFUNDED" && amount != null ? { refundAmount: amount } : {}) });
               }
             }}
           >
@@ -125,6 +129,22 @@ export function ProjectHoldControl({
               onChange={(e) => setNote(e.target.value)}
               placeholder="Why?"
             />
+            {pendingHold === "REFUNDED" ? (
+              <div className="space-y-1">
+                <Input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  aria-label="Amount refunded (naira)"
+                  value={refundAmount}
+                  onChange={(e) => setRefundAmount(e.target.value)}
+                  placeholder="Amount refunded — leave empty for everything the client paid"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Recorded as a refund in Finance; the buckets give the retained share of it back.
+                </p>
+              </div>
+            ) : null}
             {error ? (
               <p className="flex items-start gap-2 text-sm text-danger">
                 <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />

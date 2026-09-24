@@ -22,6 +22,7 @@
     "check:client-copy": "tsx scripts/check-client-copy.ts",
     "check:client-access": "tsx scripts/check-client-access.ts",
     "check:rbac": "tsx scripts/check-rbac.ts",
+    "check:finance": "tsx scripts/check-finance-math.ts",
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
     "catalogue:sync": "dotenv -e .env.local -- tsx scripts/sync-service-catalogue.ts"

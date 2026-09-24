@@ -26,7 +26,7 @@ import {
 import { EmailToggle } from "@/components/projects/AmbassadorAllocation";
 import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/projects";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
-import { COMMISSION_RATES, commissionFor } from "@/lib/commission";
+import { COMMISSION_RATE_PRESETS, commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
 import { cn, formatNaira } from "@/lib/utils";
@@ -692,7 +692,7 @@ function AmbassadorSection({
   const rate = watch("ambassadorRate");
   const notify = watch("notifyAmbassador");
   const selected = ambassadors.find((a) => a.id === ambassadorId) ?? null;
-  const effectiveRate = typeof rate === "number" ? rate : (selected?.tierRate ?? COMMISSION_RATES[0]);
+  const effectiveRate = typeof rate === "number" ? rate : (selected?.tierRate ?? COMMISSION_RATE_PRESETS[0]);
 
   return (
     <section className="space-y-4 pt-5">

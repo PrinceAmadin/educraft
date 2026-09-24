@@ -109,7 +109,7 @@ export function ClientPaymentsPanel({
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {formatDate(p.date)}
                     {p.method ? ` · ${p.method}` : ""}
-                    {p.status === "Pending" ? " · being confirmed" : ""}
+                    {p.status === "Pending" ? " · being confirmed" : p.status === "Duplicate" ? " · paid twice, refund due" : p.status === "Refunded" ? " · refunded" : ""}
                   </p>
                 </div>
                 {p.status === "Confirmed" && preview ? (

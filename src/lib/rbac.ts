@@ -180,6 +180,16 @@ export function canMarkPayoutsPaid(role: string | undefined | null): boolean {
   return r === "SUPER_ADMIN" || r === "CO_CEO_CFO";
 }
 
+/**
+ * Who may confirm (verify) or reject a client payment: the founder and the
+ * CFO — verifying is a finance act. The COO marks a bank transfer as paid and
+ * finance confirms it from the Revenue Tracker.
+ */
+export function canVerifyPayments(role: string | undefined | null): boolean {
+  const r = effectiveRole(role);
+  return r === "SUPER_ADMIN" || r === "CO_CEO_CFO";
+}
+
 export type RoleTone = "teal" | "gold" | "green" | "purple";
 
 /** The short chip beside the name in the topbar. */

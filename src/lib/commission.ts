@@ -9,7 +9,7 @@ export const AMBASSADOR_COMMISSION_CATEGORY = "Ambassador commission";
 export const PARENT_COMMISSION_CATEGORY = "Parent ambassador commission";
 
 /** Quick-pick rates — Bronze 10%, Silver 12%, Gold/Platinum 15%. */
-export const COMMISSION_RATES = [10, 12, 15] as const;
+export const COMMISSION_RATE_PRESETS = [10, 12, 15] as const;
 
 /** Bounds for a custom rate the admin types in. */
 export const MIN_COMMISSION_RATE = 1;

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { badRequest, requireAdmin, serverError } from "@/lib/api";
+import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
 import { TransitionError, verifyPayment } from "@/lib/services/projects";
 import { verifyPaymentBodySchema } from "@/lib/validations/projects";
 
+/** Verifying is a finance act: the founder and the CFO. The COO marks a payment as paid; finance confirms it. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const guard = await requireAdmin();
+  const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
 
   let body: unknown;

@@ -1,30 +1,28 @@
 import type { LucideIcon } from "lucide-react";
 import { LayoutDashboard, FolderKanban, Users, Wallet, MousePointerClick, Trophy, User } from "lucide-react";
 import { adminHomeForRole, adminMobileNavForRole, adminNavForRole } from "@/lib/sidebar-config";
+import { AMBASSADOR_TIERS as FINANCE_TIERS, COMMISSION_RATES } from "@/lib/finance/commission-config";
 
 export const APP_NAME = "EduCraft WorkBase";
 export const BRAND_NAME = "EduCraft";
 
-/** Business rules from the blueprint. */
+/** Business rules from the blueprint. Rates come from the one finance config (as whole percents here). */
 export const DOWNPAYMENT_PERCENTAGE = 45;
-export const WORKER_PAYOUT_RATE = 40;
+export const WORKER_PAYOUT_RATE = Math.round(COMMISSION_RATES.workers * 100);
 export const MAX_REVISIONS = 3;
 export const ANNUAL_REVENUE_TARGET = 1_000_000_000;
 
-export const AMBASSADOR_TIERS = [
-  { tier: "BRONZE", min: 0, max: 5, rate: 10 },
-  { tier: "SILVER", min: 6, max: 15, rate: 12 },
-  { tier: "GOLD", min: 16, max: 30, rate: 15 },
-  { tier: "PLATINUM", min: 31, max: Infinity, rate: 15 },
-] as const;
+export const AMBASSADOR_TIERS = FINANCE_TIERS.map((t) => ({
+  tier: t.name,
+  min: t.minConversions,
+  max: t.maxConversions,
+  rate: Math.round(t.rate * 100),
+}));
 
-/** Commission rate (%) for an ambassador tier. */
-export const TIER_COMMISSION_RATE: Record<string, number> = {
-  BRONZE: 10,
-  SILVER: 12,
-  GOLD: 15,
-  PLATINUM: 15,
-};
+/** Commission rate (%) for an ambassador tier — the shipped default; Settings > General can override it live. */
+export const TIER_COMMISSION_RATE: Record<string, number> = Object.fromEntries(
+  FINANCE_TIERS.map((t) => [t.name, Math.round(t.rate * 100)])
+);
 
 /** Academic levels for client profiles and intake. */
 /** Commission payout banks — shown on the ambassador application's payment step. */

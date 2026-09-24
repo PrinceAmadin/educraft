@@ -69,11 +69,14 @@ export function FinancialsTab({
   project,
   ambassadors,
   canProBono = false,
+  canVerify = true,
 }: {
   project: ProjectDetail;
   ambassadors: AllocatableAmbassador[];
   /** Super admin: may turn a paid project into a pro bono one. */
   canProBono?: boolean;
+  /** Founder and CFO: may verify a marked payment here. The COO marks paid and finance confirms. */
+  canVerify?: boolean;
 }) {
   if (project.isProBono) {
     return (
@@ -118,7 +121,12 @@ export function FinancialsTab({
       </section>
 
       <section className="space-y-3">
-        <h3 className="text-[15px] font-semibold text-foreground">Verify payments</h3>
+        <h3 className="text-[15px] font-semibold text-foreground">{canVerify ? "Verify payments" : "Payments"}</h3>
+        {!canVerify ? (
+          <p className="text-[13px] text-muted-foreground">
+            Mark a bank transfer as paid here; finance confirms it from the Revenue Tracker and you are told when it is.
+          </p>
+        ) : null}
         <PaymentVerification
           projectCode={project.projectId}
           leg="downpayment"
@@ -126,6 +134,7 @@ export function FinancialsTab({
           amount={f.downpaymentAmount}
           status={f.downpaymentStatus}
           date={project.downpaymentDate}
+          canVerify={canVerify}
         />
         <PaymentVerification
           projectCode={project.projectId}
@@ -134,6 +143,7 @@ export function FinancialsTab({
           amount={f.balanceAmount}
           status={f.balanceStatus}
           date={project.balanceDate}
+          canVerify={canVerify}
         />
       </section>
 

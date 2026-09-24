@@ -55,6 +55,13 @@ export function notifyAdmins(input: NotificationInput) {
   return notifyRole(ADMIN_ROLES, input);
 }
 
+/** Money events go to the founder and the CFO: payments awaiting verification, confirmations, refunds, payout submissions. */
+export const FINANCE_ROLES: UserRole[] = ["SUPER_ADMIN", "CO_CEO_CFO"];
+
+export function notifyFinance(input: NotificationInput) {
+  return notifyRole(FINANCE_ROLES, input);
+}
+
 // ── Reads ────────────────────────────────────────────────────
 
 export interface NotificationRow {

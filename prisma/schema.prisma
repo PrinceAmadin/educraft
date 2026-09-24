@@ -512,6 +512,8 @@ model Project {
   files       ProjectFile[]
   statusLog   ProjectStatusLog[]
   payments    Payment[]
+  payoutRecords     PayoutRecord[]
+  bucketAllocations BucketAllocationLog[]
   researchJob ResearchJob?
   references  Reference[]
   researchRunLogs      ResearchRunLog[]
@@ -800,10 +802,16 @@ model Ambassador {
   parentId       String?
   parent         Ambassador?  @relation("AmbassadorParentChild", fields: [parentId], references: [id])
   children       Ambassador[] @relation("AmbassadorParentChild")
-  parentCommRate Float?
+  /// v2.0 (Phase 2): the parent (Core) earns 15% minus the sub's own rate, so
+  /// EduCraft always pays 15% in total. `parentCommRate` is only used when
+  /// `parentCommRateIsOverride` is set — and then only ever to LOWER the
+  /// Core's cut (0 links them without paying a commission).
+  parentCommRate           Float?
+  parentCommRateIsOverride Boolean @default(false)
 
   clickEvents          ClickEvent[]
   referredClients      Client[]
+  payments             Payment[] @relation("PaymentAmbassador")
   projects             Project[] @relation("ProjectAmbassador")
   /// Jobs this ambassador earns a parent-commission on, referred by one of
   /// their sub-ambassadors.
@@ -840,6 +848,8 @@ enum PaymentType {
   CLIENT_BALANCE
   WORKER_PAYOUT
   AMBASSADOR_COMMISSION
+  /// HOG / COO commission paid out by the Payout Engine (Phase 2).
+  EXECUTIVE_COMMISSION
   EXPENSE
   REFUND
 }
@@ -863,35 +873,72 @@ model Payment {
   reference     String?
   confirmedById String?
   confirmedBy   User?            @relation("ConfirmedBy", fields: [confirmedById], references: [id])
-  status        String           @default("Pending") // Pending, Confirmed, Failed, Reversed
+  /// Pending, Confirmed, Failed, Rejected (an admin refused a marked payment),
+  /// Duplicate (a second Paystack charge on an already-verified leg — refund
+  /// it), Reversed (reserved). Only Confirmed rows are revenue.
+  status        String           @default("Pending")
+  /// Where the row came from: PAYSTACK (a checkout was opened), MANUAL (an
+  /// admin marked a bank transfer / cash and finance verified it), SYSTEM
+  /// (payouts, refunds, pay-first intake). A manual verification only ever
+  /// claims a MANUAL row, so it can never swallow a live Paystack checkout.
+  source        String           @default("SYSTEM")
+  /// The project's ambassador when the row was written, kept in step whenever
+  /// the job's allocation changes. The Project row is the truth; this is the
+  /// Phase 2 spec's snapshot for the Revenue Tracker.
+  ambassadorId       String?
+  ambassador         Ambassador?  @relation("PaymentAmbassador", fields: [ambassadorId], references: [id])
+  isAmbassadorDriven Boolean      @default(false)
   notes         String?
   date          DateTime         @default(now())
   createdAt     DateTime         @default(now())
 
+  bucketAllocation BucketAllocationLog?
+  payoutRecords    PayoutRecord[]
+
   @@index([type, status])
   @@index([projectId])
   @@index([date])
+  @@index([source, status])
 }
 
 // ─── EXPENSES ───────────────────────────────────────────
 
 model Expense {
   id          String   @id @default(cuid())
-  category    String // Software, Internet, Marketing, Equipment, Personnel, Misc
+  category    String // Software, Internet/Data, Marketing, Equipment, Personnel, Miscellaneous, API cost, Hosting, Sponsorship, Ambassador bonus, Legal, Content (+ the system commission categories)
   description String
   amount      Float
   date        DateTime
   recurring   Boolean  @default(false)
   frequency   String?
+  /// The admin who LOGGED the expense (User.id) — not an approval.
   approvedBy  String?
   /// Set on system-generated expenses tied to a job — today only the
   /// "Ambassador commission" logged when a job is allocated to an ambassador.
   projectId   String?
+  /// MANUAL (logged by an admin), COMMISSION (a job's ambassador commission),
+  /// AI (Claude API cost rolled up from AiUsageLog), SPONSORSHIP (the HOG's
+  /// student-union spending from the Growth Fund).
+  kind        String   @default("MANUAL")
+  /// Which of EduCraft's buckets pays for it. Null for commission rows: those
+  /// come out of the ambassador's 15%, never out of the retained share.
+  bucketSource   BucketType?
+  /// AUTO_APPROVED, PENDING_APPROVAL (over ₦50,000 and not logged by the
+  /// founder — no bucket outflow until approved), APPROVED, DECLINED.
+  approvalStatus String    @default("AUTO_APPROVED")
+  approvedById   String?
+  approvedAt     DateTime?
+  /// Claude cost roll-up key ("ai:YYYY-MM-DD:<subsystem>:<projectId|->"): one
+  /// expense per project (or subsystem) per day, amount kept in step with the
+  /// AiUsageLog rows behind it. Locks the row against manual deletion.
+  aiUsageKey     String?   @unique
   createdAt   DateTime @default(now())
 
   @@index([date])
   @@index([category])
   @@index([projectId])
+  @@index([kind, date])
+  @@index([bucketSource, approvalStatus])
 }
 
 // ─── NOTIFICATIONS ──────────────────────────────────────
@@ -1368,4 +1415,186 @@ model EmailLog {
 
   @@index([createdAt])
   @@index([projectId, kind, createdAt])
+}
+
+// ─── FINANCE PLATFORM (Phase 2) ─────────────────────────────
+//
+// EduCraft's retained share of every confirmed client payment is split into
+// four buckets; every naira owed out is a PayoutRecord; founder money moves
+// through FounderDraw. The rules (rates, splits, tiers) live in
+// src/lib/finance/commission-config.ts; the ledger logic in
+// src/lib/services/finance/. Money is whole naira (Float), like everywhere else.
+
+/// The four buckets EduCraft's retained share is split into.
+enum BucketType {
+  OPERATIONS_RESERVE
+  GROWTH_FUND
+  REINVESTMENT_FUND
+  FOUNDER_DISTRIBUTION
+}
+
+/// Monthly snapshot of what flowed into each bucket (one row per month).
+/// Rebuilt from BucketAllocationLog; the running balance is Σ BucketTransaction.
+model BucketBalance {
+  id                  String   @id @default(cuid())
+  month               String   @unique // "2026-09"
+  operationsReserve   Float    @default(0)
+  growthFund          Float    @default(0)
+  reinvestmentFund    Float    @default(0)
+  founderDistribution Float    @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+/// One row per allocation EVENT: a confirmed payment (paymentId set, unique —
+/// a replayed webhook can never allocate twice), or a true-up when the
+/// project's legs changed after money was in (an ambassador allocated or
+/// removed, a refund). Amounts are signed deltas; a project's Σ retainedAmount
+/// always equals its retained share of the money actually in.
+model BucketAllocationLog {
+  id                  String   @id @default(cuid())
+  paymentId           String?  @unique
+  payment             Payment? @relation(fields: [paymentId], references: [id])
+  projectId           String
+  project             Project  @relation(fields: [projectId], references: [id])
+  /// PAYMENT, REALLOCATION, REFUND, BACKFILL, ADJUSTMENT
+  reason              String
+  month               String
+  retainedAmount      Float
+  /// retained ÷ price at the time (0.40 on the standard referred job, 0.575 direct).
+  retainedRate        Float
+  operationsReserve   Float
+  growthFund          Float
+  reinvestmentFund    Float
+  founderDistribution Float
+  note                String?
+  recordedById        String?
+  allocatedAt         DateTime @default(now())
+
+  @@index([projectId])
+  @@index([month])
+}
+
+/// The bucket ledger. `amount` is signed: inflows add, outflows and negative
+/// adjustments subtract. Balance = Σ amount per bucket.
+model BucketTransaction {
+  id            String     @id @default(cuid())
+  bucketType    BucketType
+  /// INFLOW (from a payment), OUTFLOW (an expense or a founder draw), ADJUSTMENT (true-up, refund, manual correction)
+  type          String
+  amount        Float
+  description   String
+  allocationId  String?
+  paymentId     String?
+  expenseId     String?    @unique
+  founderDrawId String?
+  projectId     String?
+  recordedById  String?
+  month         String
+  createdAt     DateTime   @default(now())
+
+  @@index([bucketType, month])
+  @@index([projectId])
+  @@index([allocationId])
+  @@index([founderDrawId])
+}
+
+/// Every naira owed out on a completed project, one row per leg and recipient:
+/// WORKER (40%), AMBASSADOR (the referrer's rate), PARENT (the Core's
+/// override), HOG (2.5%, ambassador-driven jobs), COO (2.5%, every job).
+/// Worker/ambassador/parent amounts are the figures frozen on the project at
+/// allocation; executive legs are computed from the config. Marking PAID flips
+/// the matching project flag in the same transaction, so the worker and
+/// ambassador portals never disagree with the CFO's screen.
+model PayoutRecord {
+  id            String   @id @default(cuid())
+  month         String
+  leg           String
+  /// WORKER, AMBASSADOR, EXECUTIVE
+  recipientType String
+  /// Worker.id, Ambassador.id, or the role string "HOG" / "COO" (the payee user is resolved when paid).
+  recipientId   String
+  recipientName String
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id])
+  amount        Float
+  basis         String
+  /// PENDING, PAID, CANCELLED
+  status        String   @default("PENDING")
+  paidAt        DateTime?
+  paidById      String?
+  paidToUserId  String?
+  paymentId     String?
+  payment       Payment? @relation(fields: [paymentId], references: [id])
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([projectId, leg, recipientId])
+  @@index([month, status])
+  @@index([recipientType, recipientId])
+  @@index([status])
+}
+
+/// A bonus the CFO enters by hand after reviewing the month's metrics.
+model PerformanceBonus {
+  id            String   @id @default(cuid())
+  month         String
+  recipientType String   @default("EXECUTIVE")
+  /// "HOG" | "COO"
+  recipientId   String
+  recipientName String
+  amount        Float
+  reason        String
+  /// PENDING, PAID, CANCELLED
+  status        String   @default("PENDING")
+  paidAt        DateTime?
+  paidById      String?
+  paymentId     String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([month, status])
+}
+
+/// Founder money: tiered monthly draws, semester bonuses and the annual
+/// profit share, each a row per founder (CEO | CFO).
+model FounderDraw {
+  id            String   @id @default(cuid())
+  month         String
+  /// MONTHLY, MONTHLY_TOPUP, SEMESTER_BONUS, ANNUAL_PROFIT_SHARE
+  drawType      String
+  /// CEO | CFO
+  recipient     String
+  amount        Float
+  /// The month's confirmed revenue at the time (what set the tier).
+  monthRevenue  Float
+  /// PENDING (recommended, awaiting the founder), DISTRIBUTED, CANCELLED
+  status        String   @default("PENDING")
+  distributedAt DateTime?
+  approvedById  String?
+  createdById   String?
+  /// Free text, or the JSON analysis snapshot behind a semester / annual recommendation.
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([month, drawType])
+}
+
+/// The COO's monthly payout list, submitted to the CFO. One row per month,
+/// re-submitting adds a revision.
+model PayoutSubmission {
+  id            String   @id @default(cuid())
+  month         String   @unique
+  submittedById String
+  submittedAt   DateTime
+  workerTotal   Float
+  workerCount   Int
+  projectCount  Int
+  note          String?
+  revisions     Json     @default("[]")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

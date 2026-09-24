@@ -14,6 +14,7 @@ import { parentCommissionEmail } from "@/lib/emails/parent-commission";
 import { sendMail } from "@/lib/mailer";
 import { notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates, getDefaultParentCommissionRate } from "@/lib/services/settings";
+import { syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { formatNaira } from "@/lib/utils";
 
 /**
@@ -548,7 +549,10 @@ export async function allocateAmbassador(input: {
     } else {
       await removeParentCommissionExpense(tx, project.id);
     }
-  });
+    // The legs changed: EduCraft's retained share of any money already in changes with them.
+    await syncPaymentAmbassadorSnapshot(tx, project.id);
+    await syncProjectBuckets(tx, project.id, { reason: "REALLOCATION" });
+  }, { timeout: 20_000, maxWait: 10_000 });
 
   const email = input.notify ? await emailCommission(project.id) : null;
   const emailLater = !email?.sent && project.downpaymentStatus !== "Verified";
@@ -590,7 +594,9 @@ export async function removeAllocation(projectIdOrCode: string): Promise<void> {
     });
     await removeCommissionExpense(tx, project.id);
     await removeParentCommissionExpense(tx, project.id);
-  });
+    await syncPaymentAmbassadorSnapshot(tx, project.id);
+    await syncProjectBuckets(tx, project.id, { reason: "REALLOCATION" });
+  }, { timeout: 20_000, maxWait: 10_000 });
 }
 
 // ── Picker data ──────────────────────────────────────────────────────────

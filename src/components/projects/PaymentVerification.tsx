@@ -28,6 +28,7 @@ export function PaymentVerification({
   amount,
   status,
   date,
+  canVerify = true,
 }: {
   projectCode: string;
   leg: Leg;
@@ -35,6 +36,8 @@ export function PaymentVerification({
   amount: number;
   status: string;
   date: Date | string | null;
+  /** Verifying is a finance act (founder, CFO). Everyone else marks paid and waits. */
+  canVerify?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -99,10 +102,12 @@ export function PaymentVerification({
             Mark as paid
           </Button>
         ) : null}
-        {status === "Paid" ? (
+        {status === "Paid" && canVerify ? (
           <Button size="sm" onClick={() => setOpen(true)}>
             Verify payment
           </Button>
+        ) : status === "Paid" ? (
+          <span className="text-xs text-muted-foreground">Finance confirms it from the Revenue Tracker</span>
         ) : null}
       </div>
 
