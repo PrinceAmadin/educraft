@@ -241,6 +241,8 @@ export interface SemesterSurplusInput {
   founderDistributionInflows: number;
   /** Monthly draws already paid out of it in the semester. */
   founderDrawsPaid: number;
+  /** What Founder Distribution actually holds now: the bonus can never exceed it. */
+  founderDistributionBalance?: number;
 }
 
 export interface SemesterSurplus {
@@ -261,7 +263,10 @@ export function semesterSurplus(input: SemesterSurplusInput): SemesterSurplus {
   const requiredMinimum = input.operatingBaseline * 3;
   const operationsSurplus = Math.max(0, Math.round(input.operationsReserve - requiredMinimum));
   const operationsRelease = nairaPercent(operationsSurplus, 0.5);
-  const founderAvailable = Math.max(0, Math.round(input.founderDistributionInflows - input.founderDrawsPaid));
+  const founderAvailable = Math.max(
+    0,
+    Math.round(Math.min(input.founderDistributionInflows - input.founderDrawsPaid, input.founderDistributionBalance ?? Number.POSITIVE_INFINITY))
+  );
   const total = operationsRelease + founderAvailable;
   return { requiredMinimum, operationsSurplus, operationsRelease, founderAvailable, total, each: Math.floor(total / 2) };
 }

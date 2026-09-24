@@ -158,6 +158,7 @@ export async function getSurplusAnalysis(month: string): Promise<SurplusAnalysis
     operatingBaseline: settings.operatingCostMonthlyBaseline,
     founderDistributionInflows,
     founderDrawsPaid: drawsPaid,
+    founderDistributionBalance: balances.founderDistribution,
   });
   return {
     semester,
