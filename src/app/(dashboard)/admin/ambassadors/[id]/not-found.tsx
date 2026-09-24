@@ -7,7 +7,7 @@ export default function NF() {
       <span className="rounded-lg bg-elevated p-2.5 text-muted-foreground"><LuUserX className="size-6" aria-hidden /></span>
       <p className="text-sm font-medium text-foreground">Ambassador not found</p>
       <p className="max-w-[42ch] text-xs text-muted-foreground">This ambassador ID does not exist, or the record may have been removed.</p>
-      <Button asChild variant="outline" size="sm" className="mt-1"><Link href="/admin/ambassadors">Back to ambassadors</Link></Button>
+      <Button asChild variant="outline" size="sm" className="mt-1"><Link href="/admin/ambassadors/list">Back to ambassadors</Link></Button>
     </div>
   );
 }

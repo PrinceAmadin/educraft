@@ -98,7 +98,7 @@ export default async function FinancePage() {
             <PerformerList rows={bi.topWorkers} icon={LuUserCog} basePath="/admin/workers" emptyLabel="No completed projects yet" />
           </div>
           <div>
-            <ListHeader title="Top ambassadors by revenue" href="/admin/ambassadors" label="All ambassadors" />
+            <ListHeader title="Top ambassadors by revenue" href="/admin/ambassadors/list" label="All ambassadors" />
             <PerformerList rows={bi.topAmbassadors} icon={LuMegaphone} basePath="/admin/ambassadors" emptyLabel="No completed projects yet" />
           </div>
         </div>

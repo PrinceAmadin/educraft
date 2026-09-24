@@ -121,7 +121,14 @@ export async function listDirectory(q: DirectoryQuery, now: Date = new Date()): 
       : {}),
   };
   const all = (await db.ambassador.findMany({ where, select: ROW_SELECT })).map((a) => toRow(a, now));
-  const filtered = q.status ? all.filter((r) => r.activity === q.status) : all;
+  let filtered = q.status ? all.filter((r) => r.activity === q.status) : all;
+  if (q.near) {
+    filtered = filtered.filter((r) => {
+      const left = conversionsTillNextTier(r.lifetimeConversions);
+      return left != null && left > 0 && left <= 2;
+    });
+  }
+  if (q.ready) filtered = filtered.filter((r) => !r.parent && r.subCount === 0 && isEligibleForSubTeam(r.tier));
 
   const sort = q.sort ?? "conversions";
   const dir = q.dir ?? (sort === "name" ? "asc" : "desc");
@@ -150,7 +157,7 @@ export async function listDirectory(q: DirectoryQuery, now: Date = new Date()): 
 export async function directoryActivityCounts(now: Date = new Date()): Promise<Record<ActivityStatus, number> & { total: number }> {
   const rows = await db.ambassador.findMany({
     where: { status: { notIn: CLOSED_STATUSES } },
-    select: { lastConversionAt: true, createdAt: true, lifetimeConversions: true },
+    select: { lastConversionAt: true, lastReferralAt: true, createdAt: true, lifetimeConversions: true },
   });
   const counts = { ACTIVE: 0, DORMANT: 0, INACTIVE: 0, NEW: 0, total: rows.length };
   for (const r of rows) counts[activityStatus(r, now)] += 1;
@@ -361,9 +368,10 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
       lifetimeConversions: true,
       lifetimeEarnings: true,
       lastConversionAt: true,
+      lastReferralAt: true,
       createdAt: true,
       parent: { select: { id: true, fullName: true, tier: true } },
-      children: { orderBy: { lifetimeConversions: "desc" }, select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, lastConversionAt: true, createdAt: true } },
+      children: { orderBy: { lifetimeConversions: "desc" }, select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, lastConversionAt: true, lastReferralAt: true, createdAt: true } },
     },
   });
   if (!a) return null;

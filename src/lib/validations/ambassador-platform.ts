@@ -23,6 +23,10 @@ export const directoryQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().catch(undefined),
   /** Include suspended and terminated accounts (off by default). */
   includeClosed: z.enum(["1"]).optional().catch(undefined),
+  /** Within 2 conversions of the next tier. */
+  near: z.enum(["1"]).optional().catch(undefined),
+  /** Silver or above with no sub-team yet (and not a Sub themselves). */
+  ready: z.enum(["1"]).optional().catch(undefined),
 });
 export type DirectoryQuery = z.infer<typeof directoryQuerySchema>;
 
@@ -57,6 +61,13 @@ export const addSubSchema = z.object({
 
 export const suspendSchema = z.object({
   reason: z.string().trim().max(300).optional().or(z.literal("")),
+});
+
+/** "Log content posted" (dashboard rhythm panel and the Content Hub). */
+export const logContentSchema = z.object({
+  contentType: z.enum(["MONDAY_FLIER", "WEDS_CHECKIN", "FRIDAY_SPOTLIGHT", "OTHER"]),
+  postedAt: z.string().datetime({ offset: true }).optional().or(z.literal("")),
+  note: z.string().trim().max(300).optional().or(z.literal("")),
 });
 
 /** The HOG logs a student an ambassador brought in. */
