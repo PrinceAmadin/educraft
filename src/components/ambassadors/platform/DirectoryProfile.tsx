@@ -3,6 +3,7 @@ import { LuCalendarCheck, LuTrendingUp, LuWallet } from "react-icons/lu";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuUsers } from "react-icons/lu";
 import { SubTeam, type SubCandidate } from "@/components/ambassadors/platform/SubTeam";
+import { LogReferralDialog, ReferralRowActions } from "@/components/ambassadors/platform/LogReferralDialog";
 import { tierLabel } from "@/lib/ambassadors/tier-utils";
 import type { DirectoryDetail } from "@/lib/services/ambassador-platform/directory";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
@@ -92,10 +93,13 @@ export function DirectoryProfile({ detail, subCandidates }: { detail: DirectoryD
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-foreground">
-          Referral history
-          <span className="ml-2 font-mono text-xs text-muted-foreground">last {Math.min(20, detail.referralHistory.length)}</span>
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-foreground">
+            Referral history
+            <span className="ml-2 font-mono text-xs text-muted-foreground">last {Math.min(20, detail.referralHistory.length)}</span>
+          </h2>
+          <LogReferralDialog ambassadorId={detail.id} ambassadorName={detail.fullName} />
+        </div>
         {detail.referralHistory.length === 0 ? (
           <EmptyState icon={LuUsers} title="No referrals yet" description="Students this ambassador brings in appear here as they are logged or order." className="py-8" />
         ) : (
@@ -121,6 +125,7 @@ export function DirectoryProfile({ detail, subCandidates }: { detail: DirectoryD
                 </span>
                 <span className="flex basis-full items-center justify-between gap-3 sm:basis-auto sm:justify-end">
                   <ReferralStatus status={r.status} />
+                  {r.status === "PENDING" && !r.projectCode ? <ReferralRowActions ambassadorId={detail.id} referralId={r.id} /> : null}
                   <span className="font-mono text-sm tabular-nums text-foreground sm:w-20 sm:text-right">{r.commission != null ? formatNaira(r.commission) : "—"}</span>
                 </span>
               </li>

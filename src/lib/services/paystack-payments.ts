@@ -1,5 +1,6 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { recordConversion } from "@/lib/services/ambassador-platform/referrals";
 import { deliverIfFinalReleased, nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { monthKeyOf, syncProjectBuckets } from "@/lib/services/finance/buckets";
@@ -415,9 +416,11 @@ async function creditProjectPayment(
       });
       // EduCraft's retained share of this money goes into the four buckets.
       await syncProjectBuckets(tx, project.id, { reason: "PAYMENT", paymentId: payment.id, month: monthKeyOf(paidOn) });
+      // A confirmed downpayment on a referred job is the ambassador's conversion (Phase 3).
+      if (leg === "downpayment") await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
       return { advance };
     },
-    { timeout: 15_000, maxWait: 10_000 }
+    { timeout: 30_000, maxWait: 10_000 }
   );
   if (!outcome) return { status: "already_confirmed" };
   const advance = outcome.advance;
@@ -653,9 +656,11 @@ async function processPendingIntake(
       });
       // EduCraft's retained share of this money goes into the four buckets.
       await syncProjectBuckets(tx, project.id, { reason: "PAYMENT", paymentId: payment.id, month: monthKeyOf(paidOn) });
+      // A confirmed downpayment on a referred job is the ambassador's conversion (Phase 3).
+      await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
       return { paymentId: payment.id };
     },
-    { timeout: 15_000, maxWait: 10_000 }
+    { timeout: 30_000, maxWait: 10_000 }
   );
   if (!outcome) return { status: "already_confirmed" };
 

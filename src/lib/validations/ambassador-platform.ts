@@ -58,3 +58,22 @@ export const addSubSchema = z.object({
 export const suspendSchema = z.object({
   reason: z.string().trim().max(300).optional().or(z.literal("")),
 });
+
+/** The HOG logs a student an ambassador brought in. */
+export const logReferralSchema = z.object({
+  clientName: z.string().trim().min(2, "Enter the student's name").max(120),
+  clientWhatsapp: z.string().trim().max(30).optional().or(z.literal("")),
+  school: z.string().trim().max(120).optional().or(z.literal("")),
+  notes: z.string().trim().max(500).optional().or(z.literal("")),
+});
+export type LogReferralFormInput = z.infer<typeof logReferralSchema>;
+
+export const updateReferralSchema = z
+  .object({
+    status: z.enum(["PENDING", "LOST", "CANCELLED"]).optional(),
+    clientName: z.string().trim().min(2).max(120).optional(),
+    clientWhatsapp: z.string().trim().max(30).optional(),
+    school: z.string().trim().max(120).optional(),
+    notes: z.string().trim().max(500).optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to update");

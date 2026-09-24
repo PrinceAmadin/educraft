@@ -16,6 +16,7 @@ import { notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates, getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
+import { cancelProjectReferral, ensureProjectReferral } from "@/lib/services/ambassador-platform/referrals";
 import { COMMISSION_RATES } from "@/lib/finance/commission-config";
 import { formatNaira } from "@/lib/utils";
 
@@ -563,6 +564,8 @@ export async function allocateAmbassador(input: {
     await syncProjectBuckets(tx, project.id, { reason: "REALLOCATION" });
     // A completed job's payout records follow its legs.
     await reconcileProjectPayouts(tx, project.id);
+    // The referral row follows the allocation; if the downpayment is already in, it converts now.
+    await ensureProjectReferral(tx, project.id, "ADMIN");
   }, { timeout: 20_000, maxWait: 10_000 });
 
   const email = input.notify ? await emailCommission(project.id) : null;
@@ -609,6 +612,8 @@ export async function removeAllocation(projectIdOrCode: string): Promise<void> {
     await syncProjectBuckets(tx, project.id, { reason: "REALLOCATION" });
     // A completed job's payout records follow its legs.
     await reconcileProjectPayouts(tx, project.id);
+    // No ambassador: the referral no longer counts.
+    await cancelProjectReferral(tx, project.id, `Ambassador removed from ${project.projectId}`);
   }, { timeout: 20_000, maxWait: 10_000 });
 }
 

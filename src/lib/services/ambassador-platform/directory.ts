@@ -565,5 +565,5 @@ export async function removeSubAmbassador(coreId: string, subId: string): Promis
 
 /** Recount one ambassador outside a transaction (after a link change, an admin edit, a backfill). */
 export async function recount(ambassadorId: string) {
-  return db.$transaction((tx) => recountAmbassador(tx, ambassadorId));
+  return db.$transaction((tx) => recountAmbassador(tx, ambassadorId), { timeout: 30_000, maxWait: 10_000 });
 }

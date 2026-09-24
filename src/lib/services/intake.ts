@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { loginForEmail } from "@/lib/services/account-links";
 import { nextId } from "@/lib/services/projects";
+import { ensureProjectReferral } from "@/lib/services/ambassador-platform/referrals";
 import type { SubmittedContact } from "@/lib/submitted-contact";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
@@ -390,6 +391,9 @@ export async function submitIntake(
         });
       }
 
+      // The ambassador's referral row for this order (PENDING until the downpayment is confirmed).
+      if (ambassadorId) await ensureProjectReferral(tx, project.id, "INTAKE");
+
       const attachments = input.attachments ?? [];
       if (attachments.length > 0) {
         await tx.projectFile.createMany({
@@ -425,7 +429,7 @@ export async function submitIntake(
 
       return { ...project, clientCode: client.clientId };
     },
-    { timeout: 15_000 }
+    { timeout: 30_000 }
   );
 
   await notifyAdmins({

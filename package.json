@@ -26,6 +26,7 @@
     "check:tiers": "tsx scripts/check-ambassador-tiers.ts",
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
+    "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
     "catalogue:sync": "dotenv -e .env.local -- tsx scripts/sync-service-catalogue.ts"
   },

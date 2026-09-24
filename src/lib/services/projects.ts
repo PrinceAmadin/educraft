@@ -28,6 +28,7 @@ import {
 import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { monthKeyOf, projectNetInflow, syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
+import { cancelProjectReferral, ensureProjectReferral, recordConversion } from "@/lib/services/ambassador-platform/referrals";
 import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
 import { statusFeedEntry } from "@/lib/client-updates";
 import { recordUpdate } from "@/lib/services/client-updates";
@@ -512,7 +513,7 @@ export async function transitionProject(
         }
       }
     },
-    { timeout: 15_000, maxWait: 10_000 }
+    { timeout: 30_000, maxWait: 10_000 }
   );
 
   // ── Notifications ──
@@ -600,6 +601,8 @@ export async function holdProject(
       if (to === "CANCELLED" || to === "REFUNDED") {
         await releaseCommission(tx, project.id);
         await reconcileProjectPayouts(tx, project.id);
+        // The referral no longer counts toward the ambassador's tier.
+        await cancelProjectReferral(tx, project.id, to === "REFUNDED" ? `Project ${project.projectId} refunded` : `Project ${project.projectId} cancelled`);
       }
       if (refundPaymentId) {
         await tx.payment.create({
@@ -632,7 +635,7 @@ export async function holdProject(
         await recordUpdate(tx, { projectId: project.id, kind: "STATUS", title: feed.title, body: feed.body, dedupeKey: `status:${log.id}` });
       }
     },
-    { timeout: 15_000, maxWait: 10_000 }
+    { timeout: 30_000, maxWait: 10_000 }
   );
   if (feed) await notifyClient(project.id, { title: feed.title, message: `${project.projectId}: ${feed.title.toLowerCase()}.` });
   if (to === "REFUNDED" && refund > 0) {
@@ -857,6 +860,8 @@ export async function verifyPayment(
         month: monthKeyOf(paidOn),
         recordedById: changedById,
       });
+      // A confirmed downpayment on a referred job is the ambassador's conversion (Phase 3).
+      if (leg === "downpayment") await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
       if (advance) {
         await tx.projectStatusLog.create({
           data: {
@@ -876,7 +881,7 @@ export async function verifyPayment(
         dedupeKey: `payment:${payment.id}`,
       });
     },
-    { timeout: 15_000, maxWait: 10_000 }
+    { timeout: 30_000, maxWait: 10_000 }
   );
 
   await notifyClient(project.id, {
@@ -970,7 +975,7 @@ export async function rejectPayment(idOrCode: string, { leg, changedById, note, 
       body: `We could not confirm your ${legLabel} payment. Please check the transfer and message us if you need help.`,
       dedupeKey: `payment-refused:${log.id}`,
     });
-  }, { timeout: 15_000, maxWait: 10_000 });
+  }, { timeout: 30_000, maxWait: 10_000 });
 
   await notifyClient(project.id, {
     title: "Payment not confirmed",
@@ -1510,6 +1515,9 @@ export async function createProjectManual(
       });
     }
 
+    // The ambassador's referral row for this job (PENDING until the downpayment is confirmed).
+    if (ambassadorId) await ensureProjectReferral(tx, project.id, "ADMIN", createdById);
+
     await tx.projectStatusLog.create({
       data: {
         projectId: project.id,
@@ -1530,7 +1538,7 @@ export async function createProjectManual(
     });
 
     return project;
-  }, { timeout: 15_000 });
+  }, { timeout: 30_000 });
 
   // The admin logged this job against an ambassador — email them (and their
   // parent, if one earns a cut too) their commission now, as the original
