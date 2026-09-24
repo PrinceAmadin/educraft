@@ -1,7 +1,7 @@
 "use client";
 
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CHART_TOOLTIP_STYLE } from "@/components/finance/RevenueTrendChart";
+import { CHART_TOOLTIP_STYLE } from "@/components/finance/chart-style";
 import type { TrendPoint } from "@/lib/services/ambassador-analytics";
 
 /** 7-day clicks vs unique clicks, in Nigerian days. Sits on the page, no card. */

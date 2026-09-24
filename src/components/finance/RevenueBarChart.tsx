@@ -1,7 +1,7 @@
 "use client";
 
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CHART_TOOLTIP_STYLE } from "@/components/finance/RevenueTrendChart";
+import { CHART_TOOLTIP_STYLE } from "@/components/finance/chart-style";
 import { formatNaira } from "@/lib/utils";
 
 /**

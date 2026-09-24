@@ -9,7 +9,6 @@
  */
 import {
   Activity,
-  BarChart3,
   BookCheck,
   ClipboardCheck,
   CreditCard,
@@ -27,7 +26,6 @@ import {
   UserCog,
   Users,
   Wallet,
-  Zap,
 } from "lucide-react";
 import type { NavItem, NavSection } from "@/lib/constants";
 import { effectiveRole, EXEC_ROLES, homeForRole, isExecRole, type ExecRole } from "@/lib/rbac";
@@ -64,15 +62,15 @@ export const ADMIN_SIDEBAR: NavSection[] = [
   {
     heading: "Finance",
     items: [
+      // The Finance Platform: dashboard, revenue, payouts, buckets, founder draws, expenses, AI usage and
+      // reports are tabs inside it. The COO has no Finance entry, only the payout engine.
       { label: "Finance", href: "/admin/finance", icon: Wallet, matchNested: true, roles: [SA, CFO] },
-      { label: "Payout queue", href: "/admin/finance/payouts", icon: CreditCard, roles: [SA, CFO, COO] },
-      { label: "AI usage", href: "/admin/finance/ai-usage", icon: Zap, roles: [SA, CFO] },
+      { label: "Payouts", href: "/admin/finance/payouts", icon: CreditCard, roles: [SA, COO] },
     ],
   },
   {
     heading: "Reports",
     items: [
-      { label: "Finance reports", href: "/admin/reports/finance", icon: BarChart3, roles: [SA, CFO] },
       { label: "Growth reports", href: "/admin/reports/growth", icon: LineChart, roles: [SA, HOG] },
       { label: "Operations reports", href: "/admin/reports/operations", icon: Activity, roles: [SA, COO] },
     ],
@@ -105,10 +103,10 @@ const ADMIN_MOBILE: Record<ExecRole, NavItem[]> = {
     MORE,
   ],
   CO_CEO_CFO: [
-    { label: "Finance", href: "/admin/finance", icon: Wallet, matchNested: true },
+    { label: "Finance", href: "/admin/finance", icon: Wallet },
+    { label: "Revenue", href: "/admin/finance/revenue", icon: Activity },
     { label: "Payouts", href: "/admin/finance/payouts", icon: CreditCard },
     { label: "Clients", href: "/admin/clients", icon: Users, matchNested: true },
-    { label: "AI usage", href: "/admin/finance/ai-usage", icon: Zap },
     MORE,
   ],
   HOG: [
@@ -139,12 +137,14 @@ export function adminNavForRole(userRole: string | undefined | null): NavSection
   );
 }
 
-/** The bottom nav for this login; every slot is checked against the same matrix. */
+/** The bottom nav for this login; every slot is checked against the same matrix (a page under a nested entry counts). */
 export function adminMobileNavForRole(userRole: string | undefined | null): NavItem[] {
   const role = effectiveRole(userRole);
   if (!isExecRole(role)) return [];
-  const visible = new Set(adminNavForRole(role).flatMap((s) => s.items.map((i) => i.href)));
-  return ADMIN_MOBILE[role].filter((item) => item.href === MORE.href || visible.has(item.href));
+  const items = adminNavForRole(role).flatMap((s) => s.items);
+  const visible = new Set(items.map((i) => i.href));
+  const roots = items.filter((i) => i.matchNested).map((i) => i.href);
+  return ADMIN_MOBILE[role].filter((item) => item.href === MORE.href || visible.has(item.href) || roots.some((r) => item.href.startsWith(`${r}/`)));
 }
 
 /** Where the admin sidebar's logo goes: the executive's own home. */

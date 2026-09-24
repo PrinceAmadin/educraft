@@ -4,7 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { LuExternalLink, LuFlag, LuSearch, LuTriangleAlert } from "react-icons/lu";
-import { CHART_TOOLTIP_STYLE } from "@/components/finance/RevenueTrendChart";
+import { CHART_TOOLTIP_STYLE } from "@/components/finance/chart-style";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cn, formatNaira } from "@/lib/utils";

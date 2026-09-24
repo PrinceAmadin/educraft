@@ -12,7 +12,9 @@ export default async function ReportsIndexPage({ searchParams }: { searchParams:
   if (!session?.user) redirect("/login");
 
   const query = searchParams.month ? `?month=${encodeURIComponent(searchParams.month)}` : "";
-  for (const domain of ["finance", "operations", "growth"]) {
+  // The finance report is a Finance Platform tab now; the redirect there keeps the month.
+  if (canAccessRoute(session.user.role, "/admin/finance/reports")) redirect(`/admin/reports/finance${query}`);
+  for (const domain of ["operations", "growth"]) {
     if (canAccessRoute(session.user.role, `/admin/reports/${domain}`)) redirect(`/admin/reports/${domain}${query}`);
   }
   redirect(homeForRole(session.user.role));

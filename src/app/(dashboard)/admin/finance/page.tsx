@@ -1,19 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuArrowRight, LuMegaphone, LuPiggyBank, LuReceipt, LuUserCog, LuWallet } from "react-icons/lu";
-import { StatsCard } from "@/components/dashboard/StatsCard";
-import { RevenueTrendChart } from "@/components/finance/RevenueTrendChart";
+import { LuArrowRight, LuBanknote, LuFolderCheck, LuMegaphone, LuPiggyBank, LuUserCog, LuWallet } from "react-icons/lu";
+import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { RevenueBarChart } from "@/components/finance/RevenueBarChart";
+import { RevenuePayoutsChart } from "@/components/finance/RevenuePayoutsChart";
+import { BucketHealthGrid } from "@/components/finance/BucketHealthGrid";
+import { NeedsAttention } from "@/components/finance/NeedsAttention";
 import { PageHeader } from "@/components/shared/PageHeader";
-import {
-  getRevenueCards,
-  getRevenueSeries,
-  getCashFlowBreakdown,
-  getOutstandingBalances,
-  getBusinessIntelligence,
-  getPaymentMethodBreakdown,
-} from "@/lib/services/finance-dashboard";
-import { cn, formatNaira } from "@/lib/utils";
+import { getFinanceDashboard } from "@/lib/services/finance/dashboard";
+import { getBusinessIntelligence, getPaymentMethodBreakdown } from "@/lib/services/finance-dashboard";
+import { formatNaira } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Finance" };
 export const dynamic = "force-dynamic";
@@ -26,135 +22,48 @@ function topFivePlusOthers(rows: { label: string; value: number }[]): { label: s
   return [...top, { label: "Others", value: othersTotal }];
 }
 
-function changeLabel(pct: number | null) {
-  return pct == null ? "No data last period" : `${pct >= 0 ? "↑" : "↓"} ${Math.abs(pct)}% vs last period`;
-}
-function changeTone(pct: number | null) {
-  return pct == null ? "text-muted-foreground" : pct >= 0 ? "text-success" : "text-danger";
+function change(pct: number | null, what = "last month"): { text: string; tone: "muted" | "success" | "danger" } {
+  if (pct == null) return { text: `No ${what} to compare`, tone: "muted" };
+  if (pct === 0) return { text: `Same as ${what}`, tone: "muted" };
+  return { text: `${pct > 0 ? "↑" : "↓"} ${Math.abs(pct)}% vs ${what}`, tone: pct > 0 ? "success" : "danger" };
 }
 
 /**
- * Finance, read top to bottom: the month's revenue as one large number, the
- * trend chart under it, then the money breakdown in a single zone, what's still
- * owed, and the business intelligence. One big number first — not a grid of
- * equal cards competing for attention.
+ * The CFO's morning screen: this month in four numbers, the four buckets,
+ * what needs a hand, six months of revenue against payouts — then the
+ * business intelligence underneath.
  */
 export default async function FinancePage() {
-  const [revenueCards, daily, weekly, monthly, cashFlow, outstanding, bi, paymentMethods] = await Promise.all([
-    getRevenueCards(),
-    getRevenueSeries("daily"),
-    getRevenueSeries("weekly"),
-    getRevenueSeries("monthly"),
-    getCashFlowBreakdown(),
-    getOutstandingBalances(),
-    getBusinessIntelligence(),
-    getPaymentMethodBreakdown(),
-  ]);
-
-  const month = revenueCards.thisMonth;
+  const [d, paymentMethods, bi] = await Promise.all([getFinanceDashboard(), getPaymentMethodBreakdown(), getBusinessIntelligence()]);
+  const m = d.currentMonth;
+  const rev = change(d.changes.revenue);
+  const ret = change(d.changes.retained);
+  const proj = change(d.changes.projects);
 
   return (
     <div className="space-y-12">
-      <PageHeader
-        title="Finance"
-        description="Revenue, cash flow and business intelligence — generated from the database."
-      />
+      <PageHeader title="Finance" description={`${m.label}: how EduCraft's money stands right now, from confirmed payments, the payout engine and the buckets.`} />
 
-      {/* ── The number ── */}
-      <section aria-labelledby="month-revenue" className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-end">
-        <div>
-          <p id="month-revenue" className="meta-label">
-            Revenue this month
-          </p>
-          <p className="mt-2 font-mono text-[clamp(2.5rem,7vw,3.75rem)] font-medium leading-none tracking-tight tabular-nums text-foreground">
-            {formatNaira(month.amount)}
-          </p>
-          <p className={cn("mt-3 text-sm", changeTone(month.changePercent))}>{changeLabel(month.changePercent)}</p>
-        </div>
-
-        <dl className="grid grid-cols-3 gap-x-6 gap-y-4">
-          <MiniStat label="Today" value={revenueCards.today.amount} pct={revenueCards.today.changePercent} />
-          <MiniStat label="This week" value={revenueCards.thisWeek.amount} pct={revenueCards.thisWeek.changePercent} />
-          <div className="min-w-0">
-            <dt className="meta-label">This year</dt>
-            <dd className="mt-1 truncate font-mono text-lg font-medium tabular-nums text-foreground">
-              {formatNaira(revenueCards.thisYear.amount, { compact: true })}
-            </dd>
-            <dd className="mt-0.5 text-xs text-muted-foreground">
-              {revenueCards.thisYear.targetPercent}% of ₦1B target
-            </dd>
-          </div>
-        </dl>
+      <section aria-label="This month" className={STATS_GRID}>
+        <StatsCard label="Revenue this month" value={formatNaira(m.revenue)} detail={rev.text} detailTone={rev.tone} icon={LuBanknote} tone="success" href="/admin/finance/revenue" />
+        <StatsCard
+          label="Payouts this month"
+          value={formatNaira(m.payouts)}
+          detail={m.payouts > 0 ? `${formatNaira(m.payoutsPaid)} confirmed paid` : "Nothing owed yet"}
+          detailTone={m.payouts > 0 && m.payoutsPaid < m.payouts ? "gold" : "muted"}
+          icon={LuWallet}
+          tone="gold"
+          href="/admin/finance/payouts"
+        />
+        <StatsCard label="Net retained" value={formatNaira(m.retained)} detail={m.retained > 0 ? `After all payouts · ${ret.text}` : "After all payouts"} detailTone={ret.tone} icon={LuPiggyBank} href="/admin/finance/buckets" />
+        <StatsCard label="Projects this month" value={String(m.projectCount)} detail={`${m.projectCount} completed · ${proj.text}`} detailTone={proj.tone} icon={LuFolderCheck} href="/admin/projects?status=COMPLETED" />
       </section>
 
-      {/* ── Chart second ── */}
-      <RevenueTrendChart data={{ daily, weekly, monthly }} />
+      <BucketHealthGrid cards={d.buckets} />
 
-      {/* ── Breakdown, one zone ── */}
-      <section aria-label="Cash flow this month" className="grid gap-x-10 gap-y-8 rounded-2xl bg-zone p-5 sm:p-7 lg:grid-cols-3">
-        <Breakdown title="Income">
-          <Row label="Total revenue" value={formatNaira(cashFlow.income.totalRevenue)} />
-          <Row label="Worker payouts" value={formatNaira(cashFlow.income.workerPayouts)} muted />
-          <Row label="EduCraft share" value={formatNaira(cashFlow.income.educraftShare)} strong />
-        </Breakdown>
+      <NeedsAttention alerts={d.alerts} />
 
-        <Breakdown title="Expenses" action={{ href: "/admin/finance/expenses", label: "Manage" }}>
-          {cashFlow.expensesByCategory.length === 0 ? (
-            <p className="py-1.5 text-sm text-muted-foreground">No expenses logged this month.</p>
-          ) : (
-            cashFlow.expensesByCategory.map((e) => (
-              <Row key={e.category} label={e.category} value={formatNaira(e.amount)} muted />
-            ))
-          )}
-          <Row label="Total expenses" value={formatNaira(cashFlow.totalExpenses)} strong />
-        </Breakdown>
-
-        <Breakdown title="Profit">
-          <Row label="EduCraft share" value={formatNaira(cashFlow.income.educraftShare)} muted />
-          <Row label="Less expenses" value={`− ${formatNaira(cashFlow.totalExpenses)}`} muted />
-          <Row
-            label="Net profit"
-            value={formatNaira(cashFlow.netProfit)}
-            strong
-            tone={cashFlow.netProfit >= 0 ? "success" : "danger"}
-          />
-          <Row
-            label="Profit margin"
-            value={cashFlow.profitMarginPercent != null ? `${cashFlow.profitMarginPercent}%` : "—"}
-          />
-        </Breakdown>
-      </section>
-
-      {/* ── Still owed ── */}
-      <section aria-labelledby="owed-heading">
-        <h2 id="owed-heading" className="text-[15px] font-semibold text-foreground">
-          Outstanding balances
-        </h2>
-        <div className="mt-5 grid grid-cols-1 gap-x-10 gap-y-8 sm:grid-cols-3">
-          <StatsCard
-            label="Unpaid client balances"
-            value={formatNaira(outstanding.unpaidClientBalance.amount)}
-            detail={`${outstanding.unpaidClientBalance.count} project${outstanding.unpaidClientBalance.count === 1 ? "" : "s"} approved, awaiting balance`}
-            icon={LuReceipt}
-            tone="gold"
-            href="/admin/projects?status=APPROVED"
-          />
-          <StatsCard
-            label="Pending worker payouts"
-            value={formatNaira(outstanding.pendingWorkerPayouts.amount)}
-            detail={`${outstanding.pendingWorkerPayouts.count} worker${outstanding.pendingWorkerPayouts.count === 1 ? "" : "s"} owed`}
-            icon={LuWallet}
-            href="/admin/finance/payouts"
-          />
-          <StatsCard
-            label="Pending ambassador commissions"
-            value={formatNaira(outstanding.pendingAmbassadorCommissions.amount)}
-            detail={`${outstanding.pendingAmbassadorCommissions.count} ambassador${outstanding.pendingAmbassadorCommissions.count === 1 ? "" : "s"} owed`}
-            icon={LuPiggyBank}
-            href="/admin/finance/payouts"
-          />
-        </div>
-      </section>
+      <RevenuePayoutsChart data={d.revenueHistory} />
 
       {/* ── Payment methods ── */}
       <section aria-labelledby="methods-heading">
@@ -162,18 +71,12 @@ export default async function FinancePage() {
           <h2 id="methods-heading" className="text-[15px] font-semibold text-foreground">
             Payment methods this month
           </h2>
-          <Link
-            href="/admin/finance/reconciliation"
-            className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline"
-          >
+          <Link href="/admin/finance/reconciliation" className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
             Paystack reconciliation
             <LuArrowRight className="size-3" aria-hidden />
           </Link>
         </div>
-        <RevenueBarChart
-          data={paymentMethods.map((m) => ({ label: m.method, value: m.amount }))}
-          emptyLabel="No confirmed payments this month yet"
-        />
+        <RevenueBarChart data={paymentMethods.map((pm) => ({ label: pm.method, value: pm.amount }))} emptyLabel="No confirmed payments this month yet" />
       </section>
 
       {/* ── Business intelligence ── */}
@@ -184,103 +87,22 @@ export default async function FinancePage() {
         <div className="mt-5 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-2">
           <div>
             <h3 className="text-sm font-medium text-muted-foreground">Revenue by service</h3>
-            <RevenueBarChart
-              data={topFivePlusOthers(bi.byService.map((s) => ({ label: s.serviceName, value: s.revenue })))}
-            />
+            <RevenueBarChart data={topFivePlusOthers(bi.byService.map((s) => ({ label: s.serviceName, value: s.revenue })))} />
           </div>
           <div>
             <h3 className="text-sm font-medium text-muted-foreground">Revenue by university</h3>
-            <RevenueBarChart
-              data={topFivePlusOthers(bi.byUniversity.map((u) => ({ label: u.abbreviation, value: u.revenue })))}
-            />
+            <RevenueBarChart data={topFivePlusOthers(bi.byUniversity.map((u) => ({ label: u.abbreviation, value: u.revenue })))} />
           </div>
-
           <div>
             <ListHeader title="Top workers by revenue" href="/admin/workers" label="All workers" />
             <PerformerList rows={bi.topWorkers} icon={LuUserCog} basePath="/admin/workers" emptyLabel="No completed projects yet" />
           </div>
           <div>
             <ListHeader title="Top ambassadors by revenue" href="/admin/ambassadors" label="All ambassadors" />
-            <PerformerList
-              rows={bi.topAmbassadors}
-              icon={LuMegaphone}
-              basePath="/admin/ambassadors"
-              emptyLabel="No completed projects yet"
-            />
+            <PerformerList rows={bi.topAmbassadors} icon={LuMegaphone} basePath="/admin/ambassadors" emptyLabel="No completed projects yet" />
           </div>
         </div>
       </section>
-    </div>
-  );
-}
-
-function MiniStat({ label, value, pct }: { label: string; value: number; pct: number | null }) {
-  return (
-    <div className="min-w-0">
-      <dt className="meta-label">{label}</dt>
-      <dd className="mt-1 truncate font-mono text-lg font-medium tabular-nums text-foreground">
-        {formatNaira(value, { compact: true })}
-      </dd>
-      <dd className={cn("mt-0.5 text-xs", changeTone(pct))}>
-        {pct == null ? "—" : `${pct >= 0 ? "↑" : "↓"} ${Math.abs(pct)}%`}
-      </dd>
-    </div>
-  );
-}
-
-function Breakdown({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: { href: string; label: string };
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-[15px] font-semibold text-foreground">{title}</h2>
-        {action ? (
-          <Link href={action.href} className="text-[13px] font-medium text-primary hover:underline">
-            {action.label}
-          </Link>
-        ) : null}
-      </div>
-      <div className="mt-3">{children}</div>
-    </div>
-  );
-}
-
-function Row({
-  label,
-  value,
-  muted,
-  strong,
-  tone,
-}: {
-  label: string;
-  value: string;
-  muted?: boolean;
-  strong?: boolean;
-  tone?: "success" | "danger";
-}) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-3 py-1.5 text-sm",
-        strong && "mt-1.5 border-t border-border pt-3"
-      )}
-    >
-      <span className={muted ? "text-muted-foreground" : "text-foreground"}>{label}</span>
-      <span
-        className={cn(
-          "font-mono font-medium tabular-nums",
-          tone === "success" ? "text-success" : tone === "danger" ? "text-danger" : "text-foreground"
-        )}
-      >
-        {value}
-      </span>
     </div>
   );
 }
@@ -323,9 +145,7 @@ function PerformerList({
             <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <span className="min-w-0 flex-1 truncate text-sm text-foreground">{r.name}</span>
             <span className="shrink-0 text-right">
-              <span className="block font-mono text-sm font-medium tabular-nums text-foreground">
-                {formatNaira(r.revenue, { compact: true })}
-              </span>
+              <span className="block font-mono text-sm font-medium tabular-nums text-foreground">{formatNaira(r.revenue, { compact: true })}</span>
               <span className="block text-[11px] text-muted-foreground">{r.completed} completed</span>
             </span>
           </Link>

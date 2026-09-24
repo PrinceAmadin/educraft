@@ -36,13 +36,13 @@ const labelsFor = (role: string) => adminNavForRole(role).flatMap((s) => s.items
 expect(
   "CO_CEO_CFO sees exactly her tabs",
   labelsFor("CO_CEO_CFO"),
-  ["Clients", "Finance", "Payout queue", "AI usage", "Finance reports", "Bank details"]
+  ["Clients", "Finance", "Bank details"]
 );
 expect("HOG sees exactly his tabs", labelsFor("HOG"), ["Ambassadors", "Growth", "Growth reports", "Bank details"]);
 expect(
   "COO sees exactly his tabs",
   labelsFor("COO"),
-  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Payout queue", "Operations reports", "Bank details"]
+  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Payouts", "Operations reports", "Bank details"]
 );
 expect(
   "SUPER_ADMIN sees every tab",
@@ -58,14 +58,19 @@ for (const role of EXEC_ROLES) {
   expect(`${role}: no empty sections`, adminNavForRole(role).every((s) => s.items.length > 0), true);
 }
 expect("HOG has no Production or Finance section", adminNavForRole("HOG").map((s) => s.heading), ["Growth", "Reports", "Settings"]);
-expect("CFO has no Growth section", adminNavForRole("CO_CEO_CFO").map((s) => s.heading), ["Production", "Finance", "Reports", "Settings"]);
+expect("CFO has no Growth section (her report is a Finance tab)", adminNavForRole("CO_CEO_CFO").map((s) => s.heading), ["Production", "Finance", "Settings"]);
 
 // ── Sidebar and route table agree ───────────────────────────────────────────
 
+// A page reached through a nested entry (the Finance Platform tabs under "Finance") counts as offered.
+function offeredTo(role: string, href: string): boolean {
+  const items = adminNavForRole(role).flatMap((s) => s.items);
+  return items.some((i) => i.href === href) || items.some((i) => i.matchNested && href.startsWith(`${i.href}/`));
+}
 for (const section of ADMIN_SIDEBAR) {
   for (const item of section.items) {
     for (const role of EXEC_ROLES) {
-      const offered = item.roles?.includes(role) ?? true;
+      const offered = offeredTo(role, item.href);
       expect(`${role} ${offered ? "may open" : "is blocked from"} ${item.href} (sidebar ⇄ routes)`, canAccessRoute(role, item.href), offered);
     }
   }
@@ -135,10 +140,9 @@ expect("a person role never calls /api/admin", canCallAdminApi("WORKER", "/api/a
 
 for (const role of EXEC_ROLES) {
   const mobile = adminMobileNavForRole(role);
-  const visible = new Set(adminNavForRole(role).flatMap((s) => s.items.map((i) => i.href)));
   expect(`${role}: at most 5 bottom-nav slots`, mobile.length <= 5, true);
   expect(`${role}: bottom nav ends with More`, mobile[mobile.length - 1]?.href, "#more");
-  expect(`${role}: every bottom-nav slot is a visible tab`, mobile.filter((i) => i.href !== "#more").every((i) => visible.has(i.href)), true);
+  expect(`${role}: every bottom-nav slot is a visible tab`, mobile.filter((i) => i.href !== "#more").every((i) => offeredTo(role, i.href)), true);
   expect(`${role}: bottom nav starts at home`, mobile[0]?.href, homeForRole(role as ExecRole));
 }
 expect("SUPER_ADMIN bottom nav unchanged", adminMobileNavForRole("SUPER_ADMIN").map((i) => i.label), ["Home", "Projects", "QA", "Finance", "More"]);
