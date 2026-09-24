@@ -27,6 +27,7 @@ import {
 } from "@/lib/pipeline";
 import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { monthKeyOf, projectNetInflow, syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
+import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
 import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
 import { statusFeedEntry } from "@/lib/client-updates";
 import { recordUpdate } from "@/lib/services/client-updates";
@@ -470,6 +471,8 @@ export async function transitionProject(
         },
         select: { id: true },
       });
+      // Completed: every leg owed (worker, ambassador, Core, HOG, COO) becomes a payout record for the month.
+      if (to === "COMPLETED") await reconcileProjectPayouts(tx, project.id, { month: monthKeyOf(now) });
       if (skipBalance) {
         await tx.projectStatusLog.create({
           data: {
@@ -594,7 +597,10 @@ export async function holdProject(
         select: { id: true },
       });
       // A cancelled or refunded job earns no commission — drop it and its expense.
-      if (to === "CANCELLED" || to === "REFUNDED") await releaseCommission(tx, project.id);
+      if (to === "CANCELLED" || to === "REFUNDED") {
+        await releaseCommission(tx, project.id);
+        await reconcileProjectPayouts(tx, project.id);
+      }
       if (refundPaymentId) {
         await tx.payment.create({
           data: {
@@ -1365,7 +1371,7 @@ export async function createProjectManual(
   }
 
   const split = computeSplit(price.total, ambassadorCommRate);
-  const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId) : null;
+  const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId, ambassadorCommRate ?? 0) : null;
   const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
   const now = new Date();

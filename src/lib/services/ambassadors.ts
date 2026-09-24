@@ -405,7 +405,7 @@ export async function setAmbassadorParent(childId: string, input: SetParentInput
 
   await db.ambassador.update({
     where: { id: childId },
-    data: { parentId: parent.id, parentCommRate: input.rate ?? null },
+    data: { parentId: parent.id, parentCommRate: input.rate ?? null, parentCommRateIsOverride: input.rate != null },
   });
 }
 

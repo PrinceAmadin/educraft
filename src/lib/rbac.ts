@@ -107,6 +107,9 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/team", roles: ["SUPER_ADMIN"] },
   { prefix: "/api/admin/settings/bank", roles: ALL_EXECS },
   { prefix: "/api/admin/settings", roles: ["SUPER_ADMIN"] },
+  // The COO's own corner of the payout engine: their worker list and its submission.
+  { prefix: "/api/admin/finance/payouts/coo-view", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },
+  { prefix: "/api/admin/finance/payouts/coo-submit", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },
   { prefix: "/api/admin/finance/payouts", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/finance", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/ai-usage", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },

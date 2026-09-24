@@ -15,6 +15,8 @@ import { sendMail } from "@/lib/mailer";
 import { notifyUsers } from "@/lib/services/notifications";
 import { getCommissionRates, getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
+import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
+import { COMMISSION_RATES } from "@/lib/finance/commission-config";
 import { formatNaira } from "@/lib/utils";
 
 /**
@@ -88,12 +90,18 @@ export interface ResolvedParent {
  * Silver — CLAUDE.md's "requires Silver tier to activate". Returns null
  * otherwise; allocation just proceeds without a parent commission, never an
  * error, since the child ambassador is still perfectly valid on their own.
+ *
+ * v2.0 (Phase 2): EduCraft pays 15% in total on a referred job, so the Core
+ * earns 15 minus the sub's own rate on this job (a Bronze sub at 10% leaves
+ * 5%; a Gold sub at 15% leaves nothing). An admin override on the link can
+ * only lower that, never raise it.
  */
-export async function resolveParentCommission(childId: string): Promise<ResolvedParent | null> {
+export async function resolveParentCommission(childId: string, childRatePercent: number): Promise<ResolvedParent | null> {
   const child = await db.ambassador.findUnique({
     where: { id: childId },
     select: {
       parentCommRate: true,
+      parentCommRateIsOverride: true,
       parent: { select: { id: true, fullName: true, tier: true, status: true } },
     },
   });
@@ -102,7 +110,8 @@ export async function resolveParentCommission(childId: string): Promise<Resolved
   if (INACTIVE_STATUSES.includes(parent.status)) return null;
   if (!(PARENT_ACTIVATION_TIERS as readonly string[]).includes(parent.tier)) return null;
 
-  const rate = child.parentCommRate ?? (await getDefaultParentCommissionRate());
+  const standard = Math.max(0, Math.round((COMMISSION_RATES.ambassador * 100 - childRatePercent) * 100) / 100);
+  const rate = child.parentCommRateIsOverride && child.parentCommRate != null ? Math.min(child.parentCommRate, standard) : standard;
   if (rate <= 0) return null;
   return { id: parent.id, fullName: parent.fullName, rate };
 }
@@ -495,7 +504,7 @@ export async function allocateAmbassador(input: {
   const ambassador = await resolveAmbassadorRate(input.ambassadorId, input.rate);
   const commission = commissionFor(project.price, ambassador.rate);
   const sameAmbassador = project.ambassadorId === ambassador.id;
-  const parentInfo = await resolveParentCommission(ambassador.id);
+  const parentInfo = await resolveParentCommission(ambassador.id, ambassador.rate);
   const parentCommission = parentInfo ? commissionFor(project.price, parentInfo.rate) : null;
   const now = new Date();
 
@@ -552,6 +561,8 @@ export async function allocateAmbassador(input: {
     // The legs changed: EduCraft's retained share of any money already in changes with them.
     await syncPaymentAmbassadorSnapshot(tx, project.id);
     await syncProjectBuckets(tx, project.id, { reason: "REALLOCATION" });
+    // A completed job's payout records follow its legs.
+    await reconcileProjectPayouts(tx, project.id);
   }, { timeout: 20_000, maxWait: 10_000 });
 
   const email = input.notify ? await emailCommission(project.id) : null;
@@ -596,6 +607,8 @@ export async function removeAllocation(projectIdOrCode: string): Promise<void> {
     await removeParentCommissionExpense(tx, project.id);
     await syncPaymentAmbassadorSnapshot(tx, project.id);
     await syncProjectBuckets(tx, project.id, { reason: "REALLOCATION" });
+    // A completed job's payout records follow its legs.
+    await reconcileProjectPayouts(tx, project.id);
   }, { timeout: 20_000, maxWait: 10_000 });
 }
 

@@ -177,7 +177,7 @@ export async function submitIntake(
   }
 
   const split = computeSplit(price.total, ambassadorCommRate);
-  const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId) : null;
+  const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId, ambassadorCommRate ?? 0) : null;
   const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
   const now = new Date();
