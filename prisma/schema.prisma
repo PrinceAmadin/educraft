@@ -131,7 +131,26 @@ model AmbassadorApplication {
   otherUniversity String?
   department      String?
   level           String?
+  /// The old "why do you want to join" answer. Kept for applications made
+  /// before Sept 2026 — the form no longer asks it, because asking for
+  /// motivation only ever produced the same three words back.
   motivation      String?
+  /// What they can actually reach: roles held (REACH_ROLES), how many
+  /// final-year students, and the groups/pages they named.
+  reachRoles      String[]          @default([])
+  reachSize       String?
+  reachGroups     String?
+  /// Which service they picked as the one EduCraft does NOT do. Getting this
+  /// wrong is a liability, not noise: it's how they'd sell us on campus.
+  serviceCheck    String?
+  /// The work sample: the message they'd really send a stuck classmate.
+  pitchMessage    String?
+  /// "How do I know this isn't a scam?" and the upset-client scenario.
+  objectionReply  String?
+  clientUpsetReply String?
+  /// What they committed to in their first 30 days, and week one's first move.
+  expectedReferrals Int?
+  firstWeekPlan   String?
   /// Payment details, captured at application time so approval needs no
   /// follow-up — mirrors the fields already on Ambassador.
   bankName        String?
@@ -721,6 +740,18 @@ model Ambassador {
   /// the email link or their profile). Only that email is optional: welcome and
   /// commission emails are transactional and are unaffected.
   weeklyEmailOptOut Boolean    @default(false)
+  /// A new ambassador holds their slot for PROVISIONAL_DAYS: bring one
+  /// confirmed order and it's theirs, bring none and the slot is released.
+  /// Provisional is a DATE, never a status — several queries match
+  /// `status: "Active"` exactly (the weekly email, for one), so a new status
+  /// value would quietly drop provisional ambassadors out of them.
+  /// Provisional means `provisionalUntil != null && activatedAt == null`;
+  /// every ambassador from before this rule has all three null, i.e. settled.
+  provisionalUntil    DateTime?
+  /// Stamped when their first referred downpayment is confirmed.
+  activatedAt         DateTime?
+  /// Stamped when the "days left" warning went out, so it sends once.
+  provisionalWarnedAt DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -746,6 +777,7 @@ model Ambassador {
   @@index([universityId])
   @@index([status])
   @@index([parentId])
+  @@index([provisionalUntil])
 }
 
 /// One-time codes that let a worker / ambassador set or reset the password of

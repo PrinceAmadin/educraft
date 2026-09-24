@@ -8,7 +8,7 @@ import {
   getAmbassadorByUserId,
   getAmbassadorDashboard,
 } from "@/lib/services/ambassador-portal";
-import { referralLink } from "@/lib/ambassador";
+import { isProvisional, provisionalDaysLeft, referralLink } from "@/lib/ambassador";
 import { StatsCard } from "@/components/dashboard/StatsCard";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralShareCard } from "@/components/ambassadors/ReferralShareCard";
@@ -53,6 +53,18 @@ export default async function AmbassadorDashboardPage() {
         </h1>
         <TierBadge tier={data.tier} />
       </div>
+
+      {isProvisional(ambassador) ? (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl bg-gold/10 px-4 py-3">
+          <span className="text-sm font-semibold text-gold">
+            {provisionalDaysLeft(ambassador.provisionalUntil!)} day
+            {provisionalDaysLeft(ambassador.provisionalUntil!) === 1 ? "" : "s"} left to confirm your slot
+          </span>
+          <span className="text-sm text-muted-foreground">
+            Your slot becomes permanently yours once the first order from someone you referred is paid.
+          </span>
+        </div>
+      ) : null}
 
       <ReferralShareCard code={data.referralCode} link={link} qrDataUrl={qrDataUrl} />
 

@@ -29,3 +29,6 @@ Educraft_Ambassador/
 
 # Private files kept on disk by the local development driver (PRIVATE_FILES_DRIVER=local)
 .private-files/
+
+# Playwright MCP test artifacts (console logs, page snapshots)
+.playwright-mcp/

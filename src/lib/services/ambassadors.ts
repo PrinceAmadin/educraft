@@ -1,7 +1,7 @@
 import { Prisma, type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
-import { generateReferralCode, tierProgress } from "@/lib/ambassador";
+import { generateReferralCode, isProvisional, provisionalDeadline, tierProgress } from "@/lib/ambassador";
 import { getCommissionRates } from "@/lib/services/settings";
 import {
   MAX_SUB_AMBASSADORS,
@@ -64,6 +64,8 @@ export interface AmbassadorListRow {
   university: string | null;
   tier: AmbassadorTier;
   status: string;
+  /** Still inside their 30-day window, so the slot isn't theirs yet. */
+  provisional: boolean;
   rate: number;
   referrals: number;
   conversions: number;
@@ -84,6 +86,8 @@ const listSelect = {
   fullName: true,
   tier: true,
   status: true,
+  provisionalUntil: true,
+  activatedAt: true,
   university: { select: { abbreviation: true } },
   referredClients: { select: { _count: { select: { projects: true } } } },
   projects: {
@@ -140,6 +144,7 @@ export async function listAmbassadors(params: {
       university: a.university?.abbreviation ?? null,
       tier: a.tier,
       status: a.status,
+      provisional: isProvisional(a),
       rate: rates[a.tier],
       referrals: m.referrals,
       conversions: m.conversions,
@@ -168,6 +173,9 @@ const detailSelect = {
   referralCode: true,
   tier: true,
   status: true,
+  provisionalUntil: true,
+  activatedAt: true,
+  provisionalWarnedAt: true,
   bankName: true,
   accountNumber: true,
   accountName: true,
@@ -500,6 +508,20 @@ export async function updateAmbassador(id: string, input: UpdateAmbassadorInput)
 
   const data: Prisma.AmbassadorUncheckedUpdateInput = {};
   if (input.status) data.status = input.status;
+  // Founder override on the provisional window. Reinstating starts a fresh 30
+  // days but does not take a slot back — the old one may already be filled, so
+  // it is reassigned from Manage.
+  if (input.slotAction === "confirm") {
+    data.activatedAt = new Date();
+    data.provisionalUntil = null;
+    data.provisionalWarnedAt = null;
+  }
+  if (input.slotAction === "reinstate") {
+    data.status = "Active";
+    data.activatedAt = null;
+    data.provisionalUntil = provisionalDeadline();
+    data.provisionalWarnedAt = null;
+  }
   if (input.tier) data.tier = input.tier;
   if (input.fullName !== undefined) data.fullName = input.fullName;
   if (input.phone !== undefined) data.phone = blank(input.phone);
@@ -594,6 +616,7 @@ export async function deleteAmbassador(id: string): Promise<void> {
     db.ambassador.delete({ where: { id } }),
   ];
   if (ambassador.legacySlotId) {
+    // The ambassador row goes with it, so only the slot side needs emptying.
     writes.push(
       db.ambassadorSlot.updateMany({ where: { code: ambassador.legacySlotId }, data: { name: "", vacant: true } })
     );

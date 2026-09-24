@@ -3,25 +3,29 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { LuCircleAlert } from "react-icons/lu";
+import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { TIER_LADDER } from "@/lib/ambassador";
-import { AMBASSADOR_STATUSES } from "@/lib/validations/ambassadors";
+import { SELECTABLE_AMBASSADOR_STATUSES } from "@/lib/validations/ambassadors";
 import type { AmbassadorTier } from "@prisma/client";
 
 export function AmbassadorControls({
   ambassadorId,
   status,
   tier,
+  provisional,
 }: {
   ambassadorId: string;
   status: string;
   tier: AmbassadorTier;
+  /** On a 30-day provisional slot, so the founder can confirm it early. */
+  provisional?: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState<"status" | "tier" | null>(null);
+  const [busy, setBusy] = React.useState<"status" | "tier" | "slotAction" | null>(null);
 
-  async function patch(field: "status" | "tier", value: string) {
+  async function patch(field: "status" | "tier" | "slotAction", value: string) {
     setBusy(field);
     setError(null);
     try {
@@ -42,6 +46,12 @@ export function AmbassadorControls({
     }
   }
 
+  // "Lapsed" is set by the provisional sweep, never chosen — but a lapsed
+  // ambassador still needs their own status shown as the current value.
+  const statusOptions = SELECTABLE_AMBASSADOR_STATUSES.includes(status as never)
+    ? SELECTABLE_AMBASSADOR_STATUSES
+    : [status, ...SELECTABLE_AMBASSADOR_STATUSES];
+
   return (
     <div className="flex flex-wrap items-end gap-3">
       <label className="block">
@@ -55,7 +65,7 @@ export function AmbassadorControls({
           className="h-10 w-40 text-sm"
           aria-label="Ambassador status"
         >
-          {AMBASSADOR_STATUSES.map((s) => (
+          {statusOptions.map((s) => (
             <option key={s} value={s}>
               {s}
             </option>
@@ -81,6 +91,33 @@ export function AmbassadorControls({
           ))}
         </Select>
       </label>
+
+      {provisional ? (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy !== null}
+          onClick={() => void patch("slotAction", "confirm")}
+        >
+          Confirm slot now
+        </Button>
+      ) : null}
+
+      {status === "Lapsed" ? (
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={busy !== null}
+            onClick={() => void patch("slotAction", "reinstate")}
+          >
+            Reinstate
+          </Button>
+          <p className="mt-1 max-w-56 text-xs text-muted-foreground">
+            Starts a fresh 30 days. Give them a slot again from Manage.
+          </p>
+        </div>
+      ) : null}
 
       {error ? (
         <p className="flex w-full items-center gap-1 text-xs text-danger">

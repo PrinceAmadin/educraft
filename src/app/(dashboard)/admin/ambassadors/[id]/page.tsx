@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { LuPhone, LuMail, LuBuilding2, LuBellRing } from "react-icons/lu";
+import { LuPhone, LuMail, LuBuilding2, LuBellRing, LuCalendarClock } from "react-icons/lu";
 import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
 import { getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { getLinkedWorker } from "@/lib/services/linked-profiles";
@@ -22,6 +22,7 @@ import { AdminAnalytics } from "@/components/ambassador-analytics/AdminAnalytics
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuUsers } from "react-icons/lu";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
+import { isProvisional, provisionalDaysLeft } from "@/lib/ambassador";
 import type { ProjectStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,11 @@ export default async function AmbassadorDetailPage({
                 {ambassador.fullName}
               </h1>
               <TierBadge tier={ambassador.tier} />
+              <StatusPill
+                status={ambassador.status}
+                provisionalUntil={ambassador.provisionalUntil}
+                activatedAt={ambassador.activatedAt}
+              />
             </div>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">
               {ambassador.ambassadorId}
@@ -119,6 +125,7 @@ export default async function AmbassadorDetailPage({
               ambassadorId={ambassador.id}
               status={ambassador.status}
               tier={ambassador.tier}
+              provisional={isProvisional(ambassador)}
             />
             {isSuperAdmin ? (
               <DeleteAmbassadorButton ambassadorId={ambassador.id} fullName={ambassador.fullName} />
@@ -158,6 +165,13 @@ export default async function AmbassadorDetailPage({
             {ambassador.department ? (
               <span className="block text-xs text-muted-foreground">{ambassador.department}</span>
             ) : null}
+          </Field>
+          <Field icon={LuCalendarClock} label="Slot">
+            <SlotStatus
+              status={ambassador.status}
+              provisionalUntil={ambassador.provisionalUntil}
+              activatedAt={ambassador.activatedAt}
+            />
           </Field>
         </dl>
       </div>
@@ -364,6 +378,92 @@ export default async function AmbassadorDetailPage({
       </>
       )}
     </div>
+  );
+}
+
+const STATUS_PILL: Record<string, string> = {
+  Active: "bg-success/10 text-success",
+  Paused: "bg-gold/15 text-gold",
+  Suspended: "bg-danger/10 text-danger",
+  Terminated: "bg-danger/10 text-danger",
+  Lapsed: "bg-zone text-muted-foreground",
+};
+
+/**
+ * Status was previously only visible as the current value of a <Select>, so
+ * nothing on the page said "suspended" out loud. A provisional slot needs
+ * saying most of all, since it expires.
+ */
+function StatusPill({
+  status,
+  provisionalUntil,
+  activatedAt,
+}: {
+  status: string;
+  provisionalUntil: Date | null;
+  activatedAt: Date | null;
+}) {
+  const provisional = isProvisional({ provisionalUntil, activatedAt });
+  if (provisional && status === "Active") {
+    const left = provisionalDaysLeft(provisionalUntil!);
+    return (
+      <span className="rounded-full bg-gold/15 px-2 py-0.5 text-xs font-medium text-gold">
+        Provisional · {left} day{left === 1 ? "" : "s"} left
+      </span>
+    );
+  }
+  if (status === "Active") return null;
+  return (
+    <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", STATUS_PILL[status] ?? "bg-zone text-muted-foreground")}>
+      {status}
+    </span>
+  );
+}
+
+/** Where the slot stands: still on trial, settled, or handed back. */
+function SlotStatus({
+  status,
+  provisionalUntil,
+  activatedAt,
+}: {
+  status: string;
+  provisionalUntil: Date | null;
+  activatedAt: Date | null;
+}) {
+  if (status === "Lapsed") {
+    return (
+      <>
+        <span className="text-muted-foreground">Released</span>
+        <span className="block text-xs text-muted-foreground">30 days passed with no confirmed order</span>
+      </>
+    );
+  }
+  if (isProvisional({ provisionalUntil, activatedAt })) {
+    const left = provisionalDaysLeft(provisionalUntil!);
+    return (
+      <>
+        <span className="text-gold">
+          Provisional · {left} day{left === 1 ? "" : "s"} left
+        </span>
+        <span className="block text-xs text-muted-foreground">
+          Released {formatDate(provisionalUntil!)} unless a referred order is confirmed
+        </span>
+      </>
+    );
+  }
+  if (activatedAt) {
+    return (
+      <>
+        <span className="text-success">Confirmed</span>
+        <span className="block text-xs text-muted-foreground">First order confirmed {formatDate(activatedAt)}</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="text-foreground">Permanent</span>
+      <span className="block text-xs text-muted-foreground">Joined before the 30-day rule</span>
+    </>
   );
 }
 

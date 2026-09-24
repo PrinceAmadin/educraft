@@ -85,7 +85,15 @@ export function ambassadorApplicationAlert(input: {
   department: string | null;
   level: string | null;
   slotCode: string | null;
+  /** Only on applications from before the screening questions. */
   motivation: string | null;
+  pitchMessage: string | null;
+  reach: string | null;
+  roles: string;
+  expectedReferrals: number | null;
+  score: { total: number; max: number } | null;
+  /** Set only when they picked the WRONG answer — how they would sell us. */
+  serviceCheckPicked: string | null;
   /** Applied with the login they already use (a worker applying as an ambassador). */
   existingLogin: boolean;
   submittedAt: string;
@@ -104,10 +112,23 @@ export function ambassadorApplicationAlert(input: {
       { label: "Department", value: input.department },
       { label: "Level", value: input.level },
       { label: "Slot held", value: input.slotCode, mono: true },
+      { label: "Score", value: input.score ? `${input.score.total}/${input.score.max}` : null, mono: true },
+      { label: "Reach", value: input.reach },
+      { label: "Roles", value: input.roles || null },
+      {
+        label: "Expects in 30 days",
+        value: input.expectedReferrals == null ? null : `${input.expectedReferrals} students`,
+      },
+      {
+        label: "Service check",
+        value: input.serviceCheckPicked ? `FAILED — picked "${input.serviceCheckPicked}"` : null,
+      },
       { label: "Login", value: input.existingLogin ? "Already a worker, same login" : null },
       { label: "Submitted", value: input.submittedAt },
     ],
-    quote: { label: "Why they want to be an ambassador", body: input.motivation },
+    quote: input.pitchMessage
+      ? { label: "The message they'd send a stuck classmate", body: input.pitchMessage }
+      : { label: "Why they want to be an ambassador", body: input.motivation },
     actionLabel: "Review application",
     actionUrl: input.reviewUrl,
   });

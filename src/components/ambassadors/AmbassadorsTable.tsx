@@ -25,7 +25,10 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-foreground">{row.fullName}</span>
-                <TierBadge tier={row.tier} />
+                <span className="flex items-center gap-1.5">
+                  <ProvisionalChip show={row.provisional} />
+                  <TierBadge tier={row.tier} />
+                </span>
               </div>
               <p className="mt-0.5 font-mono text-xs text-muted-foreground">
                 {row.ambassadorId} · {row.university ?? "—"}
@@ -95,7 +98,10 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
                   {formatNaira(row.commissionBalance)}
                 </TableCell>
                 <TableCell>
-                  <TierBadge tier={row.tier} />
+                  <span className="flex items-center gap-1.5">
+                    <ProvisionalChip show={row.provisional} />
+                    <TierBadge tier={row.tier} />
+                  </span>
                 </TableCell>
                 <TableCell>
                   <Link
@@ -112,5 +118,15 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
         </Table>
       </div>
     </>
+  );
+}
+
+/** A slot still on its 30-day trial, so the founder can see the cohort at a glance. */
+function ProvisionalChip({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <span className="rounded-full bg-gold/15 px-2 py-0.5 text-xs font-medium text-gold" title="Slot is provisional for 30 days">
+      Provisional
+    </span>
   );
 }

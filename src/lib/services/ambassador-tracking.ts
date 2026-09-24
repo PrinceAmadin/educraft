@@ -115,7 +115,8 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
   };
   const [ambassadors, recentProjects, open, trackedGroups, weekGroups] = await Promise.all([
     db.ambassador.findMany({
-      where: { status: { not: "Terminated" } },
+      // Lapsed = a provisional slot that ran out; they are off the roster too.
+      where: { status: { notIn: ["Terminated", "Lapsed"] } },
       select: {
         id: true,
         ambassadorId: true,

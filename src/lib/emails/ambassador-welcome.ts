@@ -12,10 +12,20 @@ export function ambassadorWelcomeEmail(input: {
   loginUrl: string;
   /** False for older applications that never set a password. */
   hasLogin: boolean;
+  /** The date their provisional slot runs out, if the rule applies to them. */
+  provisionalUntil?: Date | null;
 }): { subject: string; html: string; text: string } {
   const first = input.fullName.trim().split(/\s+/)[0] || input.fullName;
   const subject = "Welcome to the EduCraft ambassador programme";
   const slotLabel = `EduCraftA-${input.slotCode}`;
+
+  // They agreed to this when they applied; saying it again is how it stays fair.
+  const deadline = input.provisionalUntil
+    ? input.provisionalUntil.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+  const provisionalLine = deadline
+    ? `Your slot is provisional until ${deadline}. Once the first order you referred is confirmed, it is yours for good.`
+    : null;
 
   const loginLine = input.hasLogin
     ? "Sign in to your dashboard with your email and password."
@@ -31,6 +41,8 @@ export function ambassadorWelcomeEmail(input: {
     "",
     "Share this link with students. When they open it, WhatsApp opens with a message that already says you referred them.",
     "",
+    provisionalLine ?? "",
+    provisionalLine ? "" : "",
     loginLine,
     input.hasLogin ? `Dashboard: ${input.loginUrl}` : "",
     "",
@@ -52,6 +64,11 @@ export function ambassadorWelcomeEmail(input: {
       <p style="margin:0;font-size:14px;word-break:break-all"><a href="${escapeHtml(input.referralLink)}" style="color:#0D9488;text-decoration:none;font-weight:600">${escapeHtml(input.referralLink)}</a></p>
     </div>
     <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#0F172A">Share this link with students. When they open it, WhatsApp opens with a message that already says you referred them.</p>
+    ${
+      provisionalLine
+        ? `<p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(provisionalLine)}</p>`
+        : ""
+    }
     <p style="margin:0 0 ${input.hasLogin ? "20" : "24"}px;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(loginLine)}</p>
     ${
       input.hasLogin

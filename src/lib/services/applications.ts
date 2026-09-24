@@ -4,7 +4,8 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins } from "@/lib/services/notifications";
-import { generateReferralCode } from "@/lib/ambassador";
+import { generateReferralCode, provisionalDeadline } from "@/lib/ambassador";
+import { isLegacyApplication, scoreApplication, type ApplicationScore } from "@/lib/ambassador-score";
 import { nextGeneralCode } from "@/lib/services/ambassador-roster";
 import { sendMail } from "@/lib/mailer";
 import { siteUrl } from "@/lib/site-url";
@@ -134,7 +135,15 @@ export async function submitApplication(
         otherUniversity: universityId ? null : input.otherUniversity || null,
         department: input.department || null,
         level: input.level || null,
-        motivation: input.motivation || null,
+        reachRoles: input.reachRoles,
+        reachSize: input.reachSize,
+        reachGroups: input.reachGroups.trim(),
+        serviceCheck: input.serviceCheck,
+        pitchMessage: input.pitchMessage.trim(),
+        objectionReply: input.objectionReply.trim(),
+        clientUpsetReply: input.clientUpsetReply.trim(),
+        expectedReferrals: input.expectedReferrals,
+        firstWeekPlan: input.firstWeekPlan.trim(),
         bankName: input.bankName.trim(),
         accountNumber: input.accountNumber.trim(),
         accountName: input.accountName.trim(),
@@ -169,7 +178,19 @@ export interface ApplicationRow {
   university: string | null;
   department: string | null;
   level: string | null;
+  /** Only ever set on applications made before the screening questions. */
   motivation: string | null;
+  reachRoles: string[];
+  reachSize: string | null;
+  reachGroups: string | null;
+  serviceCheck: string | null;
+  pitchMessage: string | null;
+  objectionReply: string | null;
+  clientUpsetReply: string | null;
+  expectedReferrals: number | null;
+  firstWeekPlan: string | null;
+  /** Triage only — sorts the pile, never decides it. Null for legacy rows. */
+  score: ApplicationScore | null;
   bankName: string | null;
   accountNumber: string | null;
   accountName: string | null;
@@ -206,6 +227,15 @@ export async function listApplications(
       department: true,
       level: true,
       motivation: true,
+      reachRoles: true,
+      reachSize: true,
+      reachGroups: true,
+      serviceCheck: true,
+      pitchMessage: true,
+      objectionReply: true,
+      clientUpsetReply: true,
+      expectedReferrals: true,
+      firstWeekPlan: true,
       bankName: true,
       accountNumber: true,
       accountName: true,
@@ -229,7 +259,19 @@ export async function listApplications(
       : []
   );
 
-  return rows.map((r) => ({
+  const mapped = rows.map((r) => {
+    const answers = {
+      reachRoles: r.reachRoles,
+      reachSize: r.reachSize,
+      reachGroups: r.reachGroups,
+      serviceCheck: r.serviceCheck,
+      pitchMessage: r.pitchMessage,
+      objectionReply: r.objectionReply,
+      clientUpsetReply: r.clientUpsetReply,
+      expectedReferrals: r.expectedReferrals,
+      firstWeekPlan: r.firstWeekPlan,
+    };
+    return {
     id: r.id,
     fullName: r.fullName,
     phone: r.phone,
@@ -238,6 +280,8 @@ export async function listApplications(
     department: r.department,
     level: r.level,
     motivation: r.motivation,
+    ...answers,
+    score: isLegacyApplication(answers) ? null : scoreApplication(answers),
     bankName: r.bankName,
     accountNumber: r.accountNumber,
     accountName: r.accountName,
@@ -250,7 +294,16 @@ export async function listApplications(
     universityId: r.universityId,
     otherUniversity: r.otherUniversity,
     emailLocked: r.status === "PENDING" && Boolean(r.userId && activeLogins.has(r.userId)),
-  }));
+    };
+  });
+
+  // Pending applications lead with the ones worth reading first; decided ones
+  // stay in the order they were decided. Volumes are small, so this sorts here
+  // rather than in the query.
+  if (status === "PENDING") {
+    mapped.sort((a, b) => (b.score?.total ?? -1) - (a.score?.total ?? -1) || a.createdAt.localeCompare(b.createdAt));
+  }
+  return mapped;
 }
 
 // ── Admin edit ───────────────────────────────────────────────
@@ -466,8 +519,10 @@ export async function approveApplication(
               userId: application.userId,
               tier: "BRONZE",
               status: "Active",
+              // The slot is theirs for 30 days; a confirmed order makes it permanent.
+              provisionalUntil: provisionalDeadline(),
             },
-            select: { id: true, referralCode: true },
+            select: { id: true, referralCode: true, provisionalUntil: true },
           });
           // Fill (or create) the slot — its /EduCraftA/{code} link is live now.
           await tx.ambassadorSlot.upsert({
@@ -521,6 +576,7 @@ export async function approveApplication(
       // otherwise land on their worker dashboard.
       loginUrl: `${base}/ambassador`,
       hasLogin: Boolean(application.userId),
+      provisionalUntil: ambassador.provisionalUntil,
     });
     const sent = await sendMail({ to: application.email, ...mail });
     if (!sent.ok) console.error("[approveApplication] welcome email failed:", sent.error);

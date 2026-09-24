@@ -3,9 +3,16 @@ import { AmbassadorTier } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
 
 const tierValues = Object.values(AmbassadorTier) as [AmbassadorTier, ...AmbassadorTier[]];
-const statusValues = ["Active", "Paused", "Suspended", "Terminated"] as const;
+const statusValues = ["Active", "Paused", "Suspended", "Terminated", "Lapsed"] as const;
 
 export const AMBASSADOR_STATUSES = statusValues;
+
+/**
+ * "Lapsed" is set by the provisional sweep when a new ambassador's 30 days
+ * pass with no confirmed order, never chosen by an admin — they reinstate
+ * instead. Keep it out of any status picker.
+ */
+export const SELECTABLE_AMBASSADOR_STATUSES = statusValues.filter((s) => s !== "Lapsed");
 
 export const createAmbassadorSchema = z.object({
   fullName: z.string().trim().min(2, "Enter the ambassador's full name").max(120),
@@ -36,6 +43,11 @@ export const updateAmbassadorSchema = z
     bankName: z.string().trim().max(80).optional().or(z.literal("")),
     accountNumber: z.string().trim().max(20).optional().or(z.literal("")),
     accountName: z.string().trim().max(120).optional().or(z.literal("")),
+    /**
+     * Founder override on the 30-day provisional slot: "confirm" makes it
+     * permanent now, "reinstate" gives a lapsed ambassador a fresh window.
+     */
+    slotAction: z.enum(["confirm", "reinstate"]).optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to update");
 

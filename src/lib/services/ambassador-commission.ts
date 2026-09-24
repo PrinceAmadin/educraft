@@ -41,7 +41,8 @@ export class CommissionError extends Error {}
 
 type Tx = Prisma.TransactionClient;
 
-const INACTIVE_STATUSES = ["Suspended", "Terminated"];
+/** "Lapsed" is a provisional slot that ran out — they can no longer be allocated a job. */
+const INACTIVE_STATUSES = ["Suspended", "Terminated", "Lapsed"];
 /** Jobs that no longer earn a commission. */
 const DEAD_STATUSES = ["CANCELLED", "REFUNDED"] as const;
 
@@ -398,6 +399,37 @@ export async function emailPendingCommission(projectDbId: string): Promise<void>
   if (project.parentAmbassadorId && project.parentCommission != null && !project.parentNotifiedAt) {
     await emailParentCommission(projectDbId, { inApp: false });
   }
+  // The money is in: a provisional slot becomes permanent here. This is the one
+  // place all three commission paths (admin allocation, public ?ref= intake,
+  // manual project) meet after a downpayment is confirmed.
+  if (project.ambassadorId) await graduateProvisional(project.ambassadorId);
+}
+
+/**
+ * Their first confirmed order: the slot is theirs for good.
+ *
+ * Deliberately keyed on a confirmed downpayment rather than the looser
+ * "referred client with any project" used for tier conversions — this is what
+ * they agreed to when they applied, and it is what the money says.
+ */
+export async function graduateProvisional(ambassadorId: string): Promise<void> {
+  const claimed = await db.ambassador.updateMany({
+    where: { id: ambassadorId, activatedAt: null, provisionalUntil: { not: null } },
+    data: { activatedAt: new Date(), provisionalUntil: null, provisionalWarnedAt: null },
+  });
+  if (claimed.count === 0) return;
+
+  const ambassador = await db.ambassador.findUnique({
+    where: { id: ambassadorId },
+    select: { userId: true, fullName: true },
+  });
+  if (!ambassador?.userId) return;
+  await notifyUsers([ambassador.userId], {
+    title: "Your slot is confirmed",
+    message: "Your first referred order has been paid, so your ambassador slot is now permanently yours.",
+    type: "success",
+    link: "/ambassador",
+  });
 }
 
 // ── Allocate / remove ────────────────────────────────────────────────────

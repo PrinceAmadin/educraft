@@ -94,6 +94,47 @@ export const ACADEMIC_LEVELS = [
   "Graduate / Alumni",
 ] as const;
 
+/**
+ * Ambassador application screening.
+ *
+ * The form used to end on "why do you want to be an ambassador?", which asks
+ * for intent — free to claim, so every answer came back as the same three
+ * words. These ask instead for what can be checked: roles actually held,
+ * students actually reachable, and one piece of the real work.
+ */
+export const REACH_ROLES = [
+  { value: "COURSE_REP", label: "Course rep or class governor" },
+  { value: "GROUP_ADMIN", label: "Admin of a department, level or class WhatsApp group" },
+  { value: "ASSOC_EXEC", label: "Executive in a departmental or faculty association" },
+  { value: "CAMPUS_PAGE", label: "I run a page or account students on my campus follow" },
+  { value: "CLUB_ACTIVE", label: "Active in a campus fellowship, club or society" },
+  { value: "NONE", label: "None of these yet" },
+] as const;
+
+/** The roles that actually put a message in front of people. */
+export const DISTRIBUTION_ROLES = ["COURSE_REP", "GROUP_ADMIN", "ASSOC_EXEC", "CAMPUS_PAGE"] as const;
+
+export const REACH_SIZES = [
+  { value: "UNDER_50", label: "Fewer than 50" },
+  { value: "R50_150", label: "50 to 150" },
+  { value: "R150_400", label: "150 to 400" },
+  { value: "OVER_400", label: "More than 400" },
+] as const;
+
+/**
+ * Every distractor is a real EduCraft service, so the question can only be
+ * answered by someone who read what we do. A wrong answer is a liability, not
+ * noise: it is how that person would sell us on their campus.
+ */
+export const SERVICE_CHECK_OPTIONS = [
+  { value: "PROJECT", label: "Write a final year project" },
+  { value: "EDITING", label: "Edit and format a document you already wrote" },
+  { value: "EXAMS", label: "Sit or write exams and tests for a student" },
+  { value: "SLIDES", label: "Design presentation slides" },
+] as const;
+
+export const SERVICE_CHECK_CORRECT = "EXAMS";
+
 export const REFERENCING_STYLES = [
   { value: "APA_7TH", label: "APA 7th" },
   { value: "APA_6TH", label: "APA 6th" },

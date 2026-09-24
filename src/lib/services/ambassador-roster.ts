@@ -266,6 +266,35 @@ export async function updateSlot(code: string, input: UpdateSlotInput): Promise<
   });
 }
 
+/** Either the client or a transaction handle — releasing a slot happens in both. */
+type SlotWriter = Pick<typeof db, "ambassadorSlot" | "ambassador">;
+
+/**
+ * Empty a slot and cut the ambassador loose from it.
+ *
+ * There is no foreign key between `AmbassadorSlot.code` and
+ * `Ambassador.legacySlotId` — the pairing is a string on both rows — so the
+ * two writes have to happen together or the roster drifts. Every release
+ * (admin reset, delete, a lapsed provisional slot) goes through here.
+ *
+ * `detachAmbassador: false` is for the case where the ambassador row is being
+ * deleted in the same transaction: updating a row that is about to disappear
+ * would fail.
+ */
+export async function releaseSlotFor(
+  client: SlotWriter,
+  code: string,
+  { detachAmbassador = true }: { detachAmbassador?: boolean } = {}
+): Promise<{ detachedAmbassador: boolean }> {
+  await client.ambassadorSlot.updateMany({ where: { code }, data: { name: "", vacant: true } });
+  if (!detachAmbassador) return { detachedAmbassador: false };
+  const detached = await client.ambassador.updateMany({
+    where: { legacySlotId: code },
+    data: { legacySlotId: null },
+  });
+  return { detachedAmbassador: detached.count > 0 };
+}
+
 /**
  * "Reset": empty the slot so the next applicant can take it. The person's HQ
  * record (jobs, payouts) is kept. It just stops being tied to this slot, so
@@ -274,9 +303,5 @@ export async function updateSlot(code: string, input: UpdateSlotInput): Promise<
 export async function vacateSlot(code: string): Promise<{ detachedAmbassador: boolean }> {
   const slot = await db.ambassadorSlot.findUnique({ where: { code }, select: { id: true } });
   if (!slot) throw new RosterError("Slot not found");
-  const [, detached] = await db.$transaction([
-    db.ambassadorSlot.update({ where: { id: slot.id }, data: { name: "", vacant: true } }),
-    db.ambassador.updateMany({ where: { legacySlotId: code }, data: { legacySlotId: null } }),
-  ]);
-  return { detachedAmbassador: detached.count > 0 };
+  return db.$transaction((tx) => releaseSlotFor(tx, code));
 }

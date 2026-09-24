@@ -17,6 +17,36 @@ export const TIER_LADDER: {
   { tier: "PLATINUM", label: "Platinum", minConversions: 31, rate: TIER_COMMISSION_RATE.PLATINUM },
 ];
 
+/**
+ * How long a newly approved ambassador holds their slot before they have to
+ * show something for it. One confirmed order inside the window and the slot is
+ * theirs for good; none, and the sweep releases it for the next applicant.
+ */
+export const PROVISIONAL_DAYS = 30;
+
+/** Days before the deadline that the one reminder email goes out. */
+export const PROVISIONAL_WARN_DAYS = 9;
+
+export function provisionalDeadline(from: Date = new Date()): Date {
+  const d = new Date(from);
+  d.setDate(d.getDate() + PROVISIONAL_DAYS);
+  return d;
+}
+
+/**
+ * Provisional is a date, not a status: several queries match
+ * `status: "Active"` exactly, so a status value would quietly drop these
+ * ambassadors out of the weekly email and the like.
+ */
+export function isProvisional(a: { provisionalUntil: Date | null; activatedAt: Date | null }): boolean {
+  return a.provisionalUntil !== null && a.activatedAt === null;
+}
+
+/** Whole days left on the window — 0 once it has run out. */
+export function provisionalDaysLeft(until: Date, now: Date = new Date()): number {
+  return Math.max(0, Math.ceil((until.getTime() - now.getTime()) / 86_400_000));
+}
+
 export const TIER_BADGE: Record<AmbassadorTier, string> = {
   BRONZE: "border-transparent bg-amber-700/15 text-amber-700 dark:text-amber-500",
   SILVER: "border-transparent bg-slate-400/15 text-slate-500 dark:text-slate-300",

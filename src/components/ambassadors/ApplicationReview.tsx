@@ -18,7 +18,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { ACADEMIC_LEVELS } from "@/lib/constants";
+import { ACADEMIC_LEVELS, REACH_ROLES } from "@/lib/constants";
+import { flagLabel, reachSizeLabel } from "@/lib/ambassador-score";
 import { formatDate } from "@/lib/utils";
 import { editApplicationSchema, type EditApplicationInput } from "@/lib/validations/application";
 import type { ApplicationRow } from "@/lib/services/applications";
@@ -84,6 +85,15 @@ export function ApplicationReview({
                       EduCraftA-{row.slotCode}
                     </span>
                   ) : null}
+                  <ScoreChip row={row} />
+                  {row.score?.flags.map((flag) => (
+                    <span
+                      key={flag}
+                      className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger"
+                    >
+                      {flagLabel(flag, row)}
+                    </span>
+                  ))}
                 </p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {row.phone}
@@ -99,11 +109,17 @@ export function ApplicationReview({
                     {row.bankName} · {row.accountNumber} · {row.accountName}
                   </p>
                 ) : null}
-                {row.motivation ? (
+                <ReachLine row={row} />
+                {row.pitchMessage ? (
+                  <p className="mt-2 rounded-lg bg-elevated p-2 text-sm text-foreground">
+                    &ldquo;{row.pitchMessage}&rdquo;
+                  </p>
+                ) : row.motivation ? (
                   <p className="mt-2 rounded-lg bg-elevated p-2 text-sm text-foreground">
                     &ldquo;{row.motivation}&rdquo;
                   </p>
                 ) : null}
+                <AnswersDisclosure row={row} />
               </div>
 
               <div className="flex shrink-0 flex-wrap gap-2">
@@ -296,13 +312,11 @@ function EditApplicationForm({
       otherUniversity: row.otherUniversity ?? "",
       department: row.department ?? "",
       level: row.level ?? "",
-      motivation: row.motivation ?? "",
       bankName: row.bankName ?? "",
       accountNumber: row.accountNumber ?? "",
       accountName: row.accountName ?? "",
     },
   });
-  const motivation = watch("motivation") ?? "";
 
   const onSubmit = async (data: EditApplicationInput) => {
     setSubmitError(null);
@@ -428,15 +442,6 @@ function EditApplicationForm({
           </Field>
         </div>
 
-        <Field
-          label="Why they want to join"
-          htmlFor="ap-why"
-          error={errors.motivation?.message}
-          hint={`${motivation.length}/200 characters`}
-        >
-          <Textarea id="ap-why" rows={3} maxLength={200} {...register("motivation")} />
-        </Field>
-
         {submitError ? (
           <p role="alert" className="flex items-start gap-2 text-sm text-danger">
             <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -455,5 +460,66 @@ function EditApplicationForm({
         </div>
       </form>
     </>
+  );
+}
+
+const SCORE_CHIP: Record<"strong" | "middle" | "weak", string> = {
+  strong: "bg-primary/10 text-primary",
+  middle: "bg-gold/15 text-gold",
+  weak: "bg-zone text-muted-foreground",
+};
+
+/**
+ * Triage only. The score says "read this one first", never "approve this one" —
+ * the answers below it are what the decision is actually made on.
+ */
+function ScoreChip({ row }: { row: ApplicationRow }) {
+  if (!row.score) return null;
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 font-mono text-xs font-medium ${SCORE_CHIP[row.score.band]}`}
+      title="Reach, roles, commitment and effort — a sort order, not a verdict"
+    >
+      {row.score.total}/{row.score.max}
+    </span>
+  );
+}
+
+function ReachLine({ row }: { row: ApplicationRow }) {
+  const size = reachSizeLabel(row.reachSize);
+  const roles = row.reachRoles
+    .filter((r) => r !== "NONE")
+    .map((r) => REACH_ROLES.find((o) => o.value === r)?.label ?? r);
+  if (!size && roles.length === 0 && !row.reachGroups) return null;
+  const parts = [size ? `${size} reachable` : null, roles.length ? roles.join(", ") : null, row.reachGroups].filter(
+    Boolean
+  );
+  return <p className="mt-1 text-xs text-muted-foreground">{parts.join(" · ")}</p>;
+}
+
+/** Collapsed: only worth opening for the ones being seriously considered. */
+function AnswersDisclosure({ row }: { row: ApplicationRow }) {
+  const answers = [
+    { label: "If they say it's a scam", value: row.objectionReply },
+    { label: "If a referred student is upset", value: row.clientUpsetReply },
+    { label: "Week one", value: row.firstWeekPlan },
+    {
+      label: "Expects in 30 days",
+      value: row.expectedReferrals == null ? null : `${row.expectedReferrals} students`,
+    },
+  ].filter((a) => a.value);
+  if (answers.length === 0) return null;
+  return (
+    <details className="mt-2 text-sm">
+      <summary className="cursor-pointer text-xs font-medium text-primary">Show answers</summary>
+      <dl className="mt-2 space-y-2">
+        {answers.map((a) => (
+          <div key={a.label}>
+            <dt className="meta-label">{a.label}</dt>
+            <dd className="text-sm text-foreground">{a.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
