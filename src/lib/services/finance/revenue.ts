@@ -112,6 +112,7 @@ const ROW_INCLUDE = {
       balanceStatus: true,
       client: { select: { fullName: true } },
       service: { select: { serviceName: true } },
+      bucketAllocations: { select: { id: true }, take: 1 },
     },
   },
   confirmedBy: { select: { displayName: true, email: true } },
@@ -147,7 +148,8 @@ function toRow(p: RowSource): RevenueRow {
     ambassadorName: p.ambassador?.fullName ?? null,
     notes: p.notes,
     legStatus: type === "refund" ? null : type === "balance" ? (p.project?.balanceStatus ?? null) : (p.project?.downpaymentStatus ?? null),
-    allocated: p.bucketAllocation != null,
+    // Allocation is per project (a backfilled project has one log for all its rows).
+    allocated: p.bucketAllocation != null || (p.project?.bucketAllocations.length ?? 0) > 0,
   };
 }
 

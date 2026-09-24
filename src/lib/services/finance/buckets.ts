@@ -38,15 +38,16 @@ export function monthKeyOf(date: Date): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** Money actually in on a project: confirmed client inflows less confirmed refunds. */
-export async function projectNetInflow(tx: Db, projectId: string): Promise<number> {
+/** Money actually in on a project: confirmed client inflows less confirmed refunds (up to `asOf`, for the backfill). */
+export async function projectNetInflow(tx: Db, projectId: string, asOf?: Date): Promise<number> {
+  const dated = asOf ? { date: { lte: asOf } } : {};
   const [inflow, refunds] = await Promise.all([
     tx.payment.aggregate({
-      where: { projectId, direction: "INFLOW", status: "Confirmed", type: { in: [...CLIENT_INFLOW_TYPES] } },
+      where: { projectId, direction: "INFLOW", status: "Confirmed", type: { in: [...CLIENT_INFLOW_TYPES] }, ...dated },
       _sum: { amount: true },
     }),
     tx.payment.aggregate({
-      where: { projectId, direction: "OUTFLOW", status: "Confirmed", type: "REFUND" },
+      where: { projectId, direction: "OUTFLOW", status: "Confirmed", type: "REFUND", ...dated },
       _sum: { amount: true },
     }),
   ]);
@@ -61,6 +62,8 @@ export interface SyncOptions {
   month?: string;
   note?: string;
   recordedById?: string | null;
+  /** Backfill only: allocate as the buckets stood at this moment (payments dated after it are ignored). */
+  asOf?: Date;
 }
 
 export interface SyncResult {
@@ -96,7 +99,7 @@ export async function syncProjectBuckets(tx: Tx, projectDbId: string, opts: Sync
     if (already) return { delta: 0, amounts: null };
   }
 
-  const netInflow = await projectNetInflow(tx, projectDbId);
+  const netInflow = await projectNetInflow(tx, projectDbId, opts.asOf);
   const expected = expectedAllocation(project, netInflow);
   const logged = await tx.bucketAllocationLog.aggregate({ where: { projectId: projectDbId }, _sum: { retainedAmount: true } });
   const delta = expected - Math.round(logged._sum.retainedAmount ?? 0);

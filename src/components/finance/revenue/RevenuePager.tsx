@@ -5,8 +5,21 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { LuChevronLeft, LuChevronRight } from "react-icons/lu";
 import { cn } from "@/lib/utils";
 
-/** Previous / next over the filtered rows, keeping every other search param. */
-export function RevenuePager({ page, pageCount, total, pageSize }: { page: number; pageCount: number; total: number; pageSize: number }) {
+/** Previous / next over filtered rows, keeping every other search param. Shared by the finance tables. */
+export function RevenuePager({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  noun = "payment",
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  /** What a row is, singular: "payment", "transaction". */
+  noun?: string;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const hrefFor = (p: number) => {
@@ -27,7 +40,7 @@ export function RevenuePager({ page, pageCount, total, pageSize }: { page: numbe
   return (
     <div className="flex items-center justify-between gap-3">
       <p className="text-[13px] text-muted-foreground">
-        {total === 0 ? "No payments" : `${from}–${to} of ${total} payment${total === 1 ? "" : "s"}`}
+        {total === 0 ? `No ${noun}s` : `${from}–${to} of ${total} ${noun}${total === 1 ? "" : "s"}`}
       </p>
       {pageCount > 1 ? (
         <div className="flex items-center gap-1">
