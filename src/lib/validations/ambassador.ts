@@ -6,6 +6,13 @@ export const ambassadorBankSchema = z.object({
   accountName: z.string().trim().max(120).optional().or(z.literal("")),
 });
 
+/**
+ * Referral list filter. "paying" = they paid a downpayment on an order,
+ * "waiting" = they signed up with the code but have not paid yet. The old
+ * converted/pending values fall through to "all" via `.catch`.
+ */
+export type ReferralFilter = "all" | "paying" | "waiting";
+
 export const referralFilterSchema = z.object({
-  filter: z.enum(["all", "converted", "pending"]).optional().catch(undefined),
+  filter: z.enum(["all", "paying", "waiting"]).optional().catch(undefined),
 });

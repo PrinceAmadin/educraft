@@ -50,9 +50,9 @@ export function OverviewPanel({ data, admin = false }: { data: OverviewData; adm
           label="Orders logged"
           value={n(data.orders)}
           detail={
-            data.conversion === null
+            data.orderRate === null
               ? admin ? "Jobs credited" : "Jobs credited to you"
-              : `${data.conversion}% of ${admin ? "their" : "your"} unique visitors`
+              : `${data.orderRate}% of the people who opened ${admin ? "their" : "your"} link ordered`
           }
           icon={LuShoppingBag}
           tone="gold"

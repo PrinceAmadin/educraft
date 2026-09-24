@@ -22,6 +22,12 @@ export interface StatsCardProps {
   icon: AppIcon;
   tone?: StatTone;
   href?: string;
+  /**
+   * Let a long label wrap onto a second line instead of truncating. For plain
+   * wording that will not shorten — "Paying clients referred" — in a two-up
+   * phone grid.
+   */
+  wrapLabel?: boolean;
 }
 
 const DETAIL_STYLES = {
@@ -44,12 +50,21 @@ export function StatsCard({
   icon: Icon,
   tone = "primary",
   href,
+  wrapLabel = false,
 }: StatsCardProps) {
   const body = (
     <>
-      <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors group-hover/stat:text-foreground">
-        <Icon className={cn("size-3.5 shrink-0", TONE_TEXT[tone])} aria-hidden />
-        <span className="truncate">{label}</span>
+      <p
+        className={cn(
+          "flex gap-1.5 text-[13px] font-medium text-muted-foreground transition-colors group-hover/stat:text-foreground",
+          wrapLabel ? "items-start" : "items-center"
+        )}
+      >
+        <Icon
+          className={cn("size-3.5 shrink-0", wrapLabel && "mt-[3px]", TONE_TEXT[tone])}
+          aria-hidden
+        />
+        <span className={wrapLabel ? "leading-snug" : "truncate"}>{label}</span>
       </p>
       <p className="mt-2 font-mono text-[1.625rem] font-medium leading-none tabular-nums text-foreground sm:text-[2rem]">
         {value}

@@ -12,8 +12,8 @@ import { watDayStart } from "@/lib/click-tracking/peak-hours";
  * included.
  *
  * This board is visible to EVERY ambassador, so it carries clicks only. Orders
- * and conversion are business data and are deliberately NOT part of this
- * service; they belong in the admin/management views.
+ * and paying clients are business data and are deliberately NOT part of this
+ * service; they belong in each ambassador's own pages and the admin views.
  *
  * The whole ranking is cached for 5 minutes per period. Nothing in the cached
  * value is specific to the viewer, so it is safe to share; the page adds the

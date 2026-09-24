@@ -13,9 +13,9 @@ export const metadata: Metadata = { title: "My referrals" };
 export const dynamic = "force-dynamic";
 
 const FILTERS = [
-  { key: "all", label: "All" },
-  { key: "converted", label: "Converted" },
-  { key: "pending", label: "Pending" },
+  { key: "all", label: "Everyone" },
+  { key: "paying", label: "Paid" },
+  { key: "waiting", label: "Not paid yet" },
 ] as const;
 
 export default async function AmbassadorReferralsPage({
@@ -38,7 +38,8 @@ export default async function AmbassadorReferralsPage({
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">My referrals</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Everyone who signed up with your code. A referral converts once they place a project.
+          Everyone who signed up with your code. Someone counts as a paying client — and earns you
+          commission — once they pay the downpayment on their first order.
         </p>
       </div>
 
@@ -62,7 +63,13 @@ export default async function AmbassadorReferralsPage({
       {rows.length === 0 ? (
         <EmptyState
           icon={LuUsers}
-          title={active === "all" ? "No referrals yet" : `No ${active} referrals`}
+          title={
+            active === "all"
+              ? "Nobody has used your link yet"
+              : active === "paying"
+                ? "No paying clients yet"
+                : "Nobody is waiting to pay"
+          }
           description="Share your link to start bringing clients in."
         />
       ) : (
@@ -75,19 +82,19 @@ export default async function AmbassadorReferralsPage({
                   <span
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-xs font-medium",
-                      r.converted
+                      r.paying
                         ? "border-transparent bg-success/15 text-success"
                         : "border-border bg-elevated text-muted-foreground"
                     )}
                   >
-                    {r.converted ? "Converted" : "Pending"}
+                    {r.paying ? "Paid" : "Not paid yet"}
                   </span>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   Joined {formatDate(r.joinedAt)}
                   {r.latestService ? ` · ${r.latestService}` : ""}
                 </p>
-                {r.converted ? (
+                {r.paying ? (
                   <p className="mt-1 font-mono text-xs text-foreground">
                     {formatNaira(r.commissionEarned)} commission
                   </p>
@@ -104,7 +111,7 @@ export default async function AmbassadorReferralsPage({
                   <th className="px-3 py-2.5">Client</th>
                   <th className="px-3 py-2.5">Service</th>
                   <th className="px-3 py-2.5">Status</th>
-                  <th className="px-3 py-2.5">Converted</th>
+                  <th className="px-3 py-2.5">Paid downpayment</th>
                   <th className="px-3 py-2.5 text-right">Commission</th>
                 </tr>
               </thead>
@@ -122,14 +129,14 @@ export default async function AmbassadorReferralsPage({
                       )}
                     </td>
                     <td className="px-3 py-3">
-                      {r.converted ? (
+                      {r.paying ? (
                         <span className="text-success">Yes</span>
                       ) : (
-                        <span className="text-muted-foreground">No</span>
+                        <span className="text-muted-foreground">Not yet</span>
                       )}
                     </td>
                     <td className="px-3 py-3 text-right font-mono tabular-nums">
-                      {r.converted ? formatNaira(r.commissionEarned) : "—"}
+                      {r.paying ? formatNaira(r.commissionEarned) : "—"}
                     </td>
                   </tr>
                 ))}

@@ -73,14 +73,19 @@ export interface OwnPerformance {
   orders: number;
   /** Unique visitors tracked on their link (this counting period). */
   uniqueVisitors: number;
-  /** orders / uniqueVisitors as a percentage, 1 decimal. null until they have visitors. */
-  conversion: number | null;
+  /**
+   * Share of those visitors who ended up ordering, as a percentage with one
+   * decimal. null until they have visitors. Called "how many ordered" on
+   * screen — never "conversion".
+   */
+  orderRate: number | null;
 }
 
 /**
- * Orders and conversion are business data: an ambassador sees their OWN only
- * (My Link and Earnings). They are deliberately absent from the leaderboard,
- * which every ambassador can read. Admin views can pass any ambassadorId.
+ * Orders and the order rate are business data: an ambassador sees their OWN
+ * only (My Link and Earnings). They are deliberately absent from the
+ * leaderboard, which every ambassador can read. Admin views can pass any
+ * ambassadorId.
  */
 export async function getOwnPerformance(ambassadorId: string): Promise<OwnPerformance> {
   const [orders, uniqueVisitors] = await Promise.all([
@@ -90,7 +95,7 @@ export async function getOwnPerformance(ambassadorId: string): Promise<OwnPerfor
   return {
     orders,
     uniqueVisitors,
-    conversion: uniqueVisitors > 0 ? Math.round((orders / uniqueVisitors) * 1000) / 10 : null,
+    orderRate: uniqueVisitors > 0 ? Math.round((orders / uniqueVisitors) * 1000) / 10 : null,
   };
 }
 
@@ -140,7 +145,7 @@ export interface OverviewData {
   /** HQ projects allocated to this ambassador (cancelled/refunded excluded). */
   orders: number;
   /** orders / unique visitors, %. null until they have visitors. */
-  conversion: number | null;
+  orderRate: number | null;
   trend: TrendPoint[];
   /** First tracked click, for "tracking since". */
   trackingSince: Date | null;
@@ -193,7 +198,7 @@ export async function getOverview(ambassadorId: string, slotCode: string): Promi
     legacyClicks,
     totalClicks: trackedClicks + (legacyClicks ?? 0),
     orders: perf.orders,
-    conversion: perf.conversion,
+    orderRate: perf.orderRate,
     trend,
     trackingSince: first?.timestamp ?? null,
   };

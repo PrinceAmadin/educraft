@@ -408,9 +408,9 @@ export async function emailPendingCommission(projectDbId: string): Promise<void>
 /**
  * Their first confirmed order: the slot is theirs for good.
  *
- * Deliberately keyed on a confirmed downpayment rather than the looser
- * "referred client with any project" used for tier conversions — this is what
- * they agreed to when they applied, and it is what the money says.
+ * Keyed on a confirmed downpayment, the same event that makes a referred
+ * client a paying client for the tier ladder — this is what they agreed to
+ * when they applied, and it is what the money says.
  */
 export async function graduateProvisional(ambassadorId: string): Promise<void> {
   const claimed = await db.ambassador.updateMany({
@@ -516,8 +516,9 @@ export async function allocateAmbassador(input: {
       },
     });
 
-    // The ambassador brought this client in — record it so the job counts as
-    // a conversion toward their tier. An existing referrer is left alone.
+    // The ambassador brought this client in — record it so the client counts
+    // toward their tier once the downpayment is verified. An existing referrer
+    // is left alone.
     if (!project.client.referredById) {
       await tx.client.update({
         where: { id: project.client.id },

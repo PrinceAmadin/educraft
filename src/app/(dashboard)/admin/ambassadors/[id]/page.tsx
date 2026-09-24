@@ -230,8 +230,8 @@ export default async function AmbassadorDetailPage({
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {progress.next
-            ? `${progress.conversions}/${progress.conversions + progress.toNext} conversions to ${progress.nextLabel}`
-            : `Top tier — ${progress.conversions} conversions`}
+            ? `${progress.payingClients}/${progress.payingClients + progress.toNext} paying clients to ${progress.nextLabel}`
+            : `Top tier — ${progress.payingClients} paying clients`}
         </p>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-border" aria-hidden>
           <div
@@ -247,10 +247,10 @@ export default async function AmbassadorDetailPage({
           <h2 className="text-sm font-semibold text-foreground">Performance</h2>
           <dl className="mt-2 space-y-2 text-sm">
             <Line label="Total referrals" value={String(metrics.referrals)} />
-            <Line label="Conversions" value={String(metrics.conversions)} />
+            <Line label="Paying clients" value={String(metrics.payingClients)} />
             <Line
-              label="Conversion rate"
-              value={metrics.conversionRate != null ? `${metrics.conversionRate}%` : "—"}
+              label="Referrals who paid"
+              value={metrics.payingClientRate != null ? `${metrics.payingClientRate}%` : "—"}
             />
             <Line label="Revenue generated" value={formatNaira(metrics.revenueGenerated)} strong />
           </dl>

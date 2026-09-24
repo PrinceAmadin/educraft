@@ -1,8 +1,9 @@
 import { type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { notifyAdmins } from "@/lib/services/notifications";
-import { tierProgress, type TierProgress } from "@/lib/ambassador";
+import { PAID_ORDER, tierProgress, type TierProgress } from "@/lib/ambassador";
 import { getCommissionRates } from "@/lib/services/settings";
+import type { ReferralFilter } from "@/lib/validations/ambassador";
 
 export async function getAmbassadorByUserId(userId: string) {
   return db.ambassador.findUnique({ where: { userId } });
@@ -12,8 +13,14 @@ export async function getAmbassadorByUserId(userId: string) {
 
 interface AmbassadorMetrics {
   referrals: number;
-  conversions: number;
-  conversionRate: number | null;
+  /**
+   * Referred clients who have paid a downpayment on at least one order — the
+   * count the tier ladder runs on, and what the portal calls "paying clients
+   * referred". A referred client who only placed an unpaid order is not one.
+   */
+  payingClients: number;
+  /** payingClients / referrals as a percentage. null until they have referrals. */
+  payingClientRate: number | null;
   revenueGenerated: number;
   commissionEarned: number;
   commissionPaid: number;
@@ -21,11 +28,11 @@ interface AmbassadorMetrics {
 }
 
 function metricsFrom(
-  referredClientProjectCounts: number[],
+  referredClientPaidProjectCounts: number[],
   projects: { price: number; status: string; ambassadorCommission: number | null; ambassadorCommPaid: boolean }[]
 ): AmbassadorMetrics {
-  const referrals = referredClientProjectCounts.length;
-  const conversions = referredClientProjectCounts.filter((n) => n > 0).length;
+  const referrals = referredClientPaidProjectCounts.length;
+  const payingClients = referredClientPaidProjectCounts.filter((n) => n > 0).length;
   const revenueGenerated = projects.reduce((s, p) => s + p.price, 0);
   const completed = projects.filter((p) => p.status === "COMPLETED");
   const commissionEarned = completed.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0);
@@ -35,8 +42,8 @@ function metricsFrom(
 
   return {
     referrals,
-    conversions,
-    conversionRate: referrals > 0 ? Math.round((conversions / referrals) * 100) : null,
+    payingClients,
+    payingClientRate: referrals > 0 ? Math.round((payingClients / referrals) * 100) : null,
     revenueGenerated,
     commissionEarned,
     commissionPaid,
@@ -53,6 +60,8 @@ export interface AmbassadorDashboard {
   rate: number;
   metrics: AmbassadorMetrics;
   progress: TierProgress;
+  /** Commission rate of the next tier up, for "…and earn 12%". null at the top. */
+  nextRate: number | null;
 }
 
 export async function getAmbassadorDashboard(ambassadorId: string): Promise<AmbassadorDashboard> {
@@ -62,7 +71,7 @@ export async function getAmbassadorDashboard(ambassadorId: string): Promise<Amba
       fullName: true,
       referralCode: true,
       tier: true,
-      referredClients: { select: { _count: { select: { projects: true } } } },
+      referredClients: { select: { _count: { select: { projects: { where: PAID_ORDER } } } } },
       projects: {
         select: { price: true, status: true, ambassadorCommission: true, ambassadorCommPaid: true },
       },
@@ -73,14 +82,17 @@ export async function getAmbassadorDashboard(ambassadorId: string): Promise<Amba
     ambassador.referredClients.map((c) => c._count.projects),
     ambassador.projects
   );
+  const progress = tierProgress(ambassador.tier, metrics.payingClients);
+  const rates = await getCommissionRates();
 
   return {
     fullName: ambassador.fullName,
     referralCode: ambassador.referralCode,
     tier: ambassador.tier,
-    rate: (await getCommissionRates())[ambassador.tier],
+    rate: rates[ambassador.tier],
     metrics,
-    progress: tierProgress(ambassador.tier, metrics.conversions),
+    progress,
+    nextRate: progress.next ? rates[progress.next] : null,
   };
 }
 
@@ -92,7 +104,8 @@ export interface ReferralRow {
   clientName: string;
   joinedAt: string;
   projectCount: number;
-  converted: boolean;
+  /** They paid the downpayment on at least one order. */
+  paying: boolean;
   latestService: string | null;
   latestStatus: string | null;
   commissionEarned: number;
@@ -100,7 +113,7 @@ export interface ReferralRow {
 
 export async function listReferrals(
   ambassadorId: string,
-  filter: "all" | "converted" | "pending" = "all"
+  filter: ReferralFilter = "all"
 ): Promise<ReferralRow[]> {
   const clients = await db.client.findMany({
     where: { referredById: ambassadorId },
@@ -114,6 +127,7 @@ export async function listReferrals(
         orderBy: { createdAt: "desc" },
         select: {
           status: true,
+          downpaymentStatus: true,
           ambassadorCommission: true,
           service: { select: { serviceName: true } },
         },
@@ -122,22 +136,22 @@ export async function listReferrals(
   });
 
   const rows: ReferralRow[] = clients.map((c) => {
-    const converted = c.projects.length > 0;
+    const paying = c.projects.some((p) => p.downpaymentStatus === "Verified");
     return {
       id: c.id,
       clientId: c.clientId,
       clientName: c.fullName,
       joinedAt: c.createdAt.toISOString(),
       projectCount: c.projects.length,
-      converted,
+      paying,
       latestService: c.projects[0]?.service.serviceName ?? null,
       latestStatus: c.projects[0]?.status ?? null,
       commissionEarned: c.projects.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0),
     };
   });
 
-  if (filter === "converted") return rows.filter((r) => r.converted);
-  if (filter === "pending") return rows.filter((r) => !r.converted);
+  if (filter === "paying") return rows.filter((r) => r.paying);
+  if (filter === "waiting") return rows.filter((r) => !r.paying);
   return rows;
 }
 
@@ -245,15 +259,20 @@ export async function getAmbassadorProfile(ambassadorId: string) {
       accountName: true,
       weeklyEmailOptOut: true,
       university: { select: { name: true, abbreviation: true } },
-      referredClients: { select: { _count: { select: { projects: true } } } },
+      referredClients: { select: { _count: { select: { projects: { where: PAID_ORDER } } } } },
     },
   });
 
-  const conversions = ambassador.referredClients.filter((c) => c._count.projects > 0).length;
+  const payingClients = ambassador.referredClients.filter((c) => c._count.projects > 0).length;
+  const progress = tierProgress(ambassador.tier, payingClients);
+  const rates = await getCommissionRates();
   return {
     profile: ambassador,
-    progress: tierProgress(ambassador.tier, conversions),
-    rate: (await getCommissionRates())[ambassador.tier],
+    progress,
+    rate: rates[ambassador.tier],
+    nextRate: progress.next ? rates[progress.next] : null,
+    /** Every tier's live rate, so the ladder on screen matches Settings. */
+    rates,
   };
 }
 

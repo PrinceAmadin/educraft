@@ -28,7 +28,8 @@ export default async function AmbassadorCommissionsPage() {
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Commissions</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Earned when a completed project settles. Paid out from the payout queue.
+          You earn commission on every project from a client you referred. It is yours once the
+          project is completed, and we pay it out from there.
         </p>
       </div>
 
@@ -40,9 +41,17 @@ export default async function AmbassadorCommissionsPage() {
 
       {/* Private to you: never shown on the leaderboard. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Stat label="Orders" value={perf.orders.toLocaleString("en-NG")} />
-        <Stat label="Unique visitors" value={perf.uniqueVisitors.toLocaleString("en-NG")} />
-        <Stat label="Conversion" value={perf.conversion === null ? "-" : `${perf.conversion}%`} />
+        <Stat label="Orders" value={perf.orders.toLocaleString("en-NG")} hint="Jobs credited to you" />
+        <Stat
+          label="People who opened your link"
+          value={perf.uniqueVisitors.toLocaleString("en-NG")}
+          hint="Counted once each"
+        />
+        <Stat
+          label="Of those, how many ordered"
+          value={perf.orderRate === null ? "-" : `${perf.orderRate}%`}
+          hint="Orders ÷ people who opened your link"
+        />
       </div>
 
       {rows.length === 0 ? (
@@ -128,7 +137,18 @@ export default async function AmbassadorCommissionsPage() {
   );
 }
 
-function Stat({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function Stat({
+  label,
+  value,
+  strong,
+  hint,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  /** Plain-language sub-label: what this number actually counts. */
+  hint?: string;
+}) {
   return (
     <div className="rounded-xl bg-zone p-3 sm:p-4">
       <p className="meta-label">{label}</p>
@@ -139,6 +159,7 @@ function Stat({ label, value, strong }: { label: string; value: string; strong?:
       >
         {value}
       </p>
+      {hint ? <p className="mt-1 text-xs leading-snug text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

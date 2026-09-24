@@ -430,8 +430,8 @@ async function creditProjectPayment(
 
   if (leg === "downpayment" && project.ambassador?.userId) {
     await notifyUsers([project.ambassador.userId], {
-      title: "Referral converted",
-      message: `A client you referred paid their downpayment on ${project.projectId}.`,
+      title: "A client you referred has paid",
+      message: `They paid their downpayment on ${project.projectId}. That is one more paying client toward your next level.`,
       type: "success",
       link: "/ambassador/commissions",
     });
@@ -621,8 +621,8 @@ async function processPendingIntake(
 
   if (project.ambassador?.userId) {
     await notifyUsers([project.ambassador.userId], {
-      title: "Referral converted",
-      message: `A client you referred paid their downpayment on ${project.projectId}.`,
+      title: "A client you referred has paid",
+      message: `They paid their downpayment on ${project.projectId}. That is one more paying client toward your next level.`,
       type: "success",
       link: "/ambassador/commissions",
     });

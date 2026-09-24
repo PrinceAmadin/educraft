@@ -13,7 +13,7 @@ const COLS = "md:grid-cols-[3rem_minmax(0,1fr)_10rem_6rem]";
 export const TOP_COUNT = 10;
 
 /**
- * Ranked list below the podium. Clicks only: orders and conversion are private
+ * Ranked list below the podium. Clicks only: orders and the order rate are private
  * to each ambassador and never appear here.
  *
  * `entries` are the people after the podium. The first `TOP_COUNT - podiumSize`

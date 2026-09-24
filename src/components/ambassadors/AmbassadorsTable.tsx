@@ -35,8 +35,8 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>
-                  <span className="font-mono text-foreground">{row.conversions}</span>/{row.referrals}{" "}
-                  converted
+                  <span className="font-mono text-foreground">{row.payingClients}</span>/{row.referrals}{" "}
+                  paying
                 </span>
                 <span className="font-mono">{row.rate}%</span>
                 <span className="font-mono">{formatNaira(row.revenueGenerated)} generated</span>
@@ -57,7 +57,7 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
               <TableHead>Ambassador</TableHead>
               <TableHead>University</TableHead>
               <TableHead className="text-right">Referrals</TableHead>
-              <TableHead className="text-right">Conversions</TableHead>
+              <TableHead className="text-right">Paying clients</TableHead>
               <TableHead className="text-right">Rate</TableHead>
               <TableHead className="text-right">Revenue</TableHead>
               <TableHead className="text-right">Balance</TableHead>
@@ -86,7 +86,7 @@ export function AmbassadorsTable({ rows }: { rows: AmbassadorListRow[] }) {
                   {row.referrals}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm tabular-nums">
-                  {row.conversions}
+                  {row.payingClients}
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm tabular-nums">
                   {row.rate}%

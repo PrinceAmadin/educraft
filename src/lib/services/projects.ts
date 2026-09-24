@@ -767,11 +767,11 @@ export async function verifyPayment(
     },
   });
 
-  // A verified downpayment on a referred project is the "conversion" moment.
+  // A verified downpayment is what turns a referred client into a paying one.
   if (leg === "downpayment" && project.ambassador?.userId) {
     await notifyUsers([project.ambassador.userId], {
-      title: "Referral converted",
-      message: `A client you referred paid their downpayment on ${project.projectId}.`,
+      title: "A client you referred has paid",
+      message: `They paid their downpayment on ${project.projectId}. That is one more paying client toward your next level.`,
       type: "success",
       link: "/ambassador/commissions",
     });

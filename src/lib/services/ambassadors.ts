@@ -1,7 +1,13 @@
 import { Prisma, type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
-import { generateReferralCode, isProvisional, provisionalDeadline, tierProgress } from "@/lib/ambassador";
+import {
+  generateReferralCode,
+  isProvisional,
+  PAID_ORDER,
+  provisionalDeadline,
+  tierProgress,
+} from "@/lib/ambassador";
 import { getCommissionRates } from "@/lib/services/settings";
 import {
   MAX_SUB_AMBASSADORS,
@@ -22,8 +28,10 @@ interface AmbassadorProjectFacts {
 
 interface AmbassadorMetrics {
   referrals: number;
-  conversions: number;
-  conversionRate: number | null;
+  /** Referred clients with a verified downpayment on at least one order. */
+  payingClients: number;
+  /** payingClients / referrals as a percentage. null until they have referrals. */
+  payingClientRate: number | null;
   revenueGenerated: number;
   commissionEarned: number;
   commissionPaid: number;
@@ -31,11 +39,11 @@ interface AmbassadorMetrics {
 }
 
 function computeMetrics(
-  referredClientProjectCounts: number[],
+  referredClientPaidProjectCounts: number[],
   projects: AmbassadorProjectFacts[]
 ): AmbassadorMetrics {
-  const referrals = referredClientProjectCounts.length;
-  const conversions = referredClientProjectCounts.filter((n) => n > 0).length;
+  const referrals = referredClientPaidProjectCounts.length;
+  const payingClients = referredClientPaidProjectCounts.filter((n) => n > 0).length;
 
   const revenueGenerated = projects.reduce((s, p) => s + p.price, 0);
   const completed = projects.filter((p) => p.status === "COMPLETED");
@@ -46,8 +54,8 @@ function computeMetrics(
 
   return {
     referrals,
-    conversions,
-    conversionRate: referrals > 0 ? Math.round((conversions / referrals) * 100) : null,
+    payingClients,
+    payingClientRate: referrals > 0 ? Math.round((payingClients / referrals) * 100) : null,
     revenueGenerated,
     commissionEarned,
     commissionPaid,
@@ -68,7 +76,7 @@ export interface AmbassadorListRow {
   provisional: boolean;
   rate: number;
   referrals: number;
-  conversions: number;
+  payingClients: number;
   revenueGenerated: number;
   commissionBalance: number;
 }
@@ -89,7 +97,7 @@ const listSelect = {
   provisionalUntil: true,
   activatedAt: true,
   university: { select: { abbreviation: true } },
-  referredClients: { select: { _count: { select: { projects: true } } } },
+  referredClients: { select: { _count: { select: { projects: { where: PAID_ORDER } } } } },
   projects: {
     select: { price: true, status: true, ambassadorCommission: true, ambassadorCommPaid: true },
   },
@@ -147,7 +155,7 @@ export async function listAmbassadors(params: {
       provisional: isProvisional(a),
       rate: rates[a.tier],
       referrals: m.referrals,
-      conversions: m.conversions,
+      payingClients: m.payingClients,
       revenueGenerated: m.revenueGenerated,
       commissionBalance: m.commissionBalance,
     };
@@ -196,6 +204,8 @@ const detailSelect = {
       fullName: true,
       createdAt: true,
       _count: { select: { projects: true } },
+      // One row is enough to know they have paid for something.
+      projects: { where: PAID_ORDER, select: { id: true }, take: 1 },
     },
   },
   projects: {
@@ -266,7 +276,7 @@ export async function getAmbassadorDetail(id: string) {
   if (!ambassador) return null;
 
   const metrics = computeMetrics(
-    ambassador.referredClients.map((c) => c._count.projects),
+    ambassador.referredClients.map((c) => c.projects.length),
     ambassador.projects
   );
 
@@ -286,7 +296,7 @@ export async function getAmbassadorDetail(id: string) {
   return {
     ambassador,
     metrics,
-    progress: tierProgress(ambassador.tier, metrics.conversions),
+    progress: tierProgress(ambassador.tier, metrics.payingClients),
     payouts,
     parentCommission,
   };

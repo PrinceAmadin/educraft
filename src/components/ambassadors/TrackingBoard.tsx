@@ -51,8 +51,8 @@ function clicksLabel(row: TrackingRow): string {
   return oldCountMissing(row) ? "—" : String(row.clicks);
 }
 
-/** Conversion is only meaningful once a link has been clicked. Jobs per click, old and new clicks together. */
-function conversion(row: TrackingRow): string {
+/** Only meaningful once a link has been clicked. Jobs per click, old and new clicks together. */
+function jobsPerClick(row: TrackingRow): string {
   if (!row.clicks || oldCountMissing(row)) return "—";
   return `${Math.round((row.jobs / row.clicks) * 1000) / 10}%`;
 }
@@ -97,7 +97,7 @@ export function TrackingBoard({
               Leaderboard
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Ranked by commission logged. Clicks include the old panel counts plus everything tracked since. Conversion is jobs per click.
+              Ranked by commission logged. Clicks include the old panel counts plus everything tracked since. Jobs/click is jobs as a share of clicks.
             </p>
           </div>
           <label className="relative block w-full sm:w-72">
@@ -179,7 +179,7 @@ export function TrackingBoard({
                       <Metric label="Clicks" value={clicksLabel(row)} />
                       <Metric label="7 days" value={String(row.weekClicks)} />
                       <Metric label="Jobs" value={String(row.jobs)} />
-                      <Metric label="Conv." value={conversion(row)} />
+                      <Metric label="Jobs/click" value={jobsPerClick(row)} />
                       <Metric label="Earned" value={formatNaira(row.commissionLogged)} />
                     </dl>
                     <Link
@@ -204,7 +204,7 @@ export function TrackingBoard({
                     <TableHead className="text-right">Clicks</TableHead>
                     <TableHead className="text-right">7 days</TableHead>
                     <TableHead className="text-right">Jobs</TableHead>
-                    <TableHead className="text-right">Conv.</TableHead>
+                    <TableHead className="text-right">Jobs/click</TableHead>
                     <TableHead className="text-right">Commission</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>
@@ -241,7 +241,7 @@ export function TrackingBoard({
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">{row.weekClicks}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">{row.jobs}</TableCell>
-                        <TableCell className="text-right font-mono text-sm tabular-nums">{conversion(row)}</TableCell>
+                        <TableCell className="text-right font-mono text-sm tabular-nums">{jobsPerClick(row)}</TableCell>
                         <TableCell className="text-right font-mono text-sm tabular-nums">
                           {formatNaira(row.commissionLogged)}
                           {row.commissionPaid > 0 ? (

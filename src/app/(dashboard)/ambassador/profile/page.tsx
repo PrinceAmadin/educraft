@@ -8,6 +8,7 @@ import { WeeklyEmailToggle } from "@/components/ambassadors/WeeklyEmailToggle";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { referralLink, TIER_LADDER } from "@/lib/ambassador";
+import { PAYING_CLIENTS_HINT, tierProgressLine } from "@/lib/ambassador-copy";
 import { formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My profile" };
@@ -27,7 +28,7 @@ export default async function AmbassadorProfilePage() {
     return <EmptyState icon={LuInbox} title="No ambassador profile" description="Contact an admin." />;
   }
 
-  const { profile, progress, rate } = await getAmbassadorProfile(ambassador.id);
+  const { profile, progress, rate, nextRate, rates } = await getAmbassadorProfile(ambassador.id);
   const link = referralLink(origin(), profile.referralCode);
 
   return (
@@ -65,13 +66,10 @@ export default async function AmbassadorProfilePage() {
       </section>
 
       <section className="surface p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-foreground">Tier</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Currently <span className="font-medium text-foreground">{progress.currentLabel}</span> —{" "}
-          {rate}% commission.
-          {progress.next
-            ? ` ${progress.toNext} more conversion${progress.toNext === 1 ? "" : "s"} to ${progress.nextLabel}.`
-            : " You're at the top tier."}
+        <h2 className="text-sm font-semibold text-foreground">Your level</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          You are <span className="font-medium text-foreground">{progress.currentLabel}</span>, earning{" "}
+          {rate}% on every project. {tierProgressLine(progress, { current: rate, next: nextRate })}
         </p>
         <ol className="mt-3 flex flex-wrap gap-2">
           {TIER_LADDER.map((t) => (
@@ -83,10 +81,14 @@ export default async function AmbassadorProfilePage() {
                   : "rounded-full bg-elevated px-2.5 py-0.5 text-xs text-muted-foreground"
               }
             >
-              {t.label} · {t.rate}% · {t.minConversions}+
+              {t.label} · {rates[t.tier]}% ·{" "}
+              {t.minPayingClients === 0
+                ? "everyone starts here"
+                : `from ${t.minPayingClients} paying clients`}
             </li>
           ))}
         </ol>
+        <p className="mt-2 text-xs text-muted-foreground">{PAYING_CLIENTS_HINT}.</p>
       </section>
 
       <section className="surface p-4 sm:p-5">
