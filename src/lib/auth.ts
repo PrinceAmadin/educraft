@@ -145,8 +145,11 @@ export function portalsForUser(
   has: { worker: boolean; ambassador: boolean; client: boolean }
 ): Portal[] {
   const primary = primaryPortal(role);
-  if (!primary) return [];
   const found = (["worker", "ambassador", "client"] as const).filter((p) => has[p]);
+  // An executive who is also an ambassador or worker (the Head of Growth kept
+  // his own referral link) keeps that dashboard behind the switcher; staff
+  // never hold client orders, so `client` is ignored for them.
+  if (!primary) return isStaffRole(role) ? found.filter((p) => p !== "client") : [];
   return [primary, ...found.filter((p) => p !== primary)];
 }
 

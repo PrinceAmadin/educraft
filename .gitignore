@@ -32,3 +32,6 @@ Educraft_Ambassador/
 
 # Playwright MCP test artifacts (console logs, page snapshots)
 .playwright-mcp/
+
+# Throwaway QA scripts (live checks with test logins) — never committed
+scripts/tmp/

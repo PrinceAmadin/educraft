@@ -23,6 +23,7 @@ interface DashboardShellProps {
 }
 
 const PORTAL_ROLE_LABELS: Partial<Record<NavRole, string>> = { worker: "Worker", ambassador: "Ambassador", client: "Client" };
+// (An executive's own badge keeps their role label — `roleLabel` — when they are on HQ.)
 
 /**
  * Chooses the sidebar and nav from the URL, so one login can move between its

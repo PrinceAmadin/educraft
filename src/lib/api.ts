@@ -77,8 +77,8 @@ export async function requireWorker(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  // The worker profile is what matters: an ambassador or client login can also own one.
-  if (!isPersonRole(session.user.role)) {
+  // The worker profile is what matters: an ambassador, client or executive login can also own one.
+  if (!isPersonRole(session.user.role) && !isStaffRole(session.user.role)) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const worker = await db.worker.findUnique({
@@ -105,8 +105,8 @@ export async function requireAmbassador(): Promise<
   if (!session?.user) {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  // The ambassador profile is what matters: a worker or client login can also own one.
-  if (!isPersonRole(session.user.role)) {
+  // The ambassador profile is what matters: a worker, client or executive login can also own one.
+  if (!isPersonRole(session.user.role) && !isStaffRole(session.user.role)) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   const ambassador = await db.ambassador.findUnique({

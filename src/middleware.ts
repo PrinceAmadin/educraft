@@ -72,15 +72,19 @@ export default auth((req) => {
   // One person can be a worker, an ambassador and a client on the same login. The
   // edge cannot query the database, so it lets any of those logins into all three
   // roots and each portal's own layout sends them home unless they really hold
-  // that profile. Staff stay in /admin.
+  // that profile. Staff get /admin plus the worker and ambassador portals (an
+  // executive who is also an ambassador keeps that dashboard); never /client.
   const ownRoot = rootFor(user.role);
   const allowedRoots = isPersonRole(user.role)
     ? [ownRoot, ...Object.values(PORTAL_ROOTS)].filter((r): r is string => Boolean(r))
-    : [ownRoot].filter((r): r is string => Boolean(r));
+    : isStaffRole(user.role)
+      ? [ownRoot, PORTAL_ROOTS.worker, PORTAL_ROOTS.ambassador].filter((r): r is string => Boolean(r))
+      : [ownRoot].filter((r): r is string => Boolean(r));
 
-  // Wrong portal for this role → send them to their own
+  // Wrong portal for this role → send them to their own (an executive straight
+  // to their domain's home, not via the founder-only /admin).
   if (!allowedRoots.some((root) => under(root))) {
-    return NextResponse.redirect(new URL(allowedRoots[0] ?? "/", nextUrl));
+    return NextResponse.redirect(new URL(isStaffRole(user.role) ? homeForRole(user.role) : allowedRoots[0] ?? "/", nextUrl));
   }
 
   // Inside /admin, each executive is confined to their own domain: a page they

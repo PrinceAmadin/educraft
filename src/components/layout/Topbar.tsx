@@ -63,6 +63,7 @@ function RefreshButton() {
 }
 
 const PORTAL_LABELS: Record<string, string> = {
+  admin: "HQ",
   worker: "Worker dashboard",
   ambassador: "Ambassador dashboard",
   client: "Client dashboard",
@@ -171,9 +172,9 @@ export function Topbar({ role, userRole, portals = [], name, email, roleLabel }:
             )}
             {otherPortals.map((p) => (
               <DropdownMenuItem key={p} asChild>
-                <Link href={navForRole(p).home}>
+                <Link href={navForRole(p, userRole).home}>
                   <Repeat2 />
-                  Switch to {PORTAL_LABELS[p].toLowerCase()}
+                  Switch to {p === "admin" ? "EduCraft HQ" : PORTAL_LABELS[p].toLowerCase()}
                 </Link>
               </DropdownMenuItem>
             ))}

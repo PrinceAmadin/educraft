@@ -28,7 +28,19 @@ export default async function DashboardLayout({
   // the database which, so a newly linked or approved role appears without a
   // fresh sign-in. The switcher offers each one they hold in good standing.
   let portals: NavRole[] = [role];
-  if (isPersonRole(session.user.role)) {
+  if (isStaffRole(session.user.role)) {
+    // An executive who is also an ambassador or worker keeps that dashboard.
+    const profiles = await db.user.findUnique({
+      where: { id: session.user.id },
+      select: { workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
+    });
+    const extra = portalsForUser(session.user.role, {
+      worker: profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
+      ambassador: profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false,
+      client: false,
+    });
+    portals = ["admin", ...extra];
+  } else if (isPersonRole(session.user.role)) {
     // The email is the person: any order placed with it since the last visit joins
     // this login now, so its client dashboard appears without signing in again.
     const me = await db.user.findUnique({ where: { id: session.user.id }, select: { email: true, isActive: true } });
