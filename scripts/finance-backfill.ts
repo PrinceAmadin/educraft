@@ -13,6 +13,9 @@
  *      that payment (so each lands in its own month). A project REFUNDED
  *      before refunds were recorded as rows is treated as fully refunded and
  *      left out.
+ *   3. Claude usage: one Operations Reserve expense per project/subsystem per
+ *      day, in step with the AiUsageLog rows (the same roll-up the logger
+ *      keeps from now on).
  */
 import { PrismaClient } from "@prisma/client";
 import { expectedAllocation } from "../src/lib/finance/commission-config";
@@ -106,6 +109,25 @@ async function main() {
     }
   }
   console.log(`\n   Σ retained to allocate: ${totalDelta.toLocaleString()} naira${apply ? ` — ${written} allocation(s) written` : ""}`);
+
+  // 3. Claude usage roll-up.
+  const logs = await db.aiUsageLog.findMany({ select: { createdAt: true, subsystem: true, projectId: true, costNaira: true } });
+  const groups = new Map<string, { day: Date; subsystem: string; projectId: string | null; total: number; calls: number }>();
+  for (const l of logs) {
+    const day = new Date(Date.UTC(l.createdAt.getUTCFullYear(), l.createdAt.getUTCMonth(), l.createdAt.getUTCDate()));
+    const key = `${day.toISOString().slice(0, 10)}|${l.subsystem}|${l.projectId ?? "-"}`;
+    const g = groups.get(key) ?? { day, subsystem: l.subsystem, projectId: l.projectId, total: 0, calls: 0 };
+    g.total += l.costNaira;
+    g.calls += 1;
+    groups.set(key, g);
+  }
+  const aiTotal = [...groups.values()].reduce((s, g) => s + g.total, 0);
+  console.log(`\n3. Claude usage: ${logs.length} log row(s) -> ${groups.size} daily expense(s), ${aiTotal.toFixed(2)} naira in all`);
+  if (apply) {
+    const { rollUpAiExpense } = await import("../src/lib/services/expenses");
+    for (const g of groups.values()) await rollUpAiExpense({ day: g.day, subsystem: g.subsystem, projectId: g.projectId });
+    console.log("   rolled up");
+  }
 
   if (apply) {
     const rows = await db.bucketTransaction.groupBy({ by: ["bucketType"], _sum: { amount: true } });

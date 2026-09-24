@@ -111,6 +111,10 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/finance/payouts/coo-view", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },
   { prefix: "/api/admin/finance/payouts/coo-submit", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },
   { prefix: "/api/admin/finance/payouts", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
+  // The HOG's sponsorship spending from the Growth Fund, and the budget it is measured against.
+  { prefix: "/api/admin/finance/expenses/sponsorship", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "HOG"] },
+  { prefix: "/api/admin/finance/expenses/hog-budget", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "HOG"] },
+  { prefix: "/api/admin/finance/settings", roles: ["SUPER_ADMIN"], readOnly: ["CO_CEO_CFO"] },
   { prefix: "/api/admin/finance", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/ai-usage", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/ambassadors", roles: ["SUPER_ADMIN", "HOG"] },

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { rollUpAiExpense } from "@/lib/services/expenses";
 
 /**
  * USD per million tokens. Update when Anthropic's pricing changes or a new
@@ -36,14 +37,19 @@ export interface AiUsageRecord extends AiUsageContext {
   status: "success" | "error";
 }
 
-/** Best-effort: a logging failure must never break the Claude call it describes. */
+/**
+ * Best-effort: a logging failure must never break the Claude call it
+ * describes. Every logged call also keeps the day's Operations Reserve
+ * expense for that project/subsystem in step (Phase 2: Claude costs flow
+ * into Expenses automatically as API cost).
+ */
 export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
   try {
     const usd = costUsd(rec.model, rec.inputTokens, rec.outputTokens);
     const project = rec.projectId
       ? await db.project.findUnique({ where: { id: rec.projectId }, select: { workerId: true } })
       : null;
-    await db.aiUsageLog.create({
+    const log = await db.aiUsageLog.create({
       data: {
         projectId: rec.projectId ?? null,
         workerId: project?.workerId ?? null,
@@ -58,7 +64,9 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
         durationMs: rec.durationMs,
         status: rec.status,
       },
+      select: { createdAt: true },
     });
+    await rollUpAiExpense({ day: log.createdAt, subsystem: rec.subsystem, projectId: rec.projectId ?? null });
   } catch (error) {
     console.error("[ai-usage] failed to log call", error);
   }

@@ -1,116 +1,138 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { LuReceipt, LuRepeat } from "react-icons/lu";
 import { auth } from "@/lib/auth";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { Pagination } from "@/components/shared/Pagination";
+import { MonthPicker } from "@/components/reports/MonthPicker";
+import { RevenuePager } from "@/components/finance/revenue/RevenuePager";
 import { ExpensesFilterBar } from "@/components/finance/ExpensesFilterBar";
 import { ExpensesTable } from "@/components/finance/ExpensesTable";
 import { AddExpenseDialog } from "@/components/finance/AddExpenseDialog";
-import {
-  EXPENSE_PAGE_SIZE,
-  getMonthToDateTotal,
-  getProjectedRecurring,
-  listExpenses,
-} from "@/lib/services/expenses";
+import { HogBudgetPanel } from "@/components/finance/HogBudgetPanel";
+import { EXPENSE_PAGE_SIZE, getHogBudget, getMonthlyExpenseSummary, getProjectedRecurring, listExpenses, listPendingApprovals } from "@/lib/services/expenses";
+import { currentMonthKey, monthLabel } from "@/lib/services/finance/surplus";
 import { expenseListParamsSchema } from "@/lib/validations/expenses";
-import { formatNaira } from "@/lib/utils";
+import { cn, formatNaira } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Expenses" };
 export const dynamic = "force-dynamic";
 
-export default async function ExpensesPage({
-  searchParams,
-}: {
-  searchParams: Record<string, string | string[] | undefined>;
-}) {
-  const flat = Object.fromEntries(
-    Object.entries(searchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])
-  );
+/**
+ * Money going out, by bucket. The month leads (what each bucket paid and
+ * for what), the founder's approvals sit next, then the HOG's sponsorship
+ * budget and the list itself.
+ */
+export default async function ExpensesPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
+  const flat = Object.fromEntries(Object.entries(searchParams).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
   const parsed = expenseListParamsSchema.parse(flat);
+  const currentMonth = currentMonthKey();
+  const rangeMode = Boolean(parsed.from || parsed.to);
+  const month = !rangeMode ? (parsed.month && parsed.month <= currentMonth ? parsed.month : currentMonth) : parsed.month ?? currentMonth;
+  const filters = rangeMode ? parsed : { ...parsed, month };
 
-  const [session, { rows, total, page, pageCount, filteredTotal }, monthTotal, recurring] =
-    await Promise.all([
-      auth(),
-      listExpenses(parsed),
-      getMonthToDateTotal(),
-      getProjectedRecurring(),
-    ]);
-
-  const canDelete = session?.user?.role === "SUPER_ADMIN";
-  const hasFilters = Boolean(parsed.category || parsed.from || parsed.to);
+  const [session, list, summary, recurring, pending, hogBudget] = await Promise.all([
+    auth(),
+    listExpenses(filters),
+    getMonthlyExpenseSummary(month),
+    getProjectedRecurring(),
+    listPendingApprovals(),
+    getHogBudget(month),
+  ]);
+  const role = session?.user?.role;
+  const isFounder = role === "SUPER_ADMIN";
+  const hasFilters = Boolean(parsed.category || parsed.bucket || parsed.status || parsed.from || parsed.to);
 
   return (
-    <div className="space-y-5">
-      <Link
-        href="/admin/finance"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:underline"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-        Finance
-      </Link>
+    <div className="space-y-10">
+      <PageHeader
+        title="Expenses"
+        description="What it costs to run EduCraft, and which bucket pays for it. Over ₦50,000 an expense waits for the founder before it leaves a bucket."
+        back={{ href: "/admin/finance", label: "Finance" }}
+        actions={
+          <>
+            <MonthPicker month={month} currentMonth={currentMonth} basePath="/admin/finance/expenses" />
+            <AddExpenseDialog isFounder={isFounder} />
+          </>
+        }
+      />
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Expenses</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            What it costs to run EduCraft — software, marketing, equipment, and the rest.
+      {/* ── The month, by bucket ── */}
+      <section aria-labelledby="bucket-summary-heading">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+          <h2 id="bucket-summary-heading" className="text-[15px] font-semibold text-foreground">
+            {monthLabel(month)} by bucket
+          </h2>
+          <p className="text-[13px] text-muted-foreground">
+            {formatNaira(summary.total)} out
+            {summary.pending.count > 0 ? ` · ${formatNaira(summary.pending.amount)} awaiting approval` : ""}
+            {summary.unbucketed.count > 0 ? ` · ${formatNaira(summary.unbucketed.total)} in ambassador commissions (off the 15%, no bucket)` : ""}
           </p>
         </div>
-        <AddExpenseDialog />
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl bg-zone p-4">
-          <p className="text-sm text-muted-foreground">Total expenses this month</p>
-          <p className="mt-1 font-mono text-2xl font-medium tabular-nums text-foreground">
-            {formatNaira(monthTotal)}
-          </p>
+        <div className="mt-4 grid gap-x-10 gap-y-6 rounded-2xl bg-zone p-5 sm:p-7 lg:grid-cols-3">
+          {summary.buckets.map((b) => (
+            <div key={b.bucket} className="min-w-0">
+              <div className="flex items-baseline justify-between gap-3">
+                <h3 className="text-sm font-medium text-foreground">{b.label}</h3>
+                <span className="font-mono text-lg font-medium tabular-nums text-foreground">{formatNaira(b.total)}</span>
+              </div>
+              {b.categories.length === 0 ? (
+                <p className="mt-2 text-[13px] text-muted-foreground">Nothing this month.</p>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {b.categories.map((c) => (
+                    <li key={c.category} className="flex items-center justify-between gap-3 text-[13px]">
+                      <span className="text-muted-foreground">{c.category}</span>
+                      <span className="font-mono tabular-nums text-foreground">{formatNaira(c.amount, { decimals: !Number.isInteger(c.amount) })}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
         </div>
-        <div className="rounded-2xl bg-zone p-4">
-          <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            <LuRepeat className="size-3.5" aria-hidden />
-            Projected recurring costs / month
-          </p>
-          <p className="mt-1 font-mono text-2xl font-medium tabular-nums text-foreground">
-            {formatNaira(recurring.monthlyTotal)}
-          </p>
-          {recurring.items.length > 0 ? (
-            <p className="mt-1 text-xs text-muted-foreground">
-              from {recurring.items.length} recurring item{recurring.items.length === 1 ? "" : "s"}
-            </p>
-          ) : null}
-        </div>
-      </div>
+        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+          <LuRepeat className="size-3.5" aria-hidden />
+          Projected recurring costs {formatNaira(recurring.monthlyTotal)} / month
+          {recurring.items.length > 0 ? ` from ${recurring.items.length} recurring item${recurring.items.length === 1 ? "" : "s"}` : ""}
+        </p>
+      </section>
 
-      <ExpensesFilterBar />
+      {/* ── Waiting on the founder ── */}
+      {pending.length > 0 ? (
+        <section aria-labelledby="pending-heading" className="space-y-3">
+          <h2 id="pending-heading" className={cn("text-[15px] font-semibold", isFounder ? "text-gold" : "text-foreground")}>
+            Awaiting the founder&apos;s approval ({pending.length})
+          </h2>
+          <ExpensesTable rows={pending} canDelete={false} canApprove={isFounder} />
+        </section>
+      ) : null}
 
-      {rows.length === 0 ? (
-        hasFilters ? (
+      <HogBudgetPanel budget={hogBudget} />
+
+      {/* ── The list ── */}
+      <section aria-labelledby="list-heading" className="space-y-4">
+        <h2 id="list-heading" className="text-[15px] font-semibold text-foreground">
+          {rangeMode ? "Expenses in range" : `Expenses in ${monthLabel(month)}`}
+        </h2>
+        <ExpensesFilterBar />
+        {list.rows.length === 0 ? (
           <EmptyState
             icon={LuReceipt}
-            title="No expenses match these filters"
-            description="Try a different category or date range."
+            title={hasFilters ? "No expenses match these filters" : "No expenses this month"}
+            description={hasFilters ? "Try a different category, bucket or date range." : "Add the first one — software subscriptions, data, marketing spend."}
           />
         ) : (
-          <EmptyState
-            icon={LuReceipt}
-            title="No expenses logged yet"
-            description="Add the first one — software subscriptions, data, marketing spend."
-          />
-        )
-      ) : (
-        <div className="space-y-3">
-          {hasFilters ? (
-            <p className="text-sm text-muted-foreground">
-              {total} expense{total === 1 ? "" : "s"} matching · {formatNaira(filteredTotal)} total
-            </p>
-          ) : null}
-          <ExpensesTable rows={rows} canDelete={canDelete} />
-          <Pagination page={page} pageCount={pageCount} total={total} pageSize={EXPENSE_PAGE_SIZE} />
-        </div>
-      )}
+          <>
+            {hasFilters ? (
+              <p className="text-[13px] text-muted-foreground">
+                {list.total} expense{list.total === 1 ? "" : "s"} matching · {formatNaira(list.filteredTotal)} in all
+              </p>
+            ) : null}
+            <ExpensesTable rows={list.rows} canDelete={isFounder} canApprove={isFounder} />
+            <RevenuePager page={list.page} pageCount={list.pageCount} total={list.total} pageSize={EXPENSE_PAGE_SIZE} noun="expense" />
+          </>
+        )}
+      </section>
     </div>
   );
 }

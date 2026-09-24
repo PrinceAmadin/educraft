@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-export type AmbassadorTab = "list" | "schools" | "core" | "sub" | "applications" | "tracking" | "manage";
+export type AmbassadorTab = "list" | "schools" | "core" | "sub" | "applications" | "tracking" | "sponsorship" | "manage";
 
 /** `short` is the phone label, so the seven tabs scroll less at 375px. */
 const TABS: { key: AmbassadorTab; href: string; label: string; short?: string }[] = [
@@ -11,6 +11,7 @@ const TABS: { key: AmbassadorTab; href: string; label: string; short?: string }[
   { key: "sub", href: "/admin/ambassadors/sub", label: "Sub (ECSA)", short: "Sub" },
   { key: "applications", href: "/admin/ambassadors/applications", label: "Applications", short: "Apps" },
   { key: "tracking", href: "/admin/ambassadors/tracking", label: "Tracking" },
+  { key: "sponsorship", href: "/admin/ambassadors/sponsorship", label: "Sponsorship" },
   { key: "manage", href: "/admin/ambassadors/manage", label: "Manage" },
 ];
 

@@ -1,12 +1,23 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { X } from "lucide-react";
+import { LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { EXPENSE_FILTER_CATEGORIES } from "@/lib/validations/expenses";
+import { BUCKET_META } from "@/lib/finance/commission-config";
+import { EXPENSE_BUCKETS, EXPENSE_FILTER_CATEGORIES, EXPENSE_STATUSES } from "@/lib/validations/expenses";
 
+const STATUS_LABELS: Record<(typeof EXPENSE_STATUSES)[number], string> = {
+  AUTO_APPROVED: "Logged",
+  PENDING_APPROVAL: "Awaiting approval",
+  APPROVED: "Approved",
+  DECLINED: "Declined",
+};
+
+const KEYS = ["category", "bucket", "status", "from", "to"] as const;
+
+/** URL-bound filters: category, bucket, approval status and a date range. */
 export function ExpensesFilterBar() {
   const router = useRouter();
   const pathname = usePathname();
@@ -22,97 +33,46 @@ export function ExpensesFilterBar() {
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }
 
-  const activeCount = ["category", "from", "to"].filter((k) => searchParams.get(k)).length;
+  const activeCount = KEYS.filter((k) => searchParams.get(k)).length;
+  const get = (k: string) => searchParams.get(k) ?? "";
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <FilterSelect
-          label="Category"
-          value={searchParams.get("category") ?? ""}
-          onChange={(v) => commit({ category: v || null })}
-        >
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <Select aria-label="Category" value={get("category")} onChange={(e) => commit({ category: e.target.value || null })}>
           <option value="">All categories</option>
           {EXPENSE_FILTER_CATEGORIES.map((c) => (
             <option key={c} value={c}>
               {c}
             </option>
           ))}
-        </FilterSelect>
-
-        <div className="col-span-2 grid grid-cols-2 gap-2 sm:col-span-2">
-          <FilterDate
-            label="From"
-            value={searchParams.get("from") ?? ""}
-            onChange={(v) => commit({ from: v || null })}
-          />
-          <FilterDate
-            label="To"
-            value={searchParams.get("to") ?? ""}
-            onChange={(v) => commit({ to: v || null })}
-          />
-        </div>
+        </Select>
+        <Select aria-label="Bucket" value={get("bucket")} onChange={(e) => commit({ bucket: e.target.value || null })}>
+          <option value="">All buckets</option>
+          {EXPENSE_BUCKETS.map((b) => (
+            <option key={b} value={b}>
+              {BUCKET_META[b].label}
+            </option>
+          ))}
+        </Select>
+        <Select aria-label="Status" value={get("status")} onChange={(e) => commit({ status: e.target.value || null })}>
+          <option value="">All statuses</option>
+          {EXPENSE_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {STATUS_LABELS[s]}
+            </option>
+          ))}
+        </Select>
+        <Input type="date" aria-label="From date" value={get("from")} onChange={(e) => commit({ from: e.target.value || null, month: null })} />
+        <Input type="date" aria-label="To date" value={get("to")} onChange={(e) => commit({ to: e.target.value || null, month: null })} />
       </div>
 
       {activeCount > 0 ? (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            {activeCount} filter{activeCount === 1 ? "" : "s"} active
-          </p>
-          <Button variant="ghost" size="sm" onClick={() => router.replace(pathname, { scroll: false })}>
-            <X className="size-4" aria-hidden />
-            Clear all
-          </Button>
-        </div>
+        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => commit(Object.fromEntries(KEYS.map((k) => [k, null])))}>
+          <LuX className="size-4" aria-hidden />
+          Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
+        </Button>
       ) : null}
     </div>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  children,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block meta-label">
-        {label}
-      </span>
-      <Select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 text-sm" aria-label={label}>
-        {children}
-      </Select>
-    </label>
-  );
-}
-
-function FilterDate({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block meta-label">
-        {label}
-      </span>
-      <Input
-        type="date"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-11 text-sm"
-        aria-label={`${label} date`}
-      />
-    </label>
   );
 }

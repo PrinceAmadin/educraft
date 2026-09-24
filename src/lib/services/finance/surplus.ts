@@ -87,17 +87,24 @@ export interface GrowthFundQuarter {
   remaining: number;
 }
 
-/** The HOG's sponsorship budget this quarter against what the Growth Fund has paid out on expenses. */
+/** The HOG's sponsorship budget this quarter against the sponsorships logged (approved or auto-approved) from the Growth Fund. */
 export async function getGrowthFundQuarter(month: string): Promise<GrowthFundQuarter> {
   const quarter = quarterOf(month);
+  const [fy, fm] = quarter.months[0].split("-").map(Number);
+  const [ty, tm] = quarter.months[quarter.months.length - 1].split("-").map(Number);
   const [settings, spentAgg] = await Promise.all([
     getFinanceSettings(),
-    db.bucketTransaction.aggregate({
-      where: { bucketType: "GROWTH_FUND", expenseId: { not: null }, month: { in: quarter.months } },
+    db.expense.aggregate({
+      where: {
+        kind: "SPONSORSHIP",
+        bucketSource: "GROWTH_FUND",
+        approvalStatus: { in: ["AUTO_APPROVED", "APPROVED"] },
+        date: { gte: new Date(Date.UTC(fy, fm - 1, 1)), lt: new Date(Date.UTC(ty, tm, 1)) },
+      },
       _sum: { amount: true },
     }),
   ]);
-  const spent = Math.round(-(spentAgg._sum.amount ?? 0)) || 0;
+  const spent = Math.round(spentAgg._sum.amount ?? 0) || 0;
   const budget = settings.hogSponsorshipBudgetQuarterly;
   return { quarter, budget, spent, remaining: budget - spent };
 }

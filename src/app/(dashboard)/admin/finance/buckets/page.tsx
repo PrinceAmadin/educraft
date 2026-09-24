@@ -7,6 +7,8 @@ import { BucketCards } from "@/components/finance/buckets/BucketCards";
 import { SemesterAnalysis } from "@/components/finance/buckets/SemesterAnalysis";
 import { BucketTransactions } from "@/components/finance/buckets/BucketTransactions";
 import { ManualAdjustmentDialog } from "@/components/finance/buckets/ManualAdjustmentDialog";
+import { FinanceSettingsDialog } from "@/components/finance/buckets/FinanceSettingsDialog";
+import { getFinanceSettings } from "@/lib/services/finance/settings";
 import { getBucketBalances, getBucketCards, getRetainedForMonth, listBucketTransactions, BUCKET_TX_PAGE_SIZE } from "@/lib/services/finance/buckets";
 import { currentMonthKey, getFounderDrawsPaid, getGrowthFundQuarter, getSurplusAnalysis, monthLabel } from "@/lib/services/finance/surplus";
 import { bucketsQuerySchema } from "@/lib/validations/finance-buckets";
@@ -29,7 +31,8 @@ export default async function BucketsPage({ searchParams }: { searchParams: Reco
   const month = query.month && query.month <= currentMonth ? query.month : currentMonth;
   const bucket = query.bucket || undefined;
 
-  const [cards, balances, retained, sponsorship, drawsPaid, surplus, transactions] = await Promise.all([
+  const isFounder = session?.user?.role === "SUPER_ADMIN";
+  const [cards, balances, retained, sponsorship, drawsPaid, surplus, transactions, settings] = await Promise.all([
     getBucketCards(month),
     getBucketBalances(),
     getRetainedForMonth(month),
@@ -37,6 +40,7 @@ export default async function BucketsPage({ searchParams }: { searchParams: Reco
     getFounderDrawsPaid([month]),
     getSurplusAnalysis(month),
     listBucketTransactions({ bucket, month, page: query.page }),
+    getFinanceSettings(),
   ]);
   const allBuckets = balances.operationsReserve + balances.growthFund + balances.reinvestmentFund + balances.founderDistribution;
 
@@ -46,7 +50,14 @@ export default async function BucketsPage({ searchParams }: { searchParams: Reco
         title="Bucket manager"
         description="EduCraft's retained share, split four ways the moment a payment is confirmed. Balances are all-time; inflow and outflow belong to the month shown."
         back={{ href: "/admin/finance", label: "Finance" }}
-        actions={canAct ? <ManualAdjustmentDialog /> : null}
+        actions={
+          canAct ? (
+            <>
+              {isFounder ? <FinanceSettingsDialog settings={settings} /> : null}
+              <ManualAdjustmentDialog />
+            </>
+          ) : null
+        }
       />
 
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
