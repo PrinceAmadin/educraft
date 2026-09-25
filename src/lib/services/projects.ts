@@ -882,7 +882,7 @@ export async function verifyPayment(
         dedupeKey: `payment:${payment.id}`,
       });
     },
-    { timeout: 30_000, maxWait: 10_000 }
+    { timeout: 60_000, maxWait: 10_000 }
   );
 
   await notifyClient(project.id, {

@@ -420,7 +420,7 @@ async function creditProjectPayment(
       if (leg === "downpayment") await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
       return { advance };
     },
-    { timeout: 30_000, maxWait: 10_000 }
+    { timeout: 60_000, maxWait: 10_000 }
   );
   if (!outcome) return { status: "already_confirmed" };
   const advance = outcome.advance;
@@ -660,7 +660,7 @@ async function processPendingIntake(
       await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
       return { paymentId: payment.id };
     },
-    { timeout: 30_000, maxWait: 10_000 }
+    { timeout: 60_000, maxWait: 10_000 }
   );
   if (!outcome) return { status: "already_confirmed" };
 
