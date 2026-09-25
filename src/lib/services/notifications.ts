@@ -55,6 +55,18 @@ export function notifyAdmins(input: NotificationInput) {
   return notifyRole(ADMIN_ROLES, input);
 }
 
+/**
+ * Operations events go to the founder and the COO: work submitted, QA
+ * outcomes, research runs and approvals, worker applications, client
+ * messages and documents waiting for review. (OPS_MANAGER is the retired
+ * spelling of COO.)
+ */
+export const OPERATIONS_ROLES: UserRole[] = ["SUPER_ADMIN", "OPS_MANAGER", "COO"];
+
+export function notifyOperations(input: NotificationInput) {
+  return notifyRole(OPERATIONS_ROLES, input);
+}
+
 /** Money events go to the founder and the CFO: payments awaiting verification, confirmations, refunds, payout submissions. */
 export const FINANCE_ROLES: UserRole[] = ["SUPER_ADMIN", "CO_CEO_CFO"];
 

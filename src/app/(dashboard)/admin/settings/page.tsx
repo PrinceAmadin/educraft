@@ -2,18 +2,20 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { SettingsTabs } from "@/components/settings/SettingsTabs";
 import { GeneralSettingsForm } from "@/components/settings/GeneralSettingsForm";
+import { OperationsTimingForm } from "@/components/operations/OperationsTimingForm";
 import { usdToNairaRate } from "@/lib/ai-usage-log";
 import { getGeneralSettings } from "@/lib/services/settings";
+import { getExpectedHours } from "@/lib/services/operations/pipeline";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [session, settings] = await Promise.all([auth(), getGeneralSettings()]);
+  const [session, settings, expected] = await Promise.all([auth(), getGeneralSettings(), getExpectedHours()]);
   const canEditPricing = session?.user?.role === "SUPER_ADMIN";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-10">
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -24,6 +26,8 @@ export default async function SettingsPage() {
       <SettingsTabs active="general" role={session?.user?.role} />
 
       <GeneralSettingsForm settings={settings} canEditPricing={canEditPricing} />
+
+      {canEditPricing ? <OperationsTimingForm hours={expected} /> : null}
 
       <section className="max-w-3xl">
         <h2 className="text-[15px] font-semibold text-foreground">Claude exchange rate</h2>

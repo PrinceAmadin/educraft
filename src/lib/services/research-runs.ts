@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
+import { ledgerRerunRequested, ledgerRerunReviewed, ledgerRunReleased, ledgerRunStarted } from "@/lib/services/operations/research-ledger";
 
 /*
  * Rationing for research runs. Each run spends Claude credits, so:
@@ -124,11 +125,16 @@ export async function claimRun(projectDbId: string, userId: string): Promise<Run
     // Waiting on the row lock plus a handful of round-trips to a remote
     // database can outrun Prisma's 5s default; a timed-out claim would surface
     // as a raw database error instead of "needs approval".
-  }, { maxWait: 15_000, timeout: 30_000 });
+  }, { maxWait: 15_000, timeout: 30_000 }).then(async (claim) => {
+    // The COO's ledger mirrors the run (outside the claim, so it can never fail it).
+    await ledgerRunStarted(db, { projectId: projectDbId, userId, logId: claim.logId, requestId: claim.requestId });
+    return claim;
+  });
 }
 
 /** Gives a claim back when the run it was for couldn't actually start. */
 export async function releaseClaim(claim: RunClaim): Promise<void> {
+  await ledgerRunReleased(claim);
   await db.researchRunLog.deleteMany({ where: { id: claim.logId } }).catch(() => {});
   if (claim.requestId) {
     await db.researchRerunRequest
@@ -165,12 +171,14 @@ export async function requestRerun(input: {
     throw new RerunRequestError("This project already has an approved re-run — use it before it expires.");
   }
 
-  await db.researchRerunRequest.create({
+  const created = await db.researchRerunRequest.create({
     data: { projectId: input.projectDbId, requestedById: input.userId, reason },
+    select: { id: true },
   });
+  await ledgerRerunRequested(db, { rerunRequestId: created.id, projectId: input.projectDbId, userId: input.userId, workerId: input.workerId, reason });
 
   const worker = await db.worker.findUnique({ where: { id: input.workerId }, select: { fullName: true } });
-  await notifyAdmins({
+  await notifyOperations({
     title: "Research re-run needs approval",
     message: `${worker?.fullName ?? "A worker"} asked to re-run research on ${input.projectCode}: "${reason.slice(0, 120)}${reason.length > 120 ? "…" : ""}"`,
     type: "warning",
@@ -208,6 +216,7 @@ export async function reviewRerunRequest(input: {
     data,
   });
   if (updated.count === 0) throw new RerunRequestError("This request has already been reviewed.");
+  await ledgerRerunReviewed(db, { rerunRequestId: request.id, decision: input.decision, reviewerId: input.reviewerId, note });
 
   const code = request.project.projectId;
   await notifyUsers([request.requestedById], {

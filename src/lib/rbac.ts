@@ -122,7 +122,12 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/projects", roles: ["SUPER_ADMIN", "COO"] },
   { prefix: "/api/admin/qa", roles: ["SUPER_ADMIN", "COO"] },
   { prefix: "/api/admin/research-rerun-requests", roles: ["SUPER_ADMIN", "COO"] },
+  { prefix: "/api/admin/research-requests", roles: ["SUPER_ADMIN", "COO"] },
   { prefix: "/api/admin/workers", roles: ["SUPER_ADMIN", "COO"] },
+  // The COO's monthly operations report (and its Word export).
+  { prefix: "/api/admin/reports/operations", roles: ["SUPER_ADMIN", "COO"] },
+  // Every executive reads their own notifications.
+  { prefix: "/api/admin/notifications", roles: ALL_EXECS },
   { prefix: "/api/admin/probono", roles: ["SUPER_ADMIN"] },
   { prefix: "/api/admin/clients", roles: ["SUPER_ADMIN"], readOnly: ["CO_CEO_CFO", "COO"] },
 ];

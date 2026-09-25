@@ -13,7 +13,8 @@ import {
   uploadPdfToFolder,
   GoogleDriveError,
 } from "@/lib/google-drive";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
+import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
+import { ledgerRunFinished } from "@/lib/services/operations/research-ledger";
 import { claimRun, getRerunState, releaseClaim } from "@/lib/services/research-runs";
 
 export class ResearchError extends Error {}
@@ -615,11 +616,12 @@ async function advanceResolvingAccess(job: Job): Promise<AdvanceResult> {
         where: { id: job.id },
         data: { status: "FAILED_NEEDS_REVIEW", errorMessage: "The search returned no papers for this topic." },
       });
-      await notifyAdmins({
+      await ledgerRunFinished(job.projectId, job.id, "FAILED");
+      await notifyOperations({
         title: "Research pipeline needs review",
         message: `${job.projectId}: the literature search returned no papers.`,
         type: "urgent",
-        link: `/admin/projects/${job.projectId}`,
+        link: `/admin/research-requests`,
       });
       return { job: next, done: true };
     }
@@ -738,11 +740,12 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
         },
       }),
     ]);
-    await notifyAdmins({
+    await ledgerRunFinished(job.projectId, job.id, "FAILED");
+    await notifyOperations({
       title: "Research pipeline needs review",
       message: `${ctx.projectId}: only ${keeperIds.length} relevant references after ${MAX_REPLACEMENT_ROUNDS} replacement rounds.`,
       type: "urgent",
-      link: `/admin/projects/${ctx.projectId}`,
+      link: `/admin/research-requests`,
     });
     const updated = await db.researchJob.findUniqueOrThrow({ where: { id: job.id } });
     return { job: updated, done: true };
@@ -765,7 +768,7 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
     }),
   ]);
   if (note) {
-    await notifyAdmins({
+    await notifyOperations({
       title: "Research finished below target",
       message: `${ctx.projectId}: ${note}`,
       type: "warning",
@@ -835,6 +838,7 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
   }
 
   const next = await db.researchJob.update({ where: { id: job.id }, data: { status: "PASSED" } });
+  await ledgerRunFinished(job.projectId, job.id, "COMPLETE");
   if (job.requestedById) {
     const [total, withPdf] = await Promise.all([
       db.reference.count({ where: { researchJobId: job.id, status: "KEPT" } }),

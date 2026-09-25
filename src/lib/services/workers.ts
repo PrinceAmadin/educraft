@@ -176,6 +176,8 @@ const workerDetailSelect = {
   createdAt: true,
   updatedAt: true,
   updatedByRole: true,
+  isQaReviewer: true,
+  qaReviewerSince: true,
   updatedBy: { select: { displayName: true, email: true } },
   projects: {
     orderBy: { createdAt: "desc" },

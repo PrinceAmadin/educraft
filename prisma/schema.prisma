@@ -89,6 +89,11 @@ model User {
   workerApplicationsReviewed  WorkerApplication[]  @relation("WorkerApplicationReviewedBy")
   workerRecordsUpdated        Worker[]             @relation("WorkerUpdatedBy")
 
+  // Phase 4 (Operations Platform)
+  projectNotes      ProjectNote[] @relation("ProjectNoteAuthor")
+  workerNotes       WorkerNote[]  @relation("WorkerNoteAuthor")
+  workerFlagsRaised WorkerFlag[]  @relation("WorkerFlagAuthor")
+
   @@index([role])
 }
 
@@ -466,10 +471,36 @@ model Project {
   /// Per-item QA checklist state: { "<item-id>": true }. Auto-saved.
   qaChecklist   Json?
   revisionCount Int     @default(0)
+  /// Phase 4: when the FIRST QA review approved the work without a revision.
+  /// Null on a project that needed a revision (or predates the field) — the
+  /// QA first-pass rate counts projects where this is set.
+  qaFirstPassDate DateTime?
+  /// Phase 4: the structured review (reviewer, Layer 4 delivery checklist,
+  /// decision). The legacy qa* columns above are still written for the old
+  /// screens; this row is the COO's record.
+  qaReview      QaReview?
 
   // ── Internal ──
   /// Admin-only working notes. Never surfaced to client or worker.
   internalNotes String?
+
+  // ── Phase 4: operations ──
+  /// The COO's at-risk flag: the project needs watching even if its numbers
+  /// look fine. Surfaces in Action required and on the row.
+  atRisk       Boolean   @default(false)
+  atRiskNote   String?
+  atRiskAt     DateTime?
+  /// A strict supervisor (or a department known for rejections): the Tier 3
+  /// reference check runs before delivery.
+  supervisorHighRisk Boolean @default(false)
+  /// The COO asked the founder for a senior domain review of this project.
+  seniorReviewRequestedAt DateTime?
+  seniorReviewNote        String?
+  /// Lineage: a follow-on order (corrections beyond round 3, a chapter added
+  /// later, a seminar built on the same topic) points at the project it came from.
+  parentProjectId String?
+  parentProject   Project?  @relation("ProjectLineage", fields: [parentProjectId], references: [id])
+  childProjects   Project[] @relation("ProjectLineage")
 
   // ── Delivery ──
   deliveryDate                DateTime?
@@ -523,6 +554,11 @@ model Project {
   clientUpdates        ProjectUpdate[]
   messages             ProjectMessage[]
   deliverables         ProjectDeliverable[]
+  // Phase 4 (Operations Platform)
+  notes                ProjectNote[]
+  correctionRounds     SupervisorCorrection[]
+  researchRequests     ResearchRequest[]
+  workerFlags          WorkerFlag[]
 
   @@index([status])
   @@index([clientId])
@@ -532,6 +568,8 @@ model Project {
   @@index([serviceId])
   @@index([internalDeadline])
   @@index([createdAt])
+  @@index([atRisk])
+  @@index([parentProjectId])
 }
 
 enum FileStorage {
@@ -708,9 +746,19 @@ model Worker {
   /// "last updated by ... on ..." line on the worker record.
   updatedByRole String?
 
+  // ── Phase 4: operations ──
+  /// A worker the COO has designated as a junior QA reviewer: they can be
+  /// assigned projects from the QA queue.
+  isQaReviewer    Boolean   @default(false)
+  qaReviewerSince DateTime?
+
   projects Project[]
+  flags            WorkerFlag[]
+  opsNotes         WorkerNote[]
+  researchRequests ResearchRequest[]
 
   @@index([status])
+  @@index([isQaReviewer])
 }
 
 // ─── WORKER APPLICATIONS ────────────────────────────────
@@ -1781,4 +1829,181 @@ model GrowthAssociate {
   clusterAmbassadors Ambassador[] @relation("GrowthAssociateCluster")
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
+}
+
+// ─── PHASE 4: OPERATIONS PLATFORM ─────────────────────────
+
+/// A dated note on a project: the COO's own ("Messaged Chidi, no response")
+/// or one an action wrote (deadline moved, flagged at risk, reassigned). The
+/// notes and the status log together are the project's timeline.
+model ProjectNote {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  content    String
+  /// EXEC (an executive login), WORKER, SYSTEM (written by an action)
+  authorType String   @default("EXEC")
+  authorId   String?
+  author     User?    @relation("ProjectNoteAuthor", fields: [authorId], references: [id])
+  /// Snapshot of the author's name at the time, so the line survives a login change.
+  authorName String?
+  /// NOTE (typed), or the action that wrote it: DEADLINE, AT_RISK, SENIOR_REVIEW,
+  /// REASSIGN, CORRECTION, FLAG, STATUS, CLIENT_UPDATE, RESEARCH, QA
+  kind       String   @default("NOTE")
+  createdAt  DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+/// One round of supervisor corrections on a delivered project. Three rounds
+/// are included in the service; a fourth is out of scope and needs a new
+/// order (only the founder can open one, in the database).
+model SupervisorCorrection {
+  id             String    @id @default(cuid())
+  projectId      String
+  project        Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  roundNumber    Int
+  clientNote     String?
+  receivedAt     DateTime  @default(now())
+  deadline       DateTime?
+  completedAt    DateTime?
+  /// IN_PROGRESS, COMPLETED, ESCALATED
+  status         String    @default("IN_PROGRESS")
+  escalationNote String?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([projectId, roundNumber])
+  @@index([projectId])
+  @@index([status])
+}
+
+/// The human QA review of a submitted project: who reviews it, the automated
+/// gate results it arrived with, the Layer 4 delivery checklist (D1–D16,
+/// fixed in code) and the decision. One row per project — a resubmission
+/// after a revision reopens it as the next round.
+model QaReview {
+  id           String    @id @default(cuid())
+  projectId    String    @unique
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// Worker.id when reviewerType is WORKER, otherwise the executive's User.id.
+  reviewerId   String?
+  /// WORKER, COO, SUPER_ADMIN (or another executive role)
+  reviewerType String?
+  reviewerName String?
+  assignedById String?
+  assignedAt   DateTime?
+  startedAt    DateTime?
+  completedAt  DateTime?
+
+  // Automated gate results (from the report production system, when it runs)
+  formattingScore  Float?
+  structuralPass   Boolean?
+  referenceVerPass Boolean?
+  voiceCheckPass   Boolean?
+
+  // Tier 3 reference data (if triggered)
+  tier3Triggered Boolean @default(false)
+  tier3Results   Json?
+
+  /// Layer 4 delivery checklist: { "d1": true, ... "d16": false }
+  deliveryChecklist Json?
+  allChecksPassed   Boolean @default(false)
+
+  /// APPROVED, REVISION_NEEDED, MINOR_FIXES, ESCALATED
+  decision         String?
+  revisionNotes    String?
+  escalationReason String?
+  /// How many times the project has been through review (1 = first submission).
+  round            Int     @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reviewerId])
+  @@index([decision])
+}
+
+/// The COO's ledger of research runs: every run the OpenAlex pipeline makes
+/// for a project (RUNNING → COMPLETE / FAILED, with the final counts and the
+/// Claude cost) and every re-run that needed approval first (PENDING →
+/// APPROVED / DENIED). Rationing itself still lives in ResearchRerunRequest
+/// and ResearchRunLog; this row mirrors them for the operations screens.
+model ResearchRequest {
+  id              String    @id @default(cuid())
+  projectId       String
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workerId        String?
+  worker          Worker?   @relation(fields: [workerId], references: [id])
+  requestedById   String?
+  papersRequested Int       @default(50)
+  /// PENDING, APPROVED, DENIED, RUNNING, COMPLETE, FAILED
+  status          String    @default("PENDING")
+  /// The worker's written reason (a re-run beyond the free one).
+  reason          String?
+  /// The rationing record this row mirrors, when the run needed approval.
+  rerunRequestId  String?   @unique
+  /// The run it became.
+  runLogId        String?   @unique
+  approvedBy      String?
+  approvedAt      DateTime?
+  deniedBy        String?
+  deniedAt        DateTime?
+  denialReason    String?
+  /// Step-by-step progress snapshot written when the run finishes.
+  pipelineLog     Json?
+  totalReferences Int?
+  openAccessCount Int?
+  paywalledCount  Int?
+  actualCostNaira Float?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([projectId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// A flag against a worker: a Tier 2 reference-quality flag, or the COO
+/// flagging them for review. Dated, so "flags in the last 30 days" is a real
+/// rolling count rather than a lifetime counter.
+model WorkerFlag {
+  id             String    @id @default(cuid())
+  workerId       String
+  worker         Worker    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  /// TIER2_REFERENCE, REVIEW, QUALITY, CONDUCT
+  kind           String    @default("REVIEW")
+  reason         String
+  projectId      String?
+  project        Project?  @relation(fields: [projectId], references: [id])
+  createdById    String?
+  createdBy      User?     @relation("WorkerFlagAuthor", fields: [createdById], references: [id])
+  createdByName  String?
+  resolvedAt     DateTime?
+  resolvedById   String?
+  resolutionNote String?
+  createdAt      DateTime  @default(now())
+
+  @@index([workerId, createdAt])
+  @@index([kind])
+}
+
+/// A dated note on a worker's record: the COO's own, or one an action wrote
+/// (suspended, max load changed, flagged, made a QA reviewer).
+model WorkerNote {
+  id         String   @id @default(cuid())
+  workerId   String
+  worker     Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  content    String
+  authorId   String?
+  author     User?    @relation("WorkerNoteAuthor", fields: [authorId], references: [id])
+  authorName String?
+  /// NOTE, or the action that wrote it: SUSPEND, UNSUSPEND, FLAG, MAX_LOAD, QA_REVIEWER, ASSIGN
+  kind       String   @default("NOTE")
+  createdAt  DateTime @default(now())
+
+  @@index([workerId, createdAt])
 }
