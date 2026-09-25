@@ -60,6 +60,10 @@ expect("conversion 45 days ago → Dormant", activityStatus({ lastConversionAt: 
 expect("conversion 61 days ago → Inactive", activityStatus({ lastConversionAt: daysAgo(61), createdAt: daysAgo(200), lifetimeConversions: 4 }, now), "INACTIVE");
 expect("joined 10 days ago, nothing yet → New", activityStatus({ lastConversionAt: null, createdAt: daysAgo(10), lifetimeConversions: 0 }, now), "NEW");
 expect("joined 90 days ago, nothing ever → Inactive", activityStatus({ lastConversionAt: null, createdAt: daysAgo(90), lifetimeConversions: 0 }, now), "INACTIVE");
+// Never converted: timed from joining, so "Inactive" always means 60+ days without a conversion.
+expect("joined 45 days ago, never converted → Dormant (not yet 60 days)", activityStatus({ lastConversionAt: null, createdAt: daysAgo(45), lifetimeConversions: 0 }, now), "DORMANT");
+expect("joined 61 days ago, never converted → Inactive", activityStatus({ lastConversionAt: null, createdAt: daysAgo(61), lifetimeConversions: 0 }, now), "INACTIVE");
+expect("joined 31 days ago, never converted → Dormant", activityStatus({ lastConversionAt: null, createdAt: daysAgo(31), lifetimeConversions: 0 }, now), "DORMANT");
 // A referral that has not paid is not activity (spec checklist: "a conversion in the last 30 days, not just a referral").
 expect("last conversion 70 days ago, a referral logged yesterday → still Inactive", activityStatus({ lastConversionAt: daysAgo(70), createdAt: daysAgo(200), lifetimeConversions: 2 }, now), "INACTIVE");
 expect("joined 10 days ago, nothing converted yet → New", activityStatus({ lastConversionAt: null, createdAt: daysAgo(10), lifetimeConversions: 0 }, now), "NEW");

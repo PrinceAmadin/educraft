@@ -53,7 +53,7 @@ export default async function AmbassadorDirectoryPage({ searchParams }: { search
       <section className={STATS_GRID} aria-label="Network activity">
         <StatsCard label="Ambassadors" value={String(activity.total)} detail="Open accounts" icon={LuUsers} />
         <StatsCard label="Active" value={String(activity.ACTIVE)} detail="Converted in the last 30 days" icon={LuCircleCheck} tone="success" />
-        <StatsCard label="Dormant" value={String(activity.DORMANT)} detail="Last conversion 30–60 days ago" icon={LuMoonStar} tone="gold" />
+        <StatsCard label="Dormant" value={String(activity.DORMANT)} detail="No conversion for 30–60 days" icon={LuMoonStar} tone="gold" />
         <StatsCard label="New" value={String(activity.NEW)} detail="Joined in the last 30 days" icon={LuSparkles} />
       </section>
 

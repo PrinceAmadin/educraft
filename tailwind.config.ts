@@ -9,6 +9,9 @@ const config: Config = {
     "./src/pages/**/*.{ts,tsx}",
     "./src/components/**/*.{ts,tsx}",
     "./src/app/**/*.{ts,tsx}",
+    // Colour maps (tier and status badges, row accents) live in src/lib: without
+    // this line their classes are never generated and the badges render uncoloured.
+    "./src/lib/**/*.{ts,tsx}",
   ],
   theme: {
     extend: {

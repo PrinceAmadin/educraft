@@ -41,7 +41,7 @@ function n(count: number, noun: string, plural = `${noun}s`): string {
 /** Third row: who needs a hand this week, each line pointing at the filtered directory. */
 export function AttentionPanel({ attention }: { attention: AttentionCounts }) {
   const lines: Line[] = [];
-  if (attention.inactive60 > 0) lines.push({ tone: "warn", text: `${n(attention.inactive60, "ambassador")} ${attention.inactive60 === 1 ? "hasn't" : "haven't"} referred anyone in 60+ days`, href: "/admin/ambassadors/list?status=INACTIVE", cta: "View inactive" });
+  if (attention.inactive60 > 0) lines.push({ tone: "warn", text: `${n(attention.inactive60, "ambassador")} ${attention.inactive60 === 1 ? "hasn't" : "haven't"} converted a referral in 60+ days`, href: "/admin/ambassadors/list?status=INACTIVE", cta: "View inactive" });
   if (attention.nearPromotion > 0) lines.push({ tone: "boost", text: `${n(attention.nearPromotion, "ambassador")} approaching a tier promotion (within 2 conversions)`, href: "/admin/ambassadors/list?near=1", cta: "View near-promotion" });
   if (attention.platinumBonus > 0) lines.push({ tone: "boost", text: `${n(attention.platinumBonus, "Platinum ambassador")} eligible for the quarterly bonus payout`, href: "/admin/ambassadors/list?tier=PLATINUM", cta: "View Platinum" });
   if (attention.readySubTeams > 0) lines.push({ tone: "info", text: `${n(attention.readySubTeams, "ambassador")} ready to activate a sub-team (Silver+, no Subs yet)`, href: "/admin/ambassadors/list?ready=1", cta: "View ready" });
