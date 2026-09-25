@@ -166,3 +166,18 @@ export const renewPartnershipSchema = z.object({
 export const linkPartnershipAmbassadorSchema = z.object({
   ambassadorId: z.string().min(1, "Pick an ambassador"),
 });
+
+// ── Content hub (Section 8) ──────────────────────────────────────────────
+export const contentMonthQuerySchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Use YYYY-MM").optional().catch(undefined),
+});
+
+export const campaignSchema = z.object({
+  label: z.string().trim().min(2, "Name the semester").max(80),
+  semesterStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"),
+});
+
+export const milestoneSchema = z.object({
+  key: z.enum(["BRIEFING", "EARLY_BIRD", "URGENCY", "FINAL_CALL", "SEMESTER"]),
+  done: z.boolean(),
+});
