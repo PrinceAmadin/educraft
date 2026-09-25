@@ -24,6 +24,7 @@
     "check:rbac": "tsx scripts/check-rbac.ts",
     "check:finance": "tsx scripts/check-finance-math.ts",
     "check:tiers": "tsx scripts/check-ambassador-tiers.ts",
+    "check:cc": "tsx scripts/check-command-center.ts",
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
     "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",
