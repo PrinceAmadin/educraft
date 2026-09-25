@@ -6,8 +6,6 @@ import { firstName } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Command Center" };
 export const dynamic = "force-dynamic";
-/** Next to the database, like the Command Center's endpoints (the dashboard layout reads it on every load). */
-export const preferredRegion = ["dub1"];
 
 /**
  * The founder's Command Center (Phase 5): four tabs under /admin, picked by

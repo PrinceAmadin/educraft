@@ -74,8 +74,8 @@ import {
  *
  * The Prisma pool is small (one connection per function through pgbouncer),
  * so reads run in small groups; the today/yesterday numbers come from
- * two-day reads the feed needs anyway. The route runs in dub1, next to the
- * database (see the route file).
+ * two-day reads the feed needs anyway. Every function runs in dub1, next to
+ * the database (`regions` in vercel.json).
  */
 
 const OPEN_STATUSES: ProjectStatus[] = [...PIPELINE_STATUSES, "REVISION_NEEDED", "SUPERVISOR_CORRECTIONS"];
