@@ -163,7 +163,8 @@ export const TIER_COLORS: Record<TierKey, string> = {
   BRONZE: "#b45309",
   SILVER: "#94a3b8",
   GOLD: "hsl(var(--gold))",
-  PLATINUM: "hsl(var(--primary))",
+  // The spec's Platinum is purple, as on the Ambassador Platform's tier badges.
+  PLATINUM: "hsl(var(--purple))",
 };
 
 export const TIER_LABELS: Record<TierKey, string> = {

@@ -130,7 +130,7 @@ function acquisitionRows(funnel: GrowthPayload["funnel"], links: GrowthPayload["
       key: "rate",
       label: "Conversion rate",
       sub: funnel.referrals === 0 ? "No referrals this month yet" : "Conversions ÷ referrals",
-      value: formatPercent(funnel.conversionRate),
+      value: formatPercent(funnel.conversionRate, 1),
       href: links.platform,
     },
     {

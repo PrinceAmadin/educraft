@@ -185,11 +185,14 @@ function schoolPenetration(conversions: readonly Conversion[]): GrowthPayload["s
  * commission credited at conversion — Σ `ambassadorCommission` on their
  * orders plus any Core override (`parentCommission`) they hold on a sub's
  * order this month, the spec's "paid on downpayment" framing. Only
- * ambassadors with a conversion this month are ranked.
+ * ambassadors with a conversion this month are ranked, and, as on Phase 3's
+ * leaderboard, never a suspended or terminated one (their conversions still
+ * count in the funnel).
  */
 async function topAmbassadors(monthRows: readonly Conversion[]): Promise<TopAmbassador[]> {
   const groups = new Map<string, { units: Set<string>; earned: number }>();
   for (const r of monthRows) {
+    if (!isOpen(r.ambassadorStatus)) continue;
     const g = groups.get(r.ambassadorId) ?? { units: new Set<string>(), earned: 0 };
     g.units.add(r.unit);
     g.earned += r.project?.ambassadorCommission ?? 0;
