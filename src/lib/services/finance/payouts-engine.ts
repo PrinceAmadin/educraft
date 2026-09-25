@@ -1,12 +1,13 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { COMMISSION_RATES, executiveLegs, workerLeg, type ProjectLegs } from "@/lib/finance/commission-config";
+import { AMBASSADOR_TIERS, COMMISSION_RATES, executiveLegs, workerLeg, type ProjectLegs } from "@/lib/finance/commission-config";
 import { monthKeyOf } from "@/lib/services/finance/buckets";
 import { monthLabel, monthRange } from "@/lib/services/finance/surplus";
 import { nextId } from "@/lib/services/projects";
 import { formatId } from "@/lib/id-format";
 import { notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { formatNaira } from "@/lib/utils";
+import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 
 /**
  * The payout engine. Every naira owed out on a completed project is one
@@ -46,6 +47,8 @@ const PROJECT_SELECT = {
   parentAmbassadorId: true,
   workerId: true,
   finalCompletionDate: true,
+  downpaymentStatus: true,
+  downpaymentDate: true,
   workerPayoutPaid: true,
   ambassadorCommPaid: true,
   parentCommPaid: true,
@@ -89,8 +92,16 @@ function pct(rate: number | null | undefined, fallback: number): string {
   return `${Math.round(r * 100) / 100}%`;
 }
 
-function tierLabel(tier: string): string {
-  return tier.charAt(0) + tier.slice(1).toLowerCase();
+/**
+ * The tier a commission rate belongs to (10% Bronze, 12% Silver, 15% Gold or
+ * Platinum), for the record's basis. Since Phase 3 an ambassador's tier moves
+ * with every conversion, so the tier at allocation is read from the rate the
+ * job was allocated at, not from today's tier.
+ */
+function rateTierLabel(ratePercent: number | null | undefined): string {
+  const rate = (ratePercent ?? 0) / 100;
+  const tiers = AMBASSADOR_TIERS.filter((t) => Math.abs(t.rate - rate) < 1e-9).map((t) => t.label);
+  return tiers.length ? `${tiers.join(" or ")} tier` : "custom rate";
 }
 
 /** The legs a completed project owes, whole naira, zero amounts left out. Pure given the names. */
@@ -120,7 +131,7 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames): LegRow[] {
       recipientId: p.ambassador.id,
       recipientName: p.ambassador.fullName,
       amount: Math.round(p.ambassadorCommission ?? 0),
-      basis: `${pct(p.ambassadorCommRate, 10)} ${sub ? "Sub-Ambassador" : "ambassador"} rate (${tierLabel(p.ambassador.tier)} tier)`,
+      basis: `${pct(p.ambassadorCommRate, 10)} ${sub ? "Sub-Ambassador" : "ambassador"} rate (${rateTierLabel(p.ambassadorCommRate)})`,
     });
   }
   if (p.parentAmbassadorId && p.parentAmbassador && (p.parentCommission ?? 0) > 0) {
@@ -170,26 +181,46 @@ export interface ReconcileResult {
   cancelled: number;
 }
 
+/** Ambassador legs are owed from the confirmed downpayment (Phase 3); the rest from completion. */
+const CONVERSION_LEGS: PayoutLeg[] = ["AMBASSADOR", "PARENT"];
+const DEAD_STATUSES = ["CANCELLED", "REFUNDED"];
+
 /**
- * Bring a project's PayoutRecords in line with what it owes now. Only a
- * COMPLETED project produces legs; anything else cancels its PENDING
- * records. A PAID record is never touched. A leg already marked paid on
- * the project before the engine existed is recorded as PAID.
+ * Bring a project's PayoutRecords in line with what it owes now.
+ *
+ * - The ambassador's commission and the Core's override are owed as soon as
+ *   the referred client's downpayment is confirmed (the conversion — "commission
+ *   is paid to ambassadors immediately when the client pays the downpayment"),
+ *   in the month of that downpayment, and stay there through completion.
+ * - The worker, HOG and COO legs are owed when the project is COMPLETED, in
+ *   the completion month (`opts.month` overrides it for a monthly recalculation).
+ * - A cancelled or refunded project owes nothing: its PENDING records are
+ *   cancelled. A PAID record is never touched. A leg already marked paid on
+ *   the project before the engine existed is recorded as PAID.
  */
 export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts: { month?: string } = {}): Promise<ReconcileResult> {
   const project = await tx.project.findUnique({ where: { id: projectDbId }, select: PROJECT_SELECT });
   if (!project) return { created: 0, updated: 0, cancelled: 0 };
   const execs = await execNames(tx);
-  const produced = project.status === "COMPLETED" ? legsFor(project, execs) : [];
-  const month = opts.month ?? monthKeyOf(project.finalCompletionDate ?? new Date());
+  const alive = !DEAD_STATUSES.includes(project.status);
+  const converted = alive && project.downpaymentStatus === "Verified";
+  const all = alive ? legsFor(project, execs) : [];
+  const produced = project.status === "COMPLETED" ? all : converted ? all.filter((l) => CONVERSION_LEGS.includes(l.leg)) : [];
+  const completionMonth = opts.month ?? monthKeyOf(project.finalCompletionDate ?? new Date());
+  const conversionMonth = monthKeyOf(project.downpaymentDate ?? project.finalCompletionDate ?? new Date());
   const existing = await tx.payoutRecord.findMany({ where: { projectId: projectDbId } });
   const result: ReconcileResult = { created: 0, updated: 0, cancelled: 0 };
   const keep = new Set<string>();
+  // Ambassadors whose records change here: their cached lifetime earnings follow (Phase 3).
+  const touched = new Set<string>();
 
   for (const leg of produced) {
     const key = `${leg.leg}:${leg.recipientId}`;
     keep.add(key);
     const row = existing.find((r) => r.leg === leg.leg && r.recipientId === leg.recipientId);
+    // A conversion leg stays in the month it was first recorded in: records
+    // made before Phase 3 (at completion) are not moved to an earlier month.
+    const month = CONVERSION_LEGS.includes(leg.leg) ? (row?.month ?? conversionMonth) : completionMonth;
     if (!row) {
       const paidBefore = legacyPaid(project, leg.leg);
       await tx.payoutRecord.create({
@@ -203,11 +234,12 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
           amount: leg.amount,
           basis: leg.basis,
           status: paidBefore ? "PAID" : "PENDING",
-          paidAt: paidBefore ? (project.finalCompletionDate ?? new Date()) : null,
+          paidAt: paidBefore ? (project.finalCompletionDate ?? project.downpaymentDate ?? new Date()) : null,
           notes: paidBefore ? "Paid before the payout engine (project flag)" : null,
         },
       });
       result.created += 1;
+      if (leg.recipientType === "AMBASSADOR") touched.add(leg.recipientId);
       continue;
     }
     if (row.status === "PAID") continue;
@@ -219,6 +251,7 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
         data: { amount: leg.amount, basis: leg.basis, recipientName: leg.recipientName, recipientType: leg.recipientType, month, status: "PENDING" },
       });
       result.updated += 1;
+      if (leg.recipientType === "AMBASSADOR") touched.add(leg.recipientId);
     }
   }
   for (const row of existing) {
@@ -226,7 +259,9 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
     if (keep.has(`${row.leg}:${row.recipientId}`)) continue;
     await tx.payoutRecord.update({ where: { id: row.id }, data: { status: "CANCELLED", notes: "No longer owed: the project's legs changed" } });
     result.cancelled += 1;
+    if (row.recipientType === "AMBASSADOR") touched.add(row.recipientId);
   }
+  for (const id of touched) await recountAmbassador(tx, id);
   return result;
 }
 
@@ -257,12 +292,25 @@ export interface CalculateResult extends ReconcileResult {
   projects: number;
 }
 
-/** Re-reconcile every project completed in the month. Idempotent. */
+/** Referred projects whose downpayment was confirmed in the month (their ambassador legs are owed from then). */
+async function convertedProjectIds(month: string): Promise<string[]> {
+  const { start, end } = monthBounds(month);
+  const rows = await db.project.findMany({
+    where: { isProBono: false, ambassadorId: { not: null }, downpaymentStatus: "Verified", status: { notIn: ["CANCELLED", "REFUNDED"] }, downpaymentDate: { gte: start, lt: end } },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/** Re-reconcile every project completed in the month, and every referred project converted in it. Idempotent. */
 export async function calculateMonthlyPayouts(month: string): Promise<CalculateResult> {
-  const ids = await completedProjectIds(month);
+  const completed = await completedProjectIds(month);
+  const converted = (await convertedProjectIds(month)).filter((id) => !completed.includes(id));
+  const ids = [...completed, ...converted];
   const totals: CalculateResult = { month, projects: ids.length, created: 0, updated: 0, cancelled: 0 };
   for (const id of ids) {
-    const r = await db.$transaction((tx) => reconcileProjectPayouts(tx, id, { month }), { timeout: 20_000, maxWait: 10_000 });
+    // Only completed projects take the month as their completion month; a converted one keeps its own dates.
+    const r = await db.$transaction((tx) => reconcileProjectPayouts(tx, id, completed.includes(id) ? { month } : {}), { timeout: 30_000, maxWait: 10_000 });
     totals.created += r.created;
     totals.updated += r.updated;
     totals.cancelled += r.cancelled;

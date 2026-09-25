@@ -15,12 +15,18 @@
  *      The confirmed downpayment Payment row(s) point at the referral.
  *   2. Clients with a referrer and no referral row at all → PENDING
  *      (a student the ambassador brought in who has not ordered yet).
- *   3. Every ambassador: lifetimeReferrals / lifetimeConversions /
+ *   3. Referred projects whose downpayment is confirmed but which are not
+ *      completed (and not cancelled / refunded): the ambassador's commission
+ *      and any Core override become PayoutRecords now, in the downpayment's
+ *      month (Phase 3 Step 13: commission is owed at the conversion, not at
+ *      completion). A leg already marked paid on the project is recorded PAID.
+ *   4. Every ambassador: lifetimeReferrals / lifetimeConversions /
  *      lifetimeEarnings / lastReferralAt / lastConversionAt / tier, with a
  *      tier-log line when the tier moves.
  */
 import { PrismaClient } from "@prisma/client";
 import { recountAmbassador } from "../src/lib/services/ambassador-platform/conversions";
+import { reconcileProjectPayouts } from "../src/lib/services/finance/payouts-engine";
 import { calculateTier } from "../src/lib/ambassadors/tier-utils";
 
 const db = new PrismaClient();
@@ -88,10 +94,28 @@ async function main() {
     }
   }
 
-  // 3. Recount everyone. The dry run previews every tier that would move, so
+  // 3. Payout records for converted, unfinished referred projects.
+  const owing = await db.project.findMany({
+    where: {
+      isProBono: false,
+      ambassadorId: { not: null },
+      downpaymentStatus: "Verified",
+      status: { notIn: ["COMPLETED", "CANCELLED", "REFUNDED"] },
+      ambassadorCommission: { gt: 0 },
+      payoutRecords: { none: { leg: "AMBASSADOR", status: { not: "CANCELLED" } } },
+    },
+    select: { id: true, projectId: true, ambassadorCommission: true, parentCommission: true, ambassadorCommPaid: true, downpaymentDate: true, ambassador: { select: { fullName: true } } },
+  });
+  console.log(`3. Converted, unfinished referred projects without a payout record: ${owing.length}`);
+  for (const p of owing) {
+    console.log(`   ${p.projectId}: ${p.ambassador?.fullName ?? "?"} ₦${Math.round(p.ambassadorCommission ?? 0)}${p.parentCommission ? ` + Core ₦${Math.round(p.parentCommission)}` : ""}${p.ambassadorCommPaid ? " (already paid)" : ""}, downpayment ${p.downpaymentDate?.toISOString().slice(0, 10) ?? "?"}`);
+    if (apply) await db.$transaction((tx) => reconcileProjectPayouts(tx, p.id), { timeout: 30_000, maxWait: 10_000 });
+  }
+
+  // 4. Recount everyone. The dry run previews every tier that would move, so
   //    the founder sees who goes up or down before anything is written.
   const ambassadors = await db.ambassador.findMany({ select: { id: true, fullName: true, tier: true, lifetimeConversions: true } });
-  console.log(`3. Recount ${ambassadors.length} ambassador(s)`);
+  console.log(`4. Recount ${ambassadors.length} ambassador(s)`);
   if (!apply) {
     const existing = await db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED" }, _count: { _all: true } });
     const converted = new Map(existing.map((e) => [e.ambassadorId, e._count._all]));

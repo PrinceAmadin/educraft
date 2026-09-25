@@ -60,8 +60,9 @@ expect("conversion 45 days ago → Dormant", activityStatus({ lastConversionAt: 
 expect("conversion 61 days ago → Inactive", activityStatus({ lastConversionAt: daysAgo(61), createdAt: daysAgo(200), lifetimeConversions: 4 }, now), "INACTIVE");
 expect("joined 10 days ago, nothing yet → New", activityStatus({ lastConversionAt: null, createdAt: daysAgo(10), lifetimeConversions: 0 }, now), "NEW");
 expect("joined 90 days ago, nothing ever → Inactive", activityStatus({ lastConversionAt: null, createdAt: daysAgo(90), lifetimeConversions: 0 }, now), "INACTIVE");
-expect("a referral submitted 5 days ago counts as activity → Active", activityStatus({ lastConversionAt: daysAgo(70), lastReferralAt: daysAgo(5), createdAt: daysAgo(200), lifetimeConversions: 2 }, now), "ACTIVE");
-expect("joined 10 days ago, a referral logged but no conversion → Active (not New)", activityStatus({ lastConversionAt: null, lastReferralAt: daysAgo(2), createdAt: daysAgo(10), lifetimeConversions: 0 }, now), "ACTIVE");
+// A referral that has not paid is not activity (spec checklist: "a conversion in the last 30 days, not just a referral").
+expect("last conversion 70 days ago, a referral logged yesterday → still Inactive", activityStatus({ lastConversionAt: daysAgo(70), createdAt: daysAgo(200), lifetimeConversions: 2 }, now), "INACTIVE");
+expect("joined 10 days ago, nothing converted yet → New", activityStatus({ lastConversionAt: null, createdAt: daysAgo(10), lifetimeConversions: 0 }, now), "NEW");
 
 // Referral code format: NAME3-SCH-NNN.
 expect("Blessing at UNILAG → BLE-LAG-847", buildReferralCode("Blessing Eze", "UNILAG", () => 0.847), "BLE-LAG-847");

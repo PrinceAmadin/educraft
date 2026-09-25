@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
+import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
 
 /**
  * Referral tracking (Phase 3 Section 2 / Step 4).
@@ -180,9 +181,13 @@ export async function recordConversion(tx: Tx, projectDbId: string, opts: { paym
     });
   }
   await tx.payment.updateMany({
-    where: { projectId: projectDbId, type: "CLIENT_DOWNPAYMENT", status: "Confirmed", referralId: null, ...(opts.paymentId ? {} : {}) },
+    where: { projectId: projectDbId, type: "CLIENT_DOWNPAYMENT", status: "Confirmed", referralId: null },
     data: { referralId: row.id },
   });
+  // The bridge to the Finance Platform (Step 13): the ambassador's commission
+  // (and the Core's override) become PayoutRecords now, in this month, for the
+  // payout queue — before the recount, so lifetime earnings include them.
+  await reconcileProjectPayouts(tx, projectDbId);
   let result: Awaited<ReturnType<typeof recountAmbassador>> = null;
   for (const id of row.touched) {
     const r = await recountAmbassador(tx, id);
@@ -238,7 +243,7 @@ export async function logReferral(ambassadorId: string, input: LogReferralInput,
     });
     await recountAmbassador(tx, ambassadorId);
     return row;
-  });
+  }, { timeout: 30_000, maxWait: 10_000 });
 }
 
 export interface UpdateReferralInput {
@@ -264,7 +269,7 @@ export async function updateReferral(ambassadorId: string, referralId: string, i
   await db.$transaction(async (tx) => {
     await tx.ambassadorReferral.update({ where: { id: referralId }, data });
     await recountAmbassador(tx, ambassadorId);
-  });
+  }, { timeout: 30_000, maxWait: 10_000 });
 }
 
 /** Every referral of one ambassador, newest first (the detail page shows the last 20; this is the full list). */

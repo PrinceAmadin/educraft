@@ -566,7 +566,7 @@ export async function allocateAmbassador(input: {
     await reconcileProjectPayouts(tx, project.id);
     // The referral row follows the allocation; if the downpayment is already in, it converts now.
     await ensureProjectReferral(tx, project.id, "ADMIN");
-  }, { timeout: 20_000, maxWait: 10_000 });
+  }, { timeout: 30_000, maxWait: 10_000 });
 
   const email = input.notify ? await emailCommission(project.id) : null;
   const emailLater = !email?.sent && project.downpaymentStatus !== "Verified";
@@ -614,7 +614,7 @@ export async function removeAllocation(projectIdOrCode: string): Promise<void> {
     await reconcileProjectPayouts(tx, project.id);
     // No ambassador: the referral no longer counts.
     await cancelProjectReferral(tx, project.id, `Ambassador removed from ${project.projectId}`);
-  }, { timeout: 20_000, maxWait: 10_000 });
+  }, { timeout: 30_000, maxWait: 10_000 });
 }
 
 // ── Picker data ──────────────────────────────────────────────────────────

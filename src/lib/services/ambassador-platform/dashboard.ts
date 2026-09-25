@@ -112,7 +112,7 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
   ]);
   const [recent, weekRows, quarterConversions, challengesPaid, renewalsDue, rhythm] = await Promise.all([
     // Activity over the last 60 days, per ambassador, for "active this month" vs the previous window.
-    db.ambassadorReferral.findMany({ where: { status: { not: "CANCELLED" }, OR: [{ submittedAt: { gte: d60 } }, { convertedAt: { gte: d60 } }] }, select: { ambassadorId: true, submittedAt: true, convertedAt: true } }),
+    db.ambassadorReferral.findMany({ where: { status: "CONVERTED", convertedAt: { gte: d60 } }, select: { ambassadorId: true, convertedAt: true } }),
     db.ambassadorReferral.findMany({ where: { status: { not: "CANCELLED" }, OR: [{ submittedAt: { gte: weeks[0].start } }, { convertedAt: { gte: weeks[0].start } }] }, select: { ambassadorId: true, submittedAt: true, convertedAt: true, status: true } }),
     db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED", convertedAt: { gte: qStart } }, _count: { _all: true } }),
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: quarterKey, bonusPaid: true }, select: { ambassadorId: true } }),
@@ -123,16 +123,16 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
   // ── Stats ──
   const total = ambassadors.length;
   const newThisMonth = ambassadors.filter((a) => a.createdAt >= mStart).length;
-  // "Active this month" = any referral activity in the last 30 days; "last
-  // month" = the same rule as it stood 30 days ago (activity in days 30–60).
+  // "Active this month" = a conversion in the last 30 days (a referral that
+  // has not paid does not count); "last month" = the same rule as it stood 30
+  // days ago (a conversion in days 30–60).
   const activeNow = new Set<string>();
   const activeBefore = new Set<string>();
   for (const r of recent) {
-    for (const d of [r.submittedAt, r.convertedAt]) {
-      if (!d) continue;
-      if (d >= d30) activeNow.add(r.ambassadorId);
-      else if (d >= d60) activeBefore.add(r.ambassadorId);
-    }
+    const d = r.convertedAt;
+    if (!d) continue;
+    if (d >= d30) activeNow.add(r.ambassadorId);
+    else if (d >= d60) activeBefore.add(r.ambassadorId);
   }
   const openIds = new Set(ambassadors.map((a) => a.id));
   const activeCount = [...activeNow].filter((id) => openIds.has(id)).length;

@@ -59,7 +59,7 @@ export const TIER_BADGE: Record<AmbassadorTier, string> = {
   BRONZE: "border-transparent bg-amber-700/15 text-amber-700 dark:text-amber-500",
   SILVER: "border-transparent bg-slate-400/15 text-slate-500 dark:text-slate-300",
   GOLD: "border-transparent bg-gold/15 text-gold",
-  PLATINUM: "border-transparent bg-primary/15 text-primary",
+  PLATINUM: "border-transparent bg-purple/15 text-purple",
 };
 
 export interface TierProgress {

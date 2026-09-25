@@ -83,15 +83,15 @@ export const ACTIVITY_LABELS: Record<ActivityStatus, string> = {
 const DAY = 86_400_000;
 
 /**
- * Active: referral activity (a referral submitted or a conversion) in the
- * last 30 days. Dormant: the last activity was 30–60 days ago. Inactive: 60+
- * days (or never, for someone who joined over 30 days ago). New: joined
- * within 30 days with no conversion yet. Computed from the dates at read
- * time, so it is always current and never has to be swept.
+ * Active: a CONVERSION (a referred client's downpayment confirmed) in the
+ * last 30 days — a referral that has not paid does not count (the spec's
+ * testing checklist). Dormant: the last conversion was 30–60 days ago.
+ * Inactive: 60+ days (or never, for someone who joined over 30 days ago).
+ * New: joined within 30 days with no conversion yet. Computed from the
+ * dates at read time, so it is always current and never has to be swept.
  */
-export function activityStatus(input: { lastConversionAt: Date | null; lastReferralAt?: Date | null; createdAt: Date; lifetimeConversions: number }, now: Date = new Date()): ActivityStatus {
-  const candidates = [input.lastConversionAt, input.lastReferralAt ?? null].filter((d): d is Date => d != null);
-  const last = candidates.length ? new Date(Math.max(...candidates.map((d) => d.getTime()))) : null;
+export function activityStatus(input: { lastConversionAt: Date | null; createdAt: Date; lifetimeConversions: number }, now: Date = new Date()): ActivityStatus {
+  const last = input.lastConversionAt;
   if (!last) {
     return now.getTime() - input.createdAt.getTime() <= 30 * DAY && input.lifetimeConversions === 0 ? "NEW" : "INACTIVE";
   }

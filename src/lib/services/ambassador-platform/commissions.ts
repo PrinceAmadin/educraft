@@ -372,7 +372,7 @@ export async function processQuarterBonuses(key: string, byUserId: string, now: 
             update: { actualCount: r.challenge.count, completed: true, completedAt: now, bonusAmount: w.amount },
           });
         }
-      });
+      }, { timeout: 30_000, maxWait: 10_000 });
       created += 1;
       amount += w.amount;
     }
