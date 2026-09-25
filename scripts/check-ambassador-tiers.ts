@@ -2,7 +2,7 @@
  * Phase 3 step 2: the tier utilities are pure, so they are proven here
  * without a database. `npm run check:tiers`.
  */
-import { activityStatus, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, tierProgressPercent, tierRate } from "../src/lib/ambassadors/tier-utils";
+import { activityStatus, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, percentLabel, subTeamThresholdLabel, tierProgressPercent, tierRate } from "../src/lib/ambassadors/tier-utils";
 import { calculateAmbassadorSplit, COMMISSION_RATES, nairaPercent } from "../src/lib/finance/commission-config";
 import { badgesFor, isBackFromDormant, isPromotion } from "../src/lib/ambassadors/badges";
 import { leaderboardMessage, spotlightMessage } from "../src/lib/ambassadors/spotlight";
@@ -32,6 +32,10 @@ for (const [n, left] of [[0, 6], [5, 1], [6, 10], [15, 1], [16, 15], [30, 1], [3
 }
 expect("progress through Bronze at 3", tierProgressPercent(3), 50);
 expect("progress at Platinum", tierProgressPercent(31), 100);
+
+// Labels derived from the config (no figures typed into components).
+expect("sub-team threshold label", subTeamThresholdLabel(), "Silver (6 conversions)");
+expect("percent labels", [percentLabel(COMMISSION_RATES.ambassador), percentLabel(COMMISSION_RATES.hog), percentLabel(0.12)], ["15%", "2.5%", "12%"]);
 
 // Sub-teams from Silver up.
 expect("Bronze cannot activate a sub-team", isEligibleForSubTeam("BRONZE"), false);

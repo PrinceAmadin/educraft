@@ -63,6 +63,9 @@ export type TierName = (typeof AMBASSADOR_TIERS)[number]["name"];
 /** ₦3,000 per client referred in the quarter, for Platinum ambassadors. */
 export const PLATINUM_QUARTERLY_BONUS_PER_CLIENT = 3000;
 
+/** The quarterly challenge (Phase 3): refer this many paying clients in the quarter for a flat bonus. Any tier. */
+export const QUARTERLY_CHALLENGE = { target: 10, bonus: 35_000, extensionDays: 7 } as const;
+
 /** The tier earned by a lifetime count of paying clients. */
 export function tierFor(payingClients: number): TierName {
   const n = Math.max(0, Math.floor(payingClients));

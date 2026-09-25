@@ -15,7 +15,8 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { db } from "@/lib/db";
 import { CHALLENGE_BONUS, currentQuarterKey, getCommissionHistory, getCommissionMonth, getQuarterTracker, recentQuarterKeys, type BonusState, type TrackerRow } from "@/lib/services/ambassador-platform/commissions";
 import { currentMonthKey } from "@/lib/services/finance/surplus";
-import { PLATINUM_QUARTERLY_BONUS_PER_CLIENT } from "@/lib/finance/commission-config";
+import { COMMISSION_RATES, PLATINUM_QUARTERLY_BONUS_PER_CLIENT } from "@/lib/finance/commission-config";
+import { percentLabel } from "@/lib/ambassadors/tier-utils";
 import { commissionHistoryQuerySchema, commissionMonthQuerySchema, quarterQuerySchema } from "@/lib/validations/ambassador-platform";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
@@ -73,7 +74,7 @@ async function CurrentMonth({ month }: { month: string }) {
       <section className={STATS_GRID} aria-label="Month totals">
         <StatsCard label="Total commissions" value={formatNaira(data.totals.total)} detail={`${data.totals.recipients} ambassador${data.totals.recipients === 1 ? "" : "s"} · ${data.label}`} icon={LuWallet} />
         <StatsCard label="Personal referrals" value={formatNaira(data.totals.personal)} detail="Their own tier rate" icon={LuUsers} />
-        <StatsCard label="Core overrides" value={formatNaira(data.totals.overrides)} detail="15% minus the Sub's rate" icon={LuUsers} tone="gold" />
+        <StatsCard label="Core overrides" value={formatNaira(data.totals.overrides)} detail={`${percentLabel(COMMISSION_RATES.ambassador)} minus the Sub's rate`} icon={LuUsers} tone="gold" />
         <StatsCard label="Still to pay" value={formatNaira(data.totals.unpaid)} detail={data.totals.paid > 0 ? `${formatNaira(data.totals.paid)} paid so far` : "Nothing paid yet"} icon={LuWallet} tone={data.totals.unpaid > 0 ? "danger" : "success"} href="/admin/finance/payouts" />
       </section>
 

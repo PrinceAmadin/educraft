@@ -1,7 +1,7 @@
 import type { AmbassadorTier, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { activityStatus, calculateTier, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
-import { PLATINUM_QUARTERLY_BONUS_PER_CLIENT } from "@/lib/finance/commission-config";
+import { PLATINUM_QUARTERLY_BONUS_PER_CLIENT, QUARTERLY_CHALLENGE } from "@/lib/finance/commission-config";
 import { getPayoutMonth, type AmbassadorPayoutGroup } from "@/lib/services/finance/payouts-engine";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { formatNaira } from "@/lib/utils";
@@ -15,8 +15,8 @@ import type { CommissionHistoryQuery } from "@/lib/validations/ambassador-platfo
  * project, one `bonusKey` per bonus), paid through the same queue.
  */
 
-export const CHALLENGE_TARGET = 10;
-export const CHALLENGE_BONUS = 35_000;
+export const CHALLENGE_TARGET = QUARTERLY_CHALLENGE.target;
+export const CHALLENGE_BONUS = QUARTERLY_CHALLENGE.bonus;
 const DAY = 86_400_000;
 
 // ── Quarter keys: the platform writes "Q3-2026"; finance's quarterOf() says "2026-Q3" ──
@@ -246,7 +246,7 @@ export interface TrackerRow {
   name: string;
   tier: AmbassadorTier;
   quarterConversions: number;
-  /** Platinum only: ₦3,000 per client this quarter. */
+  /** Platinum only: PLATINUM_QUARTERLY_BONUS_PER_CLIENT per client this quarter. */
   platinum: { eligible: boolean; earned: number; state: BonusState; toPlatinum: number | null };
   /** `endDate` is the exclusive end (the first instant after the window); `lastDay` is the last day that counts, for display. */
   challenge: { count: number; target: number; completed: boolean; endDate: string; lastDay: string; extensionGranted: boolean; extensionEndDate: string | null; bonus: number; state: BonusState; canExtend: boolean };
@@ -388,7 +388,7 @@ export async function grantChallengeExtension(ambassadorId: string, key: string,
   if (!ambassador) throw new CommissionsError("Ambassador not found");
   const existing = await db.ambassadorQuarterlyChallenge.findUnique({ where: { ambassadorId_quarter: { ambassadorId, quarter: key } } });
   if (existing?.extensionGranted) throw new CommissionsError(`${ambassador.fullName} already has their one extension for ${quarter.label}`);
-  const extensionEndDate = new Date(quarter.end.getTime() + 7 * DAY);
+  const extensionEndDate = new Date(quarter.end.getTime() + QUARTERLY_CHALLENGE.extensionDays * DAY);
   const count = await db.ambassadorReferral.count({ where: { ambassadorId, status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } } });
   await db.ambassadorQuarterlyChallenge.upsert({
     where: { ambassadorId_quarter: { ambassadorId, quarter: key } },

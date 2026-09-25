@@ -38,6 +38,17 @@ export function isEligibleForSubTeam(tier: AmbassadorTier): boolean {
   return tier !== "BRONZE";
 }
 
+/** "Silver (6 conversions)": the first tier that may lead a sub-team, from the config. */
+export function subTeamThresholdLabel(): string {
+  const first = LADDER.find((t) => isEligibleForSubTeam(t.name))!;
+  return `${first.label} (${first.minConversions} conversions)`;
+}
+
+/** 0.15 → "15%", 0.025 → "2.5%". */
+export function percentLabel(rate: number): string {
+  return `${Math.round(rate * 1000) / 10}%`;
+}
+
 /** Commission fraction for a tier (BRONZE → 0.10). */
 export function tierRate(tier: AmbassadorTier): number {
   return rateForTier(tier);

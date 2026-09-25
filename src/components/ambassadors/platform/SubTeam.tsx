@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
-import { tierLabel } from "@/lib/ambassadors/tier-utils";
+import { percentLabel, subTeamThresholdLabel, tierLabel } from "@/lib/ambassadors/tier-utils";
+import { COMMISSION_RATES } from "@/lib/finance/commission-config";
 import type { DirectoryDetail } from "@/lib/services/ambassador-platform/directory";
 import type { AmbassadorTier } from "@prisma/client";
 
@@ -89,10 +90,10 @@ export function SubTeam({ coreId, coreName, coreTier, subTeam, canHaveSubs, slot
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {!canHaveSubs
-          ? `${tierLabel(coreTier)} cannot lead a team yet — a Core activates their sub-team at Silver (6 conversions).`
+          ? `${tierLabel(coreTier)} cannot lead a team yet — a Core activates their sub-team at ${subTeamThresholdLabel()}.`
           : slotsLeft === 0
             ? `Team is full — the maximum is ${MAX_SUB_AMBASSADORS}.`
-            : `${slotsLeft} slot${slotsLeft === 1 ? "" : "s"} remaining — max ${MAX_SUB_AMBASSADORS}. EduCraft pays 15% in total: the Sub earns their tier rate, the Core the rest.`}
+            : `${slotsLeft} slot${slotsLeft === 1 ? "" : "s"} remaining — max ${MAX_SUB_AMBASSADORS}. EduCraft pays ${percentLabel(COMMISSION_RATES.ambassador)} in total: the Sub earns their tier rate, the Core the rest.`}
       </p>
       {error ? (
         <p className="mt-2 flex items-center gap-1.5 text-sm text-danger" role="alert">

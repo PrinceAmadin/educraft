@@ -1,41 +1,52 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuArrowRight } from "react-icons/lu";
+import { LuArrowRight, LuCalendarDays, LuHandshake, LuLayoutDashboard, LuNetwork, LuTrophy, LuWallet } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { InProgressNotice } from "@/components/shared/InProgressNotice";
+import type { AppIcon } from "@/lib/icons";
 
 export const metadata: Metadata = { title: "Growth" };
 
-/** The Head of Growth's home beyond the ambassador roster. Real page, Phase 3 content. */
+const TOOLS: { href: string; title: string; body: string; icon: AppIcon }[] = [
+  { href: "/admin/ambassadors", title: "Ambassador dashboard", body: "Active this month against the activation target, referrals and conversions against last month, and who needs a hand.", icon: LuLayoutDashboard },
+  { href: "/admin/ambassadors/leaderboard", title: "Leaderboard", body: "Rankings by conversions, badges, and the Friday spotlight with its message.", icon: LuTrophy },
+  { href: "/admin/ambassadors/commissions?tab=quarterly", title: "Quarterly challenge", body: "Every ambassador's progress toward the challenge and the Platinum bonus, and processing them at quarter end.", icon: LuWallet },
+  { href: "/admin/ambassadors/network", title: "Network map", body: "Core ambassadors and their Sub-teams, and who is ready to lead one.", icon: LuNetwork },
+  { href: "/admin/ambassadors/partnerships", title: "Partnerships", body: "Student unions and faculty associations, what they cost the Growth Fund and the projects they brought.", icon: LuHandshake },
+  { href: "/admin/ambassadors/content", title: "Content hub", body: "The weekly content rhythm, how consistently it went out, and the pre-season campaign.", icon: LuCalendarDays },
+];
+
+/** The Head of Growth's front door: the Ambassador Platform's tools, and what is still to come. */
 export default function GrowthPage() {
   return (
     <div className="space-y-8">
-      <PageHeader
-        title="Growth"
-        description="How EduCraft is reaching students: ambassador activation, school by school reach, campaigns and the targets behind the Head of Growth's bonuses."
-      />
+      <PageHeader title="Growth" description="How EduCraft reaches students: the ambassador network, the weekly rhythm, partnerships and campaigns." />
+
+      <section aria-label="Growth tools" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {TOOLS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <Link key={t.href} href={t.href} className="group surface flex flex-col gap-2 p-5 transition-shadow hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <Icon className="size-4 text-primary" aria-hidden />
+                {t.title}
+                <LuArrowRight className="ml-auto size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+              </span>
+              <span className="text-[13px] leading-relaxed text-muted-foreground">{t.body}</span>
+            </Link>
+          );
+        })}
+      </section>
 
       <InProgressNotice
-        phase="Phase 3 — Ambassador Platform"
-        summary="This page becomes the growth dashboard."
+        phase="a later phase"
+        summary="Still to build on this page."
         items={[
-          "Ambassador activation rate each month, against the 30% target",
           "Every school with its active ambassadors and paying clients, and the ones approaching 10+",
-          "Campaign tracking: what was sent, who clicked, who ordered",
-          "Quarterly challenge progress per ambassador",
-          "New-client target for the period and how far past it the team is",
-          "The Head of Growth's bonus tracker, calculated from all of the above",
+          "The new-client target for the period and how far past it the team is",
+          "The Head of Growth's own bonus tracker, calculated from the numbers above",
         ]}
       />
-
-      <p className="text-sm text-muted-foreground">
-        Until then, the roster, click tracking and applications live under{" "}
-        <Link href="/admin/ambassadors" className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline">
-          Ambassadors
-          <LuArrowRight className="size-3.5" aria-hidden />
-        </Link>
-        .
-      </p>
     </div>
   );
 }

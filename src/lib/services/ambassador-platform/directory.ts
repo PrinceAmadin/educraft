@@ -1,6 +1,6 @@
 import { Prisma, type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
-import { activityStatus, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, nextTier, tierProgressPercent, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
+import { activityStatus, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, nextTier, subTeamThresholdLabel, tierProgressPercent, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
 import { nextId } from "@/lib/services/projects";
 import { setAmbassadorParent, AmbassadorHierarchyError } from "@/lib/services/ambassadors";
@@ -480,7 +480,7 @@ export async function createDirectoryAmbassador(input: CreateDirectoryAmbassador
     core = await db.ambassador.findUnique({ where: { id: input.coreAmbassadorId || "" }, select: { id: true, fullName: true, tier: true, parentId: true, status: true, _count: { select: { children: true } } } });
     if (!core) throw new DirectoryError("Pick the Core ambassador they work under");
     if (core.parentId) throw new DirectoryError(`${core.fullName} is a Sub-ambassador — a sub-team is one level deep`);
-    if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs Silver or above (6 conversions) to take on Sub-ambassadors`);
+    if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs ${subTeamThresholdLabel()} or more to take on Sub-ambassadors`);
     if (core._count.children >= MAX_SUB_AMBASSADORS) throw new DirectoryError(`${core.fullName} already has ${MAX_SUB_AMBASSADORS} Sub-ambassadors, the maximum`);
     if (CLOSED_STATUSES.includes(core.status)) throw new DirectoryError(`${core.fullName} is ${core.status.toLowerCase()}`);
   }
@@ -565,7 +565,7 @@ export async function addSubAmbassador(coreId: string, subId: string): Promise<v
   const core = await db.ambassador.findUnique({ where: { id: coreId }, select: { id: true, fullName: true, tier: true, parentId: true } });
   if (!core) throw new DirectoryError("Core ambassador not found");
   if (core.parentId) throw new DirectoryError(`${core.fullName} is a Sub-ambassador themselves — a sub-team is one level deep`);
-  if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs Silver or above (6 conversions) before taking on Sub-ambassadors`);
+  if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs ${subTeamThresholdLabel()} or more before taking on Sub-ambassadors`);
   try {
     await setAmbassadorParent(subId, { parentId: coreId });
   } catch (error) {
