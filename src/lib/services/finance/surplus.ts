@@ -190,8 +190,15 @@ export async function netRevenueForMonths(months: string[]): Promise<number> {
   if (months.length === 0) return 0;
   const [fy, fm] = months[0].split("-").map(Number);
   const [ty, tm] = months[months.length - 1].split("-").map(Number);
-  const start = new Date(Date.UTC(fy, fm - 1, 1));
-  const end = new Date(Date.UTC(ty, tm, 1));
+  return netRevenueBetween(new Date(Date.UTC(fy, fm - 1, 1)), new Date(Date.UTC(ty, tm, 1)));
+}
+
+/**
+ * Confirmed client money less confirmed refunds in [start, end), by
+ * `Payment.date` — the one revenue definition, shared by the month helper
+ * above and the Command Center's same-point-last-month comparisons.
+ */
+export async function netRevenueBetween(start: Date, end: Date): Promise<number> {
   const [inflow, refunds] = await Promise.all([
     db.payment.aggregate({
       where: { status: "Confirmed", direction: "INFLOW", type: { in: ["CLIENT_DOWNPAYMENT", "CLIENT_BALANCE"] }, date: { gte: start, lt: end } },

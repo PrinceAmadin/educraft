@@ -50,6 +50,22 @@ const SETTINGS: { key: string; value: string }[] = [
   { key: "company_bank_name", value: "" },
   { key: "company_account_number", value: "" },
   { key: "company_account_name", value: "" },
+  // Command Center RAG thresholds (Phase 5): rates as fractions, naira whole.
+  // Source of truth for the defaults: THRESHOLD_DEFAULTS in src/lib/command-center/rag.ts.
+  { key: "cc.ops.delivery_rate.target", value: "0.95" },
+  { key: "cc.ops.delivery_rate.amber", value: "0.85" },
+  { key: "cc.ops.qa_first_pass.target", value: "0.80" },
+  { key: "cc.ops.qa_first_pass.amber", value: "0.72" },
+  { key: "cc.ops.supervisor_accept.target", value: "0.95" },
+  { key: "cc.ops.supervisor_accept.amber", value: "0.87" },
+  { key: "cc.growth.activation_rate.target", value: "0.25" },
+  { key: "cc.growth.activation_rate.amber", value: "0.20" },
+  { key: "cc.growth.content_consistency.target", value: "1.00" },
+  { key: "cc.growth.content_consistency.amber", value: "0.85" },
+  { key: "cc.finance.ops_reserve_min", value: "150000" },
+  { key: "cc.finance.ops_reserve_critical", value: "80000" },
+  { key: "cc.quality.tier2_pass.target", value: "0.85" },
+  { key: "cc.quality.tier2_pass.amber", value: "0.78" },
 ];
 
 /* ── EXECUTIVES ───────────────────────────────────────────── */
