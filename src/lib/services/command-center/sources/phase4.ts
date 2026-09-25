@@ -59,11 +59,13 @@ export async function tier2FlagCounts(now: Date): Promise<Tier2FlagCounts | null
   const since = new Date(now.getTime() - TIER2_FLAG_WINDOW_DAYS * DAY_MS);
   return afterMerge(4, "WorkerFlag", [{ model: "WorkerFlag" }], async () => {
     // requires Phase 4 merge: WorkerFlag (kind TIER2_REFERENCE, createdAt, resolvedAt).
-    const groups = (await p4.workerFlag.groupBy({
+    const rows = await p4.workerFlag.groupBy({
       by: ["workerId"],
       where: { kind: "TIER2_REFERENCE", createdAt: { gte: since }, resolvedAt: null },
       _count: { _all: true },
-    })) as { workerId: string; _count: { _all: number } }[];
+    });
+    // Cast apart from the call: an assertion on the call itself breaks Prisma's groupBy inference.
+    const groups = rows as { workerId: string; _count: { _all: number } }[];
     return {
       total: groups.reduce((sum, g) => sum + g._count._all, 0),
       byWorker: new Map(groups.map((g) => [g.workerId, g._count._all])),
@@ -270,11 +272,12 @@ export async function correctionRoundThreeProjects(): Promise<CorrectionRoundPro
   if (rows.length === 0) return [];
   const latest = await afterMerge(4, "SupervisorCorrection", [{ model: "SupervisorCorrection" }], async () => {
     // requires Phase 4 merge: SupervisorCorrection.roundNumber (one row per round).
-    const groups = (await p4.supervisorCorrection.groupBy({
+    const maxRounds = await p4.supervisorCorrection.groupBy({
       by: ["projectId"],
       where: { projectId: { in: rows.map((r) => r.id) } },
       _max: { roundNumber: true },
-    })) as { projectId: string; _max: { roundNumber: number | null } }[];
+    });
+    const groups = maxRounds as { projectId: string; _max: { roundNumber: number | null } }[];
     return new Map(groups.map((g) => [g.projectId, g._max.roundNumber ?? 0]));
   });
   return rows.flatMap((r) => {
@@ -303,11 +306,12 @@ export async function correctionRoundCounts(projectIds: readonly string[]): Prom
   return afterMerge(4, "SupervisorCorrection", [{ model: "SupervisorCorrection" }], async () => {
     if (projectIds.length === 0) return new Map<string, number>();
     // requires Phase 4 merge: SupervisorCorrection, one row per round.
-    const groups = (await p4.supervisorCorrection.groupBy({
+    const counts = await p4.supervisorCorrection.groupBy({
       by: ["projectId"],
       where: { projectId: { in: [...projectIds] } },
       _count: { _all: true },
-    })) as { projectId: string; _count: { _all: number } }[];
+    });
+    const groups = counts as { projectId: string; _count: { _all: number } }[];
     return new Map(groups.map((g) => [g.projectId, g._count._all]));
   });
 }
