@@ -45,7 +45,8 @@ expect("FYP-FULL, default 5 chapters", keys("FYP-FULL"), [
   "ch5:BALANCE",
   "final:BALANCE",
 ]);
-expect("THESIS with 6 chapters", keys("THESIS", 6).length, 7);
+// Five chapters at most in every report (founder, 26 Sept 2026): an order for 6 gets 5 chapters + the complete document.
+expect("THESIS asked for 6 chapters is capped at 5", keys("THESIS", 6).length, 6);
 expect("COMBO-PR has a proposal that opens with the downpayment", keys("COMBO-PR")[0], "proposal:DOWNPAYMENT");
 expect("COMBO-PRDS ends with slides after the balance", keys("COMBO-PRDS").slice(-1), ["slides:BALANCE"]);
 expect("COMBO-RS has no proposal", keys("COMBO-RS").some((k) => k.startsWith("proposal")), false);

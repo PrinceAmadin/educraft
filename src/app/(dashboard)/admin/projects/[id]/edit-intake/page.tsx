@@ -43,6 +43,7 @@ export default async function EditIntakePage({ params }: { params: { id: string 
     chapterCount: s(project.chapterCount),
     referencingStyle: s(project.referencingStyle),
     dataRequirements: s(project.dataRequirements),
+    intakeModeAnswer: s(project.intakeModeAnswer),
     minimumPages: s(project.minimumPages),
     clientDeadline: project.clientDeadline ? project.clientDeadline.toISOString().slice(0, 10) : "",
     departmentOutline: s(project.departmentOutline),

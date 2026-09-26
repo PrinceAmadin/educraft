@@ -121,6 +121,62 @@ export const PROJECT_TYPES = [
   { value: "NOT_APPLICABLE", label: "Not applicable" },
 ] as const;
 
+/**
+ * "How will your project collect its information?" (report production, D3): the
+ * client's own answer, one of the three signals behind the research mode the COO
+ * approves. Plain language on purpose: the client should not need to know the
+ * academic terms. A–E map to Modes 1–5; "not sure" is stored as no answer.
+ */
+export const INTAKE_MODE_QUESTION = "How will your project collect its information?";
+export const INTAKE_MODE_HINT = "Pick what you (or your supervisor) expect the project to do.";
+export const INTAKE_MODE_OPTIONS = [
+  {
+    value: "A",
+    title: "I will read books, journals and legal cases, and make an argument",
+    detail: "My project analyses existing knowledge more than it collects new data.",
+    examples: "Legal analysis, historical research, literary criticism, theoretical frameworks",
+  },
+  {
+    value: "B",
+    title: "I will design a questionnaire or survey for people to fill out",
+    detail: "I will then analyse their responses with SPSS, Excel or similar software.",
+    examples: "A survey of nurses' attitudes, a study of students' performance, consumer behaviour research",
+  },
+  {
+    value: "C",
+    title: "I will design and build something: a software system, a device, a machine or an app",
+    detail: "My project creates something that works, then tests it.",
+    examples: "Hospital management system, smart irrigation device, banking app, automated attendance system",
+  },
+  {
+    value: "D",
+    title: "I will run experiments in a lab, a greenhouse or a field",
+    detail: "I will collect samples and measure things such as bacteria growth, soil nutrients, crop yield or chemical reactions.",
+    examples: "Antimicrobial activity study, effect of fertiliser on maize yield, proximate analysis of food samples",
+  },
+  {
+    value: "E",
+    title: "I will download published data and analyse it with statistical software",
+    detail: "Data from the CBN, NBS, the World Bank or similar sources, to study trends, relationships or models.",
+    examples: "Effect of exchange rate on GDP, inflation and interest rates, stock market analysis",
+  },
+  {
+    value: "NOT_SURE",
+    title: "I'm not sure yet",
+    detail: "Choose this if your supervisor hasn't said. We will work it out from your topic and department.",
+    examples: null,
+  },
+] as const;
+
+/** Short labels for staff screens (Requirements tab, edit forms). */
+export const INTAKE_MODE_LABEL: Record<"A" | "B" | "C" | "D" | "E", string> = {
+  A: "A: reads and argues (thematic)",
+  B: "B: survey or questionnaire",
+  C: "C: builds something",
+  D: "D: lab or field experiments",
+  E: "E: published (secondary) data",
+};
+
 /** Quick-add suggestions for a worker's specialties (department areas). */
 export const COMMON_SPECIALTIES = [
   "Mechanical Engineering",

@@ -29,7 +29,8 @@ export type ProjectNoteKind =
   | "STATUS"
   | "CLIENT_UPDATE"
   | "RESEARCH"
-  | "QA";
+  | "QA"
+  | "MODE";
 
 export async function findProject(idOrCode: string) {
   const project = await db.project.findFirst({

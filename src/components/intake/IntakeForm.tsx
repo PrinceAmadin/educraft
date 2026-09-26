@@ -28,6 +28,7 @@ import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters 
 import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { AttachmentsField, UploadBusyContext } from "@/components/intake/AttachmentsField";
 import { VariantField, type ServiceVariantProp } from "@/components/intake/VariantField";
+import { ModeAnswerField } from "@/components/intake/ModeAnswerField";
 import { formatNaira } from "@/lib/utils";
 
 interface ServiceProp {
@@ -65,7 +66,7 @@ const DATA_OPTIONS = [
 const STEP_FIELDS: Record<IntakeTemplate, Record<string, (keyof IntakeSubmitInput)[]>> = {
   academic_fyp: {
     personal: ["fullName", "phone", "email", "universityId", "faculty", "department", "level", "matricNumber", "referralCode"],
-    project: ["projectTitle", "supervisorName", "hodName", "projectType", "chapterCount", "referencingStyle", "dataRequirements", "minimumPages"],
+    project: ["projectTitle", "intakeModeAnswer", "supervisorName", "hodName", "projectType", "chapterCount", "referencingStyle", "dataRequirements", "minimumPages"],
     requirements: ["departmentOutline", "proposalNotes", "specialInstructions", "clientDeadline", "isExpressDelivery"],
     prelims: ["dedicationType", "dedicationDetails", "acknowledgmentDetails"],
     review: ["agreeTerms"],
@@ -157,6 +158,7 @@ export function IntakeForm({
       supervisorName: "",
       hodName: "",
       projectType: "",
+      intakeModeAnswer: "",
       referencingStyle: "",
       dataRequirements: "",
       minimumPages: "",
@@ -666,6 +668,7 @@ function FypProjectStep() {
       <Field label="Project topic" required htmlFor="projectTitle" error={errors.projectTitle?.message as string | undefined}>
         <Input id="projectTitle" {...register("projectTitle")} />
       </Field>
+      <ModeAnswerField />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Supervisor" htmlFor="supervisorName">
           <Input id="supervisorName" {...register("supervisorName")} />

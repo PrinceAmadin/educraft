@@ -40,6 +40,8 @@ interface RerunState {
   rerunsUsed: number;
   freeRerunsLeft: number;
   needsApproval: boolean;
+  /** Chapters have been generated from this research: it can no longer be re-run. */
+  lockedByGeneration?: boolean;
   request: {
     id: string;
     status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
@@ -161,6 +163,19 @@ function RerunControl({
 
   if (!rerun) return null;
   const req = rerun.request;
+
+  // A re-run would delete the references the generated chapters cite; the server refuses it too.
+  if (rerun.lockedByGeneration) {
+    return (
+      <div className="min-w-0 space-y-1.5">
+        <Button size="sm" variant="outline" disabled>
+          <LuRotateCcw className="size-4" aria-hidden />
+          Run research again
+        </Button>
+        <p className="text-xs text-muted-foreground">Chapters have been written from this research, so it can no longer be re-run.</p>
+      </div>
+    );
+  }
 
   const mode: "free" | "pending" | "approved" | "request" =
     !rerun.needsApproval ? "free" : req?.status === "PENDING" ? "pending" : req?.status === "APPROVED" ? "approved" : "request";

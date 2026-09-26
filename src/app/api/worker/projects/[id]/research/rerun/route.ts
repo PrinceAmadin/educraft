@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireWorker, serverError } from "@/lib/api";
 import { ResearchError, rerunResearchJob } from "@/lib/services/research";
-import { ResearchApprovalRequiredError } from "@/lib/services/research-runs";
+import { ResearchApprovalRequiredError, ResearchLockedError } from "@/lib/services/research-runs";
 import { scheduleResearchStep } from "@/lib/services/research-runner";
 
 // Clears the previous run's Drive files before starting again.
@@ -21,6 +21,9 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     await scheduleResearchStep(job.id);
     return NextResponse.json({ job });
   } catch (error) {
+    if (error instanceof ResearchLockedError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+    }
     if (error instanceof ResearchApprovalRequiredError) {
       return NextResponse.json({ error: error.message, code: "APPROVAL_REQUIRED" }, { status: 403 });
     }

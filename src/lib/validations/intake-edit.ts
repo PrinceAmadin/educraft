@@ -60,6 +60,7 @@ export const intakeEditSchema = z.object({
       chapterCount: optionalInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
       referencingStyle: blankOr(z.enum(referencingValues)),
       dataRequirements: blankOr(z.enum(dataValues)),
+      intakeModeAnswer: blankOr(z.enum(["A", "B", "C", "D", "E"])),
       minimumPages: text(1000),
       clientDeadline: blankOr(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date")),
       departmentOutline: text(6000),

@@ -325,6 +325,8 @@ export async function submitIntake(
           chapterCount: isChapterService(input.serviceCode) ? chapters.length : (input.chapterCount ?? null),
           referencingStyle: input.referencingStyle ? input.referencingStyle : null,
           dataRequirements: input.dataRequirements ? input.dataRequirements : null,
+          // "Not sure" is stored as no answer: the COO decides from the topic and department.
+          intakeModeAnswer: input.intakeModeAnswer && input.intakeModeAnswer !== "NOT_SURE" ? input.intakeModeAnswer : null,
           minimumPages: input.minimumPages || null,
           departmentOutline: input.departmentOutline || null,
           specialInstructions: isChapterService(input.serviceCode)

@@ -38,7 +38,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
-import type { Project, Reference, ReferencingStyle } from "@prisma/client";
+import type { Project, Reference } from "@prisma/client";
 import { referenceListEntries } from "@/lib/research-references-doc";
 import {
   MODE_NAMES,
@@ -48,6 +48,9 @@ import {
   type ResearchModeNumber,
   type SectionKey,
 } from "./department-map";
+import { STYLE_LABEL, citationPlacementFor, type CitationPlacement, type ReferencingStyleKey } from "./referencing";
+
+export type { CitationPlacement, ReferencingStyleKey } from "./referencing";
 
 const PROMPTS_ROOT = path.join(process.cwd(), "prompts");
 
@@ -55,10 +58,6 @@ const PROMPTS_ROOT = path.join(process.cwd(), "prompts");
 export type ChapterNumber = 1 | 2 | 3 | 4 | 5;
 type FileChapter = ChapterNumber;
 
-/** The stored styles plus the ones B2 adds (NALT, NMCN and the two Chicago variants).
- *  Collapse into the Prisma enum once the COO card migration adds them. */
-export type ReferencingStyleKey = ReferencingStyle | "NALT" | "NMCN" | "CHICAGO_AUTHOR_DATE" | "CHICAGO_NOTES_BIBLIOGRAPHY";
-export type CitationPlacement = "MODE_A" | "MODE_B" | "MODE_C" | "NOT_APPLICABLE";
 export type PromptReference = Pick<Reference, "title" | "proposedTitle" | "authors" | "year" | "journal" | "doi" | "abstract">;
 /** The intake fields a chapter prompt reads, straight from the Project row. */
 export type ProjectPromptFields = Pick<
@@ -503,18 +502,6 @@ function stripImageGuidance(paragraphs: string[]): string[] {
 
 // ─── Value rules ───────────────────────────────────────────────────────────────────────────
 
-const STYLE_LABEL: Record<Exclude<ReferencingStyleKey, "CUSTOM" | "CHICAGO">, string> = {
-  APA_7TH: "APA 7th Edition",
-  APA_6TH: "APA 6th Edition",
-  HARVARD: "Harvard",
-  IEEE: "IEEE",
-  MLA: "MLA 9th Edition",
-  CHICAGO_AUTHOR_DATE: "Chicago 17th (Author-Date)",
-  CHICAGO_NOTES_BIBLIOGRAPHY: "Chicago 17th (Notes-Bibliography)",
-  NALT: "NALT",
-  NMCN: "NMCN Style",
-};
-
 /** The wording Chapter 1 uses for each style, so comparisons like "= NALT" read correctly. */
 function styleLabel(style: ReferencingStyleKey, customText?: string | null): string {
   if (style === "CUSTOM") {
@@ -534,31 +521,11 @@ const PLACEMENT_LABEL: Record<CitationPlacement, string> = {
   NOT_APPLICABLE: LOADER_TEXT.inTextPlacement,
 };
 
-/**
- * Where citations go. NALT always uses page footnotes (MODE C), and so does doctrinal Law.
- * B3: every other thematic (Template B) report uses MODE B, document endnotes, in every
- * chapter. Chapter 1 would default Humanities to MODE A, but Chapters 3–5 hard-code
- * MODE B, and one mode for the whole report beats following Chapter 1 alone. Thematic
- * placement is fixed; the COO may override it on standard (Template A) reports only.
- * Standard reports cite in the text, except Chicago notes-bibliography, which is a notes style (MODE C).
- */
+/** Where citations go: the rule is citationPlacementFor in referencing.ts (B3 and the NALT rule are documented there). */
 function resolveCitationPlacement(style: ReferencingStyleKey, template: "A" | "B", section: SectionKey, override?: CitationPlacement | null): CitationPlacement {
-  if (style === "NALT") {
-    if (override && override !== "MODE_C") throw new PromptAssemblyError("NALT always uses page footnotes (MODE C); it cannot be overridden.");
-    return "MODE_C";
-  }
-  if (template === "B") {
-    const fixed = section === "LAW_DOCTRINAL" ? "MODE_C" : "MODE_B";
-    if (override && override !== fixed) {
-      throw new PromptAssemblyError(`Thematic reports use ${PLACEMENT_LABEL[fixed]} in every chapter; the placement cannot be changed.`);
-    }
-    return fixed;
-  }
-  if (style === "CHICAGO_NOTES_BIBLIOGRAPHY" && override === "NOT_APPLICABLE") {
-    throw new PromptAssemblyError("Chicago notes-bibliography is a notes style; its citations cannot be switched to in-text.");
-  }
-  if (override) return override;
-  return style === "CHICAGO_NOTES_BIBLIOGRAPHY" ? "MODE_C" : "NOT_APPLICABLE";
+  const result = citationPlacementFor(style, template, section, override);
+  if ("refused" in result) throw new PromptAssemblyError(result.refused);
+  return result.placement;
 }
 
 const PROJECT_TYPE_LABEL: Record<Project["projectType"], string> = {

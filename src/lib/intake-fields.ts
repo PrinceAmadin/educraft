@@ -1,5 +1,5 @@
 import type { IntakeTemplate } from "@/lib/intake-templates";
-import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
+import { ACADEMIC_LEVELS, INTAKE_MODE_LABEL, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
 
 /**
  * What a client tells us on the intake form, described once, so the admin's
@@ -82,6 +82,15 @@ export const INTAKE_FIELDS: IntakeFieldDef[] = [
     kind: "select",
     options: REFERENCING_STYLES.map((r) => ({ value: r.value, label: r.label })),
     templates: ["academic_fyp", "academic_termpaper", "academic_seminar", "editing"],
+  },
+  {
+    key: "intakeModeAnswer",
+    label: "How the project collects data",
+    target: "project",
+    kind: "select",
+    options: (["A", "B", "C", "D", "E"] as const).map((v) => ({ value: v, label: INTAKE_MODE_LABEL[v] })),
+    templates: FYP,
+    hint: "The client's answer on the form (blank = not sure). The COO confirms the research mode on the Report tab.",
   },
   {
     key: "dataRequirements",

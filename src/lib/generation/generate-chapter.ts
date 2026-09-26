@@ -26,6 +26,8 @@ import { costUsd, usdToNairaRate } from "@/lib/ai-usage-log";
 import { ClaudeStreamError, streamClaude, type ClaudeEffort, type ClaudeStreamInput, type ClaudeStreamResult, type ClaudeTextBlock } from "@/lib/anthropic";
 import type { ClaudeUsage } from "@/lib/anthropic-stream";
 import { loadChapterPrompt, type ChapterPromptInput } from "./prompt-loader";
+import { matchDepartment, resolveSection } from "./department-map";
+import { ModeNotApprovedError, lockApprovedMode, type ApprovedModeSettings } from "@/lib/services/research-mode";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -172,6 +174,24 @@ export async function startChapterGeneration(input: StartChapterInput) {
 
   try {
     return await db.$transaction(async (tx) => {
+      // D3: no chapter without the COO's approved mode, and never in another mode or section.
+      // This locks the project row, so a reopen of the mode waits for (or is refused by) this start.
+      let approved: ApprovedModeSettings;
+      try {
+        approved = await lockApprovedMode(tx, project.id);
+      } catch (error) {
+        if (error instanceof ModeNotApprovedError) throw new GenerationError(error.message, true);
+        throw error;
+      }
+      if (approved.mode !== input.prompt.mode) {
+        throw new GenerationError(`This chapter was asked for in Mode ${input.prompt.mode}, but the COO approved Mode ${approved.mode}.`, true);
+      }
+      const approvedEntry = matchDepartment(approved.department)?.entry;
+      const approvedSection = approvedEntry ? resolveSection(approvedEntry, approved.mode, approved.sectionOverride) : null;
+      if (assembled.section !== approvedSection) {
+        throw new GenerationError(`This chapter would use the ${assembled.section} section, but the COO approved ${approvedSection ?? "a different department"}.`, true);
+      }
+
       const existing = await tx.generationCheckpoint.findUnique({
         where: { projectId_chapterNumber: { projectId: project.id, chapterNumber: chapter } },
         select: { id: true, status: true, lockedUntil: true },
@@ -201,7 +221,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
         },
         select: SNAPSHOT_SELECT,
       });
-    });
+    }, { timeout: 20_000, maxWait: 10_000 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       throw new GenerationError(`Chapter ${chapter} was started by someone else just now.`, true);

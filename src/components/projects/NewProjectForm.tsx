@@ -25,7 +25,7 @@ import {
 } from "@/components/ambassadors/CommissionPickers";
 import { EmailToggle } from "@/components/projects/AmbassadorAllocation";
 import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/projects";
-import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
+import { ACADEMIC_LEVELS, INTAKE_MODE_LABEL, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
 import { COMMISSION_RATE_PRESETS, commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
@@ -129,6 +129,7 @@ export function NewProjectForm({
       referencingStyle: "",
       minimumPages: "",
       projectType: "",
+      intakeModeAnswer: "",
       courseTitle: "",
       courseCode: "",
       specialInstructions: "",
@@ -160,6 +161,7 @@ export function NewProjectForm({
                 "referencingStyle",
                 "minimumPages",
                 "projectType",
+                "intakeModeAnswer",
                 "chapterCount",
               ] as (keyof CreateProjectInput)[])
             : []),
@@ -830,6 +832,16 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
               {PROJECT_TYPES.map((p) => (
                 <option key={p.value} value={p.value}>
                   {p.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="How the project collects data" htmlFor="intakeModeAnswer" hint="What the client said; the COO confirms the research mode later">
+            <Select id="intakeModeAnswer" {...register("intakeModeAnswer")}>
+              <option value="">Not sure</option>
+              {(["A", "B", "C", "D", "E"] as const).map((v) => (
+                <option key={v} value={v}>
+                  {INTAKE_MODE_LABEL[v]}
                 </option>
               ))}
             </Select>

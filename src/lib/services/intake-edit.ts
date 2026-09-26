@@ -138,6 +138,13 @@ export async function updateProjectIntake(
       mark("dataRequirements");
     }
   }
+  if (p.intakeModeAnswer !== undefined) {
+    const next = p.intakeModeAnswer === "" ? null : p.intakeModeAnswer;
+    if (next !== project.intakeModeAnswer) {
+      projectData.intakeModeAnswer = next;
+      mark("intakeModeAnswer");
+    }
+  }
   if (p.chapterCount !== undefined && p.chapterCount !== project.chapterCount) {
     projectData.chapterCount = p.chapterCount;
     mark("chapterCount");

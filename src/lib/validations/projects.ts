@@ -144,6 +144,7 @@ export const createProjectSchema = z
     referencingStyle: z.enum(referencingValues).optional().or(z.literal("")),
     minimumPages: optionalText,
     projectType: z.enum(projectTypeValues).optional().or(z.literal("")),
+    intakeModeAnswer: z.enum(["A", "B", "C", "D", "E"]).optional().or(z.literal("")),
     chapterCount: optionalPositiveInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
 
     // Term paper

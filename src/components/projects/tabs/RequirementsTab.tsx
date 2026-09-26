@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { FileList } from "@/components/projects/tabs/FileList";
 import { OrderDetailsNotice } from "@/components/projects/OrderDetailsNotice";
 import { formatDate } from "@/lib/utils";
+import { INTAKE_MODE_LABEL } from "@/lib/constants";
 import type { ProjectDetail } from "@/lib/services/projects";
 
 const REFERENCING_LABELS: Record<string, string> = {
@@ -54,6 +55,10 @@ export function RequirementsTab({ project }: { project: ProjectDetail }) {
     {
       label: "Data requirements",
       value: project.dataRequirements ? DATA_LABELS[project.dataRequirements] ?? project.dataRequirements : null,
+    },
+    {
+      label: "How it collects data",
+      value: project.intakeModeAnswer ? INTAKE_MODE_LABEL[project.intakeModeAnswer] : null,
     },
     { label: "Project partners", value: project.projectPartners },
     { label: "Client deadline", value: project.clientDeadline ? formatDate(project.clientDeadline) : null },

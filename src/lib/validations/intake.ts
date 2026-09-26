@@ -120,6 +120,8 @@ export const intakeSubmitSchema = z
     chapterCount: optionalPositiveInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
     referencingStyle: z.enum(referencingValues).optional().or(z.literal("")),
     dataRequirements: z.enum(dataValues).optional().or(z.literal("")),
+    // D3: how the project collects its data (A–E, or NOT_SURE); the COO's mode card reads it.
+    intakeModeAnswer: z.enum(["A", "B", "C", "D", "E", "NOT_SURE"]).optional().or(z.literal("")),
     minimumPages: text,
 
     // Term paper
@@ -201,6 +203,10 @@ export const intakeSubmitSchema = z
     ].includes(v.template);
     if (needsTopic) {
       require("projectTitle", Boolean(v.projectTitle && v.projectTitle.length >= 3), "Enter the topic");
+    }
+
+    if (v.template === "academic_fyp") {
+      require("intakeModeAnswer", Boolean(v.intakeModeAnswer), "Choose how your project will collect its information, or \"I'm not sure yet\"");
     }
 
     if (v.template === "academic_termpaper") {

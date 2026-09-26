@@ -377,6 +377,17 @@ enum ReferencingStyle {
   CUSTOM
 }
 
+/// The client's answer to "How will your project collect its information?"
+/// (report production, D3): A read and argue, B survey, C build, D lab or
+/// field, E published data. Null = not sure, or asked before the question existed.
+enum IntakeModeAnswer {
+  A
+  B
+  C
+  D
+  E
+}
+
 enum DataRequirement {
   PRIMARY
   SECONDARY
@@ -418,6 +429,7 @@ model Project {
   referencingStyle    ReferencingStyle?
   minimumPages        String?
   dataRequirements    DataRequirement?
+  intakeModeAnswer    IntakeModeAnswer?
   departmentOutline   String?
   specialInstructions String?
 
@@ -561,6 +573,7 @@ model Project {
   workerFlags          WorkerFlag[]
   // Phase D (report production)
   generationCheckpoints GenerationCheckpoint[]
+  researchMode          ResearchMode?
 
   @@index([status])
   @@index([clientId])
@@ -1302,6 +1315,60 @@ model AiUsageLog {
 }
 
 // ─── REPORT PRODUCTION (Phase D) ────────────────────────
+// The COO's decision on how a project collects its data (D3). The system
+// recommends a mode from the department default, a keyword scan of the topic
+// and the client's own answer; the COO confirms it on the mode card together
+// with what the prompt loader needs (department, section, referencing style,
+// thematic titles). Approving locks it. It can be reopened only until the
+// first chapter is generated; after that it never changes. No chapter is
+// generated without an approved, locked row.
+model ResearchMode {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// 1 Thematic · 2 Survey · 3 Build · 4 Lab · 5 Secondary data.
+  modeNumber Int
+  /// THEMATIC, SURVEY, BUILD, LAB or API_DATA: set from modeNumber in code, never typed.
+  modeName   String
+
+  // The COO's settings for the prompt loader.
+  /// The Table A department name the COO confirmed (the client's typed department is only a suggestion).
+  department            String
+  /// A section the COO chose (e.g. COMPUTER_SCIENCE for a software Mode 3 project); null = the department's own.
+  sectionOverride       String?
+  /// A ReferencingStyleKey (APA_7TH, NALT, NMCN, CHICAGO_NOTES_BIBLIOGRAPHY…), pre-filled from the department.
+  referencingStyle      String
+  /// The supervisor's format, when referencingStyle is CUSTOM (required then).
+  customStyleText       String?
+  /// MODE_A / MODE_B / MODE_C / NOT_APPLICABLE override for a standard report; null = the loader decides.
+  citationPlacement     String?
+  /// Mode 1 only: the thematic chapter titles (required before approval).
+  thematicTitleChapter3 String?
+  thematicTitleChapter4 String?
+  /// Overrides the department's non-human-samples flag (lab sciences); null = the department's.
+  nonHumanSamples       Boolean?
+  samplesDescription    String?
+
+  // The signals as they stood when the COO decided.
+  recommendedMode    Int?
+  clientIntakeAnswer String?
+  departmentDefault  Int?
+  /// "trigger → Mode N" lines from the keyword scan.
+  keywordTriggers    String[] @default([])
+  conflictDetected   Boolean  @default(false)
+
+  /// Approval: set together; cleared by a reopen.
+  cooApprovedBy     String?
+  cooApprovedByName String?
+  cooApprovedAt     DateTime?
+  cooNotes          String?
+  isLocked          Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // One chapter's generation: the job, its plan, the text written so far and
 // what it cost. It runs on the server like a research job: a lease, short
 // background slices, one step at a time (plan the sections, then write one

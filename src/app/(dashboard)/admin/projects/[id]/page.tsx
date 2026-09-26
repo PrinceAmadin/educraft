@@ -25,6 +25,8 @@ import { getProjectOps } from "@/lib/services/operations/project-ops";
 import { getExpectedHours } from "@/lib/services/operations/pipeline";
 import { firstName } from "@/lib/utils";
 import { db } from "@/lib/db";
+import { ModeCard } from "@/components/projects/mode/ModeCard";
+import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -57,12 +59,15 @@ export default async function ProjectDetailPage({
     listAllocatableAmbassadors(),
   ]);
   if (!project) notFound();
-  const [researchSummary, unreadFromClient, deliverables, ops, expected] = await Promise.all([
+  const reportProject = isReportTemplate(project.service.intakeFormTemplate);
+  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
     listDeliverablesForAdmin(project.id),
     getProjectOps(project.id),
     getExpectedHours(),
+    // D3: the research-mode card the COO approves, for written reports only.
+    reportProject ? getModeCard(project.id).then((r) => r.card) : Promise.resolve(null),
   ]);
   const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED")).length;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
@@ -77,6 +82,15 @@ export default async function ProjectDetailPage({
 
   const tabs: ProjectTab[] = [
     { id: "requirements", label: "Requirements", content: <RequirementsTab project={project} /> },
+    ...(modeCard
+      ? [
+          {
+            id: "report",
+            label: modeCard.status === "APPROVED" || modeCard.generationStarted ? "Report" : "Report · mode",
+            content: <ModeCard initial={modeCard} />,
+          },
+        ]
+      : []),
     { id: "timeline", label: "Timeline", content: <TimelineTab project={project} /> },
     {
       id: "financials",

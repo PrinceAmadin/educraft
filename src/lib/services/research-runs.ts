@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { ledgerRerunRequested, ledgerRerunReviewed, ledgerRunReleased, ledgerRunStarted } from "@/lib/services/operations/research-ledger";
+import { RESEARCH_LOCKED_MESSAGE, hasGenerationStarted } from "@/lib/generation/generation-state";
 
 /*
  * Rationing for research runs. Each run spends Claude credits, so:
@@ -30,6 +31,14 @@ export class ResearchApprovalRequiredError extends Error {
 /** A request that can't be made or reviewed in the state it's in. */
 export class RerunRequestError extends Error {}
 
+/** B7: research can't be re-run once chapters have been generated from it (a re-run deletes their references). */
+export class ResearchLockedError extends Error {
+  readonly code = "GENERATION_STARTED";
+  constructor() {
+    super(RESEARCH_LOCKED_MESSAGE);
+  }
+}
+
 // ── State (what the worker's panel shows) ────────────────────
 
 export type RerunRequestView = {
@@ -48,15 +57,18 @@ export interface RerunState {
   needsApproval: boolean;
   /** The latest request that's still relevant (not yet consumed by a run). */
   request: RerunRequestView | null;
+  /** Chapters have been generated from this research: no re-run, no request (B7). */
+  lockedByGeneration: boolean;
 }
 
 export async function getRerunState(projectDbId: string): Promise<RerunState> {
-  const [rerunsUsed, latest] = await Promise.all([
+  const [rerunsUsed, latest, lockedByGeneration] = await Promise.all([
     db.researchRunLog.count({ where: { projectId: projectDbId, kind: "RERUN" } }),
     db.researchRerunRequest.findFirst({
       where: { projectId: projectDbId, status: { not: "USED" } },
       orderBy: { createdAt: "desc" },
     }),
+    hasGenerationStarted(projectDbId),
   ]);
 
   const freeRerunsLeft = Math.max(FREE_RERUNS - rerunsUsed, 0);
@@ -72,7 +84,7 @@ export async function getRerunState(projectDbId: string): Promise<RerunState> {
       createdAt: latest.createdAt.toISOString(),
     };
   }
-  return { rerunsUsed, freeRerunsLeft, needsApproval: freeRerunsLeft === 0, request };
+  return { rerunsUsed, freeRerunsLeft, needsApproval: freeRerunsLeft === 0, request, lockedByGeneration };
 }
 
 // ── Claiming a run ───────────────────────────────────────────
@@ -102,6 +114,8 @@ export async function claimRun(projectDbId: string, userId: string): Promise<Run
 
     const initial = runsStarted === 0 && jobExists === 0;
     let requestId: string | null = null;
+    // B7: under the same project lock the start of a chapter takes, so the two can never interleave.
+    if (!initial && (await hasGenerationStarted(projectDbId, tx))) throw new ResearchLockedError();
 
     if (!initial && reruns >= FREE_RERUNS) {
       const now = new Date();
@@ -161,6 +175,7 @@ export async function requestRerun(input: {
   }
 
   const state = await getRerunState(input.projectDbId);
+  if (state.lockedByGeneration) throw new RerunRequestError(RESEARCH_LOCKED_MESSAGE);
   if (!state.needsApproval) {
     throw new RerunRequestError("You still have a free re-run on this project — no approval needed.");
   }
@@ -199,10 +214,11 @@ export async function reviewRerunRequest(input: {
 
   const request = await db.researchRerunRequest.findUnique({
     where: { id: input.requestId },
-    select: { id: true, status: true, requestedById: true, project: { select: { projectId: true } } },
+    select: { id: true, status: true, requestedById: true, projectId: true, project: { select: { projectId: true } } },
   });
   if (!request) throw new RerunRequestError("Request not found");
   if (request.status !== "PENDING") throw new RerunRequestError("This request has already been reviewed.");
+  if (input.decision === "approve" && (await hasGenerationStarted(request.projectId))) throw new RerunRequestError(RESEARCH_LOCKED_MESSAGE);
 
   const now = new Date();
   const data: Prisma.ResearchRerunRequestUncheckedUpdateManyInput =

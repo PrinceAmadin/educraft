@@ -1525,6 +1525,7 @@ export async function createProjectManual(
         referencingStyle: input.referencingStyle ? input.referencingStyle : null,
         minimumPages: input.minimumPages || null,
         projectType: input.projectType ? input.projectType : "NOT_APPLICABLE",
+        intakeModeAnswer: input.intakeModeAnswer ? input.intakeModeAnswer : null,
         chapterCount: input.chapterCount ?? null,
         specialInstructions: input.specialInstructions || null,
         additionalData:
