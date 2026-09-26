@@ -26,6 +26,7 @@
     "check:tiers": "tsx scripts/check-ambassador-tiers.ts",
     "check:cc": "tsx scripts/check-command-center.ts",
     "check:prompts": "tsx scripts/check-prompt-loader.ts",
+    "check:generation": "tsx scripts/check-generation.ts",
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
     "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",

@@ -1,0 +1,30 @@
+import { NextRequest } from "next/server";
+import { requireWorker, serverError } from "@/lib/api";
+import { resolveGenerationProject } from "@/lib/generation/generate-chapter";
+import { generationEventStream } from "@/lib/generation/generation-stream";
+import { badChapter, chapterParam, projectNotFound } from "@/lib/generation/route-helpers";
+
+export const dynamic = "force-dynamic";
+// The stream closes itself after 4 minutes; EventSource reconnects.
+export const maxDuration = 300;
+
+/**
+ * GET (text/event-stream): chapter_progress, chapter_complete and
+ * chapter_failed for the worker's own project, read from the database.
+ * `?chapter=N` watches one chapter. A run that has stalled is restarted.
+ */
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const guard = await requireWorker();
+  if (!guard.ok) return guard.response;
+
+  const chapter = chapterParam(new URL(req.url));
+  if (chapter === null) return badChapter();
+
+  try {
+    const project = await resolveGenerationProject(params.id, guard.workerId);
+    if (!project) return projectNotFound();
+    return generationEventStream({ projectId: project.id, chapter, signal: req.signal, resumeStalled: true });
+  } catch (error) {
+    return serverError("GET /api/worker/projects/[id]/generation/events", error);
+  }
+}

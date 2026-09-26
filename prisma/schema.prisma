@@ -559,6 +559,8 @@ model Project {
   correctionRounds     SupervisorCorrection[]
   researchRequests     ResearchRequest[]
   workerFlags          WorkerFlag[]
+  // Phase D (report production)
+  generationCheckpoints GenerationCheckpoint[]
 
   @@index([status])
   @@index([clientId])
@@ -1280,8 +1282,14 @@ model AiUsageLog {
   step          String // the specific call, e.g. write_search_queries
   chapterNumber Int?
   model         String
+  /// Uncached input tokens (usage.input_tokens).
   inputTokens   Int      @default(0)
   outputTokens  Int      @default(0)
+  /// Prompt-cache writes and reads (usage.cache_creation_input_tokens / cache_read_input_tokens), billed at 1.25x and 0.1x the input price.
+  cacheWriteTokens Int   @default(0)
+  cacheReadTokens  Int   @default(0)
+  /// Anthropic web searches (usage.server_tool_use.web_search_requests), $10 per 1,000 on top of the tokens.
+  webSearchRequests Int  @default(0)
   costUsd       Float    @default(0)
   costNaira     Float    @default(0)
   durationMs    Int      @default(0)
@@ -1291,6 +1299,83 @@ model AiUsageLog {
   @@index([createdAt])
   @@index([projectId])
   @@index([workerId])
+}
+
+// ─── REPORT PRODUCTION (Phase D) ────────────────────────
+// One chapter's generation: the job, its plan, the text written so far and
+// what it cost. It runs on the server like a research job: a lease, short
+// background slices, one step at a time (plan the sections, then write one
+// part per step), so it survives Vercel's 5-minute function limit and a
+// closed browser. Regenerating a chapter replaces its row.
+enum GenerationStatus {
+  PENDING // created, the first step has not run yet
+  OUTLINING // Claude is planning the chapter's sections
+  WRITING // writing the planned parts, one per step
+  COMPLETED // fullOutput holds the whole chapter
+  FAILED // retries ran out or the error cannot be retried; partialOutput keeps the parts already written
+}
+
+model GenerationCheckpoint {
+  id            String           @id @default(cuid())
+  projectId     String
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapterNumber Int
+  status        GenerationStatus @default(PENDING)
+  progressPercent Int            @default(0)
+
+  /// The assembled chapter prompt (Phase D1), frozen when the run starts, so
+  /// every step sends identical bytes (prompt cache) and a prompt-library
+  /// edit mid-run cannot change the chapter.
+  promptText String @db.Text
+  /// Project facts sent around the prompt: title, "Chapter N of 5",
+  /// objectives, special instructions, supervisor TOC, output format.
+  briefText  String @db.Text
+  /// What the loader resolved (department, section, mode, template, style,
+  /// blocks used), for audit.
+  promptMeta Json
+  /// Run options (effort; a simulated failure for tests, ignored in production).
+  options    Json?
+
+  /// The plan from the outline step: numbered sections with word targets,
+  /// packed into parts, with each part's result once written.
+  plan          Json?
+  /// Index of the next part to write, of partCount.
+  partCursor    Int     @default(0)
+  partCount     Int     @default(0)
+  /// The parts written so far, joined. Kept when the run fails.
+  partialOutput String? @db.Text
+  /// The part being streamed now, saved every few thousand characters;
+  /// discarded when that part is retried.
+  draftText     String? @db.Text
+  /// The whole chapter, once every part is written.
+  fullOutput    String? @db.Text
+
+  // Totals over every Claude call of this run, failed attempts included.
+  inputTokens      Int   @default(0)
+  outputTokens     Int   @default(0)
+  cacheWriteTokens Int   @default(0)
+  cacheReadTokens  Int   @default(0)
+  costUsd          Float @default(0)
+
+  /// User.id of whoever started the run (told if it fails).
+  requestedById String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  errorMessage  String?
+
+  // ── Background execution (same scheme as ResearchJob) ──
+  lockedUntil DateTime?
+  /// When a step last made progress (also refreshed while a part streams); stale on an unfinished run = the chain broke.
+  lastStepAt  DateTime?
+  /// Consecutive failed steps; reset on success.
+  failedSteps Int       @default(0)
+  lastError   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, chapterNumber])
+  @@index([status])
 }
 
 // ─── RESEARCH RUN CONTROL ───────────────────────────────

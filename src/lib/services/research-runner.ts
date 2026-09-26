@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { db } from "@/lib/db";
 import { advanceResearchJob, ResearchError } from "@/lib/services/research";
 import { notifyUsers } from "@/lib/services/notifications";
+import { selfBaseUrl } from "@/lib/self-base-url";
 
 /*
  * Runs a research job on the server, with every browser closed.
@@ -41,20 +42,6 @@ function tokenSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
   if (!secret) throw new Error("AUTH_SECRET is not set");
   return secret;
-}
-
-/**
- * Where this deployment can reach itself. Deliberately not the Paystack
- * callback URL: that one may be an override for a custom domain, whereas this
- * must be an address that serves this very deployment.
- */
-function selfBaseUrl(): string {
-  if (process.env.RESEARCH_BASE_URL) return process.env.RESEARCH_BASE_URL;
-  if (process.env.VERCEL_ENV === "production" && process.env.VERCEL_PROJECT_PRODUCTION_URL) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
-  }
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
 }
 
 /** Proves a request to the internal step endpoint came from us — the endpoint has no session. */

@@ -1,30 +1,8 @@
 import { db } from "@/lib/db";
 import { rollUpAiExpense } from "@/lib/services/expenses";
+import { costUsd, usdToNairaRate } from "@/lib/ai-pricing";
 
-/**
- * USD per million tokens. Update when Anthropic's pricing changes or a new
- * model is used — an unknown model falls back to the Sonnet rate.
- * Sonnet 5 is $2 in / $10 out: the launch price became the standard price and
- * the rise to $3/$15 planned for 1 Sept 2026 was cancelled (checked 26 Sept
- * 2026). Rows logged before then keep the cost they were stored with.
- */
-const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
-  "claude-sonnet-5": { input: 2, output: 10 },
-};
-const FALLBACK_PRICE = { input: 2, output: 10 };
-/** Anthropic's server-side web search: $10 per 1,000 searches, on top of the tokens. */
-const WEB_SEARCH_USD = 10 / 1000;
-
-/** ₦ per US$. Override with USD_NGN_RATE in the environment. */
-export function usdToNairaRate(): number {
-  const n = Number(process.env.USD_NGN_RATE);
-  return Number.isFinite(n) && n > 0 ? n : 1500;
-}
-
-export function costUsd(model: string, inputTokens: number, outputTokens: number, webSearches = 0): number {
-  const p = PRICE_PER_MTOK[model] ?? FALLBACK_PRICE;
-  return (inputTokens * p.input + outputTokens * p.output) / 1_000_000 + webSearches * WEB_SEARCH_USD;
-}
+export { costUsd, usdToNairaRate } from "@/lib/ai-pricing";
 
 export interface AiUsageContext {
   /** Project.id (not the EC-XXXXX code). */
@@ -40,6 +18,9 @@ export interface AiUsageRecord extends AiUsageContext {
   outputTokens: number;
   /** usage.server_tool_use.web_search_requests: each search is billed on top of the tokens. */
   webSearchRequests?: number;
+  /** usage.cache_creation_input_tokens / cache_read_input_tokens (not included in inputTokens). */
+  cacheWriteTokens?: number;
+  cacheReadTokens?: number;
   durationMs: number;
   status: "success" | "error";
 }
@@ -52,7 +33,10 @@ export interface AiUsageRecord extends AiUsageContext {
  */
 export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
   try {
-    const usd = costUsd(rec.model, rec.inputTokens, rec.outputTokens, rec.webSearchRequests ?? 0);
+    const usd = costUsd(rec.model, rec.inputTokens, rec.outputTokens, rec.webSearchRequests ?? 0, {
+      writeTokens: rec.cacheWriteTokens,
+      readTokens: rec.cacheReadTokens,
+    });
     const project = rec.projectId
       ? await db.project.findUnique({ where: { id: rec.projectId }, select: { workerId: true } })
       : null;
@@ -66,6 +50,9 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
         model: rec.model,
         inputTokens: rec.inputTokens,
         outputTokens: rec.outputTokens,
+        cacheWriteTokens: rec.cacheWriteTokens ?? 0,
+        cacheReadTokens: rec.cacheReadTokens ?? 0,
+        webSearchRequests: rec.webSearchRequests ?? 0,
         costUsd: usd,
         costNaira: usd * usdToNairaRate(),
         durationMs: rec.durationMs,
