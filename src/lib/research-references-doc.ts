@@ -193,14 +193,15 @@ function runs(segs: Seg[]): TextRun[] {
   return out;
 }
 
-/** The same list as plain APA 7th lines (de-duplicated, alphabetical): the source list a chapter prompt carries. */
-export function referenceListLines(refs: DocReference[]): string[] {
-  return sortAlphabetically(dedupeReferences(refs)).map((r, i) =>
-    format("APA_7TH", r, i + 1)
+/** The same list as plain APA 7th lines (de-duplicated, alphabetical), each with its row: the source list a chapter prompt carries. */
+export function referenceListEntries<T extends DocReference>(refs: T[]): { text: string; ref: T }[] {
+  return sortAlphabetically(dedupeReferences(refs)).map((ref, i) => ({
+    text: format("APA_7TH", ref, i + 1)
       .map((s) => s.text)
       .join("")
       .trim(),
-  );
+    ref,
+  }));
 }
 
 export async function buildReferencesDocx(refs: DocReference[], style: ReferencingStyle | null): Promise<Buffer> {

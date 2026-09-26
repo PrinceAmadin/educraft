@@ -55,9 +55,9 @@ async function refuses(label: string, run: () => unknown, message: RegExp) {
 
 // Test fixtures only — not a real project or real papers.
 const REFERENCES: ChapterPromptInput["references"] = [
-  { title: "Design of an IoT-Based Smart Energy Meter for Prepaid Billing", proposedTitle: "", authors: "Okafor, C.; Bello, A.", year: 2021, journal: "Journal of Electrical Systems", doi: "10.1000/qa.test.1" },
-  { title: "Load Profiling of Residential Buildings in Southern Nigeria", proposedTitle: "", authors: "Adeyemi, T.; Musa, K.; Eze, O.", year: 2019, journal: "Energy Reports", doi: "10.1000/qa.test.2" },
-  { title: "Low-Cost Current Sensing for Smart Metering", proposedTitle: "", authors: "Nwosu, P.", year: 2023, journal: null, doi: null },
+  { title: "Design of an IoT-Based Smart Energy Meter for Prepaid Billing", proposedTitle: "", authors: "Okafor, C.; Bello, A.", year: 2021, journal: "Journal of Electrical Systems", doi: "10.1000/qa.test.1", abstract: "A prepaid energy meter built on an ESP32 microcontroller was tested in 20 homes; billing error stayed under 2%." },
+  { title: "Load Profiling of Residential Buildings in Southern Nigeria", proposedTitle: "", authors: "Adeyemi, T.; Musa, K.; Eze, O.", year: 2019, journal: "Energy Reports", doi: "10.1000/qa.test.2", abstract: "Hourly load data from 45 households show evening peaks of 1.8 kW." },
+  { title: "Low-Cost Current Sensing for Smart Metering", proposedTitle: "", authors: "Nwosu, P.", year: 2023, journal: null, doi: null, abstract: null },
 ];
 const PROJECT: ChapterPromptInput["project"] = {
   projectTitle: "Design and Implementation of an IoT-Based Smart Energy Meter for Residential Buildings",
@@ -72,7 +72,7 @@ const PROJECT: ChapterPromptInput["project"] = {
   referencingStyle: "APA_7TH",
 };
 const EARLIER = { objectives: ["To design the meter", "To test its accuracy"], researchQuestions: ["How accurate is the meter?"], hypotheses: [] };
-const TITLES = { chapter3: "The Doctrine of Legitimate Expectation in Nigerian Courts", chapter4: "Judicial Review After 1999", chapter5: "Lessons From Comparative Jurisdictions" };
+const TITLES = { chapter3: "The Doctrine of Legitimate Expectation in Nigerian Courts", chapter4: "Judicial Review After 1999" };
 
 type InputOverrides = Omit<Partial<ChapterPromptInput>, "project"> & { project?: Partial<ChapterPromptInput["project"]> };
 function input(over: InputOverrides = {}): ChapterPromptInput {
@@ -181,7 +181,9 @@ async function main() {
 
   // ── Required prompt 3: Chapter 3, Law Doctrinal, Mode 1 ────────────────────────────────
   const law = await sample("ch3-law-doctrinal-mode1", { chapter: 3, department: "Law", mode: 1, project: { referencingStyle: "NALT" } });
-  expect("Ch3 Law: doctrinal, Template B, six chapters, NALT footnotes", [law.section, law.template, law.chapterCount, law.referencingStyle, law.citationPlacement], ["LAW_DOCTRINAL", "B", 6, "NALT", "MODE_C"]);
+  expect("Ch3 Law: doctrinal, Template B, NALT footnotes", [law.section, law.template, law.referencingStyle, law.citationPlacement], ["LAW_DOCTRINAL", "B", "NALT", "MODE_C"]);
+  has("Ch3 Law: the five-chapter note overrides the Law section's six chapters", law.text, LOADER_TEXT.fiveChapters);
+  has("Ch3 Law: court cases only from the list, else the last-resort placeholder", law.text, LOADER_TEXT.primarySourcesRule("case"));
   expect("Ch3 Law: blocks used", law.blocksUsed.slice(0, 4), ["ch3:MODE 1", "ch3:SHARED", "ch3:TEMPLATE_B_THEMATIC", "ch3:LAW_DOCTRINAL_CH3"]);
   expect("Ch3 Law: TEMPLATE_B_THEMATIC comes before the Law section that says 'above'", law.text.indexOf("[DEPARTMENT: TEMPLATE_B_THEMATIC]") < law.text.indexOf("[DEPARTMENT: LAW_DOCTRINAL_CH3]"), true);
   has("Ch3 Law: Template B quality gate", law.text, "QB1: No 'Methodology' chapter");
@@ -206,7 +208,7 @@ async function main() {
 
   // ── Image rules: Chapter 2 only; figure placeholders in 3 and 4 ────────────────────────
   for (const chapter of [1, 3, 4, 5] as const) {
-    const p = await loadChapterPrompt(input({ chapter, department: "History", mode: 1, chapterCount: 5 }));
+    const p = await loadChapterPrompt(input({ chapter, department: "History", mode: 1 }));
     lacks(`image rules absent from History chapter ${chapter}`, p.text, "═══ IMAGE RULES ═══");
     lacks(`no image-rules file pointer in History chapter ${chapter}`, p.text, "IMAGE INTELLIGENCE RULES");
     expect(`figure placeholder rule in History chapter ${chapter} only when it is 3 or 4`, p.text.includes(LOADER_TEXT.figurePlaceholder), chapter === 3 || chapter === 4);
@@ -232,42 +234,42 @@ async function main() {
   has("Chapter 3, Engineering: default title METHODOLOGY", eng3.text, "[H1] METHODOLOGY (e.g.,");
   has("Chapter 4 title in a standard report: approved wording", (await loadChapterPrompt(input({ chapter: 4 }))).text, "Not applicable (Template A)");
 
-  // ── Template B chain ────────────────────────────────────────────────────────────────────
-  const hist5 = await sample("ch5-history-5ch", { chapter: 5, department: "History", mode: 1, chapterCount: 5, project: { referencingStyle: "CHICAGO_NOTES_BIBLIOGRAPHY" } });
-  expect("History, 5 chapters: Chapter 5 is the conclusion", hist5.blocksUsed.filter((b) => b.startsWith("ch5:T") || b.startsWith("ch5:H")), ["ch5:TEMPLATE_B_CONCLUSION", "ch5:HUMANITIES"]);
+  // ── Template B chain (five chapters at most: Chapter 5 is always the conclusion) ────────
+  const hist5 = await sample("ch5-history", { chapter: 5, department: "History", mode: 1, project: { referencingStyle: "CHICAGO_NOTES_BIBLIOGRAPHY" } });
+  expect("History Chapter 5 is the conclusion", hist5.blocksUsed.filter((b) => b.startsWith("ch5:T") || b.startsWith("ch5:H")), ["ch5:TEMPLATE_B_CONCLUSION", "ch5:HUMANITIES"]);
   expect("History: MODE B endnotes (B3)", hist5.citationPlacement, "MODE_B");
   has("MODE B block carries the entry formats", hist5.text, "Entry format — first appearance");
-  const hist6 = await sample("ch5-history-6ch", { chapter: 5, department: "History", mode: 1, chapterCount: 6 });
-  expect("History, 6 chapters: Chapter 5 loads TEMPLATE_B_THEMATIC_CH5, then the Chapter 4 block it refers to", hist6.blocksUsed.filter((b) => /^ch[45]:T/.test(b)), ["ch5:TEMPLATE_B_THEMATIC_CH5", "ch4:TEMPLATE_B_THEMATIC_CH4 (read as Chapter Five)"]);
-  has("History, 6 chapters: Chapter 5 title from the card", hist6.text, "LESSONS FROM COMPARATIVE JURISDICTIONS");
-  lacks("History, 6 chapters: the Chapter 4 title does not leak into Chapter 5", hist6.text, "JUDICIAL REVIEW AFTER 1999");
-  has("History, 6 chapters: Chapter 5 is told it is an argument, not the conclusion", hist6.text, LOADER_TEXT.sixChapterFive);
-  has("History, 6 chapters: Chapter 5 follows the Chapter 4 structure rules its block points to", hist6.text, "HARD REJECT TRIGGER");
-  has("…introduced as Chapter Four rules read as Chapter Five", hist6.text, LOADER_TEXT.borrowedChapterFour);
-  expect("…and the borrowed block is listed", hist6.blocksUsed.includes("ch4:TEMPLATE_B_THEMATIC_CH4 (read as Chapter Five)"), true);
-  lacks("History, 6 chapters: Chapter 5 does not carry the closing cardinal rules", hist6.text, "THE THREE CARDINAL RULES OF CHAPTER 5");
-  lacks("History, 6 chapters: nor the recommendation standards", hist6.text, "RECOMMENDATION QUALITY STANDARDS");
-  const hist6ch6 = await sample("ch6-history-6ch", { chapter: 6, department: "History", mode: 1, chapterCount: 6 });
-  expect("Chapter 6 comes from TEMPLATE_B_CONCLUSION only (7d)", hist6ch6.blocksUsed.filter((b) => b.startsWith("ch5:") && !b.includes("closing")), ["ch5:TEMPLATE_B_CONCLUSION"]);
-  has("Chapter 6 still carries the C1 sentence", hist6ch6.text, LOADER_TEXT.modePrecedence);
-  has("Chapter 6 gets the closing cardinal rules", hist6ch6.text, "[OBJECTIVE NOT MET — COO TO REVIEW]");
-  has("Chapter 6 gets the recommendation standards", hist6ch6.text, "RECOMMENDATION QUALITY STANDARDS");
-  const hist5ch4 = await loadChapterPrompt(input({ chapter: 4, department: "History", mode: 1, chapterCount: 5 }));
-  lacks("a thematic Chapter 4 skips the data-chapter cardinal rules", hist5ch4.text, "CARDINAL RULES FOR CHAPTER 4");
-  has("…but keeps its hard-reject trigger", hist5ch4.text, "HARD REJECT TRIGGER");
-  const hist5ch5 = await loadChapterPrompt(input({ chapter: 5, department: "History", mode: 1, chapterCount: 5 }));
-  has("a five-chapter thematic conclusion keeps the closing cardinal rules", hist5ch5.text, "[OBJECTIVE NOT MET — COO TO REVIEW]");
-  const law5 = await loadChapterPrompt(input({ chapter: 5, department: "Law", mode: 1, project: { referencingStyle: "NALT" } }));
-  has("Law Chapter 5 keeps its Chapter Five part", law5.text, "Chapter Five (Third Thematic Argument)");
-  lacks("Law Chapter 5 drops its Chapter Six part", law5.text, "Law Doctrinal Chapter Six contains");
-  expect("Law Chapter 5 says which part it loaded", law5.blocksUsed.includes("ch5:LAW_DOCTRINAL (Chapter Five part)"), true);
-  const law6 = await sample("ch6-law-doctrinal", { chapter: 6, department: "Law", mode: 1, project: { referencingStyle: "NALT" } });
-  expect("Law Chapter 6 exists (always six chapters)", law6.chapterCount, 6);
+  has("a thematic conclusion keeps the closing cardinal rules", hist5.text, "[OBJECTIVE NOT MET — COO TO REVIEW]");
+  has("…and the recommendation standards", hist5.text, "RECOMMENDATION QUALITY STANDARDS");
+  expect("no thematic-argument Chapter 5 block is loaded", hist5.blocksUsed.some((b) => b.includes("TEMPLATE_B_THEMATIC_CH5")), false);
+  has("History gets the five-chapter note (its section says FIVE or SIX)", hist5.text, LOADER_TEXT.fiveChapters);
+  has("History: archival sources only from the list, else the last-resort placeholder", hist5.text, LOADER_TEXT.primarySourcesRule("archive"));
+  const hist4 = await loadChapterPrompt(input({ chapter: 4, department: "History", mode: 1 }));
+  lacks("a thematic Chapter 4 skips the data-chapter cardinal rules", hist4.text, "CARDINAL RULES FOR CHAPTER 4");
+  has("…but keeps its hard-reject trigger", hist4.text, "HARD REJECT TRIGGER");
+  const law5 = await sample("ch5-law-doctrinal", { chapter: 5, department: "Law", mode: 1, project: { referencingStyle: "NALT" } });
+  expect("Law Chapter 5 is the conclusion: TEMPLATE_B_CONCLUSION + the Law conclusion part", law5.blocksUsed.filter((b) => b.startsWith("ch5:T") || b.startsWith("ch5:L")), ["ch5:TEMPLATE_B_CONCLUSION", "ch5:LAW_DOCTRINAL (conclusion part, read as Chapter Five)"]);
+  has("Law Chapter 5 carries the Law conclusion instructions", law5.text, "Law Doctrinal Chapter Six contains");
+  has("…introduced as Chapter Five", law5.text, LOADER_TEXT.lawConclusionAsFive);
+  lacks("Law Chapter 5 drops the third-argument part", law5.text, "Chapter Five (Third Thematic Argument)");
+  has("Law Chapter 5 gets the five-chapter note", law5.text, LOADER_TEXT.fiveChapters);
+  const law1 = await loadChapterPrompt(input({ chapter: 1, department: "Law", mode: 1, project: { referencingStyle: "NALT" } }));
+  has("Law Chapter 1: its SIX-CHAPTER RULE is overridden by the five-chapter note", law1.text, "SIX-CHAPTER RULE");
+  has("…the note is there", law1.text, LOADER_TEXT.fiveChapters);
   const nonDoc4 = await loadChapterPrompt(input({ chapter: 4, department: "Law", mode: 2, project: { referencingStyle: "NALT" } }));
   expect("Non-doctrinal Law Chapter 4 also loads BUSINESS, which it refers to", nonDoc4.blocksUsed.filter((b) => b.startsWith("ch4:") && !b.includes("MODE") && !b.includes("SHARED") && !b.includes("rules") && !b.includes("extras")), ["ch4:LAW_NON_DOCTRINAL", "ch4:BUSINESS"]);
   expect("Non-doctrinal Law with NALT still uses footnotes", nonDoc4.citationPlacement, "MODE_C");
+  has("Non-doctrinal Law (its sections say SIX chapters) gets the five-chapter note", nonDoc4.text, LOADER_TEXT.fiveChapters);
   const eduB = await loadChapterPrompt(input({ chapter: 3, department: "Educational Foundations", mode: 1 }));
   expect("Theoretical Education (Mode 1) takes the Humanities thematic chain", [eduB.section, eduB.blocksUsed.includes("ch3:HUMANITIES")], ["HUMANITIES", true]);
+
+  // ── References: abstracts (Q3), statutes, no quotations (Q6) ────────────────────────────
+  has("each reference carries its abstract", eee.text, "Abstract: A prepaid energy meter built on an ESP32");
+  has("a reference without an abstract is kept and marked", eee.text, "Low-Cost Current Sensing for Smart Metering.\nAbstract: abstract unavailable");
+  has("statutes and the Constitution may be cited by name", eee.text, "apart from statutes and the Constitution, which you may cite by name");
+  has("the abstract rule is stated", eee.text, "Report a study's methods and findings only as far as its abstract states them");
+  has("no direct quotations; pinpoints left as p. [page] (Q6)", eee.text, LOADER_TEXT.noDirectQuotes);
+  lacks("a science project gets no case or archive rule", eee.text, "[CASE TO BE SUPPLIED]");
 
   // ── Loader notes (A1, A2) ───────────────────────────────────────────────────────────────
   const soc = await sample("ch1-sociology-mode2", { chapter: 1, department: "Sociology", mode: 2 });
@@ -302,8 +304,7 @@ async function main() {
       ? [{ mode: entry.defaultMode }]
       : [{ mode: 3, override: "ENGINEERING" }, { mode: 4, override: "MEDICAL_SCIENCE" }, { mode: 2, override: "BUSINESS" }];
     for (const run of runs) {
-      const lastChapter = run.mode === 1 ? (entry.section === "LAW" ? 6 : 5) : 5;
-      for (let c = 1; c <= lastChapter; c++) {
+      for (let c = 1; c <= 5; c++) {
         try {
           const p = await loadChapterPrompt(
             input({ chapter: c as ChapterNumber, department: entry.name, mode: run.mode, sectionOverride: run.override, project: { referencingStyle: defaultReferencingStyle(entry) } }),
@@ -313,6 +314,8 @@ async function main() {
           if (p.fallback.used) problems.push(`${entry.name} ch${c}: fallback — ${p.fallback.note}`);
           if (/search_query|IMAGE INTELLIGENCE RULES|Image Intelligence in Template B/.test(p.text)) problems.push(`${entry.name} ch${c}: an image-search instruction survived`);
           for (const h of SHARED_HEADINGS) if (!p.text.includes(h)) problems.push(`${entry.name} ch${c}: missing ${h}`);
+          if (!p.text.includes(LOADER_TEXT.noDirectQuotes)) problems.push(`${entry.name} ch${c}: no-quotation rule missing`);
+          if (!p.text.includes("Abstract: ")) problems.push(`${entry.name} ch${c}: abstracts missing`);
         } catch (err) {
           problems.push(`${entry.name} Mode ${run.mode} ch${c}: ${(err as Error).message}`);
         }
@@ -381,15 +384,12 @@ async function main() {
   await refuses("Custom style without its format is refused", () => loadChapterPrompt(input({ project: { referencingStyle: "CUSTOM" } })), /Custom but the supervisor's format/);
   await refuses("Chapter 4 without Chapter 1's objectives is refused", () => loadChapterPrompt(input({ chapter: 4, fromEarlierChapters: {} })), /OBJECTIVES: Chapter One's objectives have not been extracted/);
   await refuses("B5: a thematic Chapter 1 waits for the card's titles", () => loadChapterPrompt(input({ chapter: 1, department: "History", mode: 1, thematicTitles: {} })), /missing: Chapter 3, Chapter 4/);
-  await refuses("B5: a six-chapter report also needs the Chapter 5 title", () => loadChapterPrompt(input({ chapter: 6, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, thematicTitles: { chapter3: "A", chapter4: "B" } })), /missing: Chapter 5/);
-  await refuses("a standard report has no Chapter 6 (A10/B6)", () => loadChapterPrompt(input({ chapter: 6 })), /five chapters; there is no Chapter 6/);
-  await refuses("a five-chapter thematic report has no Chapter 6", () => loadChapterPrompt(input({ chapter: 6, department: "History", mode: 1, chapterCount: 5 })), /no Chapter 6/);
+  await refuses("there is no Chapter 6 in any department (Q1/Q2)", () => loadChapterPrompt(input({ chapter: 6 as ChapterNumber, department: "Law", mode: 1, project: { referencingStyle: "NALT" } })), /Chapter 6 does not exist; reports have five chapters at most/);
   await refuses("no references, no prompt (B7)", () => loadChapterPrompt(input({ references: [] })), /No verified references/);
   await refuses("NALT placement cannot be overridden", () => loadChapterPrompt(input({ department: "Law", mode: 1, project: { referencingStyle: "NALT" }, citationPlacement: "MODE_B" })), /NALT always uses page footnotes/);
   await refuses("thematic placement cannot be overridden (B3)", () => loadChapterPrompt(input({ chapter: 1, department: "History", mode: 1, citationPlacement: "MODE_A" })), /Thematic reports use MODE B/);
   await refuses("an impossible chapter number is refused", () => loadChapterPrompt(input({ chapter: 7 as ChapterNumber })), /Chapter 7 does not exist/);
   await refuses("an impossible mode is refused", () => loadChapterPrompt(input({ mode: 0 as ResearchModeNumber })), /Mode 0 does not exist/);
-  await refuses("an impossible chapter count is refused", () => loadChapterPrompt(input({ chapter: 5, department: "History", mode: 1, chapterCount: 4 as 5 })), /5 or 6 chapters, not 4/);
   await refuses("an unknown style is refused", () => loadChapterPrompt(input({ project: { referencingStyle: "apa_7th" as "APA_7TH" } })), /Unknown referencing style/);
   await refuses("an unknown project type is refused", () => loadChapterPrompt(input({ project: { projectType: "BOGUS" as "PRACTICAL" } })), /Unknown project type/);
   await refuses("a notes style cannot be switched to in-text", () => loadChapterPrompt(input({ department: "Marketing", mode: 2, project: { referencingStyle: "CHICAGO_NOTES_BIBLIOGRAPHY" }, citationPlacement: "NOT_APPLICABLE" })), /notes style/);

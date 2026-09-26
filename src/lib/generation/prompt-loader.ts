@@ -22,10 +22,15 @@
  * and embedding steps of the Chapter 2 image rules). Figures are placeholders the worker
  * replaces with real images after generation.
  *
- * Project facts the prompt files never carry in some chapters (the title in Chapters 2, 3
- * and 6, "Chapter N of M", the chapter plan, the supervisor's TOC outside Chapter 1) and
- * generated inputs (earlier chapters, uploaded data) are added by the Phase D2 generation
- * call, which wraps this prompt.
+ * Every report has five chapters at most, in every department (founder, 26 Sept 2026): the
+ * prompt files' six-chapter structures (Law doctrinal, some Humanities) are overridden by a
+ * note, and a Law report's conclusion instructions (written for "Chapter Six") are read as
+ * Chapter Five.
+ *
+ * Project facts the prompt files never carry in some chapters (the title in Chapters 2 and 3,
+ * "Chapter N of 5", the chapter plan, the supervisor's TOC outside Chapter 1) and generated
+ * inputs (earlier chapters, uploaded data) are added by the Phase D2 generation call, which
+ * wraps this prompt.
  *
  * Deployment: prompts/ must reach the serverless function. The route that calls this
  * (Phase D4) must list prompts/** in next.config's experimental.outputFileTracingIncludes.
@@ -34,7 +39,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import mammoth from "mammoth";
 import type { Project, Reference, ReferencingStyle } from "@prisma/client";
-import { referenceListLines } from "@/lib/research-references-doc";
+import { referenceListEntries } from "@/lib/research-references-doc";
 import {
   MODE_NAMES,
   matchDepartment,
@@ -46,14 +51,15 @@ import {
 
 const PROMPTS_ROOT = path.join(process.cwd(), "prompts");
 
-export type ChapterNumber = 1 | 2 | 3 | 4 | 5 | 6;
-type FileChapter = 1 | 2 | 3 | 4 | 5;
+/** Five chapters at most, in every department. */
+export type ChapterNumber = 1 | 2 | 3 | 4 | 5;
+type FileChapter = ChapterNumber;
 
 /** The stored styles plus the ones B2 adds (NALT, NMCN and the two Chicago variants).
  *  Collapse into the Prisma enum once the COO card migration adds them. */
 export type ReferencingStyleKey = ReferencingStyle | "NALT" | "NMCN" | "CHICAGO_AUTHOR_DATE" | "CHICAGO_NOTES_BIBLIOGRAPHY";
 export type CitationPlacement = "MODE_A" | "MODE_B" | "MODE_C" | "NOT_APPLICABLE";
-export type PromptReference = Pick<Reference, "title" | "proposedTitle" | "authors" | "year" | "journal" | "doi">;
+export type PromptReference = Pick<Reference, "title" | "proposedTitle" | "authors" | "year" | "journal" | "doi" | "abstract">;
 /** The intake fields a chapter prompt reads, straight from the Project row. */
 export type ProjectPromptFields = Pick<
   Project,
@@ -68,8 +74,6 @@ export interface ChapterPromptInput {
   mode: ResearchModeNumber;
   /** The COO's section choice on the card; required for departments with no default section. */
   sectionOverride?: SectionKey | null;
-  /** Thematic (Mode 1) reports only: 5 by default, 6 when the COO sets it. Law doctrinal is always 6. */
-  chapterCount?: 5 | 6 | null;
   project: ProjectPromptFields & {
     /** University.name of the client's university. */
     university: string;
@@ -83,7 +87,7 @@ export interface ChapterPromptInput {
   /** Standard (Template A) reports only: the COO's override of the placement the rules derive. */
   citationPlacement?: CitationPlacement | null;
   /** Mode 1 chapter titles entered on the COO card (B5). */
-  thematicTitles?: { chapter3?: string | null; chapter4?: string | null; chapter5?: string | null };
+  thematicTitles?: { chapter3?: string | null; chapter4?: string | null };
   /** Values taken from generated chapters: undefined = not extracted yet (throws where needed),
    *  an empty list = the chapter genuinely has none. */
   fromEarlierChapters?: { objectives?: string[]; researchQuestions?: string[]; hypotheses?: string[] };
@@ -100,7 +104,6 @@ export interface AssembledChapterPrompt {
   department: string;
   section: SectionKey;
   template: "A" | "B";
-  chapterCount: 5 | 6;
   referencingStyle: string;
   citationPlacement: CitationPlacement;
   /** Everything included, in order, as "chN:WHAT". */
@@ -137,6 +140,8 @@ export const LOADER_TEXT = {
   noMinimumPages: "No school minimum given — use the department page range",
   inTextPlacement: "Not applicable — in-text citations with a References list",
   chapterFourTitleTemplateA: "Not applicable (Template A)",
+  /** Q3 — a kept reference with no abstract is listed, never dropped. */
+  abstractUnavailable: "abstract unavailable",
 
   // Loader wording, for the founder to review.
   nonHumanDefault: "non-human (for example chemical, material, plant, animal or microbial)",
@@ -144,12 +149,13 @@ export const LOADER_TEXT = {
     "Results and Discussion: in this department Chapter Four presents the results AND discusses them in the same chapter (chapter title: RESULTS AND DISCUSSION). Interpret each result against the literature straight after presenting it, citing only the verified references. This replaces the results-only rule in the department section and the mode instructions, and the Chapter 4 cardinal rules PRESENT FIRST, DISCUSS LATER and NO NEW LITERATURE.",
   combinedResultsCh5:
     "Results and Discussion were combined in Chapter Four for this department. Chapter Five is the Summary, Conclusion and Recommendations (chapter title: SUMMARY, CONCLUSION AND RECOMMENDATIONS). This replaces every discussion section in the department section (5.2 Discussion of Findings) and in the mode instructions (5.1 Discussion of Results and 5.2 Mechanism / Explanation): do not write a separate discussion of findings.",
-  borrowedChapterFour:
-    "The next block was written for Chapter Four. Apply its structure rules, hard-reject trigger and quality checks to this Chapter Five, reading Chapter Four as Chapter Five, Chapter Three as Chapter Four and Chapter Five as Chapter Six. Its balance rule does not apply.",
   /** Combined Results and Discussion leaves Chapter Five a summary chapter: the range the other standard summary chapters use. */
   combinedResultsCh5Pages: "8–14 pages",
-  sixChapterFive:
-    "This report has six chapters, so this Chapter Five is a thematic argument, not the conclusion. Rules in this prompt that treat Chapter Five as the closing, summarising chapter (no new arguments, summary of findings, recommendations) apply to Chapter Six instead.",
+  /** Added wherever the loaded text mentions a sixth chapter (Q1/Q2: five chapters at most, everywhere). */
+  fiveChapters:
+    "This report has exactly five chapters, and Chapter Five is the last one. Ignore every mention of a sixth chapter or a six-chapter structure in this prompt: any outline of chapters lists five, and anything meant for a sixth chapter belongs in Chapter Five.",
+  lawConclusionAsFive:
+    "The Law section below was written for the conclusion chapter of a six-chapter report. In this five-chapter report it applies to this Chapter Five: read Chapter Six as Chapter Five and 6.1 to 6.5 as 5.1 to 5.5, and use its numbered structure rather than the unnumbered Template B conclusion above.",
   noImageSearch: "You cannot search for, download or embed images, and must not invent image sources.",
   inTextCitationBlock:
     "This project cites in the text, in the referencing style below, with one References list at the end of the document. Do not produce endnote or footnote blocks.",
@@ -158,8 +164,17 @@ export const LOADER_TEXT = {
     `Cite with superscript note numbers as set out in the CITATION MODE BLOCK, and format every note and every bibliography entry in ${style}.`,
   styleOverridesApa: (style: string) =>
     `Where the referencing rules above give APA 7th Edition formats or treat APA as the default, use ${style} instead. Their rules on real, relevant and correctly used sources still apply.`,
+  /** Q6 — no direct quotations anywhere; page pinpoints are left for the worker. */
+  noDirectQuotes:
+    "Do not quote any source directly anywhere in this chapter; paraphrase and cite instead. Where a citation needs a page number (a pinpoint), write p. [page] and the worker will fill it in.",
   referencesIntro: (count: number, style: string) =>
-    `These ${count} works are the only sources you may cite. EduCraft's research step found and checked them (OpenAlex); they are listed in APA 7th format so you can identify them. Cite them in ${style}. Do not cite anything that is not on this list.`,
+    `These ${count} works are the only sources you may cite, apart from statutes and the Constitution, which you may cite by name. EduCraft's research step found and checked them (OpenAlex); they are listed in APA 7th format so you can identify them, each followed by its abstract. Cite them in ${style}. ` +
+    `Report a study's methods and findings only as far as its abstract states them; where the abstract is unavailable, cite the work only for what its title states. Never add volume, issue, page or publisher details that are not listed. Do not cite anything that is not on this list.`,
+  /** Law and Humanities: court cases and archival sources come only from the list (Q4). */
+  primarySourcesRule: (kind: "case" | "archive") =>
+    kind === "case"
+      ? "Cite a court case only if it is on this list. If a point needs a case and none on the list supports it, write [CASE TO BE SUPPLIED] instead of naming one; never invent a case name or citation."
+      : "Cite an archival source (a newspaper report, gazette, official record or manuscript) only if it is on this list. If a point needs one and none on the list supports it, write [ARCHIVE TO BE SUPPLIED] instead of naming one; never invent an archival source.",
 } as const;
 
 // ─── The library (read once per process) ───────────────────────────────────────────────────
@@ -383,7 +398,7 @@ function curateImageRules(paragraphs: string[]): string[] {
 
 // ─── Section planning ──────────────────────────────────────────────────────────────────────
 
-type BlockRef = { file: FileChapter; tag: string; part?: "LAW_CHAPTER_FIVE" | "AS_CHAPTER_FIVE" };
+type BlockRef = { file: FileChapter; tag: string; part?: "LAW_CONCLUSION" };
 
 const dept = (tag: string) => `DEPARTMENT: ${tag}`;
 
@@ -407,9 +422,8 @@ const CLOSEST: Record<string, string[]> = {
  * The [DEPARTMENT: X] blocks one chapter loads, in order. Template A: the one resolved
  * section, plus the section it defers to. Template B (Mode 1): the approved thematic chain.
  */
-function planBlocks(chapter: ChapterNumber, template: "A" | "B", section: SectionKey, chapterCount: 5 | 6): BlockRef[] {
+function planBlocks(chapter: ChapterNumber, template: "A" | "B", section: SectionKey): BlockRef[] {
   if (template === "A") {
-    if (chapter === 6) throw new PromptAssemblyError("Standard (Template A) reports have five chapters; there is no Chapter 6 to generate.");
     const file = chapter;
     const plan: BlockRef[] = [{ file, tag: section }];
     // Non-doctrinal Law defers to other sections for these two chapters ("Refer to [DEPARTMENT: …]").
@@ -432,19 +446,12 @@ function planBlocks(chapter: ChapterNumber, template: "A" | "B", section: Sectio
     case 4:
       return [{ file: 4, tag: "TEMPLATE_B_THEMATIC_CH4" }, { file: 4, tag: section }];
     case 5:
-      if (chapterCount === 5) return [{ file: 5, tag: "TEMPLATE_B_CONCLUSION" }, { file: 5, tag: "HUMANITIES" }];
-      // Six chapters: Chapter 5 is the last thematic argument. Its block says "Same structure rules as
-      // TEMPLATE_B_THEMATIC_CH4", so that block follows, read as Chapter Five and without its title line
-      // (the Chapter 4 title must never reach a Chapter 5 prompt). The Law section's Chapter Six part is cut off.
+      // Five chapters at most: Chapter 5 is always the conclusion. Law takes the conclusion part of its
+      // Chapter 5 section (written as "Chapter Six"); the part for a third argument chapter is not used.
       return [
-        { file: 5, tag: "TEMPLATE_B_THEMATIC_CH5" },
-        { file: 4, tag: "TEMPLATE_B_THEMATIC_CH4", part: "AS_CHAPTER_FIVE" },
-        ...(law ? [{ file: 5 as const, tag: "LAW_DOCTRINAL", part: "LAW_CHAPTER_FIVE" as const }] : []),
+        { file: 5, tag: "TEMPLATE_B_CONCLUSION" },
+        law ? { file: 5, tag: "LAW_DOCTRINAL", part: "LAW_CONCLUSION" } : { file: 5, tag: "HUMANITIES" },
       ];
-    case 6:
-      if (chapterCount !== 6) throw new PromptAssemblyError("This thematic report has five chapters; there is no Chapter 6 to generate.");
-      // Decision 7d: Chapter 6 comes from the TEMPLATE_B_CONCLUSION section of the Chapter 5 file only.
-      return [{ file: 5, tag: "TEMPLATE_B_CONCLUSION" }];
   }
 }
 
@@ -466,18 +473,14 @@ function resolveBlocks(lib: PromptLibrary, plan: BlockRef[]): { blocks: Resolved
     let paragraphs = file.blocks.get(dept(tag))!;
     let label = `ch${ref.file}:${tag}`;
     let lead: string | undefined;
-    if (ref.part === "AS_CHAPTER_FIVE") {
-      paragraphs = paragraphs.filter((p) => !p.includes("{CHAPTER_FOUR_TITLE}"));
-      label += " (read as Chapter Five)";
-      lead = LOADER_TEXT.borrowedChapterFour;
-    }
-    if (ref.part === "LAW_CHAPTER_FIVE") {
-      // Chapter 5's Law section covers Chapter Five and Chapter Six; a Chapter 5 run loads only the first part.
+    if (ref.part === "LAW_CONCLUSION") {
+      // Chapter 5's Law section covers a third argument ("Chapter Five") and the conclusion ("Chapter Six").
+      // In a five-chapter report only the conclusion part is used, read as Chapter Five.
       const six = paragraphs.findIndex((p) => /^Chapter Six\b/.test(p.trim()));
-      if (six !== -1) {
-        paragraphs = trimBlank(paragraphs.slice(0, six));
-        label += " (Chapter Five part)";
-      }
+      if (six === -1) throw new PromptAssemblyError(`${file.fileName}: the Law section has no "Chapter Six" conclusion part.`);
+      paragraphs = trimBlank(paragraphs.slice(six));
+      label += " (conclusion part, read as Chapter Five)";
+      lead = LOADER_TEXT.lawConclusionAsFive;
     }
     return { ref: { ...ref, tag }, label, paragraphs: stripImageGuidance(paragraphs), lead };
   });
@@ -571,6 +574,12 @@ function neutralize(s: string): string {
 
 const orDefault = (v: string | null | undefined, fallback: string) => (v?.trim() ? neutralize(v.trim()) : fallback);
 
+/** An abstract on one line; a runaway one (a mis-parsed full text) is cut at 4,000 characters. */
+function abstractText(raw: string): string {
+  const s = raw.replace(/\s+/g, " ").trim();
+  return s.length > 4000 ? `${s.slice(0, 4000).replace(/\s+\S*$/, "")} …` : s;
+}
+
 /** The system writes "Chapter-based order: …" into specialInstructions itself; it is not a client instruction. */
 function clientInstructions(raw: string | null | undefined): string {
   const text = (raw ?? "")
@@ -607,6 +616,8 @@ function chapterThreeDefaultTitle(paragraphs: string[]): string | null {
 // ─── Assembly ──────────────────────────────────────────────────────────────────────────────
 
 const IMAGE_POINTER = /IMAGE INTELLIGENCE RULES/;
+/** "SIX-CHAPTER RULE", "6-chapter structure", "Chapter count: SIX", "Chapter Six", "Ch.6", "Law: 6 chapters", "FIVE or SIX". */
+const SIX_CHAPTERS = /\b(six|6)[- ]chapter|\bchapter (six|6)\b|\bch\.\s?6\b|\b6 chapters\b|chapter count:\s*(five or )?six/i;
 
 function render(title: string, paragraphs: string[]): string {
   return `═══ ${title} ═══\n\n${paragraphs.join("\n\n")}`;
@@ -614,12 +625,9 @@ function render(title: string, paragraphs: string[]): string {
 
 export async function loadChapterPrompt(input: ChapterPromptInput): Promise<AssembledChapterPrompt> {
   const chapter = input.chapter;
-  if (![1, 2, 3, 4, 5, 6].includes(chapter)) throw new PromptAssemblyError(`Chapter ${String(chapter)} does not exist; chapters run from 1 to 6.`);
+  // The types stop bad values at compile time; a JSON body from the COO card is checked here too.
+  if (![1, 2, 3, 4, 5].includes(chapter)) throw new PromptAssemblyError(`Chapter ${String(chapter)} does not exist; reports have five chapters at most.`);
   if (![1, 2, 3, 4, 5].includes(input.mode)) throw new PromptAssemblyError(`Mode ${String(input.mode)} does not exist; research modes run from 1 to 5.`);
-  // The types stop these at compile time; a JSON body from the COO card is checked here too.
-  if (input.chapterCount != null && input.chapterCount !== 5 && input.chapterCount !== 6) {
-    throw new PromptAssemblyError(`A report has 5 or 6 chapters, not ${String(input.chapterCount)}.`);
-  }
   const knownStyle = ["CUSTOM", "CHICAGO", ...Object.keys(STYLE_LABEL)].includes(input.project.referencingStyle);
   if (!knownStyle) throw new PromptAssemblyError(`Unknown referencing style "${String(input.project.referencingStyle)}".`);
   if (!(input.project.projectType in PROJECT_TYPE_LABEL)) throw new PromptAssemblyError(`Unknown project type "${String(input.project.projectType)}".`);
@@ -632,63 +640,44 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   const entry: DepartmentEntry = match.entry;
   const section = resolveSection(entry, input.mode, input.sectionOverride);
   const template: "A" | "B" = input.mode === 1 ? "B" : "A";
-  const chapterCount: 5 | 6 = template === "A" ? 5 : section === "LAW_DOCTRINAL" ? 6 : (input.chapterCount ?? 5);
 
-  // B5: a thematic report is blocked until every thematic title is on the card, whichever chapter is asked for.
+  // B5: a thematic report is blocked until both thematic titles are on the card, whichever chapter is asked for.
   if (template === "B") {
     const titles = input.thematicTitles ?? {};
-    const missing = [
-      !titles.chapter3?.trim() && "Chapter 3",
-      !titles.chapter4?.trim() && "Chapter 4",
-      chapterCount === 6 && !titles.chapter5?.trim() && "Chapter 5",
-    ].filter(Boolean);
+    const missing = [!titles.chapter3?.trim() && "Chapter 3", !titles.chapter4?.trim() && "Chapter 4"].filter(Boolean);
     if (missing.length) throw new PromptAssemblyError(`Enter the thematic chapter titles on the COO card first (missing: ${missing.join(", ")}).`);
   }
 
-  const fileChapter: FileChapter = chapter === 6 ? 5 : chapter;
+  const fileChapter: FileChapter = chapter;
   const file = lib.chapters.get(fileChapter)!;
   const style = styleLabel(input.project.referencingStyle, input.project.customStyleText);
   const placement = resolveCitationPlacement(input.project.referencingStyle, template, section, input.citationPlacement);
-  const { blocks: deptBlocks, fallbackNotes } = resolveBlocks(lib, planBlocks(chapter, template, section, chapterCount));
+  const { blocks: deptBlocks, fallbackNotes } = resolveBlocks(lib, planBlocks(chapter, template, section));
   const combinedResults = Boolean(entry.pureScience) && section === "MEDICAL_SCIENCE" && input.mode === 4;
   const parts: { title: string; text: string }[] = [];
   const used: string[] = [];
 
   // 1. Mode instructions: the chapter's all-modes rules, then its block for the approved mode.
-  //    Two all-modes groups are moved or left out because they contradict the chapter they would land in:
-  //    - a thematic Chapter 4 skips the Chapter 4 cardinal rules, which govern data chapters (results per
-  //      objective, tables first) while its thematic block makes a "Table 4.1" a hard reject;
-  //    - in a six-chapter thematic report the Chapter 5 file's closing rules (the cardinal rules and the
-  //      recommendation standards) go to Chapter 6, the conclusion, not to Chapter 5, the last argument.
-  //    No prompt file has a Chapter 6 header, so Chapter 6 carries those closing rules and the C1 sentence.
+  //    A thematic Chapter 4 skips the Chapter 4 cardinal rules (founder-confirmed): they govern data chapters
+  //    (results per objective, tables first), while its thematic block makes a "Table 4.1" a hard reject.
   const modeTitle = `MODE INSTRUCTIONS — CHAPTER ${chapter}, MODE ${input.mode} (${MODE_NAMES[input.mode].toUpperCase()})`;
-  const closingRulesToSix = template === "B" && chapterCount === 6;
-  const closingRules = [...file.allModesRules.flat(), ...file.headerExtras.filter((g) => !g.byMode).map((g) => g.paragraphs.join("\n\n"))];
-  if (chapter !== 6) {
-    const skipAllModes = (chapter === 4 && template === "B") || (chapter === 5 && closingRulesToSix);
-    const allModes = skipAllModes ? [] : file.allModesRules.flat();
-    const extras = file.headerExtras.flatMap((g) => {
-      if (!g.byMode) return chapter === 5 && closingRulesToSix ? [] : [g.paragraphs.join("\n\n")];
-      const forMode = g.byMode.get(input.mode);
-      return forMode ? [[...g.paragraphs, ...forMode].join("\n\n")] : [];
-    });
-    if (allModes.length) used.push(`ch${fileChapter}:(ALL MODES) rules`);
-    used.push(`ch${fileChapter}:MODE ${input.mode}`);
-    if (extras.length) used.push(`ch${fileChapter}:header extras`);
-    parts.push({
-      title: modeTitle,
-      text: render(modeTitle, [...allModes, ...file.routingIntro, ...file.modeBlocks.get(input.mode)!, ...extras, LOADER_TEXT.modePrecedence]),
-    });
-  } else {
-    if (closingRules.length) used.push("ch5:closing rules (ALL MODES)");
-    parts.push({ title: modeTitle, text: render(modeTitle, [...closingRules, LOADER_TEXT.modePrecedence]) });
-  }
+  const allModes = chapter === 4 && template === "B" ? [] : file.allModesRules.flat();
+  const extras = file.headerExtras.flatMap((g) => {
+    if (!g.byMode) return [g.paragraphs.join("\n\n")];
+    const forMode = g.byMode.get(input.mode);
+    return forMode ? [[...g.paragraphs, ...forMode].join("\n\n")] : [];
+  });
+  if (allModes.length) used.push(`ch${fileChapter}:(ALL MODES) rules`);
+  used.push(`ch${fileChapter}:MODE ${input.mode}`);
+  if (extras.length) used.push(`ch${fileChapter}:header extras`);
+  parts.push({
+    title: modeTitle,
+    text: render(modeTitle, [...allModes, ...file.routingIntro, ...file.modeBlocks.get(input.mode)!, ...extras, LOADER_TEXT.modePrecedence]),
+  });
 
-  // 2. Shared section of this chapter's file (Chapter 6 takes its one section only, per decision 7d).
-  if (chapter !== 6) {
-    used.push(`ch${fileChapter}:SHARED`);
-    parts.push({ title: "SHARED INSTRUCTIONS", text: render("SHARED INSTRUCTIONS", ["[SHARED: ALL DEPARTMENTS]", ...file.blocks.get("SHARED: ALL DEPARTMENTS")!, "[END SHARED: ALL DEPARTMENTS]"]) });
-  }
+  // 2. Shared section of this chapter's file.
+  used.push(`ch${fileChapter}:SHARED`);
+  parts.push({ title: "SHARED INSTRUCTIONS", text: render("SHARED INSTRUCTIONS", ["[SHARED: ALL DEPARTMENTS]", ...file.blocks.get("SHARED: ALL DEPARTMENTS")!, "[END SHARED: ALL DEPARTMENTS]"]) });
 
   // 3. Department section(s), kept inside their original tags so "see [DEPARTMENT: X] above" still reads.
   used.push(...deptBlocks.map((b) => b.label));
@@ -706,7 +695,8 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (nonHuman && section === "MEDICAL_SCIENCE") notes.push(LOADER_TEXT.nonHumanSamples(orDefault(input.samples?.description, LOADER_TEXT.nonHumanDefault)));
   if (combinedResults && chapter === 4) notes.push(LOADER_TEXT.combinedResultsCh4);
   if (combinedResults && chapter === 5) notes.push(LOADER_TEXT.combinedResultsCh5);
-  if (template === "B" && chapterCount === 6 && chapter === 5) notes.push(LOADER_TEXT.sixChapterFive);
+  // Q1/Q2: five chapters at most. Wherever the loaded text plans a sixth chapter, the note overrides it.
+  if (parts.some((p) => SIX_CHAPTERS.test(p.text))) notes.push(LOADER_TEXT.fiveChapters);
   if (notes.length) {
     used.push("loader:notes");
     parts.push({ title: "NOTES FOR THIS PROJECT", text: render("NOTES FOR THIS PROJECT", notes) });
@@ -728,7 +718,10 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   // 5. The four shared rules files, then the project's style, which overrides reference_rules.md's APA default.
   for (const rule of lib.sharedRules) parts.push({ title: rule.title, text: render(rule.title, [rule.text]) });
   used.push("shared:voice, formatting, anti-AI, reference rules");
-  parts.push({ title: "REFERENCING STYLE FOR THIS PROJECT", text: render("REFERENCING STYLE FOR THIS PROJECT", styleStatement(input.project.referencingStyle, style, placement, ch1)) });
+  parts.push({
+    title: "REFERENCING STYLE FOR THIS PROJECT",
+    text: render("REFERENCING STYLE FOR THIS PROJECT", [...styleStatement(input.project.referencingStyle, style, placement, ch1), LOADER_TEXT.noDirectQuotes]),
+  });
 
   // 6. Image rules: Chapter 2 (C3). Chapters 3 and 4, which ask for diagrams, charts and screenshots, get the placeholder rule.
   if (chapter === 2) {
@@ -743,9 +736,14 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (input.references.length === 0) {
     throw new PromptAssemblyError("No verified references. The project's research must finish before chapters are generated.");
   }
-  const refLines = referenceListLines(input.references).map(neutralize);
-  used.push(`research:${refLines.length} verified references`);
-  parts.push({ title: "VERIFIED REFERENCES", text: render("VERIFIED REFERENCES", [LOADER_TEXT.referencesIntro(refLines.length, style), refLines.join("\n")]) });
+  // Q3: every kept reference with its OpenAlex abstract, or "abstract unavailable" (never dropped).
+  const entries = referenceListEntries(input.references).map(
+    ({ text: line, ref }) => `${neutralize(line)}\nAbstract: ${ref.abstract?.trim() ? neutralize(abstractText(ref.abstract)) : LOADER_TEXT.abstractUnavailable}`,
+  );
+  // Q4: cases and archival sources come only from the list; a point with none gets the last-resort placeholder.
+  const primarySources = section === "LAW_DOCTRINAL" || section === "LAW_NON_DOCTRINAL" ? [LOADER_TEXT.primarySourcesRule("case")] : section === "HUMANITIES" ? [LOADER_TEXT.primarySourcesRule("archive")] : [];
+  used.push(`research:${entries.length} verified references with abstracts`);
+  parts.push({ title: "VERIFIED REFERENCES", text: render("VERIFIED REFERENCES", [LOADER_TEXT.referencesIntro(entries.length, style), ...primarySources, entries.join("\n\n")]) });
 
   // Strip pointers to the image rules: they send the model to a file it cannot see
   // ("chapter_2_literature_review.docx") and to the search/download/embed process.
@@ -756,7 +754,7 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     .replace(/\[FIG\] search_query \|/g, "[FIG] [FIGURE PLACEHOLDER: description of figure needed] |");
 
   // 8. Placeholders. Every {TOKEN} in the assembled instructions must have a value, or nothing is sent.
-  const values = placeholderValues(input, { departmentName: neutralize(match.displayName), template, chapterCount, style, placement, deptBlocks, combinedResults });
+  const values = placeholderValues(input, { departmentName: neutralize(match.displayName), template, style, placement, deptBlocks, combinedResults });
   const missing = new Set<string>();
   text = text.replace(TOKEN, (_m, token: string) => {
     const resolve = values[token];
@@ -784,7 +782,6 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     department: match.displayName,
     section,
     template,
-    chapterCount,
     referencingStyle: style,
     citationPlacement: placement,
     blocksUsed: used,
@@ -830,7 +827,6 @@ function placeholderValues(
   ctx: {
     departmentName: string;
     template: "A" | "B";
-    chapterCount: 5 | 6;
     style: string;
     placement: CitationPlacement;
     deptBlocks: ResolvedBlock[];
@@ -857,7 +853,7 @@ function placeholderValues(
     UNIVERSITY: () => required(p.university, "The university"),
     PROJECT_TYPE: () => PROJECT_TYPE_LABEL[p.projectType],
     TEMPLATE: () => ctx.template,
-    CHAPTER_COUNT: () => String(ctx.chapterCount),
+    CHAPTER_COUNT: () => "5", // five chapters at most, in every department
     DATA_REQUIREMENTS: () => DATA_REQUIREMENTS[input.mode],
     // B1: declared in Chapter 1's variable list but never used in the chapter text — defaults, never a block.
     SUPERVISOR: () => orDefault(p.supervisorName, LOADER_TEXT.notProvided),
@@ -897,7 +893,6 @@ function placeholderValues(
       ctx.template === "B"
         ? neutralize(required(titles.chapter4, "The Chapter 4 title (entered on the COO card)").toUpperCase())
         : LOADER_TEXT.chapterFourTitleTemplateA,
-    CHAPTER_FIVE_TITLE: () => neutralize(required(titles.chapter5, "The Chapter 5 title (entered on the COO card)").toUpperCase()),
   };
 }
 
