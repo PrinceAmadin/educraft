@@ -149,8 +149,13 @@ export const LOADER_TEXT = {
     "Results and Discussion: in this department Chapter Four presents the results AND discusses them in the same chapter (chapter title: RESULTS AND DISCUSSION). Interpret each result against the literature straight after presenting it, citing only the verified references. This replaces the results-only rule in the department section and the mode instructions, and the Chapter 4 cardinal rules PRESENT FIRST, DISCUSS LATER and NO NEW LITERATURE.",
   combinedResultsCh5:
     "Results and Discussion were combined in Chapter Four for this department. Chapter Five is the Summary, Conclusion and Recommendations (chapter title: SUMMARY, CONCLUSION AND RECOMMENDATIONS). This replaces every discussion section in the department section (5.2 Discussion of Findings) and in the mode instructions (5.1 Discussion of Results and 5.2 Mechanism / Explanation): do not write a separate discussion of findings.",
-  /** Combined Results and Discussion leaves Chapter Five a summary chapter: the range the other standard summary chapters use. */
-  combinedResultsCh5Pages: "8–14 pages",
+  /** A Chapter Five with no discussion in it is a summary chapter: the range the other standard summary chapters use. */
+  conclusionChapterPages: "8–14 pages",
+  /** Non-doctrinal Law (founder, 26 Sept): the discussion is in Chapter Four only. */
+  lawNonDoctrinalCh4:
+    "In this report the Discussion of Findings is written in this Chapter Four, together with the results (4.5 Discussion of Findings in the Law section). This replaces the Chapter 4 cardinal rules PRESENT FIRST, DISCUSS LATER and NO NEW LITERATURE: interpret each finding against the literature and the legal framework here.",
+  lawNonDoctrinalCh5:
+    "In this report the Discussion of Findings was written in Chapter Four. This Chapter Five is the conclusion only (summary of findings, conclusion, recommendations, limitations and suggestions for further research): do not write a discussion of findings here. This replaces the Discussion requirements in the department section and the mode instructions.",
   /** Added wherever the loaded text mentions a sixth chapter (Q1/Q2: five chapters at most, everywhere). */
   fiveChapters:
     "This report has exactly five chapters, and Chapter Five is the last one. Ignore every mention of a sixth chapter or a six-chapter structure in this prompt: any outline of chapters lists five, and anything meant for a sixth chapter belongs in Chapter Five.",
@@ -426,9 +431,10 @@ function planBlocks(chapter: ChapterNumber, template: "A" | "B", section: Sectio
   if (template === "A") {
     const file = chapter;
     const plan: BlockRef[] = [{ file, tag: section }];
-    // Non-doctrinal Law defers to other sections for these two chapters ("Refer to [DEPARTMENT: …]").
+    // Non-doctrinal Law: its Chapter 4 refers to BUSINESS (results and discussion combined). Its Chapter 5
+    // would load MEDICAL_SCIENCE for a second discussion; the founder put the discussion in Chapter 4 only,
+    // so Chapter 5 is the conclusion alone (see the notes).
     if (section === "LAW_NON_DOCTRINAL" && chapter === 4) plan.push({ file, tag: "BUSINESS" });
-    if (section === "LAW_NON_DOCTRINAL" && chapter === 5) plan.push({ file, tag: "MEDICAL_SCIENCE" });
     return plan;
   }
 
@@ -695,6 +701,8 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (nonHuman && section === "MEDICAL_SCIENCE") notes.push(LOADER_TEXT.nonHumanSamples(orDefault(input.samples?.description, LOADER_TEXT.nonHumanDefault)));
   if (combinedResults && chapter === 4) notes.push(LOADER_TEXT.combinedResultsCh4);
   if (combinedResults && chapter === 5) notes.push(LOADER_TEXT.combinedResultsCh5);
+  if (section === "LAW_NON_DOCTRINAL" && chapter === 4) notes.push(LOADER_TEXT.lawNonDoctrinalCh4);
+  if (section === "LAW_NON_DOCTRINAL" && chapter === 5) notes.push(LOADER_TEXT.lawNonDoctrinalCh5);
   // Q1/Q2: five chapters at most. Wherever the loaded text plans a sixth chapter, the note overrides it.
   if (parts.some((p) => SIX_CHAPTERS.test(p.text))) notes.push(LOADER_TEXT.fiveChapters);
   if (notes.length) {
@@ -754,7 +762,8 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     .replace(/\[FIG\] search_query \|/g, "[FIG] [FIGURE PLACEHOLDER: description of figure needed] |");
 
   // 8. Placeholders. Every {TOKEN} in the assembled instructions must have a value, or nothing is sent.
-  const values = placeholderValues(input, { departmentName: neutralize(match.displayName), template, style, placement, deptBlocks, combinedResults });
+  const conclusionOnlyFive = combinedResults || section === "LAW_NON_DOCTRINAL";
+  const values = placeholderValues(input, { departmentName: neutralize(match.displayName), template, style, placement, deptBlocks, conclusionOnlyFive });
   const missing = new Set<string>();
   text = text.replace(TOKEN, (_m, token: string) => {
     const resolve = values[token];
@@ -830,7 +839,8 @@ function placeholderValues(
     style: string;
     placement: CitationPlacement;
     deptBlocks: ResolvedBlock[];
-    combinedResults: boolean;
+    /** Chapter Five carries no discussion (pure sciences with combined results; non-doctrinal Law). */
+    conclusionOnlyFive: boolean;
   },
 ): Record<string, () => string> {
   const p = input.project;
@@ -874,7 +884,7 @@ function placeholderValues(
         if (!total) return LOADER_TEXT.noMinimumPages;
         return /^\d+$/.test(total) ? `${total} pages` : neutralize(total);
       }
-      if (ctx.combinedResults && input.chapter === 5) return LOADER_TEXT.combinedResultsCh5Pages;
+      if (ctx.conclusionOnlyFive && input.chapter === 5) return LOADER_TEXT.conclusionChapterPages;
       return pageRange(headers) ?? LOADER_TEXT.noMinimumPages;
     },
     OBJECTIVES: () => {

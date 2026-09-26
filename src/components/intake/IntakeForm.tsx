@@ -25,6 +25,7 @@ import { computePrice } from "@/lib/pricing";
 import { baseOptionLabel } from "@/lib/service-groups";
 import { ChapterCalculator } from "@/components/services/ChapterCalculator";
 import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { AttachmentsField, UploadBusyContext } from "@/components/intake/AttachmentsField";
 import { VariantField, type ServiceVariantProp } from "@/components/intake/VariantField";
 import { formatNaira } from "@/lib/utils";
@@ -683,7 +684,7 @@ function FypProjectStep() {
           </Select>
         </Field>
         <Field label="Number of chapters" htmlFor="chapterCount" error={errors.chapterCount?.message as string | undefined}>
-          <Input id="chapterCount" type="number" inputMode="numeric" min={1} max={20} {...register("chapterCount")} />
+          <Input id="chapterCount" type="number" inputMode="numeric" min={1} max={MAX_REPORT_CHAPTERS} {...register("chapterCount")} />
         </Field>
         <ReferencingField />
         <Field label="Data requirements" htmlFor="dataRequirements">

@@ -35,9 +35,13 @@ export function chapterTitle(n: number): string {
   return `Chapter ${n}`;
 }
 
+/** Every report has five chapters at most, in every department (founder, 26 Sept 2026). */
+export const MAX_REPORT_CHAPTERS = 5;
+export const CHAPTER_LIMIT_MESSAGE = `A report has ${MAX_REPORT_CHAPTERS} chapters at most.`;
+
 function clampChapters(n: number | null | undefined): number {
   if (!n || !Number.isFinite(n) || n < 1) return DEFAULT_CHAPTER_COUNT;
-  return Math.min(Math.round(n), 12);
+  return Math.min(Math.round(n), MAX_REPORT_CHAPTERS);
 }
 
 export function deliverableTemplate(input: {

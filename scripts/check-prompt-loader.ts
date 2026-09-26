@@ -6,6 +6,9 @@
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS, deliverableTemplate } from "../src/lib/deliverables";
+import { intakeSubmitSchema } from "../src/lib/validations/intake";
+import { intakeEditSchema } from "../src/lib/validations/intake-edit";
 import {
   DEPARTMENTS,
   defaultReferencingStyle,
@@ -260,6 +263,11 @@ async function main() {
   expect("Non-doctrinal Law Chapter 4 also loads BUSINESS, which it refers to", nonDoc4.blocksUsed.filter((b) => b.startsWith("ch4:") && !b.includes("MODE") && !b.includes("SHARED") && !b.includes("rules") && !b.includes("extras")), ["ch4:LAW_NON_DOCTRINAL", "ch4:BUSINESS"]);
   expect("Non-doctrinal Law with NALT still uses footnotes", nonDoc4.citationPlacement, "MODE_C");
   has("Non-doctrinal Law (its sections say SIX chapters) gets the five-chapter note", nonDoc4.text, LOADER_TEXT.fiveChapters);
+  has("Non-doctrinal Law Chapter 4 holds the discussion", nonDoc4.text, LOADER_TEXT.lawNonDoctrinalCh4);
+  const nonDoc5 = await sample("ch5-law-non-doctrinal", { chapter: 5, department: "Law", mode: 2, project: { referencingStyle: "NALT" } });
+  expect("Non-doctrinal Law Chapter 5 no longer loads the MEDICAL_SCIENCE discussion", nonDoc5.blocksUsed.filter((b) => b.startsWith("ch5:") && /LAW|MEDICAL|BUSINESS/.test(b)), ["ch5:LAW_NON_DOCTRINAL"]);
+  has("Non-doctrinal Law Chapter 5 is the conclusion only", nonDoc5.text, LOADER_TEXT.lawNonDoctrinalCh5);
+  has("…with a summary-chapter length", nonDoc5.text, /8–14 pages\s+— enforced/);
   const eduB = await loadChapterPrompt(input({ chapter: 3, department: "Educational Foundations", mode: 1 }));
   expect("Theoretical Education (Mode 1) takes the Humanities thematic chain", [eduB.section, eduB.blocksUsed.includes("ch3:HUMANITIES")], ["HUMANITIES", true]);
 
@@ -359,6 +367,19 @@ async function main() {
     expect(`lookup "${typed}"`, lookupDepartment(typed)?.name ?? null, wanted);
   }
   expect("a combined degree keeps the name as typed", matchDepartment("Economics Education")?.displayName, "Economics Education");
+
+  // ── Five chapters at most at intake and in the document slots ───────────────────────────
+  const intakeChapters = intakeSubmitSchema.innerType().shape.chapterCount;
+  expect("intake refuses 6 chapters", intakeChapters.safeParse("6").success, false);
+  expect("intake accepts 5 chapters", intakeChapters.safeParse("5").success, true);
+  expect("the refusal says why", intakeChapters.safeParse(6).error?.issues[0]?.message, CHAPTER_LIMIT_MESSAGE);
+  const edit6 = intakeEditSchema.safeParse({ project: { chapterCount: 6 } });
+  expect("admin edit refuses 6 chapters", edit6.success ? null : edit6.error.issues.find((i) => i.path.join(".") === "project.chapterCount")?.message, CHAPTER_LIMIT_MESSAGE);
+  expect(
+    "a 6-chapter order gets 5 chapter slots",
+    deliverableTemplate({ serviceCode: "FYP-FULL", serviceName: "Final Year Project", chapterCount: 6, chapters: [] }).filter((d) => d.kind === "CHAPTER").length,
+    MAX_REPORT_CHAPTERS,
+  );
   const find = (name: string) => DEPARTMENTS.find((d) => d.name === name)!;
   expect("Agricultural Economics in Mode 4 → AGRICULTURE (A8)", resolveSection(find("Agricultural Economics"), 4), "AGRICULTURE");
   expect("Agricultural Economics in Mode 2 → BUSINESS (A8)", resolveSection(find("Agricultural Economics"), 2), "BUSINESS");

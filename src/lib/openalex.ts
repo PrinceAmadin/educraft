@@ -8,12 +8,20 @@
  *
  * OpenAlex stores abstracts as an inverted index (word → positions); this
  * rebuilds the plain text.
+ *
+ * Since February 2026 OpenAlex wants an API key on every request: with
+ * OPENALEX_API_KEY a key gets $1 of free use a day (about 1,000 searches);
+ * without one an IP gets $0.10 (about 100), which a few research jobs use up.
  */
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
 
 function contactEmail(): string {
   return process.env.RESEARCH_CONTACT_EMAIL || "educraft611@gmail.com";
+}
+
+function apiKey(): string | null {
+  return process.env.OPENALEX_API_KEY?.trim() || null;
 }
 
 function rebuildAbstract(index: Record<string, number[]> | null | undefined): string | null {
@@ -117,12 +125,22 @@ export async function searchWorks(
     mailto: contactEmail(),
   });
   if (foundational) params.set("sort", "cited_by_count:desc");
+  const key = apiKey();
+  if (key) params.set("api_key", key);
 
   try {
     const res = await fetch(`${OPENALEX_BASE_URL}/works?${params.toString()}`, {
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      // 401 = the key is wrong or revoked; 429 = the day's budget is used up. Either way the search
+      // finds nothing, so say so in the logs instead of looking like a topic with no papers.
+      const body = await res.text().catch(() => "");
+      console.error(
+        `[openalex] search failed: ${res.status} ${body.slice(0, 160)} (remaining today: $${res.headers.get("x-ratelimit-remaining-usd") ?? "?"}, key ${key ? "set" : "missing"})`,
+      );
+      return [];
+    }
     const json = await res.json().catch(() => null);
     return (json?.results ?? []).map(toWork).filter((w: OpenAlexWork | null): w is OpenAlexWork => Boolean(w));
   } catch {

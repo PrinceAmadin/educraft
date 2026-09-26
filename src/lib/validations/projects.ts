@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { ProjectStatus, ProjectType, ReferencingStyle } from "@prisma/client";
 import { commissionRateSchema } from "@/lib/validations/commission";
 
@@ -77,10 +78,10 @@ export const internalNotesBodySchema = z.object({
 const optionalText = z.string().trim().max(500).optional().or(z.literal(""));
 
 /** Empty string / null → undefined, otherwise coerce to a positive int. */
-const optionalPositiveInt = (max: number) =>
+const optionalPositiveInt = (max: number, tooMany?: string) =>
   z.preprocess(
     (v) => (v === "" || v === null || v === undefined ? undefined : v),
-    z.coerce.number().int().positive().max(max).optional()
+    z.coerce.number().int().positive().max(max, tooMany).optional()
   );
 
 const optionalNonNegativeInt = z.preprocess(
@@ -143,7 +144,7 @@ export const createProjectSchema = z
     referencingStyle: z.enum(referencingValues).optional().or(z.literal("")),
     minimumPages: optionalText,
     projectType: z.enum(projectTypeValues).optional().or(z.literal("")),
-    chapterCount: optionalPositiveInt(20),
+    chapterCount: optionalPositiveInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
 
     // Term paper
     courseTitle: optionalText,

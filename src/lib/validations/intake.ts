@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
 
@@ -9,10 +10,10 @@ const dataValues = Object.values(DataRequirement) as [DataRequirement, ...DataRe
 const text = z.string().trim().max(1000).optional().or(z.literal(""));
 const longText = z.string().trim().max(6000).optional().or(z.literal(""));
 
-const optionalPositiveInt = (max: number) =>
+const optionalPositiveInt = (max: number, tooMany?: string) =>
   z.preprocess(
     (v) => (v === "" || v == null ? undefined : v),
-    z.coerce.number().int().positive().max(max).optional()
+    z.coerce.number().int().positive().max(max, tooMany).optional()
   );
 
 const educationEntry = z.object({
@@ -116,7 +117,7 @@ export const intakeSubmitSchema = z
     supervisorName: text,
     hodName: text,
     projectType: z.enum(projectTypeValues).optional().or(z.literal("")),
-    chapterCount: optionalPositiveInt(20),
+    chapterCount: optionalPositiveInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
     referencingStyle: z.enum(referencingValues).optional().or(z.literal("")),
     dataRequirements: z.enum(dataValues).optional().or(z.literal("")),
     minimumPages: text,

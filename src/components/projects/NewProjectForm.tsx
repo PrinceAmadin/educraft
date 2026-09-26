@@ -28,6 +28,7 @@ import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
 import { COMMISSION_RATE_PRESETS, commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
+import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
 import { cn, formatNaira } from "@/lib/utils";
 
@@ -843,7 +844,7 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
               type="number"
               inputMode="numeric"
               min={1}
-              max={20}
+              max={MAX_REPORT_CHAPTERS}
               {...register("chapterCount")}
             />
           </Field>

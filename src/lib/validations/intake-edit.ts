@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
 
@@ -10,10 +11,10 @@ const dataValues = Object.values(DataRequirement) as [DataRequirement, ...DataRe
 const text = (max: number) => z.string().trim().max(max);
 const blankOr = <T extends z.ZodTypeAny>(schema: T) => z.union([z.literal(""), schema]);
 
-const optionalInt = (max: number) =>
+const optionalInt = (max: number, tooMany?: string) =>
   z.preprocess(
     (v) => (v === "" || v == null ? null : v),
-    z.coerce.number().int().positive().max(max).nullable()
+    z.coerce.number().int().positive().max(max, tooMany).nullable()
   );
 
 const educationEntry = z.object({
@@ -56,7 +57,7 @@ export const intakeEditSchema = z.object({
       hodName: text(1000),
       projectPartners: text(1000),
       projectType: blankOr(z.enum(projectTypeValues)),
-      chapterCount: optionalInt(20),
+      chapterCount: optionalInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
       referencingStyle: blankOr(z.enum(referencingValues)),
       dataRequirements: blankOr(z.enum(dataValues)),
       minimumPages: text(1000),
