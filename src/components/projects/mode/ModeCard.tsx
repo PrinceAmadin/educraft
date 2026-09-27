@@ -25,7 +25,11 @@ import {
   type ModeDecision,
 } from "@/lib/mode-classifier";
 import { INTAKE_MODE_LABEL } from "@/lib/constants";
+import { validateObjectives } from "@/lib/generation/objectives-rules";
+import { sourceKindForDepartment } from "@/lib/research/source-policy";
 import type { ModeCard as ModeCardData } from "@/lib/services/research-mode";
+import { ObjectivesSection, type BriefAction } from "./ObjectivesSection";
+import { SourcesSection, type ManualSourceDraft } from "./SourcesSection";
 import { cn, formatDateTime } from "@/lib/utils";
 
 /** Every department in Table A the COO can confirm (group labels are never a department). */
@@ -56,7 +60,18 @@ type Form = {
   chapter3: string;
   chapter4: string;
   notes: string;
+  /** D3b: the objectives as edited, and the ids of the ticked cases or archival sources. */
+  objectives: string[];
+  selected: string[];
 };
+
+function briefForm(card: ModeCardData): Pick<Form, "objectives" | "selected"> {
+  const b = card.brief;
+  return {
+    objectives: b?.objectives ?? [],
+    selected: b ? b.points.flatMap((p) => p.sources.filter((s) => s.selected).map((s) => s.id)) : [],
+  };
+}
 
 function formFrom(card: ModeCardData): Form {
   const d = card.decision;
@@ -69,11 +84,17 @@ function formFrom(card: ModeCardData): Form {
     chapter3: d.thematicTitles?.chapter3 ?? "",
     chapter4: d.thematicTitles?.chapter4 ?? "",
     notes: card.approval?.notes ?? "",
+    ...briefForm(card),
   };
 }
 
-function decisionFrom(form: Form): ModeDecision & { notes: string | null } {
+type Decision = ModeDecision & { notes: string | null; objectives?: string[]; selectedSourceIds?: string[] };
+
+function decisionFrom(form: Form, card?: ModeCardData): Decision {
+  // The objectives and ticks travel with the decision once the brief is ready (saved or approved together).
+  const brief = card?.brief?.status === "READY" ? card.brief : null;
   return {
+    ...(brief ? { objectives: form.objectives, ...(brief.sourceKind ? { selectedSourceIds: form.selected } : {}) } : {}),
     department: form.department,
     modeNumber: form.modeNumber,
     section: form.section || null,
@@ -100,7 +121,7 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const router = useRouter();
   const [card, setCard] = React.useState(initial);
   const [form, setForm] = React.useState<Form>(() => formFrom(initial));
-  const [busy, setBusy] = React.useState<"approve" | "save" | "reopen" | null>(null);
+  const [busy, setBusy] = React.useState<"approve" | "save" | "reopen" | BriefAction | "add" | "remove" | null>(null);
   const [problems, setProblems] = React.useState<string[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
   const [reopenOpen, setReopenOpen] = React.useState(false);
@@ -119,9 +140,100 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const sectionOptions = mode ? sectionOptionsFor(entry, mode) : [];
   const ownSection = mode ? defaultSectionFor(entry, mode) : null;
   const validation = validateModeDecision(decisionFrom(form));
-  const liveProblems = validation.ok ? [] : validation.problems;
   const locked = card.isLocked;
+  // D3b: the brief's own blockers (not ready, stopped, department changed) and the objectives as typed.
+  const brief = card.brief;
+  const objectivesCheck = validateObjectives(form.objectives);
+  const objectivesProblems = brief?.status === "READY" && !objectivesCheck.ok ? objectivesCheck.problems : [];
+  const briefProblems = brief
+    ? brief.status === "NONE"
+      ? ["Draft the objectives first: press Draft objectives."]
+      : brief.stopped
+        ? ["The objectives and source search stopped. Press Carry on."]
+        : brief.running
+          ? ["The objectives and sources are still being prepared."]
+          : sourceKindForDepartment(form.department) !== brief.sourceKind
+            ? ["The department you picked calls for a different source search: save the draft, then press Start again."]
+            : objectivesProblems
+    : [];
+  const liveProblems = [...(validation.ok ? [] : validation.problems), ...briefProblems];
+  const briefEditable = !locked && brief?.status === "READY";
+  const selectedSet = React.useMemo(() => new Set(form.selected), [form.selected]);
+
+  // While the brief is being prepared, the card asks for news every 5 seconds (the server runs it).
+  const waiting = Boolean(brief && (brief.status === "PENDING" || brief.running));
+  React.useEffect(() => {
+    if (!waiting) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/admin/projects/${card.projectId}/mode`, { cache: "no-store" });
+        if (!res.ok || stop) return;
+        const next = (await res.json()) as ModeCardData;
+        setCard(next);
+        if (next.brief && next.brief.status === "READY") setForm((f) => ({ ...f, ...briefForm(next) }));
+      } catch {
+        // offline for a moment: the next tick tries again
+      }
+    };
+    const id = window.setInterval(tick, 5000);
+    void tick();
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [waiting, card.projectId]);
   const departmentChoices = DEPARTMENT_NAMES.includes(form.department) || !form.department ? DEPARTMENT_NAMES : [form.department, ...DEPARTMENT_NAMES];
+
+  /** D3b: brief actions, hand-added sources. The answer is the card; the brief part of the form is refreshed from it. */
+  async function briefCall(path: string, method: "POST" | "DELETE", body: unknown, kind: BriefAction | "add" | "remove", done: string) {
+    setBusy(kind);
+    setProblems([]);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/projects/${card.projectId}/${path}`, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (Array.isArray(data?.problems)) setProblems(data.problems);
+        else setMessage(data?.message ?? data?.error ?? "That did not work. Try again.");
+        return false;
+      }
+      const next = data as ModeCardData;
+      setCard(next);
+      // Keep what the COO is typing in the objectives; take the server's ticks for a new or removed source.
+      setForm((f) => ({ ...f, ...(kind === "add" || kind === "remove" ? { selected: briefForm(next).selected } : briefForm(next)) }));
+      setMessage(done);
+      router.refresh();
+      return true;
+    } catch {
+      setMessage("Could not reach the server. Check your connection and try again.");
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const briefAction = (action: BriefAction) =>
+    void briefCall(
+      "mode/brief",
+      "POST",
+      { action },
+      action,
+      action === "redraft_objectives" ? "Drafting the objectives again. This takes about a minute." : action === "carry_on" ? "Resumed." : "Started. This takes a few minutes; you can leave the page.",
+    );
+
+  const addSource = (d: ManualSourceDraft) =>
+    briefCall(
+      "mode/sources",
+      "POST",
+      { pointIndex: d.pointIndex, title: d.title, court: d.court, decidedOn: d.decidedOn, citation: d.citation, holder: d.holder, reference: d.reference, url: d.url },
+      "add",
+      "Added and ticked.",
+    );
 
   async function send(path: string, method: "POST" | "PUT", body: unknown, kind: "approve" | "save" | "reopen") {
     setBusy(kind);
@@ -262,7 +374,7 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
         className="space-y-10"
         onSubmit={(e) => {
           e.preventDefault();
-          void send("mode", "POST", decisionFrom(form), "approve");
+          void send("mode", "POST", decisionFrom(form, card), "approve");
         }}
       >
         <FormSection
@@ -364,6 +476,31 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
           </FormSection>
         ) : null}
 
+        {brief ? (
+          <ObjectivesSection
+            brief={brief}
+            objectives={form.objectives}
+            onChange={(next) => set("objectives", next)}
+            editable={briefEditable}
+            busy={busy}
+            onAction={briefAction}
+            problems={objectivesProblems}
+          />
+        ) : null}
+
+        {brief ? (
+          <SourcesSection
+            brief={brief}
+            projectId={card.projectId}
+            selected={selectedSet}
+            onToggle={(id, on) => set("selected", on ? [...form.selected.filter((x) => x !== id), id] : form.selected.filter((x) => x !== id))}
+            editable={briefEditable}
+            busy={busy}
+            onAdd={addSource}
+            onRemove={(id) => void briefCall(`mode/sources/${id}`, "DELETE", null, "remove", "Removed.")}
+          />
+        ) : null}
+
         {!locked ? (
           <Field label="Note for the timeline" htmlFor="mode-notes" hint="Optional: why this mode, for whoever reads the project later">
             <Textarea id="mode-notes" rows={2} value={form.notes} maxLength={1000} onChange={(e) => set("notes", e.target.value)} />
@@ -403,7 +540,7 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
                 type="button"
                 variant="outline"
                 disabled={busy !== null || !form.department || !form.modeNumber}
-                onClick={() => void send("mode/change", "PUT", decisionFrom(form), "save")}
+                onClick={() => void send("mode/change", "PUT", decisionFrom(form, card), "save")}
               >
                 {busy === "save" ? "Saving…" : "Save draft"}
               </Button>

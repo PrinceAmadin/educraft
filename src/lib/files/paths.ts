@@ -1,4 +1,4 @@
-import type { UploadPurpose } from "@/lib/files/policy";
+import type { StoredPurpose, UploadPurpose } from "@/lib/files/policy";
 
 /**
  * Private-store paths: projects/{projectCuid}/{purpose}/{targetCuid}/{random}.{ext}
@@ -22,7 +22,7 @@ export interface PrivatePath {
 
 export function buildPrivatePath(input: {
   projectDbId: string;
-  purpose: UploadPurpose;
+  purpose: StoredPurpose;
   targetId: string;
   random: string;
   ext: string;
@@ -30,12 +30,30 @@ export function buildPrivatePath(input: {
   return `projects/${input.projectDbId}/${input.purpose}/${input.targetId}/${input.random}.${input.ext}`;
 }
 
+/** A path an UPLOAD may use (chapters and message attachments only). */
 export function parsePrivatePath(pathname: string): PrivatePath | null {
+  const parsed = parseStoredPath(pathname);
+  if (!parsed || (parsed.purpose !== "deliverable" && parsed.purpose !== "message")) return null;
+  return { ...parsed, purpose: parsed.purpose };
+}
+
+export interface StoredPath {
+  projectDbId: string;
+  purpose: StoredPurpose;
+  targetId: string;
+  name: string;
+}
+
+/**
+ * Any path in the private store, including "source" files the server writes
+ * itself (Supreme Court judgment PDFs, D3b). Never accepted from an upload.
+ */
+export function parseStoredPath(pathname: string): StoredPath | null {
   const parts = pathname.split("/");
   if (parts.length !== 5 || parts[0] !== "projects") return null;
   const [, projectDbId, purpose, targetId, name] = parts;
   if (!ID.test(projectDbId) || !TARGET.test(targetId) || !NAME.test(name)) return null;
-  if (purpose !== "deliverable" && purpose !== "message") return null;
+  if (purpose !== "deliverable" && purpose !== "message" && purpose !== "source") return null;
   return { projectDbId, purpose, targetId, name };
 }
 

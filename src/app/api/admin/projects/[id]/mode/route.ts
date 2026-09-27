@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
+import { kickSourceStage } from "@/lib/research/source-stage-actions";
 import { opsGuard, parseBody } from "@/lib/services/operations/route-helpers";
 import { approveMode, getModeCard } from "@/lib/services/research-mode";
 import { modeErrorResponse } from "@/lib/services/research-mode-errors";
@@ -18,6 +20,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!guard.ok) return guard.response;
   try {
     const { card, dbMs } = await getModeCard(params.id);
+    // D3b: a brief waiting to start, or whose run went quiet, starts from this request (never one that stopped after failures).
+    if (card.brief && (card.brief.status === "PENDING" || card.brief.running)) {
+      waitUntil(kickSourceStage(params.id).catch((error) => console.error("[mode card] could not start the source stage", error)));
+    }
     return NextResponse.json(card, {
       headers: {
         "Cache-Control": "no-store",

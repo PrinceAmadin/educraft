@@ -94,6 +94,31 @@ export interface ChapterPromptInput {
   references: PromptReference[];
   /** Per-project override of the department's non-human-samples flag, and what the samples are (A2). */
   samples?: { nonHuman?: boolean | null; description?: string | null };
+  /**
+   * D3b: the cases (Law) or archival sources (History) the COO approved on the mode card, each
+   * with the point it supports, and the points left without one. Absent for every other
+   * department, where the list-only rule applies as before.
+   */
+  primarySources?: PromptPrimarySources;
+}
+
+export interface PromptPrimarySource {
+  /** The point (legal proposition or historical question) the source supports. */
+  point: string;
+  title: string;
+  court?: string | null;
+  decidedOn?: string | null;
+  citation?: string | null;
+  suitNumber?: string | null;
+  holder?: string | null;
+  reference?: string | null;
+  recordType?: string | null;
+}
+
+export interface PromptPrimarySources {
+  kind: "case" | "archive";
+  items: PromptPrimarySource[];
+  unsupportedPoints: string[];
 }
 
 export interface AssembledChapterPrompt {
@@ -171,15 +196,47 @@ export const LOADER_TEXT = {
   /** Q6 — no direct quotations anywhere; page pinpoints are left for the worker. */
   noDirectQuotes:
     "Do not quote any source directly anywhere in this chapter; paraphrase and cite instead. Where a citation needs a page number (a pinpoint), write p. [page] and the worker will fill it in.",
-  referencesIntro: (count: number, style: string) =>
-    `These ${count} works are the only sources you may cite, apart from statutes and the Constitution, which you may cite by name. EduCraft's research step found and checked them (OpenAlex); they are listed in APA 7th format so you can identify them, each followed by its abstract. Cite them in ${style}. ` +
+  referencesIntro: (count: number, style: string, primary?: "case" | "archive") =>
+    `These ${count} works are the only sources you may cite, apart from statutes and the Constitution, which you may cite by name${
+      primary ? `, and the ${primary === "case" ? "court decisions in the APPROVED CASES" : "records in the APPROVED ARCHIVAL SOURCES"} list that follows` : ""
+    }. EduCraft's research step found and checked them (OpenAlex); they are listed in APA 7th format so you can identify them, each followed by its abstract. Cite them in ${style}. ` +
     `Report a study's methods and findings only as far as its abstract states them; where the abstract is unavailable, cite the work only for what its title states. Never add volume, issue, page or publisher details that are not listed. Do not cite anything that is not on this list.`,
   /** Law and Humanities: court cases and archival sources come only from the list (Q4). */
   primarySourcesRule: (kind: "case" | "archive") =>
     kind === "case"
       ? "Cite a court case only if it is on this list. If a point needs a case and none on the list supports it, write [CASE TO BE SUPPLIED] instead of naming one; never invent a case name or citation."
       : "Cite an archival source (a newspaper report, gazette, official record or manuscript) only if it is on this list. If a point needs one and none on the list supports it, write [ARCHIVE TO BE SUPPLIED] instead of naming one; never invent an archival source.",
+  /** D3b: the approved list (Law: cases; History: archival sources), each with the point it supports. */
+  approvedCasesIntro: (n: number) =>
+    n
+      ? `These ${n} court decisions were found for this project and approved by EduCraft; each is listed with the point it supports. Cite a case only from this list, for its point or one it plainly covers, and exactly as listed (the parties, year, court and citation). Never add a citation, report volume, page or holding that is not listed, and say what a case decided only as far as its point states it.`
+      : "No court decision was approved for this project.",
+  approvedArchivesIntro: (n: number) =>
+    n
+      ? `These ${n} archival sources were found for this project and approved by EduCraft; each is listed with the question it bears on. Cite one only from this list, for its question, and exactly as listed (title, date, holder and reference). Never add a file number, page or detail that is not listed, and say what a record shows only as far as its listing states it. A thesis is a secondary study: cite it as a thesis, not as a primary record.`
+      : "No archival source was approved for this project.",
+  unsupportedPoints: (kind: "case" | "archive", points: string[]) =>
+    `No ${kind === "case" ? "court decision" : "archival source"} was found for these points. Where the chapter needs one for them, write ${kind === "case" ? "[CASE TO BE SUPPLIED]" : "[ARCHIVE TO BE SUPPLIED]"} instead of naming one: ${points.map((p, i) => `${i + 1}. ${p}`).join("; ")}.`,
+  approvedOnlyRule: (kind: "case" | "archive") =>
+    kind === "case"
+      ? "For any other point that needs a court decision, write [CASE TO BE SUPPLIED]; never invent a case name or citation."
+      : "For any other point that needs an archival source, write [ARCHIVE TO BE SUPPLIED]; never invent an archival source.",
 } as const;
+
+/** One line of the approved list. */
+export function formatPrimarySource(kind: "case" | "archive", s: PromptPrimarySource): string {
+  const clean = (v: string | null | undefined) => (v?.trim() ? neutralize(v.replace(/\s+/g, " ").trim()) : null);
+  if (kind === "case") {
+    const year = /\b(1[89]\d\d|20\d\d)\b/.exec(s.decidedOn ?? "")?.[1] ?? null;
+    const citation = clean(s.citation);
+    const suit = clean(s.suitNumber);
+    const parts = [`${clean(s.title)}${year ? ` (${year})` : ""}`, citation, clean(s.court), suit && !citation?.includes(suit) ? `suit no. ${suit}` : null].filter(Boolean);
+    return `${parts.join(", ")}. Supports: ${clean(s.point)}`;
+  }
+  const kindLabel = s.recordType === "Thesis" ? "thesis" : "primary record";
+  const parts = [clean(s.title), clean(s.decidedOn), clean(s.holder), clean(s.reference)].filter(Boolean);
+  return `${parts.join(", ")} (${kindLabel}). Bears on: ${clean(s.point)}`;
+}
 
 // ─── The library (read once per process) ───────────────────────────────────────────────────
 
@@ -716,9 +773,30 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     ({ text: line, ref }) => `${neutralize(line)}\nAbstract: ${ref.abstract?.trim() ? neutralize(abstractText(ref.abstract)) : LOADER_TEXT.abstractUnavailable}`,
   );
   // Q4: cases and archival sources come only from the list; a point with none gets the last-resort placeholder.
-  const primarySources = section === "LAW_DOCTRINAL" || section === "LAW_NON_DOCTRINAL" ? [LOADER_TEXT.primarySourcesRule("case")] : section === "HUMANITIES" ? [LOADER_TEXT.primarySourcesRule("archive")] : [];
+  // D3b: Law and the History department carry the list the COO approved, after the references.
+  const lawSection = section === "LAW_DOCTRINAL" || section === "LAW_NON_DOCTRINAL";
+  const approved = input.primarySources ?? null;
+  if (approved?.kind === "case" && !lawSection) throw new PromptAssemblyError("Approved cases were given for a project that is not in a Law section.");
+  if (approved?.kind === "archive" && entry.name !== "History") throw new PromptAssemblyError("Approved archival sources were given for a project outside the History department.");
+  const primarySources = approved ? [] : lawSection ? [LOADER_TEXT.primarySourcesRule("case")] : section === "HUMANITIES" ? [LOADER_TEXT.primarySourcesRule("archive")] : [];
   used.push(`research:${entries.length} verified references with abstracts`);
-  parts.push({ title: "VERIFIED REFERENCES", text: render("VERIFIED REFERENCES", [LOADER_TEXT.referencesIntro(entries.length, style), ...primarySources, entries.join("\n\n")]) });
+  parts.push({ title: "VERIFIED REFERENCES", text: render("VERIFIED REFERENCES", [LOADER_TEXT.referencesIntro(entries.length, style, approved?.kind), ...primarySources, entries.join("\n\n")]) });
+  if (approved) {
+    const title = approved.kind === "case" ? "APPROVED CASES" : "APPROVED ARCHIVAL SOURCES";
+    const intro = approved.kind === "case" ? LOADER_TEXT.approvedCasesIntro(approved.items.length) : LOADER_TEXT.approvedArchivesIntro(approved.items.length);
+    const lines = approved.items.map((s, i) => `${i + 1}. ${formatPrimarySource(approved.kind, s)}`);
+    const unsupported = approved.unsupportedPoints.map((p) => neutralize(p.replace(/\s+/g, " ").trim())).filter(Boolean);
+    parts.push({
+      title,
+      text: render(title, [
+        intro,
+        ...(lines.length ? [lines.join("\n")] : []),
+        ...(unsupported.length ? [LOADER_TEXT.unsupportedPoints(approved.kind, unsupported)] : []),
+        LOADER_TEXT.approvedOnlyRule(approved.kind),
+      ]),
+    });
+    used.push(`d3b:${approved.items.length} approved ${approved.kind === "case" ? "cases" : "archival sources"}, ${unsupported.length} points without one`);
+  }
 
   // Strip pointers to the image rules: they send the model to a file it cannot see
   // ("chapter_2_literature_review.docx") and to the search/download/embed process.

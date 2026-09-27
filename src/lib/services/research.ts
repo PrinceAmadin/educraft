@@ -15,6 +15,7 @@ import {
 } from "@/lib/google-drive";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { ledgerRunFinished } from "@/lib/services/operations/research-ledger";
+import { createPendingBrief } from "@/lib/research/source-stage";
 import { claimRun, getRerunState, releaseClaim } from "@/lib/services/research-runs";
 
 export class ResearchError extends Error {}
@@ -839,6 +840,8 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
 
   const next = await db.researchJob.update({ where: { id: job.id }, data: { status: "PASSED" } });
   await ledgerRunFinished(job.projectId, job.id, "COMPLETE");
+  // D3b: a report project's objectives (and Law/History sources) come next; the next browser request starts them.
+  await createPendingBrief(job.projectId).catch((error) => console.error("[research] could not queue the objectives stage", error));
   if (job.requestedById) {
     const [total, withPdf] = await Promise.all([
       db.reference.count({ where: { researchJobId: job.id, status: "KEPT" } }),

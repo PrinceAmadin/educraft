@@ -55,6 +55,9 @@ export type UploaderRole = "WORKER" | "ADMIN" | "CLIENT";
 
 export const UPLOAD_PURPOSES: readonly UploadPurpose[] = ["deliverable", "message"];
 
+/** Everything the private store holds: uploads plus "source", files the server itself saves (court judgment PDFs, D3b). */
+export type StoredPurpose = UploadPurpose | "source";
+
 export function canUpload(role: UploaderRole, purpose: UploadPurpose): boolean {
   if (purpose === "deliverable") return role === "WORKER" || role === "ADMIN";
   return role === "CLIENT" || role === "ADMIN";
@@ -76,15 +79,16 @@ const TYPES: Record<string, string> = {
   webp: "image/webp",
 };
 
-const EXTENSIONS: Record<UploadPurpose, readonly string[]> = {
+const EXTENSIONS: Record<StoredPurpose, readonly string[]> = {
   deliverable: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "png", "jpg", "jpeg"],
   message: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "webp"],
+  source: ["pdf"],
 };
 
 const MB = 1024 * 1024;
-const MAX_BYTES: Record<UploadPurpose, number> = { deliverable: 50 * MB, message: 25 * MB };
+const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB };
 
-export function maxBytesFor(purpose: UploadPurpose): number {
+export function maxBytesFor(purpose: StoredPurpose): number {
   return MAX_BYTES[purpose];
 }
 
@@ -94,7 +98,7 @@ export function extensionOf(fileName: string): string {
 }
 
 /** The content type for an allowed file, or null when this purpose doesn't take that kind of file. */
-export function contentTypeFor(purpose: UploadPurpose, fileName: string): string | null {
+export function contentTypeFor(purpose: StoredPurpose, fileName: string): string | null {
   const ext = extensionOf(fileName);
   return EXTENSIONS[purpose].includes(ext) ? TYPES[ext] : null;
 }

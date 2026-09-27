@@ -14,8 +14,6 @@
  */
 import { Prisma, type ResearchMode } from "@prisma/client";
 import { db } from "@/lib/db";
-import { sqlTable } from "@/lib/db-schema";
-import { resolveTemplate } from "@/lib/intake-templates";
 import { MODE_NAMES, type ResearchModeNumber, type SectionKey } from "@/lib/generation/department-map";
 import { REFERENCING_STYLE_CHOICES, isReferencingStyleKey, type CitationPlacement, type ReferencingStyleKey } from "@/lib/generation/referencing";
 import {
@@ -34,58 +32,20 @@ import {
   type ModeCode,
   type ModeDecision,
 } from "@/lib/mode-classifier";
-import { hasGenerationStarted } from "@/lib/generation/generation-state";
+import { hasGenerationStarted, isReportTemplate, lockProjectRow } from "@/lib/generation/generation-state";
+import { ModeDecisionError, ModeLockedError, ModeNotApprovedError, ModeStateError } from "@/lib/services/mode-errors";
 import { writeProjectNote } from "@/lib/services/operations/project-ops";
 import type { Actor } from "@/lib/services/operations/actor";
+import { BRIEF_CARD_SELECT, briefBlockers, buildBriefView, type BriefView } from "@/lib/research/source-stage-view";
+import { briefApprovalNote, saveBriefChoices, sourceStageCost, type BriefChoices } from "@/lib/research/source-stage-actions";
 
 type Tx = Prisma.TransactionClient;
 
 /** Enough room for the lock, the reads and the writes over the shared pooler (Prisma's 5 s default has been hit here). */
 const TX_OPTIONS = { timeout: 20_000, maxWait: 10_000 } as const;
 
-export class ModeLockedError extends Error {
-  readonly code = "MODE_LOCKED";
-  constructor(
-    readonly reason: "APPROVED" | "GENERATION_STARTED",
-    message?: string,
-  ) {
-    super(
-      message ??
-        (reason === "GENERATION_STARTED"
-          ? "Chapters have been generated with this mode, so it can no longer change."
-          : "The mode has been approved. Reopen it before changing it."),
-    );
-  }
-}
-
-export class ModeNotApprovedError extends Error {
-  readonly code = "MODE_NOT_APPROVED";
-  constructor(message = "The COO has not approved this project's research mode yet.") {
-    super(message);
-  }
-}
-
-/** A decision that breaks a rule; `problems` are shown on the card. */
-export class ModeDecisionError extends Error {
-  constructor(readonly problems: string[]) {
-    super(problems[0] ?? "The decision is not valid.");
-  }
-}
-
-/** A request the project's state does not allow (not a report, nothing to reopen…). */
-export class ModeStateError extends Error {
-  constructor(
-    message: string,
-    readonly status: 404 | 409 = 409,
-  ) {
-    super(message);
-  }
-}
-
-/** Written final-year reports and theses: every academic_fyp* service uses the final-year form. */
-export function isReportTemplate(template: string | null | undefined): boolean {
-  return Boolean(template) && resolveTemplate(template!) === "academic_fyp";
-}
+// The errors live in mode-errors.ts (shared with the D3b source stage); re-exported for existing callers.
+export { ModeDecisionError, ModeLockedError, ModeNotApprovedError, ModeStateError, isReportTemplate };
 
 // ─── Reading ────────────────────────────────────────────────────────────────
 
@@ -100,6 +60,7 @@ const PROJECT_SELECT = {
   client: { select: { fullName: true, department: true, university: { select: { name: true } } } },
   service: { select: { serviceCode: true, serviceName: true, intakeFormTemplate: true } },
   researchMode: true,
+  brief: { select: BRIEF_CARD_SELECT },
   _count: { select: { generationCheckpoints: true } },
 } satisfies Prisma.ProjectSelect;
 
@@ -180,6 +141,8 @@ export interface ModeCard {
   thematicTitlesRequired: boolean;
 
   approval: { by: string | null; at: string | null; notes: string | null } | null;
+  /** D3b: the objectives and (Law/History) sources approved with the mode; null for non-report services. */
+  brief: BriefView | null;
   /** What stops approval now, in plain language. */
   blockers: string[];
   canApprove: boolean;
@@ -187,7 +150,7 @@ export interface ModeCard {
   canReopen: boolean;
 }
 
-function buildCard(project: CardProject): ModeCard {
+function buildCard(project: CardProject, briefCost: number): ModeCard {
   const saved = project.researchMode;
   const generationStarted = project._count.generationCheckpoints > 0;
   const c = classifyMode({
@@ -209,10 +172,12 @@ function buildCard(project: CardProject): ModeCard {
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
 
   const validation = validateModeDecision(decision);
+  const brief = reportProject ? buildBriefView(project.brief, { costNaira: briefCost, currentDepartment: decision.department, locked: isLocked }) : null;
   const blockers = [
     ...(reportProject ? [] : ["This service is not a written report, so it has no research mode."]),
     ...(modeNumber ? [] : ["Pick a mode: nothing in the project points to one."]),
     ...(validation.ok ? [] : validation.problems.filter((p) => !(modeNumber === null && p.startsWith("Pick a mode")))),
+    ...(brief ? briefBlockers(brief, reportProject) : []),
   ];
   const allowed = new Set(c.allowedModes.length ? c.allowedModes : MODE_NUMBERS);
   const clientStyle = project.referencingStyle;
@@ -272,6 +237,7 @@ function buildCard(project: CardProject): ModeCard {
     approval: saved?.isLocked
       ? { by: saved.cooApprovedByName, at: saved.cooApprovedAt?.toISOString() ?? null, notes: saved.cooNotes }
       : null,
+    brief,
     blockers,
     canApprove: reportProject && !isLocked && blockers.length === 0,
     canChange: !isLocked,
@@ -283,16 +249,20 @@ function buildCard(project: CardProject): ModeCard {
 export async function getModeCard(idOrCode: string): Promise<{ card: ModeCard; dbMs: number }> {
   const started = performance.now();
   const project = await loadProject(idOrCode);
+  const cost = project.brief ? await sourceStageCost(project.id) : 0;
   const dbMs = performance.now() - started;
-  return { card: buildCard(project), dbMs };
+  return { card: buildCard(project, cost), dbMs };
+}
+
+async function cardFor(projectDbId: string): Promise<ModeCard> {
+  const project = await loadProject(projectDbId);
+  return buildCard(project, project.brief ? await sourceStageCost(project.id) : 0);
 }
 
 // ─── Writing ────────────────────────────────────────────────────────────────
 
-/** Serialises every mode write and the start of generation for one project. */
-async function lockProject(tx: Tx, projectDbId: string): Promise<void> {
-  await tx.$queryRaw`SELECT id FROM ${sqlTable("Project")} WHERE id = ${projectDbId} FOR UPDATE`;
-}
+/** Serialises every mode write and the start of generation for one project (generation-state.ts). */
+const lockProject = lockProjectRow;
 
 function describe(decision: ModeDecision, section: SectionKey | null): string {
   const mode = isModeNumber(decision.modeNumber) ? modeTitle(decision.modeNumber) : "no mode";
@@ -337,7 +307,7 @@ async function assertChangeable(tx: Tx, projectDbId: string, saved: ResearchMode
 }
 
 /** Saves the COO's choice without approving it. */
-export async function changeMode(idOrCode: string, decision: ModeDecision, actor: Actor): Promise<ModeCard> {
+export async function changeMode(idOrCode: string, decision: ModeDecision & BriefChoices, actor: Actor): Promise<ModeCard> {
   const problems = validateModeDraft(decision);
   if (problems.length) throw new ModeDecisionError(problems);
   const mode = decision.modeNumber as ResearchModeNumber;
@@ -353,15 +323,16 @@ export async function changeMode(idOrCode: string, decision: ModeDecision, actor
       create: { projectId: project.id, ...data },
       update: { ...data, isLocked: false, cooApprovedBy: null, cooApprovedByName: null, cooApprovedAt: null, cooNotes: null },
     });
+    await saveBriefChoices(tx, project.id, { objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds }, { approving: false, department: data.department });
     const entry = getDepartmentModeDefault(decision.department).entry;
     const section = decision.section ?? defaultSectionFor(entry, mode);
     await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode set (not yet approved): ${describe(decision, section)}.` });
   }, TX_OPTIONS);
-  return buildCard(await loadProject(project.id));
+  return cardFor(project.id);
 }
 
 /** Checks the decision against the loader's rules, saves it and locks it. */
-export async function approveMode(idOrCode: string, decision: ModeDecision & { notes?: string | null }, actor: Actor): Promise<ModeCard> {
+export async function approveMode(idOrCode: string, decision: ModeDecision & BriefChoices & { notes?: string | null }, actor: Actor): Promise<ModeCard> {
   const valid = validateModeDecision(decision);
   if (!valid.ok) throw new ModeDecisionError(valid.problems);
 
@@ -373,6 +344,8 @@ export async function approveMode(idOrCode: string, decision: ModeDecision & { n
     await lockProject(tx, project.id);
     const saved = await tx.researchMode.findUnique({ where: { projectId: project.id } });
     await assertChangeable(tx, project.id, saved);
+    // D3b: the objectives and sources are approved with the mode; a brief that is not ready stops the approval.
+    const brief = await saveBriefChoices(tx, project.id, { objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds }, { approving: true, department: valid.department });
     const approval = {
       isLocked: true,
       cooApprovedBy: actor.userId,
@@ -383,9 +356,10 @@ export async function approveMode(idOrCode: string, decision: ModeDecision & { n
     const data = { ...rowData(project, decision, valid.mode), department: valid.department, ...approval };
     await tx.researchMode.upsert({ where: { projectId: project.id }, create: { projectId: project.id, ...data }, update: data });
     const note = decision.notes?.trim() ? ` Note: ${decision.notes.trim()}` : "";
-    await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode approved and locked: ${describe(decision, valid.section)}.${note}` });
+    const briefLine = brief ? briefApprovalNote(brief) : "";
+    await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode approved and locked: ${describe(decision, valid.section)}.${briefLine}${note}` });
   }, TX_OPTIONS);
-  return buildCard(await loadProject(project.id));
+  return cardFor(project.id);
 }
 
 /** Unlocks an approved mode, only while no chapter has been generated. */
@@ -402,7 +376,7 @@ export async function reopenMode(idOrCode: string, reason: string, actor: Actor)
     });
     await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode reopened (was ${modeTitle(saved.modeNumber as ResearchModeNumber)}): ${reason.trim()}` });
   }, TX_OPTIONS);
-  return buildCard(await loadProject(project.id));
+  return cardFor(project.id);
 }
 
 // ─── For generation (D2 now, D4 later) ──────────────────────────────────────

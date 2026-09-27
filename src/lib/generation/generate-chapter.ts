@@ -28,6 +28,8 @@ import type { ClaudeUsage } from "@/lib/anthropic-stream";
 import { loadChapterPrompt, type ChapterPromptInput } from "./prompt-loader";
 import { matchDepartment, resolveSection } from "./department-map";
 import { ModeNotApprovedError, lockApprovedMode, type ApprovedModeSettings } from "@/lib/services/research-mode";
+import { getApprovedBrief, type ApprovedBrief } from "@/lib/research/source-stage-actions";
+import { toPromptPrimarySources } from "./approved-inputs";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -190,6 +192,21 @@ export async function startChapterGeneration(input: StartChapterInput) {
       const approvedSection = approvedEntry ? resolveSection(approvedEntry, approved.mode, approved.sectionOverride) : null;
       if (assembled.section !== approvedSection) {
         throw new GenerationError(`This chapter would use the ${assembled.section} section, but the COO approved ${approvedSection ?? "a different department"}.`, true);
+      }
+      // D3b: exactly the approved objectives (same words, same order) and exactly the approved cases or archival sources.
+      let brief: ApprovedBrief;
+      try {
+        brief = await getApprovedBrief(tx, project.id);
+      } catch (error) {
+        if (error instanceof ModeNotApprovedError) throw new GenerationError(error.message, true);
+        throw error;
+      }
+      const given = earlier.objectives ?? [];
+      if (given.length !== brief.objectives.length || given.some((o, i) => o !== brief.objectives[i])) {
+        throw new GenerationError("These objectives are not the ones the COO approved. Every chapter uses the approved objectives word for word.", true);
+      }
+      if (JSON.stringify(input.prompt.primarySources ?? null) !== JSON.stringify(toPromptPrimarySources(brief) ?? null)) {
+        throw new GenerationError(`These ${brief.kind === "ARCHIVE" ? "archival sources" : "cases"} are not the ones the COO approved.`, true);
       }
 
       const existing = await tx.generationCheckpoint.findUnique({

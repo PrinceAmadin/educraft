@@ -419,6 +419,47 @@ async function main() {
   const lowerBraces = await loadChapterPrompt(input({ chapter: 3, department: "History", mode: 1, thematicTitles: { ...TITLES, chapter3: "The {hod} of power" } }));
   lacks("a lower-case token upper-cased in a title never becomes a placeholder", lowerBraces.text, "{HOD}");
 
+  // ── D3b: the cases (Law) and archival sources (History) the COO approved, after the references ──
+  const CASES: ChapterPromptInput["primarySources"] = {
+    kind: "case",
+    items: [{ point: "Whether a court is bound by a plea agreement", title: "Chinaka Promise v. Federal Republic of Nigeria", court: "Court of Appeal", decidedOn: "2020", citation: null, suitNumber: "CA/A/767c/2019" }],
+    unsupportedPoints: ["Whether a victim must consent to a plea bargain"],
+  };
+  const lawCases = await loadChapterPrompt(input({ chapter: 2, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, primarySources: CASES }));
+  has("D3b Law: the approved cases part", lawCases.text, "═══ APPROVED CASES ═══");
+  has(
+    "D3b Law: each case with its point",
+    lawCases.text,
+    "1. Chinaka Promise v. Federal Republic of Nigeria (2020), Court of Appeal, suit no. CA/A/767c/2019. Supports: Whether a court is bound by a plea agreement",
+  );
+  has("D3b Law: a point with no approved case gets the placeholder", lawCases.text, LOADER_TEXT.unsupportedPoints("case", ["Whether a victim must consent to a plea bargain"]));
+  has("D3b Law: the references intro points to the approved list", lawCases.text, "and the court decisions in the APPROVED CASES list that follows");
+  has("D3b Law: statutes and the Constitution still cited by name", lawCases.text, "apart from statutes and the Constitution, which you may cite by name");
+  lacks("D3b Law: the list-only case rule gives way to the approved list", lawCases.text, LOADER_TEXT.primarySourcesRule("case"));
+  has("D3b Law: never invent a case", lawCases.text, LOADER_TEXT.approvedOnlyRule("case"));
+  const noCases = await loadChapterPrompt(
+    input({ chapter: 4, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, primarySources: { kind: "case", items: [], unsupportedPoints: ["A point"] } }),
+  );
+  has("D3b Law with nothing ticked: says so and keeps the placeholder", noCases.text, LOADER_TEXT.approvedCasesIntro(0));
+  const ARCHIVES: ChapterPromptInput["primarySources"] = {
+    kind: "archive",
+    items: [
+      { point: "How was tax assessed in Benin Province?", title: "Taxation in Nigeria", decidedOn: "1934-1943", holder: "The National Archives, Kew", reference: "CO 583/200/6", recordType: "Primary" },
+      { point: "How was tax assessed in Benin Province?", title: "The Administration of Colonial Taxation in Zaria Province", decidedOn: "2015", holder: "Ahmadu Bello University", reference: "hdl:123456789/8183", recordType: "Thesis" },
+    ],
+    unsupportedPoints: [],
+  };
+  const histArchives = await loadChapterPrompt(input({ chapter: 2, department: "History", mode: 1, primarySources: ARCHIVES }));
+  has("D3b History: the approved archival sources part", histArchives.text, "═══ APPROVED ARCHIVAL SOURCES ═══");
+  has("D3b History: a primary record line", histArchives.text, "Taxation in Nigeria, 1934-1943, The National Archives, Kew, CO 583/200/6 (primary record). Bears on: How was tax assessed in Benin Province?");
+  has("D3b History: a thesis is marked as a thesis", histArchives.text, "hdl:123456789/8183 (thesis). Bears on:");
+  lacks("D3b History: no unsupported line when every point has a source", histArchives.text, "No archival source was found for these points");
+  await refuses("D3b: archival sources outside History are refused", () => loadChapterPrompt(input({ chapter: 2, department: "English", mode: 1, primarySources: ARCHIVES })), /outside the History department/);
+  await refuses("D3b: cases outside Law are refused", () => loadChapterPrompt(input({ chapter: 2, department: "History", mode: 1, primarySources: CASES })), /not in a Law section/);
+  const english = await loadChapterPrompt(input({ chapter: 2, department: "English", mode: 1 }));
+  has("D3b: other Humanities departments keep the list-only archive rule", english.text, LOADER_TEXT.primarySourcesRule("archive"));
+  lacks("D3b: …and get no approved list", english.text, "APPROVED ARCHIVAL SOURCES");
+
   if (process.argv.includes("--print")) {
     console.log("\n" + "━".repeat(100) + "\nCHAPTER 1 — ELECTRICAL ENGINEERING — MODE 3 (full assembled prompt)\n" + "━".repeat(100) + "\n");
     console.log(eee.text);

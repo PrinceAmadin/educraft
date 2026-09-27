@@ -100,6 +100,195 @@ export async function callClaudeForJson<T>({
   return block.input as T;
 }
 
+// ─── Web search ──────────────────────────────────────────────────────────────
+
+/**
+ * Anthropic's web search, run on Anthropic's servers. The basic version: each
+ * search is made by Claude directly and its results come back as they are
+ * (the newer versions search from inside a code sandbox, which complicates
+ * pairing them with our own record tool). $10 per 1,000 searches plus the
+ * tokens of the results.
+ */
+export const WEB_SEARCH_TOOL = "web_search_20250305";
+
+export interface WebSearchOptions {
+  /** The most searches Claude may make in this call. */
+  maxUses: number;
+  /** Never search these domains (subdomains included). Mutually exclusive with allowedDomains. */
+  blockedDomains?: string[];
+  allowedDomains?: string[];
+  /** Two-letter country code to localise results, e.g. "NG". */
+  country?: string;
+}
+
+export interface ClaudeWebSearchInput extends ClaudeToolCallInput<unknown> {
+  webSearch: WebSearchOptions;
+  /** Stop waiting after this long, all continuations together. Default 100 s. */
+  timeoutMs?: number;
+}
+
+export interface WebSearchResultRef {
+  url: string;
+  title: string;
+  pageAge: string | null;
+}
+
+export interface ClaudeWebSearchResult<T> {
+  /** What Claude put in the record tool, or null when it finished without calling it. */
+  record: T | null;
+  /** Searches billed, from the API's own count. */
+  searchesUsed: number;
+  /** True when the call was cut off, so searchesUsed may be short of what was billed. */
+  incomplete: boolean;
+  queries: string[];
+  /** Every result page the searches returned (a recorded source must be one of these). */
+  results: WebSearchResultRef[];
+  searchErrors: string[];
+  stopReason: string | null;
+  calls: number;
+}
+
+const MAX_WEB_SEARCH_CALLS = 4; // the first call + up to 3 continuations
+
+/**
+ * A web-search turn that failed. `searchesUsed` is what the API reported as
+ * billed before the failure; `uncertain` means the call was cut off (timeout,
+ * dropped connection), so more searches may have run and been billed.
+ */
+export class WebSearchCallError extends AnthropicError {
+  constructor(
+    message: string,
+    readonly searchesUsed: number,
+    readonly uncertain: boolean,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * One turn in which Claude may search the web, then must record what it found
+ * with our tool. Handles `pause_turn` (the server-side loop paused: send the
+ * turn back unchanged) and a record made before a search had finished (tell
+ * Claude to wait and record again). Every call is logged with its search count.
+ */
+export async function callClaudeWithWebSearch<T>({
+  system,
+  user,
+  toolName,
+  toolDescription,
+  inputSchema,
+  maxTokens = 6000,
+  usage,
+  webSearch,
+  timeoutMs = 100_000,
+}: ClaudeWebSearchInput): Promise<ClaudeWebSearchResult<T>> {
+  const deadline = Date.now() + timeoutMs;
+  const searchTool: Record<string, unknown> = { type: WEB_SEARCH_TOOL, name: "web_search", max_uses: webSearch.maxUses };
+  if (webSearch.allowedDomains?.length) searchTool.allowed_domains = webSearch.allowedDomains;
+  else if (webSearch.blockedDomains?.length) searchTool.blocked_domains = webSearch.blockedDomains;
+  if (webSearch.country) searchTool.user_location = { type: "approximate", country: webSearch.country };
+  const tools = [searchTool, { name: toolName, description: toolDescription, input_schema: inputSchema }];
+
+  const messages: { role: "user" | "assistant"; content: unknown }[] = [{ role: "user", content: user }];
+  const out: ClaudeWebSearchResult<T> = { record: null, searchesUsed: 0, incomplete: false, queries: [], results: [], searchErrors: [], stopReason: null, calls: 0 };
+  const seen = new Set<string>();
+
+  while (out.calls < MAX_WEB_SEARCH_CALLS) {
+    const left = deadline - Date.now();
+    if (left <= 1_000) {
+      out.incomplete = true;
+      break;
+    }
+    out.calls++;
+    const startedAt = Date.now();
+    let res: Response;
+    try {
+      res = await fetch(ANTHROPIC_BASE_URL, {
+        method: "POST",
+        headers: { "x-api-key": apiKey(), "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages, tools, tool_choice: { type: "auto" } }),
+        signal: AbortSignal.timeout(left),
+      });
+    } catch (error) {
+      // Timed out or the connection dropped: searches may have run and been billed.
+      out.incomplete = true;
+      if (usage) {
+        await logAiUsage({ ...usage, model: MODEL, inputTokens: 0, outputTokens: 0, durationMs: Date.now() - startedAt, status: "error" });
+      }
+      throw new WebSearchCallError(`The web search call did not finish: ${error instanceof Error ? error.message : String(error)}`, out.searchesUsed, true);
+    }
+
+    const json = await res.json().catch(() => null);
+    const searches = json?.usage?.server_tool_use?.web_search_requests ?? 0;
+    out.searchesUsed += searches;
+    if (usage) {
+      await logAiUsage({
+        ...usage,
+        model: json?.model ?? MODEL,
+        inputTokens: json?.usage?.input_tokens ?? 0,
+        outputTokens: json?.usage?.output_tokens ?? 0,
+        cacheWriteTokens: json?.usage?.cache_creation_input_tokens ?? 0,
+        cacheReadTokens: json?.usage?.cache_read_input_tokens ?? 0,
+        webSearchRequests: searches,
+        durationMs: Date.now() - startedAt,
+        status: res.ok ? "success" : "error",
+      });
+    }
+    if (!res.ok) throw new WebSearchCallError(json?.error?.message || `Claude API error (${res.status})`, out.searchesUsed, false);
+
+    const content: any[] = Array.isArray(json?.content) ? json.content : [];
+    const answered = new Set<string>();
+    const asked: string[] = [];
+    let recordBlock: any = null;
+    for (const block of content) {
+      if (block?.type === "server_tool_use" && block.name === "web_search") {
+        asked.push(block.id);
+        if (typeof block.input?.query === "string") out.queries.push(block.input.query);
+      } else if (block?.type === "web_search_tool_result") {
+        answered.add(block.tool_use_id);
+        if (Array.isArray(block.content)) {
+          for (const r of block.content) {
+            if (r?.type !== "web_search_result" || typeof r.url !== "string" || seen.has(r.url)) continue;
+            seen.add(r.url);
+            out.results.push({ url: r.url, title: String(r.title ?? ""), pageAge: r.page_age ?? null });
+          }
+        } else if (block.content?.error_code) {
+          out.searchErrors.push(String(block.content.error_code));
+        }
+      } else if (block?.type === "tool_use" && block.name === toolName) {
+        recordBlock = block;
+      }
+    }
+    out.stopReason = json?.stop_reason ?? null;
+    const pendingSearch = asked.some((id) => !answered.has(id));
+
+    if (out.stopReason === "pause_turn") {
+      messages.push({ role: "assistant", content });
+      continue;
+    }
+    if (out.stopReason === "tool_use" && recordBlock && pendingSearch) {
+      // Recorded before its own search ran: the search runs when we answer the record call.
+      messages.push({ role: "assistant", content });
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: recordBlock.id,
+            is_error: true,
+            content: `Not recorded: your search has not returned yet. Read its results, then call ${toolName} again with only what those results show.`,
+          },
+        ],
+      });
+      continue;
+    }
+    if (recordBlock) out.record = recordBlock.input as T;
+    break;
+  }
+  if (out.calls >= MAX_WEB_SEARCH_CALLS && out.record === null && out.stopReason === "pause_turn") out.incomplete = true;
+  return out;
+}
+
 // ─── Streamed calls ──────────────────────────────────────────────────────────
 
 /** A prompt-cache breakpoint: everything up to and including the marked block is cached for 5 minutes. */

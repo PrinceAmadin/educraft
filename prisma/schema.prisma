@@ -574,6 +574,8 @@ model Project {
   // Phase D (report production)
   generationCheckpoints GenerationCheckpoint[]
   researchMode          ResearchMode?
+  brief                 ProjectBrief?
+  sources               ProjectSource[]
 
   @@index([status])
   @@index([clientId])
@@ -1380,6 +1382,114 @@ enum GenerationStatus {
   WRITING // writing the planned parts, one per step
   COMPLETED // fullOutput holds the whole chapter
   FAILED // retries ran out or the error cannot be retried; partialOutput keeps the parts already written
+}
+
+/// D3b: where a project's objectives and (Law/History) sources stand.
+enum SourceStageStatus {
+  PENDING // created when research passed; starts on the next browser request
+  DRAFTING_OBJECTIVES
+  PLANNING_POINTS // Law/History: objectives → points that need a case or a record
+  SEARCHING // one step per point (Law) or per attempt round (History)
+  READY // the COO can review and approve
+  FAILED // retries ran out; everything found so far is kept
+}
+
+enum SourceKind {
+  CASE
+  ARCHIVE
+}
+
+enum SourceOrigin {
+  WEB // found by Anthropic web search on an open page
+  SUPREME_COURT
+  HANSARD
+  NATIONAL_ARCHIVES
+  INTERNET_ARCHIVE
+  WELLCOME
+  UNILAG
+  ABU
+  NATIONAL_LIBRARY
+  IBADAN
+  COO // added by hand on the card
+}
+
+/// D3b: a report project's objectives (every department) and, for Law and History, the
+/// search for cases or archival sources. The COO edits `objectives` and ticks sources on
+/// the mode card; approving the mode freezes both (ResearchMode.isLocked).
+model ProjectBrief {
+  id                   String            @id @default(cuid())
+  projectId            String            @unique
+  project              Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status               SourceStageStatus @default(PENDING)
+  /// Null: this department has no source stage.
+  sourceKind           SourceKind?
+  /// The department the stage ran for (the mode card may change it later).
+  department           String?
+  /// What the drafter wrote, kept for the record.
+  draftedObjectives    String[]
+  /// The COO's copy: Chapter 1 states these word for word once approved.
+  objectives           String[]
+  objectivesFromClient Boolean           @default(false)
+  /// [{ index, text, attempts, outcome, queries }]
+  points               Json?
+  /// Web searches and archive queries spent; never more than 16 (source-policy.ts).
+  searchesUsed         Int               @default(0)
+  officialLookups      Int               @default(0)
+  /// One entry per search: point, source, query, results, kept, dropped.
+  searchLog            Json?
+  /// The step the runner is on within SEARCHING (next point or attempt round).
+  cursor               Int               @default(0)
+  /// Set by "Draft objectives again": the drafting step then skips planning and searching.
+  redraftOnly          Boolean           @default(false)
+  lockedUntil          DateTime?
+  failedSteps          Int               @default(0)
+  lastError            String?
+  startedById          String?
+  draftedAt            DateTime?
+  searchedAt           DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  sources              ProjectSource[]
+
+  @@index([status])
+}
+
+/// D3b: one case or archival record found for a point. Only `selected` rows reach the
+/// chapter prompts, and only once the COO has approved the mode card.
+model ProjectSource {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  briefId     String
+  brief       ProjectBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  kind        SourceKind
+  origin      SourceOrigin
+  pointIndex  Int
+  title       String
+  court       String?
+  decidedOn   String?
+  citation    String?
+  suitNumber  String?
+  holder      String?
+  reference   String?
+  /// Primary / Thesis (archives)
+  recordType  String?
+  /// Where it was found.
+  sourceUrl   String?
+  /// The official record (Supreme Court judgment, archive catalogue entry).
+  officialUrl String?
+  relevance   String?
+  /// Matched in the Supreme Court's own record.
+  confirmed   Boolean      @default(false)
+  selected    Boolean      @default(false)
+  /// The judgment PDF copied into the private Blob store.
+  pdfPath     String?      @unique
+  addedById   String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([projectId])
+  @@index([briefId])
 }
 
 model GenerationCheckpoint {
