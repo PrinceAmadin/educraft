@@ -18,6 +18,7 @@ import {
   type ExecRole,
 } from "../src/lib/rbac";
 import { ADMIN_SIDEBAR, adminMobileNavForRole, adminNavForRole } from "../src/lib/sidebar-config";
+import { recheckLogin } from "../src/lib/session-check";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown) {
@@ -147,8 +148,39 @@ for (const role of EXEC_ROLES) {
 }
 expect("SUPER_ADMIN bottom nav unchanged", adminMobileNavForRole("SUPER_ADMIN").map((i) => i.label), ["Home", "Projects", "QA", "Finance", "More"]);
 
-if (failures) {
-  console.log(`\n${failures} check(s) failed`);
-  process.exit(1);
+// ── Sessions re-checked against the login (auth.ts jwt callback) ────────────
+
+async function sessionChecks() {
+  const logins: Record<string, { isActive: boolean; role: string }> = {
+    ceo: { isActive: true, role: "SUPER_ADMIN" },
+    off: { isActive: false, role: "COO" },
+    demoted: { isActive: true, role: "WORKER" },
+    worker: { isActive: true, role: "WORKER" },
+  };
+  const lookup = async (id: string) => logins[id] ?? null;
+  const verdicts = await Promise.all([
+    recheckLogin({ id: "ceo", role: "SUPER_ADMIN" }, lookup),
+    recheckLogin({ id: "worker", role: "WORKER" }, lookup),
+    recheckLogin({ id: "gone", role: "SUPER_ADMIN" }, lookup),
+    recheckLogin({ id: "off", role: "COO" }, lookup),
+    recheckLogin({ id: "demoted", role: "COO" }, lookup),
+    recheckLogin({ role: "COO" }, lookup),
+  ]);
+  expect("session kept: login stands (staff and person)", verdicts.slice(0, 2), ["keep", "keep"]);
+  expect("session ended: deleted, switched off, role changed, no id", verdicts.slice(2), ["end", "end", "end", "end"]);
+  const quiet = console.error;
+  console.error = () => {};
+  const onBlip = await recheckLogin({ id: "ceo", role: "SUPER_ADMIN" }, async () => {
+    throw new Error("P1001");
+  });
+  console.error = quiet;
+  expect("a database error keeps the session (logged)", onBlip, "keep");
 }
-console.log("RBAC rules match the matrix.");
+
+sessionChecks().then(() => {
+  if (failures) {
+    console.log(`\n${failures} check(s) failed`);
+    process.exit(1);
+  }
+  console.log("RBAC rules match the matrix.");
+});

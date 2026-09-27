@@ -102,6 +102,8 @@ Four executive roles run HQ (RBAC Phase 1, Sept 2026 — spec: `DATA/EDUCRAFT_RB
 
 Anything under `/admin` that no row names is SUPER_ADMIN only (fail closed). `/api/admin/*` is judged by the same table (`API_PERMISSIONS`, method-aware: the CFO and COO may only GET `/api/admin/clients`; marking payouts paid is founder + CFO).
 
+**Sessions are re-checked on every request (27 Sept 2026, founder's call):** sessions are 30-day JWTs, but every server-side read of the session (`auth()` in pages, layouts and API routes, and `/api/auth/session`) looks the login up again in the `jwt` callback in `src/lib/auth.ts` (`recheckLogin`, `src/lib/session-check.ts`, tested by `check:rbac`): a deleted login, a switched-off login or a changed role ends the session at once (a role change signs them out rather than swapping the role, because the edge middleware still routes by the role in the cookie). A database error keeps the session and logs `[auth] could not re-check the login`. The middleware cannot reach the database and still judges the token alone, so every signed-in page and API must call `auth()` (they all do; there are no server actions).
+
 ## Brand Design System
 
 ### Colors

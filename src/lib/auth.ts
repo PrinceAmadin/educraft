@@ -8,6 +8,7 @@ import { verifyPassword } from "@/lib/services/client-otp";
 import { isStaffRole, primaryPortal, type Portal } from "@/lib/roles";
 import { EXEC_ROLE_LABELS } from "@/lib/rbac";
 import { linkClientOrders } from "@/lib/services/account-links";
+import { recheckLogin } from "@/lib/session-check";
 
 // Landing route per role lives with the rest of the access rules (edge-safe);
 // re-exported here because every caller already imports it from `@/lib/auth`.
@@ -36,6 +37,26 @@ async function touchSignIn(userId: string): Promise<void> {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+  callbacks: {
+    ...authConfig.callbacks,
+    /**
+     * Every server-side read of the session (pages, layouts, API routes and
+     * /api/auth/session) re-checks the login in the database, so deleting it,
+     * switching it off, removing someone from the team or changing their role
+     * ends the session at once, not when the 30-day token runs out. The edge
+     * middleware cannot reach the database and keeps judging the token alone;
+     * every page and API behind it calls `auth()`, which is where this runs.
+     */
+    async jwt(params) {
+      const token = await authConfig.callbacks.jwt(params);
+      // A fresh sign-in: `authorize` has just checked the login.
+      if (params.user) return token;
+      const verdict = await recheckLogin({ id: token.id, role: token.role }, (id) =>
+        db.user.findUnique({ where: { id }, select: { isActive: true, role: true } })
+      );
+      return verdict === "keep" ? token : null;
+    },
+  },
   providers: [
     Credentials({
       credentials: {
