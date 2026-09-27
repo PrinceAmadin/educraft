@@ -5,6 +5,9 @@ import { PLATINUM_QUARTERLY_BONUS_PER_CLIENT, QUARTERLY_CHALLENGE } from "@/lib/
 import { getPayoutMonth, type AmbassadorPayoutGroup } from "@/lib/services/finance/payouts-engine";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { formatNaira } from "@/lib/utils";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { EXEC_RECORD_SELECT, loadExecIndex } from "@/lib/services/executives";
 import type { CommissionHistoryQuery } from "@/lib/validations/ambassador-platform";
 
 /**
@@ -76,6 +79,8 @@ export interface CommissionRow {
   unpaid: number;
   status: AmbassadorPayoutGroup["status"];
   paidAt: string | null;
+  /** Set when the ambassador is an executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface CommissionMonth {
@@ -89,9 +94,12 @@ export interface CommissionMonth {
 export async function getCommissionMonth(month: string = currentMonthKey(), now: Date = new Date()): Promise<CommissionMonth> {
   const payout = await getPayoutMonth(month);
   const ids = payout.ambassadors.map((g) => g.recipientId);
-  const ambassadors = ids.length
-    ? await db.ambassador.findMany({ where: { id: { in: ids } }, select: { id: true, lastConversionAt: true, lastReferralAt: true, createdAt: true, lifetimeConversions: true, university: { select: { abbreviation: true } } } })
-    : [];
+  const [ambassadors, execIndex] = await Promise.all([
+    ids.length
+      ? db.ambassador.findMany({ where: { id: { in: ids } }, select: { id: true, lastConversionAt: true, lastReferralAt: true, createdAt: true, lifetimeConversions: true, university: { select: { abbreviation: true } }, ...EXEC_RECORD_SELECT } })
+      : Promise.resolve([]),
+    loadExecIndex(),
+  ]);
   const rows: CommissionRow[] = payout.ambassadors.map((g) => {
     const a = ambassadors.find((x) => x.id === g.recipientId);
     const bonus = Math.round(g.lines.filter((l) => l.leg === "BONUS").reduce((s, l) => s + l.amount, 0));
@@ -112,6 +120,7 @@ export async function getCommissionMonth(month: string = currentMonthKey(), now:
       unpaid: g.unpaid,
       status: g.status,
       paidAt: g.paidAt,
+      execRole: a ? execRoleForRecord(execIndex, a) : null,
     };
   });
   const totals = {
@@ -180,6 +189,8 @@ export interface HistoryRow {
   amount: number;
   status: string;
   paidAt: string | null;
+  /** Set when the ambassador is an executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface HistoryResult {
@@ -205,9 +216,13 @@ export async function getCommissionHistory(q: CommissionHistoryQuery): Promise<H
     select: { id: true, month: true, recipientId: true, recipientName: true, leg: true, basis: true, amount: true, status: true, paidAt: true, project: { select: { projectId: true, client: { select: { fullName: true } } } } },
   });
   const ids = [...new Set(records.map((r) => r.recipientId))];
-  const ambassadors = ids.length ? await db.ambassador.findMany({ where: { id: { in: ids } }, select: { id: true, ambassadorId: true, tier: true } }) : [];
+  const [ambassadors, execIndex] = await Promise.all([
+    ids.length ? db.ambassador.findMany({ where: { id: { in: ids } }, select: { id: true, ambassadorId: true, tier: true, ...EXEC_RECORD_SELECT } }) : Promise.resolve([]),
+    loadExecIndex(),
+  ]);
   const tierOf = new Map(ambassadors.map((a) => [a.id, a.tier]));
   const codeOf = new Map(ambassadors.map((a) => [a.id, a.ambassadorId]));
+  const execOf = new Map(ambassadors.map((a) => [a.id, execRoleForRecord(execIndex, a)]));
   const filtered = q.tier ? records.filter((r) => tierOf.get(r.recipientId) === q.tier) : records;
   const page = Math.max(1, q.page ?? 1);
   const start = (page - 1) * HISTORY_PAGE_SIZE;
@@ -227,6 +242,7 @@ export async function getCommissionHistory(q: CommissionHistoryQuery): Promise<H
       amount: r.amount,
       status: r.status,
       paidAt: r.paidAt?.toISOString() ?? null,
+      execRole: execOf.get(r.recipientId) ?? null,
     })),
     total: filtered.length,
     page,
@@ -254,6 +270,8 @@ export interface TrackerRow {
   platinum: { eligible: boolean; clients: number; earned: number; state: BonusState; toPlatinum: number | null; countsFrom: string | null };
   /** `endDate` is the exclusive end (the first instant after the window); `lastDay` is the last day that counts, for display. */
   challenge: { count: number; target: number; completed: boolean; endDate: string; lastDay: string; extensionGranted: boolean; extensionEndDate: string | null; bonus: number; state: BonusState; canExtend: boolean };
+  /** Set when the ambassador is an executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface QuarterTracker {
@@ -316,11 +334,12 @@ function bonusState(earned: number, ended: boolean, record: { status: string } |
 export async function getQuarterTracker(key: string = currentQuarterKey(), now: Date = new Date()): Promise<QuarterTracker> {
   const quarter = quarterFromKey(key);
   const ended = now.getTime() >= quarter.end.getTime();
-  const [ambassadors, conversions, challenges, records] = await Promise.all([
-    db.ambassador.findMany({ where: { status: { notIn: CLOSED } }, select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true } }),
+  const [ambassadors, conversions, challenges, records, execIndex] = await Promise.all([
+    db.ambassador.findMany({ where: { status: { notIn: CLOSED } }, select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, ...EXEC_RECORD_SELECT } }),
     db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } }, _count: { _all: true } }),
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: key } }),
     db.payoutRecord.findMany({ where: { leg: "BONUS", OR: [{ bonusKey: { startsWith: `platinum:${key}:` } }, { bonusKey: { startsWith: `challenge:${key}:` } }], status: { not: "CANCELLED" } }, select: { bonusKey: true, status: true, amount: true } }),
+    loadExecIndex(),
   ]);
   const convOf = new Map(conversions.map((c) => [c.ambassadorId, c._count._all]));
   const recordOf = new Map(records.map((r) => [r.bonusKey!, r]));
@@ -378,6 +397,7 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
           state: completed ? bonusState(challengeBonus, challengeEnded || completed, recordOf.get(`challenge:${key}:${a.id}`)) : challengeEnded ? "NOT_EARNED" : "IN_PROGRESS",
           canExtend: !ch?.extensionGranted && !completed && !ended && challengeCount > 0,
         },
+        execRole: execRoleForRecord(execIndex, a),
       };
     })
     .filter((r) => r.quarterConversions > 0 || r.platinum.eligible || r.challenge.count > 0)

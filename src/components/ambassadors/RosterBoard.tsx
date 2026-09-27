@@ -6,6 +6,7 @@ import { LuSearch, LuSearchX } from "react-icons/lu";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { CopyLinkButton } from "@/components/ambassadors/CopyLinkButton";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { cn } from "@/lib/utils";
 import type { RosterRow } from "@/lib/services/ambassador-roster";
 
@@ -107,19 +108,20 @@ export function RosterBoard({ rows }: { rows: RosterRow[] }) {
                 <span className="order-3 col-span-2 font-mono text-xs text-primary md:order-none md:col-span-1">
                   EduCraftA-{r.code}
                 </span>
-                <span className="min-w-0 md:order-none">
+                <span className="flex min-w-0 items-center gap-1.5 md:order-none">
                   {r.vacant ? (
                     <span className="text-sm italic text-muted-foreground">Unassigned</span>
                   ) : r.ambassadorId ? (
                     <Link
                       href={`/admin/ambassadors/${r.ambassadorId}`}
-                      className="truncate text-sm font-semibold text-foreground hover:text-primary"
+                      className="min-w-0 truncate text-sm font-semibold text-foreground hover:text-primary"
                     >
                       {r.name}
                     </Link>
                   ) : (
-                    <span className="block truncate text-sm font-semibold text-foreground">{r.name}</span>
+                    <span className="block min-w-0 truncate text-sm font-semibold text-foreground">{r.name}</span>
                   )}
+                  <RoleChip role={r.execRole} />
                 </span>
                 <span className="hidden md:block">
                   <SchoolChip school={r.school} />

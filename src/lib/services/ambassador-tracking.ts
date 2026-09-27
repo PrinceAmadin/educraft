@@ -2,6 +2,9 @@ import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
 import { watDayStart } from "@/lib/click-tracking/peak-hours";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 
 /**
  * The Tracking view — the original panel's leaderboard, rebuilt on HQ's own
@@ -38,6 +41,8 @@ export interface TrackingRow {
   jobs: number;
   commissionLogged: number;
   commissionPaid: number;
+  /** Set when the ambassador is an executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface RecentCommission {
@@ -49,6 +54,8 @@ export interface RecentCommission {
   commission: number;
   allocatedAt: Date;
   notifiedAt: Date | null;
+  /** Set when the ambassador is an executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface OpenJob {
@@ -113,7 +120,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
     quality: { in: ["UNIQUE", "RETURN", "DUPLICATE"] as ("UNIQUE" | "RETURN" | "DUPLICATE")[] },
     isFraud: false,
   };
-  const [ambassadors, recentProjects, open, trackedGroups, weekGroups] = await Promise.all([
+  const [ambassadors, recentProjects, open, trackedGroups, weekGroups, execIndex] = await Promise.all([
     db.ambassador.findMany({
       // Lapsed = a provisional slot that ran out; they are off the roster too.
       where: { status: { notIn: ["Terminated", "Lapsed"] } },
@@ -126,6 +133,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
         tier: true,
         status: true,
         legacySlotId: true,
+        user: { select: { email: true, role: true } },
         university: { select: { abbreviation: true } },
         projects: {
           where: { status: { notIn: DEAD_STATUSES as never[] }, ambassadorCommission: { not: null } },
@@ -168,6 +176,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
     }),
     db.clickEvent.groupBy({ by: ["ambassadorId", "quality"], where: counted, _count: { _all: true } }),
     db.clickEvent.groupBy({ by: ["ambassadorId"], where: { ...counted, timestamp: { gte: weekStart } }, _count: { _all: true } }),
+    loadExecIndex(),
   ]);
 
   const trackedBy = new Map<string, number>();
@@ -204,6 +213,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
       commissionPaid: a.projects
         .filter((p) => p.ambassadorCommPaid)
         .reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0),
+      execRole: execRoleForRecord(execIndex, a),
     }))
     .sort(
       (x, y) =>
@@ -213,6 +223,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
         x.name.localeCompare(y.name)
     );
 
+  const execOf = new Map(rows.map((r) => [r.id, r.execRole]));
   return {
     rows,
     totals: {
@@ -236,6 +247,7 @@ export async function getAmbassadorTracking(): Promise<AmbassadorTracking> {
         commission: p.ambassadorCommission ?? 0,
         allocatedAt: p.ambassadorAllocatedAt!,
         notifiedAt: p.ambassadorNotifiedAt,
+        execRole: execOf.get(p.ambassador!.id) ?? null,
       })),
     openJobs: open.map((p) => ({
       id: p.id,

@@ -6,6 +6,7 @@ import { Pagination } from "@/components/shared/Pagination";
 import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { MonthPicker } from "@/components/reports/MonthPicker";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -86,9 +87,12 @@ async function CurrentMonth({ month }: { month: string }) {
             {data.rows.map((r) => (
               <li key={r.id} className="surface p-4">
                 <div className="flex items-start justify-between gap-2">
-                  <Link href={`/admin/ambassadors/${r.id}`} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary">
-                    {r.name}
-                  </Link>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Link href={`/admin/ambassadors/${r.id}`} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary">
+                      {r.name}
+                    </Link>
+                    <RoleChip role={r.execRole} />
+                  </span>
                   <TierBadge tier={r.tier} />
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
@@ -131,9 +135,12 @@ async function CurrentMonth({ month }: { month: string }) {
                 {data.rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>
-                      <Link href={`/admin/ambassadors/${r.id}`} className="text-sm font-medium text-foreground hover:text-primary">
-                        {r.name}
-                      </Link>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Link href={`/admin/ambassadors/${r.id}`} className="text-sm font-medium text-foreground hover:text-primary">
+                          {r.name}
+                        </Link>
+                        <RoleChip role={r.execRole} />
+                      </span>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <span>{r.school ?? "—"}</span>
                         <ActivityBadge status={r.activity} />
@@ -186,9 +193,12 @@ async function History({ flat }: { flat: Record<string, string | undefined> }) {
             {data.rows.map((r) => (
               <li key={r.id} className="py-3">
                 <div className="flex items-start justify-between gap-2">
-                  <Link href={`/admin/ambassadors/${r.ambassadorId}`} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary">
-                    {r.name}
-                  </Link>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Link href={`/admin/ambassadors/${r.ambassadorId}`} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary">
+                      {r.name}
+                    </Link>
+                    <RoleChip role={r.execRole} />
+                  </span>
                   <span className="font-mono text-sm tabular-nums text-foreground">{formatNaira(r.amount)}</span>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">
@@ -220,9 +230,12 @@ async function History({ flat }: { flat: Record<string, string | undefined> }) {
                   <TableRow key={r.id}>
                     <TableCell className="text-sm text-muted-foreground">{r.monthLabel}</TableCell>
                     <TableCell>
-                      <Link href={`/admin/ambassadors/${r.ambassadorId}`} className="text-sm font-medium text-foreground hover:text-primary">
-                        {r.name}
-                      </Link>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Link href={`/admin/ambassadors/${r.ambassadorId}`} className="text-sm font-medium text-foreground hover:text-primary">
+                          {r.name}
+                        </Link>
+                        <RoleChip role={r.execRole} />
+                      </span>
                       <div className="font-mono text-xs text-muted-foreground">{r.code}</div>
                     </TableCell>
                     <TableCell>
@@ -290,9 +303,12 @@ async function Quarterly({ quarter }: { quarter: string }) {
             {data.rows.map((r) => (
               <li key={r.id} className="surface p-4 text-sm">
                 <div className="flex items-start justify-between gap-2">
-                  <Link href={`/admin/ambassadors/${r.id}`} className="min-w-0 truncate font-medium text-foreground hover:text-primary">
-                    {r.name}
-                  </Link>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Link href={`/admin/ambassadors/${r.id}`} className="min-w-0 truncate font-medium text-foreground hover:text-primary">
+                      {r.name}
+                    </Link>
+                    <RoleChip role={r.execRole} />
+                  </span>
                   <TierBadge tier={r.tier} />
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -324,9 +340,12 @@ async function Quarterly({ quarter }: { quarter: string }) {
                 {data.rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>
-                      <Link href={`/admin/ambassadors/${r.id}`} className="text-sm font-medium text-foreground hover:text-primary">
-                        {r.name}
-                      </Link>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Link href={`/admin/ambassadors/${r.id}`} className="text-sm font-medium text-foreground hover:text-primary">
+                          {r.name}
+                        </Link>
+                        <RoleChip role={r.execRole} />
+                      </span>
                       <div className="font-mono text-xs text-muted-foreground">{r.code}</div>
                     </TableCell>
                     <TableCell>

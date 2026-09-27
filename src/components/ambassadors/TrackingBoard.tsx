@@ -28,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { CommissionPreview, CommissionRatePicker } from "@/components/ambassadors/CommissionPickers";
 import {
   EmailToggle,
@@ -154,9 +155,12 @@ export function TrackingBoard({
                   <li key={row.id} className="py-4">
                     <div className="flex items-start justify-between gap-3">
                       <Link href={`/admin/ambassadors/${row.id}`} className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-foreground">
-                          <span className="mr-1.5 font-mono text-xs text-subtle">{rank}.</span>
-                          {row.name}
+                        <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
+                          <span className="truncate">
+                            <span className="mr-1.5 font-mono text-xs text-subtle">{rank}.</span>
+                            {row.name}
+                          </span>
+                          <RoleChip role={row.execRole} />
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
                           <span className="font-mono">{row.code}</span>
@@ -219,12 +223,15 @@ export function TrackingBoard({
                       <TableRow key={row.id}>
                         <TableCell className="font-mono text-xs text-subtle">{rows.indexOf(row) + 1}</TableCell>
                         <TableCell>
-                          <Link
-                            href={`/admin/ambassadors/${row.id}`}
-                            className="text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
-                          >
-                            {row.name}
-                          </Link>
+                          <span className="flex items-center gap-1.5">
+                            <Link
+                              href={`/admin/ambassadors/${row.id}`}
+                              className="text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
+                            >
+                              {row.name}
+                            </Link>
+                            <RoleChip role={row.execRole} />
+                          </span>
                           <div className="font-mono text-xs text-muted-foreground">
                             {row.code}
                             {row.legacySlotId ? ` · slot ${row.legacySlotId}` : ""}
@@ -299,8 +306,11 @@ export function TrackingBoard({
                   className="flex min-h-12 items-center justify-between gap-3 py-3 transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none sm:px-3"
                 >
                   <span className="min-w-0">
-                    <span className="block truncate text-sm text-foreground">
-                      <span className="font-mono">{c.projectCode}</span> · {c.ambassadorName}
+                    <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
+                      <span className="truncate">
+                        <span className="font-mono">{c.projectCode}</span> · {c.ambassadorName}
+                      </span>
+                      <RoleChip role={c.execRole} className="h-5 px-1.5 text-[10px]" />
                     </span>
                     <span className="block text-xs text-muted-foreground">
                       {formatDate(c.allocatedAt)} ·{" "}

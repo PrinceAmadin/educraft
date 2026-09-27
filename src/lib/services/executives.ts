@@ -34,7 +34,9 @@ export async function loadExecIndex(tx: Db = db): Promise<ExecIndex> {
   );
 }
 
-const RECORD_IDENTITY = { email: true, user: { select: { email: true, role: true } } } as const;
+/** What `execForRecord` needs from an ambassador or worker row: add it to a select. */
+export const EXEC_RECORD_SELECT = { email: true, user: { select: { email: true, role: true } } } as const;
+const RECORD_IDENTITY = EXEC_RECORD_SELECT;
 
 /** The executive role an ambassador record belongs to (for the tag on its page), or null. */
 export async function execRoleOfAmbassador(id: string): Promise<ExecRole | null> {

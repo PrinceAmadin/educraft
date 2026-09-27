@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { CopyLinkButton } from "@/components/ambassadors/CopyLinkButton";
 import { SchoolChip, StatusPill } from "@/components/ambassadors/RosterBoard";
 import { SlotDialog } from "@/components/ambassadors/SlotDialog";
+import { RoleChip } from "@/components/layout/RoleChip";
 import type { RosterRow } from "@/lib/services/ambassador-roster";
 
 const CODE_LABEL: Record<RosterKind, (code: string) => string> = {
@@ -113,7 +114,14 @@ export function RosterManageTable({
                 <li key={r.code} className={`grid items-center gap-x-3 gap-y-2 border-b border-border/40 px-2 py-3 last:border-0 ${grid} grid-cols-[minmax(0,1fr)_auto]`}>
                   <span className="font-mono text-xs text-primary md:order-none">{CODE_LABEL[r.kind](r.code)}</span>
                   <span className="min-w-0 text-sm font-semibold text-foreground md:order-none">
-                    {r.vacant ? <span className="font-normal italic text-muted-foreground">Vacant</span> : r.name}
+                    {r.vacant ? (
+                      <span className="font-normal italic text-muted-foreground">Vacant</span>
+                    ) : (
+                      <>
+                        {r.name}
+                        <RoleChip role={r.execRole} className="ml-1.5 align-middle" />
+                      </>
+                    )}
                     {kind === "SUB" && r.parentName ? (
                       <span className="mt-0.5 block text-xs font-normal text-muted-foreground md:hidden">Under {r.parentName}</span>
                     ) : null}

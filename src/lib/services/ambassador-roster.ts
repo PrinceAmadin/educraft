@@ -1,5 +1,8 @@
 import type { RosterKind } from "@prisma/client";
 import { db } from "@/lib/db";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { EXEC_RECORD_SELECT, loadExecIndex } from "@/lib/services/executives";
 
 /**
  * The panel roster: numbered general slots (EduCraftA-001...), Core (ECCA) and
@@ -35,18 +38,21 @@ export interface RosterRow {
   /** The HQ Ambassador record behind this slot, when there is one. */
   ambassadorId: string | null;
   hasEmail: boolean;
+  /** Set when the slot's ambassador is an executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 const byCode = (a: { code: string }, b: { code: string }) =>
   a.code.localeCompare(b.code, "en", { numeric: true });
 
 export async function listRoster(kind?: RosterKind): Promise<RosterRow[]> {
-  const [all, ambassadors] = await Promise.all([
+  const [all, ambassadors, execIndex] = await Promise.all([
     db.ambassadorSlot.findMany(),
     db.ambassador.findMany({
       where: { legacySlotId: { not: null } },
-      select: { id: true, legacySlotId: true, email: true },
+      select: { id: true, legacySlotId: true, ...EXEC_RECORD_SELECT },
     }),
+    loadExecIndex(),
   ]);
   const amb = new Map(ambassadors.map((a) => [a.legacySlotId!, a]));
   const coreName = new Map(all.filter((s) => s.kind === "CORE").map((s) => [s.code, s.name]));
@@ -74,6 +80,7 @@ export async function listRoster(kind?: RosterKind): Promise<RosterRow[]> {
       linkPath: slotLinkPath(s.kind, s.code),
       ambassadorId: amb.get(s.code)?.id ?? null,
       hasEmail: Boolean(amb.get(s.code)?.email),
+      execRole: !s.vacant && amb.get(s.code) ? execRoleForRecord(execIndex, amb.get(s.code)!) : null,
     }));
 }
 
