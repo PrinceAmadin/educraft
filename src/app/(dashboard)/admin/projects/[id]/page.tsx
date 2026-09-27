@@ -30,6 +30,8 @@ import { DataPauseReviewCard } from "@/components/worker/DataPauseReviewCard";
 import { getAdminPauses } from "@/lib/services/data-pause";
 import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard";
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
+import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
+import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +66,7 @@ export default async function ProjectDetailPage({
   ]);
   if (!project) notFound();
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
-  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary] = await Promise.all([
+  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary, generation] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
     listDeliverablesForAdmin(project.id),
@@ -76,7 +78,10 @@ export default async function ProjectDetailPage({
     reportProject ? getAdminPauses(project.id) : Promise.resolve([]),
     // D5: a Mode 5 project's dataset (World Bank + CBN), fetched once Chapter 3 is written.
     reportProject ? secondaryDataStatus(project.id, project.projectId) : Promise.resolve(null),
+    // D6: the live report dashboard (chapters, pause, queue).
+    reportProject ? generationDashboardFor(project.id) : Promise.resolve(null),
   ]);
+  const adminBase = `/api/admin/projects/${encodeURIComponent(project.projectId)}`;
   const dataToCheck = pauses.some((p) => p.status === "SUBMITTED");
   const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED")).length;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
@@ -98,9 +103,18 @@ export default async function ProjectDetailPage({
             label: dataToCheck ? "Report · data to check" : modeCard.status === "APPROVED" || modeCard.generationStarted ? "Report" : "Report · mode",
             content: (
               <div className="space-y-8">
+                {generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? (
+                  <GenerationDashboard
+                    initial={generation}
+                    renderedAt={new Date().toISOString()}
+                    streamUrl={`${adminBase}/generation/progress`}
+                    uploadEndpoint={`${adminBase}/upload`}
+                    actionEndpoint={`${adminBase}/data-pause`}
+                  />
+                ) : null}
                 {pauses.map((p) => (
                   <DataPauseReviewCard
-                    key={`${p.id}-${p.status}-${p.round}`}
+                    key={`${p.id}-${p.status}-${p.round}-${p.files.length}`}
                     initial={p}
                     actionEndpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/data-pause`}
                     uploadEndpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/upload`}

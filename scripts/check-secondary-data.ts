@@ -210,17 +210,82 @@ async function main() {
     check("CSV: one row per year, 2000–2023", csv.trim().split("\n").length === 25 && csv.split("\n")[1] === "2000,69.45,10.00,10.00" && csv.trim().split("\n")[24].startsWith("2023,"), csv.split("\n")[1]);
   }
   {
-    // Inflation: the World Bank times out, the CBN answers (from 2003 only).
+    // Inflation: the World Bank times out twice (first try and retry), the CBN answers (from 2003 only).
     const seen: string[] = [];
+    const t0 = Date.now();
     const r = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["INF", "inflation"]]), {
       fetchImpl: fakeFetch(async (u, signal) => (u.includes("FP.CPI.TOTL.ZG") ? hang(signal) : u.includes("cbn.gov.ng") ? json(cbnInflation()) : wbRoute(() => 5e9)(u, signal)), seen),
-      timeoutMs: 50,
+      timeoutMs: 800,
       print: quiet,
     });
+    const elapsed = Date.now() - t0;
     const col = r.dataset.columns[1];
-    check("fallback: a timed-out World Bank series falls to the CBN", col.source === "Central Bank of Nigeria" && col.code === "GetAllInflationRates.allItemsAverage", col.source);
+    check("fallback: a World Bank series that times out twice falls to the CBN", col.source === "Central Bank of Nigeria" && col.code === "GetAllInflationRates.allItemsAverage", col.source);
     check("…and the years the CBN lacks are listed as missing", r.missing.some((m) => m.symbol === "INF" && /2000–2002/.test(m.reason)), r.missing);
-    check("…the timeout is in the request log", r.requests.some((q) => q.timedOut && q.url.includes("FP.CPI.TOTL.ZG")));
+    const infTries = r.requests.filter((q) => q.url.includes("FP.CPI.TOTL.ZG"));
+    check("…both timed-out attempts are in the request log", infTries.length === 2 && infTries.every((q) => q.timedOut), infTries.map((q) => q.ms));
+    check("…the first try gets 5/8 of the budget and the retry the rest", infTries[0].ms >= 480 && infTries[0].ms < 650 && infTries[0].ms + infTries[1].ms < 900, infTries.map((q) => q.ms));
+    check("…and the whole World Bank series stays within its 8 s budget (800 ms here)", elapsed < 1_100, elapsed);
+  }
+  {
+    // A hang on the first try, an answer on the retry: the series still comes from the World Bank.
+    const calls = new Map<string, number>();
+    const r = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["EXR", "exchange_rate"]]), {
+      fetchImpl: fakeFetch(async (u, signal) => {
+        const n = (calls.get(u) ?? 0) + 1;
+        calls.set(u, n);
+        return u.includes("PA.NUS.FCRF") && n === 1 ? hang(signal) : wbRoute(() => 100)(u, signal);
+      }),
+      timeoutMs: 800,
+      print: quiet,
+    });
+    const exr = r.requests.filter((q) => q.url.includes("PA.NUS.FCRF"));
+    check("retry: a first try that times out, then an answer, keeps the World Bank series", r.dataset.columns[1].source === "World Bank, World Development Indicators" && Object.keys(r.dataset.columns[1].values).length === 24);
+    check("…logged as one timeout and one success", exr.length === 2 && exr[0].timedOut && exr[1].ok, exr);
+    check("…and the healthy series was asked once only", r.requests.filter((q) => q.url.includes("NY.GDP.MKTP.CD")).length === 1);
+  }
+  {
+    // An answer with no values, then one with values.
+    const calls = new Map<string, number>();
+    const r = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["INF", "inflation"]]), {
+      fetchImpl: fakeFetch(async (u, signal) => {
+        const n = (calls.get(u) ?? 0) + 1;
+        calls.set(u, n);
+        return wbRoute((code) => (code === "FP.CPI.TOTL.ZG" && n === 1 ? null : 7))(u, signal);
+      }),
+      timeoutMs: 800,
+      print: quiet,
+    });
+    check("retry: an empty World Bank answer is asked once more", r.requests.filter((q) => q.url.includes("FP.CPI.TOTL.ZG")).length === 2 && r.dataset.columns[1].source === "World Bank, World Development Indicators");
+  }
+  {
+    // 503 then an answer: retried. 404: not.
+    const calls = new Map<string, number>();
+    const r = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["EXR", "exchange_rate"]]), {
+      fetchImpl: fakeFetch(async (u, signal) => {
+        const n = (calls.get(u) ?? 0) + 1;
+        calls.set(u, n);
+        if (u.includes("NY.GDP.MKTP.CD") && n === 1) return { status: 503, body: "busy" };
+        if (u.includes("PA.NUS.FCRF")) return { status: 404, body: "gone" };
+        return wbRoute(() => 5e9)(u, signal);
+      }),
+      timeoutMs: 800,
+      print: quiet,
+    });
+    check("retry: a 503 is asked once more and then succeeds", r.requests.filter((q) => q.url.includes("NY.GDP.MKTP.CD")).length === 2 && r.dataset.columns[0].source !== null);
+    check("retry: a 404 is not retried", r.requests.filter((q) => q.url.includes("PA.NUS.FCRF")).length === 1);
+  }
+  {
+    // A refused indicator code: the same answer again would change nothing.
+    const seen: string[] = [];
+    await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["INF", "inflation"]]), {
+      fetchImpl: fakeFetch(async (u, signal) =>
+        u.includes("FP.CPI.TOTL.ZG") ? json([{ message: [{ id: "120", key: "Invalid value", value: "The provided parameter value is not valid" }] }]) : u.includes("cbn.gov.ng") ? json(cbnInflation()) : wbRoute(() => 5e9)(u, signal),
+      seen),
+      timeoutMs: 800,
+      print: quiet,
+    });
+    check("retry: a refused World Bank code is not retried", seen.filter((u) => u.includes("FP.CPI.TOTL.ZG")).length === 1, seen);
   }
   {
     // Both sources fail: the saved copy is used, and says so.

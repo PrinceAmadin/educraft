@@ -291,14 +291,15 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
   {
-    // Section B on the price list, so general express (+₦2,000; it was +₦5,000 before).
+    // Listed under Section B, but a final-year-equivalent report: the final-year
+    // express surcharge (founder, 27 Sept 2026).
     serviceCode: "THESIS",
     serviceName: "Thesis / Dissertation",
     category: ServiceCategory.ACADEMIC,
     basePrice: 70000,
     intakeFormTemplate: "academic_fyp",
     estimatedDays: 30,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
+    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
   },
 
   // ── Section B.4: Letter writing ──

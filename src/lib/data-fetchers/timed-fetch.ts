@@ -32,7 +32,11 @@ export type FetchLike = (
 export class FetchFailure extends Error {
   constructor(
     message: string,
-    readonly timedOut = false
+    readonly timedOut = false,
+    /** The HTTP status when the source answered with an error; null when no answer came or the answer was unusable. */
+    readonly status: number | null = null,
+    /** Worth one retry: no answer, a network error, 429 or a 5xx. A refused code or someone else's series is not. */
+    readonly transient = false
   ) {
     super(message);
   }
@@ -68,7 +72,7 @@ export async function timedGetJson(
     entry.bytes = text.length;
     if (!res.ok) {
       finish(`HTTP ${res.status}`);
-      throw new FetchFailure(`${source} answered ${res.status}`);
+      throw new FetchFailure(`${source} answered ${res.status}`, false, res.status, res.status === 429 || res.status >= 500);
     }
     let json: unknown;
     try {
@@ -85,7 +89,7 @@ export async function timedGetJson(
     const name = (error as Error)?.name;
     entry.timedOut = name === "TimeoutError" || name === "AbortError" || signal.aborted;
     finish(entry.timedOut ? `no answer within ${Math.round(timeoutMs / 1000)} s` : (error as Error)?.message ?? "network error");
-    throw new FetchFailure(entry.timedOut ? `${source} did not answer within ${Math.round(timeoutMs / 1000)} seconds` : `${source} could not be reached`, entry.timedOut);
+    throw new FetchFailure(entry.timedOut ? `${source} did not answer within ${Math.round(timeoutMs / 1000)} seconds` : `${source} could not be reached`, entry.timedOut, null, true);
   }
 }
 

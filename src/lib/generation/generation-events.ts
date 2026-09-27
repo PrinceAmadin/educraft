@@ -13,7 +13,21 @@
  */
 import type { GenerationStatus } from "@prisma/client";
 
-export type GenerationEventName = "chapter_progress" | "chapter_complete" | "chapter_failed" | "generation_idle";
+export type GenerationEventName =
+  | "chapter_progress"
+  | "chapter_complete"
+  | "chapter_failed"
+  | "generation_idle"
+  // D6 (progress-events.ts): the data pauses and the generation queue.
+  | "pipeline_paused"
+  | "pipeline_resumed"
+  | "queue_position";
+
+/**
+ * Who a stream is for. "legacy" is D2's /events shape (unchanged); "worker"
+ * leaves out Claude costs; "admin" (founder/COO) keeps them.
+ */
+export type EventAudience = "legacy" | "worker" | "admin";
 
 export interface GenerationEvent {
   event: GenerationEventName;
@@ -41,6 +55,8 @@ export interface SnapshotLike {
   cacheWriteTokens: number;
   cacheReadTokens: number;
   costUsd: number;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
 }
 
 const ACTIVE = new Set<GenerationStatus>(["PENDING", "OUTLINING", "WRITING"]);
@@ -63,20 +79,22 @@ export function tokensUsed(s: Pick<SnapshotLike, "inputTokens" | "outputTokens" 
   return s.inputTokens + s.cacheWriteTokens + s.cacheReadTokens + s.outputTokens;
 }
 
-export function eventForSnapshot(s: SnapshotLike, opts: { nairaRate: number; output?: { outputLength: number; words: number } | null }): GenerationEvent {
+export function durationSeconds(s: Pick<SnapshotLike, "startedAt" | "completedAt">): number | null {
+  return s.startedAt && s.completedAt ? Math.max(0, Math.round((s.completedAt.getTime() - s.startedAt.getTime()) / 1000)) : null;
+}
+
+export function eventForSnapshot(s: SnapshotLike, opts: { nairaRate: number; output?: { outputLength: number; words: number } | null; audience?: EventAudience }): GenerationEvent {
   const id = `${s.id}:${s.updatedAt.getTime()}`;
+  const audience = opts.audience ?? "legacy";
   if (s.status === "COMPLETED") {
+    const cost = { tokensUsed: tokensUsed(s), outputTokens: s.outputTokens, costNaira: Math.round(s.costUsd * opts.nairaRate * 100) / 100 };
+    if (audience === "legacy") {
+      return { event: "chapter_complete", id, data: { chapterNum: s.chapterNumber, outputLength: opts.output?.outputLength ?? 0, words: opts.output?.words ?? 0, ...cost } };
+    }
     return {
       event: "chapter_complete",
       id,
-      data: {
-        chapterNum: s.chapterNumber,
-        outputLength: opts.output?.outputLength ?? 0,
-        words: opts.output?.words ?? 0,
-        tokensUsed: tokensUsed(s),
-        outputTokens: s.outputTokens,
-        costNaira: Math.round(s.costUsd * opts.nairaRate * 100) / 100,
-      },
+      data: { chapterNum: s.chapterNumber, words: opts.output?.words ?? 0, durationSeconds: durationSeconds(s), ...(audience === "admin" ? cost : {}) },
     };
   }
   if (s.status === "FAILED") {

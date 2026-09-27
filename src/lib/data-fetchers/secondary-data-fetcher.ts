@@ -3,7 +3,9 @@
  * specifies (see model-spec.ts), from the World Bank and the CBN.
  *
  * For each variable, in model order:
- *   1. its first source in the catalogue (8 s at most per request);
+ *   1. its first source in the catalogue (8 s at most; a World Bank series
+ *      that times out, fails in passing or comes back empty is asked once
+ *      more within the same 8 s: 5 s for the first try, the rest for the retry);
  *   2. its next source, if it has one (8 s);
  *   3. the last good copy of that same series EduCraft saved (the cache);
  *   4. otherwise it is missing: an empty column, listed with the reason.
@@ -18,10 +20,19 @@ import { roundTo, type Dataset, type DatasetColumn, type MissingItem, missingYea
 import type { ModelSpec } from "./model-spec";
 import { cbnSeries, fetchCbnMonths, type CbnMonth } from "./sources/cbn";
 import { fetchWorldBankSeries, type AnnualSeries } from "./sources/world-bank";
-import { limiter, type FetchLike, type RequestLogEntry } from "./timed-fetch";
+import { FETCH_TIMEOUT_MS, FetchFailure, limiter, type FetchLike, type RequestLogEntry } from "./timed-fetch";
 
 /** The World Bank API timed out on 22 of 42 series asked for at once (27 Sept); three at a time answered every one in under a second. */
 export const WORLD_BANK_CONCURRENCY = 3;
+
+/**
+ * The World Bank sometimes hangs on one series (it cut off at 8 s once in the
+ * D5 live test) or answers with no values. One retry, inside the same 8-second
+ * window: the first attempt gets 5/8 of it, the retry whatever is left.
+ */
+export const WORLD_BANK_FIRST_ATTEMPT_SHARE = 5 / 8;
+/** Below this the retry is not worth starting. */
+const MIN_RETRY_MS = 250;
 
 export interface CachedSeries {
   /** year -> raw value (before display scaling). */
@@ -79,8 +90,28 @@ export async function fetchSecondaryData(spec: ModelSpec, opts: FetchSecondaryOp
     return call;
   };
 
+  const budgetMs = opts.timeoutMs ?? FETCH_TIMEOUT_MS;
+  /** One World Bank series: an attempt, and one retry within the same budget if it timed out, failed in passing or came back empty. */
+  const worldBank = async (code: string): Promise<AnnualSeries> => {
+    const started = Date.now();
+    let first: AnnualSeries | null = null;
+    try {
+      first = await fetchWorldBankSeries(code, start, end, requests, { ...http, timeoutMs: Math.round(budgetMs * WORLD_BANK_FIRST_ATTEMPT_SHARE) });
+      if (Object.keys(first.values).length > 0) return first;
+    } catch (error) {
+      // A refused code or someone else's series will not change on a second try.
+      if (!(error instanceof FetchFailure) || !error.transient) throw error;
+    }
+    const remaining = budgetMs - (Date.now() - started);
+    if (remaining < MIN_RETRY_MS) {
+      if (first) return first;
+      throw new FetchFailure(`World Bank did not answer within ${Math.round(budgetMs / 1000)} seconds`, true, null, true);
+    }
+    return fetchWorldBankSeries(code, start, end, requests, { ...http, timeoutMs: remaining });
+  };
+
   const live = async (s: SeriesSource): Promise<AnnualSeries> => {
-    if (s.source === "WB") return worldBankSlot(() => fetchWorldBankSeries(s.code, start, end, requests, http));
+    if (s.source === "WB") return worldBankSlot(() => worldBank(s.code));
     const months = await cbnMonths(s.endpoint);
     return cbnSeries(months, s.field, s.annual, s.zeroIsMissing ?? false, start, end);
   };

@@ -15,6 +15,8 @@ import { DataPauseReviewCard } from "@/components/worker/DataPauseReviewCard";
 import { getWorkerPauseView } from "@/lib/services/data-pause";
 import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard";
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
+import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
+import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -66,7 +68,20 @@ export default async function WorkerAssignmentPage({
   const routeBase = `/api/worker/projects/${encodeURIComponent(project.projectId)}`;
   // D4: the report waits here for the client's data; the worker checks it (and may add their own).
   // D5: Mode 5 projects get their dataset fetched from the World Bank and the CBN once Chapter 3 is written.
-  const [pause, secondary] = await Promise.all([getWorkerPauseView(worker.id, project.projectId), secondaryDataStatus(project.id, project.projectId)]);
+  // D6: the report's live dashboard (null for anything that is not a written report).
+  const [pause, secondary, dashboard] = await Promise.all([
+    getWorkerPauseView(worker.id, project.projectId),
+    secondaryDataStatus(project.id, project.projectId),
+    generationDashboardFor(project.id),
+  ]);
+  const renderedAt = new Date().toISOString();
+  const pauseCard = pause ? (
+    // The file count is in the key: files added from the D6 banner remount the card with the new list.
+    <DataPauseReviewCard key={`${pause.id}-${pause.status}-${pause.round}-${pause.files.length}`} initial={pause} actionEndpoint={`${routeBase}/data-pause`} uploadEndpoint={`${routeBase}/upload`} />
+  ) : null;
+  const secondaryCard = secondary.eligible ? (
+    <SecondaryDataCard initial={secondary} endpoint={`${routeBase}/generation/fetch-secondary-data`} filesBase={routeBase} />
+  ) : null;
 
   const deliverables = (await listDeliverablesForWorker(project.id)).map((d) => {
     const open = canSubmitDeliverable(d.kind, project.status);
@@ -152,14 +167,17 @@ export default async function WorkerAssignmentPage({
         </div>
       ) : null}
 
-      {pause ? (
-        <DataPauseReviewCard
-          key={`${pause.id}-${pause.status}-${pause.round}`}
-          initial={pause}
-          actionEndpoint={`${routeBase}/data-pause`}
-          uploadEndpoint={`${routeBase}/upload`}
-        />
-      ) : null}
+      {dashboard ? (
+        // D6: the pause lives on the Report tab; this line makes sure the worker sees that the client sent files.
+        pause?.status === "SUBMITTED" ? (
+          <a href="?tab=report" className="flex items-center gap-2 rounded-2xl bg-gold/10 p-4 text-sm font-semibold text-foreground hover:underline focus-visible:underline focus-visible:outline-none">
+            <LuTriangleAlert className="size-4 shrink-0 text-gold" aria-hidden />
+            The client sent data files — check them in Report.
+          </a>
+        ) : null
+      ) : (
+        pauseCard
+      )}
 
       <WorkerAssignmentActions projectCode={project.projectId} status={project.status} />
 
@@ -210,12 +228,31 @@ export default async function WorkerAssignmentPage({
             content: (
               <div className="space-y-8">
                 <ResearchPanel projectCode={project.projectId} />
-                {secondary.eligible ? (
-                  <SecondaryDataCard initial={secondary} endpoint={`${routeBase}/generation/fetch-secondary-data`} filesBase={routeBase} />
-                ) : null}
+                {dashboard ? null : secondaryCard}
               </div>
             ),
           },
+          ...(dashboard
+            ? [
+                {
+                  id: "report",
+                  label: pause?.status === "SUBMITTED" ? "Report · data to check" : "Report",
+                  content: (
+                    <div className="space-y-8">
+                      <GenerationDashboard
+                        initial={dashboard}
+                        renderedAt={renderedAt}
+                        streamUrl={`${routeBase}/generation/progress`}
+                        uploadEndpoint={`${routeBase}/upload`}
+                        actionEndpoint={`${routeBase}/data-pause`}
+                      />
+                      {pauseCard}
+                      {secondaryCard}
+                    </div>
+                  ),
+                },
+              ]
+            : []),
           {
             id: "documents",
             label: "Documents",

@@ -551,9 +551,18 @@ export async function getGenerationStatus(projectId: string, opts: { chapter?: n
 
 /** The finished chapter's length, for the completion event (read once per run, not on every poll). */
 export async function chapterOutputStats(checkpointId: string): Promise<{ outputLength: number; words: number } | null> {
-  const row = await db.generationCheckpoint.findUnique({ where: { id: checkpointId }, select: { fullOutput: true } });
-  if (!row?.fullOutput) return null;
-  return { outputLength: row.fullOutput.length, words: countWords(row.fullOutput) };
+  return (await chapterOutputStatsMany([checkpointId])).get(checkpointId) ?? null;
+}
+
+/** The same for several runs in one query (a stream's first read sends every finished chapter at once). */
+export async function chapterOutputStatsMany(checkpointIds: string[]): Promise<Map<string, { outputLength: number; words: number }>> {
+  const stats = new Map<string, { outputLength: number; words: number }>();
+  if (checkpointIds.length === 0) return stats;
+  const rows = await db.generationCheckpoint.findMany({ where: { id: { in: checkpointIds } }, select: { id: true, fullOutput: true } });
+  for (const row of rows) {
+    if (row.fullOutput) stats.set(row.id, { outputLength: row.fullOutput.length, words: countWords(row.fullOutput) });
+  }
+  return stats;
 }
 
 /** Project.id from an id or EC code, scoped to a worker's own assignments when a workerId is given. */

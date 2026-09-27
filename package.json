@@ -32,6 +32,7 @@
     "check:dataform": "tsx scripts/check-data-form.ts",
     "check:dataupload": "tsx scripts/check-data-upload.ts",
     "check:secondary": "tsx scripts/check-secondary-data.ts",
+    "check:progress": "tsx scripts/check-progress.ts",
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
     "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",
