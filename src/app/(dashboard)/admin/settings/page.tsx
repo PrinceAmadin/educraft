@@ -6,12 +6,18 @@ import { OperationsTimingForm } from "@/components/operations/OperationsTimingFo
 import { usdToNairaRate } from "@/lib/ai-usage-log";
 import { getGeneralSettings } from "@/lib/services/settings";
 import { getExpectedHours } from "@/lib/services/operations/pipeline";
+import { getAlertRoleRecipients } from "@/lib/services/team-alerts";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [session, settings, expected] = await Promise.all([auth(), getGeneralSettings(), getExpectedHours()]);
+  const [session, settings, expected, alertRoles] = await Promise.all([
+    auth(),
+    getGeneralSettings(),
+    getExpectedHours(),
+    getAlertRoleRecipients(),
+  ]);
   const canEditPricing = session?.user?.role === "SUPER_ADMIN";
 
   return (
@@ -25,7 +31,7 @@ export default async function SettingsPage() {
 
       <SettingsTabs active="general" role={session?.user?.role} />
 
-      <GeneralSettingsForm settings={settings} canEditPricing={canEditPricing} />
+      <GeneralSettingsForm settings={settings} canEditPricing={canEditPricing} alertRoles={alertRoles} />
 
       {canEditPricing ? <OperationsTimingForm hours={expected} /> : null}
 

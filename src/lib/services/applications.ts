@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
-import { notifyAdmins } from "@/lib/services/notifications";
+import { notifyAdmins, notifyGrowth } from "@/lib/services/notifications";
 import { generateReferralCode, provisionalDeadline } from "@/lib/ambassador";
 import { isLegacyApplication, scoreApplication, type ApplicationScore } from "@/lib/ambassador-score";
 import { nextGeneralCode } from "@/lib/services/ambassador-roster";
@@ -152,10 +152,10 @@ export async function submitApplication(
     });
   });
 
-  // The team's Gmail (Settings > Email alerts), sent after the response. Queued
+  // Gmail to the founder and the Head of Growth, sent after the response. Queued
   // before anything else can throw, so a saved application is always emailed.
   alertAmbassadorApplication(application.id, { existingLogin: Boolean(ownLogin) });
-  await notifyAdmins({
+  await notifyGrowth({
     title: "New ambassador application",
     message: `${input.fullName.trim()} applied for slot ${slotCode}.`,
     type: "info",

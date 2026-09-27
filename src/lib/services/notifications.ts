@@ -67,6 +67,13 @@ export function notifyOperations(input: NotificationInput) {
   return notifyRole(OPERATIONS_ROLES, input);
 }
 
+/** Ambassador events go to the founder and the Head of Growth: new ambassador applications. */
+export const GROWTH_ROLES: UserRole[] = ["SUPER_ADMIN", "HOG"];
+
+export function notifyGrowth(input: NotificationInput) {
+  return notifyRole(GROWTH_ROLES, input);
+}
+
 /** Money events go to the founder and the CFO: payments awaiting verification, confirmations, refunds, payout submissions. */
 export const FINANCE_ROLES: UserRole[] = ["SUPER_ADMIN", "CO_CEO_CFO"];
 

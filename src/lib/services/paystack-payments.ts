@@ -2,7 +2,7 @@ import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { recordConversion } from "@/lib/services/ambassador-platform/referrals";
 import { deliverIfFinalReleased, nextId } from "@/lib/services/projects";
-import { notifyAdmins, notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
+import { notifyFinance, notifyOperations, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { monthKeyOf, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { emailPendingCommission } from "@/lib/services/ambassador-commission";
 import { alertPaidIntakeFailed, alertPaidOrder } from "@/lib/services/team-alerts";
@@ -432,8 +432,8 @@ async function creditProjectPayment(
     link: "/admin/finance/revenue",
   });
 
-  // An order submitted first (variable price) is now paid: tell the team's
-  // Gmail. Queued before anything else can throw, so it is never lost.
+  // An order submitted first (variable price) is now paid: email the founder
+  // and the COO. Queued before anything else can throw, so it is never lost.
   if (leg === "downpayment") {
     alertPaidOrder(project.id, {
       reference,
@@ -444,7 +444,7 @@ async function creditProjectPayment(
     });
   }
 
-  await notifyAdmins({
+  await notifyOperations({
     title: leg === "downpayment" ? "Downpayment received" : "Balance received",
     message:
       leg === "downpayment"
@@ -561,7 +561,7 @@ async function processPendingIntake(
         });
         const form = (pending.payload ?? {}) as { fullName?: unknown; phone?: unknown };
         const who = [form.fullName, form.phone].filter((v) => typeof v === "string" && v.trim()).join(", ");
-        await notifyAdmins({
+        await notifyOperations({
           title: "Payment received, order not created",
           message: `Paystack confirmed ${reference}${who ? ` from ${who}` : ""}, but the order could not be created (${error.message}). Contact the client, then create the project by hand or refund them in Paystack.`,
           type: "urgent",
@@ -664,7 +664,7 @@ async function processPendingIntake(
   );
   if (!outcome) return { status: "already_confirmed" };
 
-  // A new, paid order: tell the team's Gmail (Settings > Email alerts).
+  // A new, paid order: email the founder and the COO.
   // Queued before anything else can throw, so it is never lost.
   alertPaidOrder(project.id, {
     reference,
@@ -674,7 +674,7 @@ async function processPendingIntake(
     advanced: true,
   });
 
-  await notifyAdmins({
+  await notifyOperations({
     title: "Downpayment received",
     message: `Paystack confirmed the downpayment for ${project.projectId} — new project created.`,
     type: "success",

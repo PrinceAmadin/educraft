@@ -53,13 +53,14 @@ export interface GeneralSettings {
   commissionRates: Record<AmbassadorTier, number>;
   /** Default parent-ambassador rate — an admin can override it per sub-ambassador. */
   parentCommissionRate: number;
-  /** Comma-separated inboxes for new-application and paid-order alerts. */
+  /** The founder's inboxes, comma-separated: every team alert (the COO and HOG get theirs at their login email). */
   alertEmails: string;
 }
 
 /**
- * Inboxes that get the team alerts (new ambassador / worker application, paid
- * client order). Falls back to the founder's Gmail when the setting is unset.
+ * The founder's inboxes, which get every team alert (new ambassador / worker
+ * application, paid client order; see team-alerts.ts for the executives who
+ * also get them). Falls back to the founder's Gmail when the setting is unset.
  * Not the sender (educraft611@gmail.com): Gmail files mail an account sends to
  * itself under Sent, so no inbox alert would show.
  */

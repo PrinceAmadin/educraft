@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +13,7 @@ import { FormActions } from "@/components/forms/FormActions";
 import { FormSection } from "@/components/forms/FormSection";
 import { generalSettingsSchema, splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 import type { GeneralSettings } from "@/lib/services/settings";
+import type { AlertRoleRecipient } from "@/lib/services/team-alerts";
 
 const TIERS = ["BRONZE", "SILVER", "GOLD", "PLATINUM"] as const;
 const TIER_LABEL: Record<(typeof TIERS)[number], string> = {
@@ -24,9 +26,12 @@ const TIER_LABEL: Record<(typeof TIERS)[number], string> = {
 export function GeneralSettingsForm({
   settings,
   canEditPricing,
+  alertRoles,
 }: {
   settings: GeneralSettings;
   canEditPricing: boolean;
+  /** The executives who also get alerts, at their sign-in email. */
+  alertRoles: AlertRoleRecipient[];
 }) {
   const router = useRouter();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
@@ -203,7 +208,7 @@ export function GeneralSettingsForm({
         action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
       >
         <Field
-          label="Send alerts to"
+          label="Founder's inbox (every alert)"
           required
           htmlFor="alertEmails"
           error={errors.alertEmails?.message}
@@ -217,6 +222,36 @@ export function GeneralSettingsForm({
             {...register("alertEmails")}
           />
         </Field>
+
+        <div className="space-y-3">
+          <p className="meta-label">Also sent to</p>
+          <ul className="space-y-3">
+            {alertRoles.map((r) => (
+              <li key={r.audience} className="text-sm">
+                <p className="text-foreground">
+                  <span className="font-medium">{r.role}</span>
+                  <span className="text-muted-foreground"> · {r.covers}</span>
+                </p>
+                {r.people.length > 0 ? (
+                  r.people.map((p) => (
+                    <p key={p.email} className="break-words text-muted-foreground">
+                      {p.name}, {p.email}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-muted-foreground">No active {r.role}, so only the founder gets these.</p>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[13px] text-muted-foreground">
+            Executives get alerts at the email they sign in with.{" "}
+            <Link href="/admin/settings/team" className="text-primary hover:underline">
+              Change it on Team &amp; roles
+            </Link>
+            .
+          </p>
+        </div>
       </FormSection>
 
       {submitError ? (

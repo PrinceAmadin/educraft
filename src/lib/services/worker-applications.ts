@@ -115,7 +115,7 @@ export async function submitWorkerApplication(
       });
     });
 
-    // The team's Gmail (Settings > Email alerts), sent after the response. Queued
+    // Gmail to the founder and the COO, sent after the response. Queued
     // before anything else can throw, so a saved application is always emailed.
     alertWorkerApplication(application.id, { existingLogin: Boolean(ownLogin) });
     await notifyOperations({

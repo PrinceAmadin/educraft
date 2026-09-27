@@ -1,12 +1,15 @@
+import type { UserRole } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { sendMail } from "@/lib/mailer";
 import { siteUrl } from "@/lib/site-url";
 import {
+  ALERT_AUDIENCE_EXEC,
   ambassadorApplicationAlert,
   paidIntakeFailedAlert,
   paidOrderAlert,
   workerApplicationAlert,
+  type AlertAudience,
   type AlertEmail,
 } from "@/lib/emails/team-alerts";
 import { getAlertEmails } from "@/lib/services/settings";
@@ -16,10 +19,15 @@ import { isLegacyApplication, reachSizeLabel, scoreApplication } from "@/lib/amb
 import { formatDate, formatNaira } from "@/lib/utils";
 
 /**
- * Gmail alerts to the team's inbox (Settings > General > Email alerts) for the
- * moments someone outside HQ asks for our attention: an ambassador applies, a
- * worker applies, a client's downpayment is confirmed by Paystack on an order
- * (and the rare paid order that could not become a project).
+ * Gmail alerts for the moments someone outside HQ asks for our attention: an
+ * ambassador applies, a worker applies, a client's downpayment is confirmed by
+ * Paystack on an order (and the rare paid order that could not become a
+ * project).
+ *
+ * Who gets them: the founder's inbox (Settings > General > Email alerts) gets
+ * every alert; ambassador applications also go to the Head of Growth, worker
+ * applications and paid orders to the COO, at the email they sign in with
+ * (Team & roles), so changing an executive's email there moves their alerts too.
  *
  * Each one is the email twin of an in-app notification. Callers queue it
  * straight after their database commit, before anything else that could
@@ -27,6 +35,88 @@ import { formatDate, formatNaira } from "@/lib/utils";
  * Paystack poll is never held up by Gmail's ~5 s login, and a failed send is
  * logged as `[team-alert]` and never undoes what triggered it.
  */
+
+/** The executive logins each audience reaches, besides the founder's inbox. OPS_MANAGER is the retired spelling of COO. */
+const AUDIENCE_ROLES: Record<AlertAudience, UserRole[]> = {
+  growth: ["HOG"],
+  operations: ["COO", "OPS_MANAGER"],
+};
+
+/**
+ * The seed gives the executives placeholder logins on this domain, which
+ * EduCraft does not own; a re-seed recreates them as active logins. Alerts
+ * carry client and applicant details, so they never go there.
+ */
+const PLACEHOLDER_EMAIL_DOMAIN = "@educraft.com";
+
+/**
+ * The founder's inboxes plus the executives', lower-cased, each once, in that
+ * order. Placeholder addresses are dropped and returned separately for the log.
+ * Pure, so the rules can be checked without a database.
+ */
+export function mergeAlertRecipients(
+  founderInboxes: readonly string[],
+  execEmails: readonly string[]
+): { to: string[]; skipped: string[] } {
+  const to: string[] = [];
+  const skipped: string[] = [];
+  for (const raw of [...founderInboxes, ...execEmails]) {
+    const email = raw.trim().toLowerCase();
+    if (!email || to.includes(email) || skipped.includes(email)) continue;
+    if (email.endsWith(PLACEHOLDER_EMAIL_DOMAIN)) skipped.push(email);
+    else to.push(email);
+  }
+  return { to, skipped };
+}
+
+/** Active logins holding an audience's roles, oldest first. */
+async function audienceLogins(audience: AlertAudience) {
+  return db.user.findMany({
+    where: { role: { in: AUDIENCE_ROLES[audience] }, isActive: true },
+    orderBy: { createdAt: "asc" },
+    select: { email: true, displayName: true, execProfile: { select: { fullName: true } } },
+  });
+}
+
+/** Everyone an alert for this audience goes to. */
+export async function alertRecipients(audience: AlertAudience): Promise<{ to: string[]; skipped: string[] }> {
+  const [founder, logins] = await Promise.all([getAlertEmails(), audienceLogins(audience)]);
+  return mergeAlertRecipients(
+    founder,
+    logins.map((u) => u.email)
+  );
+}
+
+export interface AlertRoleRecipient {
+  audience: AlertAudience;
+  /** "Head of Growth" / "COO". */
+  role: string;
+  /** What they are emailed about. */
+  covers: string;
+  people: { name: string; email: string }[];
+}
+
+/** The executives who get alerts besides the founder, for Settings > General. */
+export async function getAlertRoleRecipients(): Promise<AlertRoleRecipient[]> {
+  const covers: Record<AlertAudience, string> = {
+    growth: "Ambassador applications",
+    operations: "Worker applications and paid orders",
+  };
+  const audiences: AlertAudience[] = ["growth", "operations"];
+  return Promise.all(
+    audiences.map(async (audience) => {
+      const logins = await audienceLogins(audience);
+      return {
+        audience,
+        role: ALERT_AUDIENCE_EXEC[audience],
+        covers: covers[audience],
+        people: logins
+          .filter((u) => !u.email.toLowerCase().endsWith(PLACEHOLDER_EMAIL_DOMAIN))
+          .map((u) => ({ name: u.execProfile?.fullName ?? u.displayName ?? u.email, email: u.email.toLowerCase() })),
+      };
+    })
+  );
+}
 
 /** Dates in alerts read in Nigerian time, whatever the server's zone. */
 function watDateTime(value: Date): string {
@@ -40,13 +130,19 @@ function watDateTime(value: Date): string {
   }).format(value)} WAT`;
 }
 
-async function deliver(label: string, build: () => Promise<AlertEmail | null>): Promise<void> {
+async function deliver(
+  label: string,
+  audience: AlertAudience,
+  build: () => Promise<AlertEmail | null>
+): Promise<void> {
   try {
     const mail = await build();
     if (!mail) return;
-    const to = await getAlertEmails();
+    const { to, skipped } = await alertRecipients(audience);
+    if (skipped.length) console.warn(`[team-alert] ${label}: skipped placeholder ${skipped.join(", ")}`);
     const sent = await sendMail({ to: to.join(", "), ...mail });
-    if (sent.ok) console.info(`[team-alert] ${label}: sent to ${to.length} inbox(es)`);
+    // Emails are not logged: the count is enough to tell whether the executive was included.
+    if (sent.ok) console.info(`[team-alert] ${label}: sent to ${to.length} inbox(es) (founder + ${ALERT_AUDIENCE_EXEC[audience]})`);
     else console.error(`[team-alert] ${label}: not sent: ${sent.error}`);
   } catch (error) {
     console.error(`[team-alert] ${label}: failed`, error);
@@ -54,8 +150,8 @@ async function deliver(label: string, build: () => Promise<AlertEmail | null>): 
 }
 
 /** Hands the send to waitUntil and returns at once; never throws. */
-function queue(label: string, build: () => Promise<AlertEmail | null>): void {
-  waitUntil(deliver(label, build));
+function queue(label: string, audience: AlertAudience, build: () => Promise<AlertEmail | null>): void {
+  waitUntil(deliver(label, audience, build));
 }
 
 /**
@@ -83,7 +179,7 @@ async function applicationFlood(label: string): Promise<boolean> {
 
 export function alertAmbassadorApplication(applicationId: string, { existingLogin }: { existingLogin: boolean }): void {
   const label = `ambassador application ${applicationId}`;
-  queue(label, async () => {
+  queue(label, "growth", async () => {
     if (await applicationFlood(label)) return null;
     const app = await db.ambassadorApplication.findUnique({
       where: { id: applicationId },
@@ -124,7 +220,7 @@ export function alertAmbassadorApplication(applicationId: string, { existingLogi
         .map((r) => REACH_ROLES.find((o) => o.value === r)?.label ?? r)
         .join(", "),
       expectedReferrals: app.expectedReferrals,
-      // The founder triages from Gmail, so the alert carries the same verdict
+      // The founder and the HOG triage from Gmail, so the alert carries the same verdict
       // the applications list shows.
       score: isLegacyApplication(app) ? null : scoreApplication(app),
       existingLogin,
@@ -138,7 +234,7 @@ export function alertAmbassadorApplication(applicationId: string, { existingLogi
 
 export function alertWorkerApplication(applicationId: string, { existingLogin }: { existingLogin: boolean }): void {
   const label = `worker application ${applicationId}`;
-  queue(label, async () => {
+  queue(label, "operations", async () => {
     if (await applicationFlood(label)) return null;
     const app = await db.workerApplication.findUnique({
       where: { id: applicationId },
@@ -182,7 +278,7 @@ export function alertPaidOrder(
     advanced: boolean;
   }
 ): void {
-  queue(`paid order ${projectDbId}`, async () => {
+  queue(`paid order ${projectDbId}`, "operations", async () => {
     const project = await db.project.findUnique({
       where: { id: projectDbId },
       select: {
@@ -258,7 +354,7 @@ export function alertPaidIntakeFailed(
   pendingIntakeId: string,
   payment: { reference: string; amountNaira: number; paidOn: Date; reason: string }
 ): void {
-  queue(`paid intake failed ${pendingIntakeId}`, async () => {
+  queue(`paid intake failed ${pendingIntakeId}`, "operations", async () => {
     const pending = await db.pendingIntake.findUnique({
       where: { id: pendingIntakeId },
       select: { serviceCode: true, payload: true },

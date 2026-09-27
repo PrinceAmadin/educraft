@@ -1,17 +1,31 @@
 import { escapeHtml } from "@/lib/mailer";
 
 /**
- * Internal alerts to the EduCraft team's inbox (the "alert_emails" setting):
- * a new ambassador application, a new worker application, and a client order
- * whose downpayment has been paid. Same palette as the other emails (white
- * surface, teal accent, slate text, no decorative icons). Details only; the
- * button opens the record in HQ, where the admin acts on it.
+ * Internal alerts to the founder's inbox (the "alert_emails" setting) and the
+ * executive who runs that area: a new ambassador application (Head of Growth),
+ * a new worker application and a client order whose downpayment has been paid
+ * (COO). Same palette as the other emails (white surface, teal accent, slate
+ * text, no decorative icons). Details only; the button opens the record in HQ,
+ * where the team acts on it.
  */
 
 export interface AlertEmail {
   subject: string;
   html: string;
   text: string;
+}
+
+/** Who an alert goes to besides the founder: the Head of Growth or the COO. */
+export type AlertAudience = "growth" | "operations";
+
+/** The executive each audience names, in the footer and the log. */
+export const ALERT_AUDIENCE_EXEC: Record<AlertAudience, string> = {
+  growth: "Head of Growth",
+  operations: "COO",
+};
+
+function recipientsNote(audience: AlertAudience): string {
+  return `EduCraft HQ alert, sent to the founder and the ${ALERT_AUDIENCE_EXEC[audience]}. The founder's inbox is set in Settings > General; an executive's is the email they sign in with (Team & roles).`;
 }
 
 interface AlertRow {
@@ -22,6 +36,7 @@ interface AlertRow {
 }
 
 function alertEmail(input: {
+  audience: AlertAudience;
   subject: string;
   eyebrow: string;
   heading: string;
@@ -45,7 +60,7 @@ function alertEmail(input: {
     "",
     `${input.actionLabel}: ${input.actionUrl}`,
     "",
-    "EduCraft HQ alert. Change who receives these in Settings > General.",
+    recipientsNote(input.audience),
   ].join("\n");
 
   const row = (r: AlertRow) =>
@@ -68,7 +83,7 @@ function alertEmail(input: {
         : ""
     }
     <a href="${escapeHtml(input.actionUrl)}" style="display:inline-block;background:#0D9488;color:#FFFFFF;text-decoration:none;font-size:14px;font-weight:600;padding:12px 20px;border-radius:10px">${escapeHtml(input.actionLabel)}</a>
-    <p style="margin:28px 0 0;padding-top:16px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.5;color:#64748B">EduCraft HQ alert. Change who receives these in Settings &gt; General.</p>
+    <p style="margin:28px 0 0;padding-top:16px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.5;color:#64748B">${escapeHtml(recipientsNote(input.audience))}</p>
   </div>
 </body></html>`;
 
@@ -98,6 +113,7 @@ export function ambassadorApplicationAlert(input: {
   reviewUrl: string;
 }): AlertEmail {
   return alertEmail({
+    audience: "growth",
     subject: `New ambassador application: ${input.fullName}${input.slotCode ? ` (slot ${input.slotCode})` : ""}`,
     eyebrow: "Ambassador programme",
     heading: "New ambassador application",
@@ -143,6 +159,7 @@ export function workerApplicationAlert(input: {
   reviewUrl: string;
 }): AlertEmail {
   return alertEmail({
+    audience: "operations",
     subject: `New worker application: ${input.fullName}`,
     eyebrow: "Worker applications",
     heading: "New worker application",
@@ -197,6 +214,7 @@ export function paidOrderAlert(input: {
   projectUrl: string;
 }): AlertEmail {
   return alertEmail({
+    audience: "operations",
     subject: input.notAdvancedStatus
       ? `Decision needed: ${input.paid} paid on ${input.projectCode} (marked ${input.notAdvancedStatus.toLowerCase()})`
       : `Paid order ${input.projectCode}: ${input.service}, ${input.paid} downpayment`,
@@ -260,6 +278,7 @@ export function paidIntakeFailedAlert(input: {
   newProjectUrl: string;
 }): AlertEmail {
   return alertEmail({
+    audience: "operations",
     subject: `Action needed: ${input.amount} paid but no project was created (${input.reference})`,
     eyebrow: "Client orders",
     heading: "Payment received, order not created",
