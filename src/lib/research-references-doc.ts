@@ -16,8 +16,8 @@ export interface DocReference {
   doi: string | null;
 }
 
-type ReferencingStyle = "APA_7TH" | "APA_6TH" | "HARVARD" | "IEEE" | "CHICAGO" | "MLA" | "CUSTOM";
-type Seg = { text: string; italics?: boolean };
+export type ReferencingStyle = "APA_7TH" | "APA_6TH" | "HARVARD" | "IEEE" | "CHICAGO" | "MLA" | "CUSTOM";
+export type Seg = { text: string; italics?: boolean };
 
 const ET_AL: Seg = { text: "et al.", italics: true };
 
@@ -204,8 +204,17 @@ export function referenceListEntries<T extends DocReference>(refs: T[]): { text:
   }));
 }
 
+/**
+ * The list as formatted segments (de-duplicated, alphabetical, in `style`): the
+ * one formatter behind this Word file and the References section of an
+ * assembled report (Phase D7).
+ */
+export function formattedReferences<T extends DocReference>(refs: T[], style: ReferencingStyle | null): { ref: T; segs: Seg[] }[] {
+  return sortAlphabetically(dedupeReferences(refs)).map((ref, i) => ({ ref, segs: format(style ?? "APA_7TH", ref, i + 1) }));
+}
+
 export async function buildReferencesDocx(refs: DocReference[], style: ReferencingStyle | null): Promise<Buffer> {
-  const list = sortAlphabetically(dedupeReferences(refs));
+  const list = formattedReferences(refs, style);
   const font = { ascii: "Times New Roman", hAnsi: "Times New Roman", cs: "Times New Roman", eastAsia: "Times New Roman" };
   const spacing = { line: 480, lineRule: LineRuleType.AUTO, before: 0, after: 0 };
 
@@ -237,12 +246,12 @@ export async function buildReferencesDocx(refs: DocReference[], style: Referenci
             children: [new TextRun({ text: "REFERENCES", bold: true })],
           }),
           ...list.map(
-            (r, i) =>
+            ({ segs }) =>
               new Paragraph({
                 alignment: AlignmentType.JUSTIFIED,
                 spacing,
                 indent: { left: 720, hanging: 720 },
-                children: runs(format(style ?? "APA_7TH", r, i + 1)),
+                children: runs(segs),
               }),
           ),
         ],

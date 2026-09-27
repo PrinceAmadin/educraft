@@ -1,0 +1,412 @@
+/**
+ * Phase D7: the text rules document assembly applies to generated chapter
+ * text before it becomes Word runs. Pure (no database, no docx), so
+ * scripts/check-assembly.ts can prove each one.
+ *
+ *   inlineSegments   *italics*, et al. italic (P4/R5), stray asterisks
+ *   fixSentenceDashes  P2: no em/en dashes as sentence separators
+ *   titleCase / sentenceCase / upperH1   AL2-AL4
+ *   renumberEquationRefs   EQ3/EQ4: "Equation (3.1)" -> the assembly's "Equation 3.1"
+ *   findPlaceholders   what the specialist still has to fill in
+ *   citationsIn / citedReferences   the References list holds only works cited
+ */
+
+export interface Seg {
+  text: string;
+  italics?: boolean;
+  /** Set as a subscript (a symbol written "f_m" in the prose). */
+  sub?: boolean;
+}
+
+/**
+ * The model writes symbols in its prose the way it writes them in equations:
+ * "where f_m is the target mean strength". A single letter (Latin or Greek)
+ * followed by "_x" or "_{xy}" becomes the letter with a real subscript.
+ */
+export function subscriptSymbols(segs: Seg[]): Seg[] {
+  const out: Seg[] = [];
+  const pattern = /(?<![\p{L}\d_])([A-Za-zΑ-Ωα-ω])_(\{[^}\s]{1,12}\}|[A-Za-z0-9]{1,10})(?![\p{L}\d_])/gu;
+  for (const seg of segs) {
+    if (seg.sub || !seg.text.includes("_")) {
+      out.push(seg);
+      continue;
+    }
+    let last = 0;
+    for (const m of seg.text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      if (at > last) out.push({ ...seg, text: seg.text.slice(last, at) });
+      out.push({ ...seg, text: m[1] });
+      out.push({ ...seg, text: m[2].replace(/^\{|\}$/g, ""), sub: true });
+      last = at + m[0].length;
+    }
+    if (last < seg.text.length) out.push({ ...seg, text: seg.text.slice(last) });
+  }
+  return out.filter((s) => s.text);
+}
+
+// ─── Inline runs ─────────────────────────────────────────────────────────────
+
+/** "et al." (with or without the full stop, and the common "et. al." slip), always italic. */
+const ET_AL = /\bet\.?\s+al\b\.?/g;
+
+/** Splits the non-italic parts of `segs` so every "et al." is its own italic segment, written "et al.". */
+export function italiciseEtAl(segs: Seg[]): Seg[] {
+  const out: Seg[] = [];
+  for (const seg of segs) {
+    if (seg.italics) {
+      out.push({ text: seg.text.replace(ET_AL, "et al."), italics: true });
+      continue;
+    }
+    let last = 0;
+    for (const m of seg.text.matchAll(ET_AL)) {
+      const at = m.index ?? 0;
+      if (at > last) out.push({ text: seg.text.slice(last, at) });
+      out.push({ text: "et al.", italics: true });
+      last = at + m[0].length;
+      // "et al.," keeps its comma; "et al. (2020)" keeps its space: only the letters and the stop are replaced.
+    }
+    if (last < seg.text.length) out.push({ text: seg.text.slice(last) });
+  }
+  return mergeSegments(out);
+}
+
+function mergeSegments(segs: Seg[]): Seg[] {
+  const out: Seg[] = [];
+  for (const s of segs) {
+    if (!s.text) continue;
+    const prev = out[out.length - 1];
+    if (prev && Boolean(prev.italics) === Boolean(s.italics)) prev.text += s.text;
+    else out.push({ text: s.text, ...(s.italics ? { italics: true } : {}) });
+  }
+  return out;
+}
+
+/**
+ * The model marks italics with single asterisks and nothing else (bold is not
+ * allowed in the body, so "**" markers are dropped). A pair of asterisks around
+ * text is italic; a stray asterisk is removed from prose but kept in a table
+ * cell, where it is a significance star ("0.032*").
+ */
+export function inlineSegments(text: string, opts: { inTable?: boolean } = {}): Seg[] {
+  let s = text.replace(/\*\*(?=\S)([^*\n]*?\S)\*\*/g, "$1");
+  if (!opts.inTable) s = s.replace(/\*\*/g, "");
+  const segs: Seg[] = [];
+  const pair = /\*(?=[^\s*])([^*\n]*?[^\s*])\*/g;
+  let last = 0;
+  for (const m of s.matchAll(pair)) {
+    const at = m.index ?? 0;
+    // A significance star straight after a number is not an opening italic marker.
+    if (opts.inTable && /\d$/.test(s.slice(0, at))) continue;
+    if (at > last) segs.push({ text: s.slice(last, at) });
+    segs.push({ text: m[1], italics: true });
+    last = at + m[0].length;
+  }
+  if (last < s.length) segs.push({ text: s.slice(last) });
+  const cleaned = opts.inTable ? segs : segs.map((g) => ({ ...g, text: g.text.replace(/\*/g, "") }));
+  return subscriptSymbols(italiciseEtAl(cleaned));
+}
+
+// ─── P2: dashes ──────────────────────────────────────────────────────────────
+
+/**
+ * An em dash, an en dash or a spaced hyphen used as a sentence separator becomes
+ * a comma. Number ranges (2000–2023, pp. 12–15), compounds (co-operative,
+ * Nigeria–Ghana) and anything inside [square brackets] (the placeholders) are
+ * left alone.
+ */
+export function fixSentenceDashes(text: string): { text: string; fixed: number } {
+  let fixed = 0;
+  const parts = text.split(/(\[[^\]]*\])/);
+  const out = parts.map((part) => {
+    if (part.startsWith("[")) return part;
+    return part
+      .replace(/(\S?)\s+[—–]\s+(\S?)/g, (m, before: string, after: string) => {
+        if (/\d/.test(before) && /\d/.test(after)) return m; // "12 – 15" is a range
+        fixed++;
+        return `${before}, ${after}`;
+      })
+      .replace(/(?<=[A-Za-z)'’"”])—(?=[A-Za-z('‘"“])/g, () => {
+        fixed++;
+        return ", ";
+      })
+      .replace(/(?<=[A-Za-z)'’"”])\s+-{1,2}\s+(?=[A-Za-z('‘"“])/g, () => {
+        fixed++;
+        return ", ";
+      });
+  });
+  // A dash that ended a clause may leave ", ," or ",." behind.
+  const joined = out.join("").replace(/,\s*,/g, ",").replace(/,\s*([.;:!?])/g, "$1");
+  return { text: joined, fixed };
+}
+
+// ─── Heading case (AL2-AL4) ─────────────────────────────────────────────────
+
+const MINOR = new Set(["a", "an", "the", "and", "but", "or", "nor", "for", "so", "yet", "of", "in", "on", "at", "to", "by", "with", "from", "as", "via", "per", "vs", "vs.", "into", "onto", "upon", "than", "over", "within", "among", "amongst", "between", "through", "towards", "toward", "across", "about", "against", "without"]);
+
+/** Tokens kept exactly as written: acronyms (SPSS, GDP), mixed case (mHealth, iPhone), and anything with a digit (COVID-19, H2O). */
+function keepAsWritten(word: string): boolean {
+  const bare = word.replace(/[^A-Za-z0-9]/g, "");
+  if (!bare) return true;
+  if (/\d/.test(bare)) return true;
+  if (bare.length >= 2 && bare === bare.toUpperCase() && /[A-Z]/.test(bare)) return true;
+  if (/[a-z][A-Z]/.test(bare)) return true;
+  return false;
+}
+
+/** Common acronyms that must survive a heading written all in capitals. */
+const KNOWN_ACRONYMS = new Set(["SPSS", "GDP", "ICT", "IT", "AI", "SME", "SMES", "ANOVA", "OLS", "ARDL", "VAR", "VECM", "CBN", "NBS", "NGO", "NGOS", "HIV", "AIDS", "COVID", "UK", "USA", "UN", "WHO", "IOT", "ERP", "CRM", "HRM", "ROI", "ROA", "ROE", "FDI", "MPR", "CPI", "PLC", "ISO", "LAN", "WAN", "GSM", "GPS", "PV", "AC", "DC", "RHA", "OPC", "BS", "ASTM", "NIS", "UML", "SQL", "API", "PHP", "HTML", "CSS", "USSD", "ATM", "POS", "BVN", "NIN", "JAMB", "WAEC", "NECO", "UTME", "LGA", "FCT", "NHIS", "PHC", "WASH"]);
+
+/** Splits "1.1 Background of the Study" into the number and the words. */
+function splitNumber(heading: string): { number: string; words: string } {
+  const m = /^(\d+(?:\.\d+)*\.?)\s+(.*)$/.exec(heading.trim());
+  return m ? { number: m[1].replace(/\.$/, ""), words: m[2] } : { number: "", words: heading.trim() };
+}
+
+const join = (number: string, words: string) => (number ? `${number} ${words}` : words);
+
+function capitaliseParts(word: string): string {
+  return word.replace(/(^|[-/(‘'"“])([a-z])/g, (_m, p: string, c: string) => p + c.toUpperCase());
+}
+
+function isAllCaps(words: string): boolean {
+  const letters = words.replace(/[^A-Za-z]/g, "");
+  return letters.length >= 4 && letters === letters.toUpperCase();
+}
+
+/** AL3 (Heading 2): Title Case — each word capitalised except minor words; acronyms and numbers untouched. */
+export function titleCase(heading: string): string {
+  const { number, words } = splitNumber(heading);
+  const shouted = isAllCaps(words);
+  let afterColon = false;
+  const out = words
+    .split(/(\s+)/)
+    .map((w, i) => {
+      if (/^\s*$/.test(w)) return w;
+      const first = i === 0 || afterColon;
+      afterColon = /[:?]$/.test(w);
+      const bare = w.replace(/[^A-Za-z]/g, "");
+      if (shouted) {
+        if (KNOWN_ACRONYMS.has(bare.toUpperCase()) && bare.length > 1) return w;
+        const lower = w.toLowerCase();
+        if (!first && MINOR.has(lower.replace(/[^a-z.]/g, ""))) return lower;
+        return capitaliseParts(lower);
+      }
+      if (keepAsWritten(w)) return w;
+      const lower = w.toLowerCase();
+      if (!first && MINOR.has(lower.replace(/[^a-z.]/g, ""))) return lower;
+      return capitaliseParts(w);
+    })
+    .join("");
+  return join(number, out);
+}
+
+/**
+ * AL4 (Heading 3): sentence case — the first word capitalised; a later word is
+ * lower-cased only when it is written Capitalised, is not a proper noun the
+ * chapters use (Nigeria, Lagos, Taro Yamane) and does not follow a colon.
+ */
+export function sentenceCase(heading: string, properNouns: ReadonlySet<string> = new Set()): string {
+  const { number, words } = splitNumber(heading);
+  const shouted = isAllCaps(words);
+  let afterColon = false;
+  const out = words
+    .split(/(\s+)/)
+    .map((w, i) => {
+      if (/^\s*$/.test(w)) return w;
+      const first = i === 0 || afterColon;
+      afterColon = /[:?]$/.test(w);
+      const bare = w.replace(/[^A-Za-z]/g, "");
+      if (shouted) {
+        if (KNOWN_ACRONYMS.has(bare.toUpperCase()) && bare.length > 1) return w;
+        if (properNouns.has(bare.charAt(0) + bare.slice(1).toLowerCase())) return capitaliseParts(w.toLowerCase());
+        return first ? capitaliseParts(w.toLowerCase()) : w.toLowerCase();
+      }
+      if (first) return w.charAt(0).toUpperCase() + w.slice(1);
+      if (keepAsWritten(w)) return w;
+      if (/^[A-Z][a-z'’-]*$/.test(bare) && !properNouns.has(bare)) return w.toLowerCase();
+      return w;
+    })
+    .join("");
+  return join(number, out);
+}
+
+/** AL2 (Heading 1): upper case. */
+export function upperH1(text: string): string {
+  return text.trim().toUpperCase();
+}
+
+/**
+ * Words the chapters capitalise in the middle of a sentence (Nigeria, Lagos,
+ * Yamane): the proper nouns a sentence-case heading must keep.
+ */
+export function properNounsFrom(texts: string[]): Set<string> {
+  const capitalised = new Set<string>();
+  const lower = new Set<string>();
+  for (const text of texts) {
+    for (const line of text.split(/\n+/)) {
+      // Prose only: headings, table rows and captions are written in Title Case, which says nothing about names.
+      if (/^\s*\[H[123]\]/.test(line) || line.includes("|") || /^\s*\**\s*(?:Table|Figure|Fig\.)\s+\d/i.test(line) || /^\s*\[/.test(line)) continue;
+      for (const w of line.match(/\p{L}[\p{L}'’-]*/gu) ?? []) if (w === w.toLowerCase()) lower.add(w);
+      for (const sentence of line.split(/(?<=[.!?:])\s+/)) {
+        const words = sentence.split(/\s+/);
+        for (let i = 1; i < words.length; i++) {
+          const bare = words[i].replace(/^[("'‘“[]+|[)"'’”\],.;:!?]+$/g, "");
+          if (/^\p{Lu}[\p{Ll}'’-]+$/u.test(bare) && !/[.!?:]$/.test(words[i - 1])) capitalised.add(bare);
+        }
+      }
+    }
+  }
+  // A word the chapters also write in lower case ("rice husk ash") is not a name, even where a sentence capitalises it.
+  return new Set([...capitalised].filter((w) => !lower.has(w.toLowerCase())));
+}
+
+const CHAPTER_WORDS = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN"];
+export function chapterWord(n: number): string {
+  return CHAPTER_WORDS[n] ?? String(n);
+}
+
+// ─── Equations (EQ3/EQ4) ────────────────────────────────────────────────────
+
+/**
+ * In-text references to an equation, "Equation (3.1)", "equation 3.1",
+ * "Eq. (3.2)", become the assembly's own number, without parentheses.
+ */
+export function renumberEquationRefs(text: string, map: ReadonlyMap<string, string>): string {
+  return text.replace(/\b(Equations?|Eqs?\.|Eqn\.?)\s*\(\s*(\d+\.\d+)\s*\)|\b(Equations?|Eqs?\.|Eqn\.?)\s+(\d+\.\d+)\b/gi, (_m, w1, n1, w2, n2) => {
+    const word = (w1 ?? w2) as string;
+    const n = (n1 ?? n2) as string;
+    return `${word} ${map.get(n) ?? n}`;
+  });
+}
+
+/** The "3.1" / "(3.1)" the model put at the end of an equation line, and the line without it. */
+export function splitEquationNumber(line: string): { text: string; number: string | null } {
+  const m = /^(.*?\S)\s+(?:\(\s*(\d+\.\d+)\s*\)|(\d+\.\d+))\s*$/.exec(line.trim());
+  if (!m) return { text: line.trim(), number: null };
+  // "x = 3.1" is a value, not a number label: only strip when something is left that still has an "=".
+  if (!/[=≈≤≥<>]/.test(m[1])) return { text: line.trim(), number: null };
+  if (m[3] && /[=≈≤≥<>]\s*$/.test(m[1])) return { text: line.trim(), number: null };
+  return { text: m[1], number: m[2] ?? m[3] };
+}
+
+// ─── Placeholders ────────────────────────────────────────────────────────────
+
+const PLACEHOLDER = /\[(?:DATA NOT PROVIDED[^\]]*|OBJECTIVE NOT MET[^\]]*|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|FIGURE PLACEHOLDER:[^\]]*|[A-Z][A-Z' ]{2,} TO BE SUPPLIED)\]|p\. \[page\]/g;
+
+export function findPlaceholders(text: string): string[] {
+  return [...text.matchAll(PLACEHOLDER)].map((m) => (m[0].startsWith("[FIGURE PLACEHOLDER") ? "[FIGURE PLACEHOLDER]" : m[0]));
+}
+
+// ─── Citations and the cited-only References list ────────────────────────────
+
+export interface Citation {
+  /** The first author's surname (or an organisation), as written. */
+  author: string;
+  /** "2020", "2020a" or "n.d.". */
+  year: string;
+  raw: string;
+}
+
+export function nameKey(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const YEAR = /(?:1[5-9]|20)\d{2}[a-z]?|n\.d\./;
+
+/** The first author of a name list: "Smith et al.", "Smith and Jones", "Smith & Jones", "World Health Organization [WHO]". */
+function firstAuthor(names: string): string | null {
+  const cleaned = names
+    .replace(/^(?:e\.g\.|see(?: also)?|cf\.|as cited in|in)\s*,?\s*/i, "")
+    .replace(/\[[^\]]*\]/g, "")
+    .trim();
+  const first = cleaned.split(/\s+(?:et\.?\s+al\b\.?|and\b|&)|,\s+(?=\p{Lu})/u)[0]?.trim() ?? "";
+  if (!/\p{L}{2,}/u.test(first) || /[=<>%]|\d/.test(first)) return null;
+  if (first.split(/\s+/).length > 8) return null;
+  // "(Field Survey, 2026)", "(Researcher's compilation, 2026)": the source line of a table or figure, not a work.
+  if (SOURCE_NOT_A_WORK.test(first)) return null;
+  return first.replace(/[.,]+$/, "");
+}
+
+const SOURCE_NOT_A_WORK = /^(?:field ?(?:survey|work|data)|researcher(?:['’]s)?(?:\s+\w+)?|author(?:['’]s)?(?:\s+\w+)?|laboratory(?:\s+\w+)?|lab(?:\s+\w+)?|spss(?:\s+\w+)?|eviews(?:\s+\w+)?|stata(?:\s+\w+)?|pilot (?:study|test)|survey(?:\s+data)?|market associations?|computed|computation|adapted|source|own computation)$/i;
+
+/**
+ * Author-date citations in a chapter: parenthetical "(Smith, 2020; Adams et
+ * al., 2019)", "(Smith, 2020, 2021)", "(Smith, 2020, p. [page])", and
+ * narrative "Smith (2020)", "Smith and Jones (2019)", "Okafor et al. (2021)".
+ */
+export function citationsIn(text: string): Citation[] {
+  const out: Citation[] = [];
+  const plain = text.replace(/\*/g, "");
+  for (const m of plain.matchAll(/\(([^()]*?\d{4}[a-z]?[^()]*?)\)/g)) {
+    for (const partRaw of m[1].split(/;\s*/)) {
+      const part = partRaw.trim();
+      const pm = new RegExp(`^(.*?[A-Za-z].*?),?\\s+((?:${YEAR.source})(?:\\s*,\\s*(?:${YEAR.source}))*)(?:\\s*,\\s*(?:pp?\\.|para\\.|chap\\.).*)?$`).exec(part);
+      if (!pm) continue;
+      const author = firstAuthor(pm[1]);
+      if (!author) continue;
+      for (const year of pm[2].split(/\s*,\s*/)) out.push({ author, year, raw: `(${part})` });
+    }
+  }
+  // Names with accents and hyphens (Demirgüç-Kunt, Konté, Al-Alwan): Unicode letters throughout.
+  const NAME = "\\p{Lu}[\\p{L}'’\\-‐]+";
+  const narrative = new RegExp(
+    `(?<!\\p{L})((?:${NAME}\\s+){0,2}${NAME}(?:\\s+(?:et\\.?\\s+al\\.?|(?:and|&)\\s+${NAME}))?)\\s+\\((${YEAR.source})(?:[,;][^)]*)?\\)`,
+    "gu",
+  );
+  for (const m of plain.matchAll(narrative)) {
+    const author = firstAuthor(m[1].replace(/^(?:The|A|An|In|As|According to)\s+/, ""));
+    if (!author) continue;
+    // "Table 4.1 (2020)" style false positives have no letters left once stripped of known words.
+    if (/^(?:Table|Figure|Equation|Chapter|Section|Appendix|Source)$/i.test(author)) continue;
+    out.push({ author: author.split(/\s+/).slice(-1)[0], year: m[2], raw: m[0] });
+  }
+  return out;
+}
+
+export interface CitableReference {
+  authors: string | null; // "Family, G.; Family2, G2."
+  year: number | null;
+}
+
+function firstFamily(ref: CitableReference): string {
+  const first = (ref.authors ?? "").split(";")[0]?.trim() ?? "";
+  return first.split(",")[0]?.trim() ?? "";
+}
+
+function authorMatches(citedKey: string, family: string): boolean {
+  const refKey = nameKey(family);
+  if (!citedKey || !refKey) return false;
+  if (citedKey === refKey) return true;
+  // "van der Merwe" cited as "Merwe", or an organisation cited by its first words.
+  const lastWord = nameKey(family.split(/\s+/).slice(-1)[0] ?? "");
+  if (lastWord.length >= 4 && citedKey === lastWord) return true;
+  return citedKey.length >= 6 && refKey.length >= 6 && (refKey.startsWith(citedKey) || citedKey.startsWith(refKey));
+}
+
+/**
+ * Only works cited in the chapters go in the References list (founder, D7).
+ * Returns the cited references (in their original order), the ones left out,
+ * and every citation that matches no reference, so QA can catch a citation to
+ * a work that is not on the verified list.
+ */
+export function citedReferences<T extends CitableReference>(refs: T[], chapterTexts: string[]): { cited: T[]; uncited: T[]; unmatched: string[] } {
+  const citations = chapterTexts.flatMap(citationsIn);
+  const citedSet = new Set<T>();
+  const unmatched = new Set<string>();
+  for (const c of citations) {
+    const year = c.year === "n.d." ? null : Number(c.year.slice(0, 4));
+    const key = nameKey(c.author);
+    const hit = refs.filter((r) => (r.year ?? null) === year && authorMatches(key, firstFamily(r)));
+    if (hit.length) hit.forEach((r) => citedSet.add(r));
+    else unmatched.add(`${c.author}, ${c.year}`);
+  }
+  return {
+    cited: refs.filter((r) => citedSet.has(r)),
+    uncited: refs.filter((r) => !citedSet.has(r)),
+    unmatched: [...unmatched].sort((a, b) => a.localeCompare(b)),
+  };
+}

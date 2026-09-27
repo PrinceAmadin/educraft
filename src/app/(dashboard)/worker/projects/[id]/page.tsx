@@ -245,6 +245,7 @@ export default async function WorkerAssignmentPage({
                         streamUrl={`${routeBase}/generation/progress`}
                         uploadEndpoint={`${routeBase}/upload`}
                         actionEndpoint={`${routeBase}/data-pause`}
+                        downloadUrl={`${routeBase}/documents/docx`}
                       />
                       {pauseCard}
                       {secondaryCard}

@@ -110,6 +110,7 @@ export default async function ProjectDetailPage({
                     streamUrl={`${adminBase}/generation/progress`}
                     uploadEndpoint={`${adminBase}/upload`}
                     actionEndpoint={`${adminBase}/data-pause`}
+                    downloadUrl={`${adminBase}/documents/docx`}
                   />
                 ) : null}
                 {pauses.map((p) => (
