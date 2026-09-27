@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { TIER_LADDER } from "@/lib/ambassador";
 import type { NetworkCluster, NetworkMap, NetworkPerson, NetworkSolo } from "@/lib/services/ambassador-platform/network";
@@ -246,6 +247,7 @@ function Person({ p, strong, extra }: { p: NetworkPerson; strong?: boolean; extr
         <Link href={`/admin/ambassadors/${p.id}`} className={cn("min-w-0 truncate text-sm hover:text-primary focus-visible:outline-none focus-visible:underline", strong ? "font-semibold text-foreground" : "text-foreground")}>
           {p.fullName}
         </Link>
+        <RoleChip role={p.execRole} />
         <span className="shrink-0 sm:hidden">
           <TierBadge tier={p.tier} />
         </span>

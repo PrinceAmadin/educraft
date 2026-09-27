@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { SuspendControl } from "@/components/ambassadors/platform/SuspendControl";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { EmptyState } from "@/components/shared/EmptyState";
 import type { DirectoryRow } from "@/lib/services/ambassador-platform/directory";
 import { relativeDays, shortMonthYear } from "@/lib/ambassadors/format";
@@ -31,9 +32,12 @@ export function DirectoryTable({ rows, sort, dir, now }: { rows: DirectoryRow[];
           <li key={row.id} className="surface p-4">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <Link href={`/admin/ambassadors/${row.id}`} className="block truncate text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline">
-                  {row.fullName}
-                </Link>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Link href={`/admin/ambassadors/${row.id}`} className="truncate text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline">
+                    {row.fullName}
+                  </Link>
+                  <RoleChip role={row.execRole} />
+                </span>
                 <p className="font-mono text-xs text-muted-foreground">
                   {row.university ?? "—"} · {row.referralCode}
                 </p>
@@ -95,9 +99,12 @@ export function DirectoryTable({ rows, sort, dir, now }: { rows: DirectoryRow[];
             {rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell>
-                  <Link href={`/admin/ambassadors/${row.id}`} className="text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline">
-                    {row.fullName}
-                  </Link>
+                  <span className="flex items-center gap-1.5">
+                    <Link href={`/admin/ambassadors/${row.id}`} className="text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline">
+                      {row.fullName}
+                    </Link>
+                    <RoleChip role={row.execRole} />
+                  </span>
                   <div className="font-mono text-xs text-muted-foreground">{row.referralCode}</div>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{row.university ?? "—"}</TableCell>

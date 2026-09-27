@@ -13,6 +13,7 @@ import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
 import { applicationRejectedEmail } from "@/lib/emails/application-decision";
 import { alertAmbassadorApplication } from "@/lib/services/team-alerts";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
+import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 import type { SendFn } from "@/lib/services/client-otp";
 import type { AmbassadorApplicationInput, EditApplicationInput } from "@/lib/validations/application";
 
@@ -562,6 +563,10 @@ export async function approveApplication(
     }
     throw new ApplicationError("Could not allocate an ambassador id — try again");
   })();
+
+  // An executive's other email makes the new record Platinum. Outside the approval's
+  // transaction (kept short); a failure only delays it to the next recount.
+  await recountAmbassador(db, ambassador.id).catch((err) => console.error("[exec-tier] recount after approval failed", err));
 
   // Welcome email: slot ID, their client link, and how to sign in. A failed
   // send never undoes the approval — the admin can message them from Tracking.

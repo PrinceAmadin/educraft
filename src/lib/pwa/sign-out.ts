@@ -28,12 +28,16 @@ export async function clearOfflineData(): Promise<void> {
  * Sign out and leave nothing of this person on the device: stop their push
  * notifications first (the session is still valid for that call), then wipe saved pages.
  * Clients land back on their own sign-in page, everyone else on the team one.
+ * `next` sends them to the sign-in page with another email filled in (switching
+ * between an executive's HQ login and their ambassador/worker login); only a
+ * `/login` address on this site is accepted.
  */
-export async function signOutAndClear(): Promise<void> {
+export async function signOutAndClear(next?: string): Promise<void> {
   const fromClientPortal = window.location.pathname === "/client" || window.location.pathname.startsWith("/client/");
   await Promise.race([disablePush(), new Promise((resolve) => setTimeout(resolve, 2500))]);
   await clearOfflineData();
-  await signOut({ callbackUrl: fromClientPortal ? "/client/login" : "/login" });
+  const switchTo = next && /^\/login(\?|$)/.test(next) ? next : null;
+  await signOut({ callbackUrl: switchTo ?? (fromClientPortal ? "/client/login" : "/login") });
 }
 
 /**

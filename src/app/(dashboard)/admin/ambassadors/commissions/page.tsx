@@ -363,6 +363,9 @@ function PlatinumCell({ r }: { r: TrackerRow }) {
       <span className="block text-xs">
         <StateLabel state={r.platinum.state} />
       </span>
+      {r.platinum.countsFrom ? (
+        <span className="block text-xs text-muted-foreground">Executive: clients from {formatDate(r.platinum.countsFrom)} count</span>
+      ) : null}
     </span>
   );
 }

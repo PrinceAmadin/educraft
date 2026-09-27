@@ -8,6 +8,7 @@ import {
   LuLoaderCircle as Loader2,
 } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { cn } from "@/lib/utils";
 import type { WorkerRecommendation } from "@/lib/services/workers";
 
@@ -77,6 +78,7 @@ export function AssignWorkerScreen({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-semibold text-foreground">{w.fullName}</span>
+                <RoleChip role={w.execRole} />
                 <span className="font-mono text-xs text-muted-foreground">{w.workerId}</span>
                 {w.specialtyMatch ? (
                   <span className="inline-flex items-center gap-1 rounded-full border-transparent bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">

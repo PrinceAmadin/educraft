@@ -3,7 +3,9 @@ import { auth, navRoleForUser, portalsForUser, ROLE_LABELS } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isPersonRole, isStaffRole } from "@/lib/roles";
 import { linkClientOrders } from "@/lib/services/account-links";
+import { execForLoginEmail, linkedAccountsFor, type LinkedPortal } from "@/lib/services/executives";
 import { DashboardShell } from "@/components/layout/DashboardShell";
+import type { SwitchAccount } from "@/components/layout/Topbar";
 import type { NavRole } from "@/lib/constants";
 
 export default async function DashboardLayout({
@@ -28,12 +30,20 @@ export default async function DashboardLayout({
   // the database which, so a newly linked or approved role appears without a
   // fresh sign-in. The switcher offers each one they hold in good standing.
   let portals: NavRole[] = [role];
+  // An executive's ambassador/worker account on another email, and the reverse:
+  // switching between them is a sign-out and a sign-in, never shared access.
+  let switchAccounts: SwitchAccount[] = [];
+  let linkedExecRole: string | null = null;
   if (isStaffRole(session.user.role)) {
     // An executive who is also an ambassador or worker keeps that dashboard.
-    const profiles = await db.user.findUnique({
-      where: { id: session.user.id },
-      select: { workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
-    });
+    const [profiles, linked] = await Promise.all([
+      db.user.findUnique({
+        where: { id: session.user.id },
+        select: { workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
+      }),
+      linkedAccountsFor(session.user.id),
+    ]);
+    switchAccounts = linked.map((a) => ({ email: a.email, label: linkedAccountLabel(a.holds) }));
     const extra = portalsForUser(session.user.role, {
       worker: profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
       ambassador: profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false,
@@ -44,7 +54,11 @@ export default async function DashboardLayout({
     // The email is the person: any order placed with it since the last visit joins
     // this login now, so its client dashboard appears without signing in again.
     const me = await db.user.findUnique({ where: { id: session.user.id }, select: { email: true, isActive: true } });
-    if (me?.isActive) await linkClientOrders(session.user.id, me.email);
+    const [exec] = await Promise.all([execForLoginEmail(me?.email), me?.isActive ? linkClientOrders(session.user.id, me.email) : null]);
+    if (exec) {
+      linkedExecRole = exec.role;
+      switchAccounts = [{ email: exec.primaryEmail, label: "EduCraft HQ" }];
+    }
     const profiles = await db.user.findUnique({
       where: { id: session.user.id },
       select: {
@@ -66,6 +80,8 @@ export default async function DashboardLayout({
       defaultRole={role}
       portals={portals}
       userRole={session.user.role}
+      linkedExecRole={linkedExecRole}
+      switchAccounts={switchAccounts}
       name={name}
       email={session.user.email ?? ""}
       roleLabel={ROLE_LABELS[session.user.role] ?? "Member"}
@@ -77,4 +93,10 @@ export default async function DashboardLayout({
 
 function isWorkerOpen(status: string) {
   return status === "Active" || status === "On Break";
+}
+
+/** ["worker", "ambassador"] → "my worker & ambassador account". */
+function linkedAccountLabel(holds: LinkedPortal[]): string {
+  const list = holds.length > 1 ? `${holds.slice(0, -1).join(", ")} & ${holds[holds.length - 1]}` : holds[0];
+  return `my ${list} account`;
 }

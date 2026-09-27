@@ -1,6 +1,6 @@
 import type { AmbassadorTier, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { activityStatus, calculateTier, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
+import { activityStatus, platinumBonusClientCount, platinumByOffice, TOP_TIER, TOP_TIER_MIN_CONVERSIONS, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
 import { PLATINUM_QUARTERLY_BONUS_PER_CLIENT, QUARTERLY_CHALLENGE } from "@/lib/finance/commission-config";
 import { getPayoutMonth, type AmbassadorPayoutGroup } from "@/lib/services/finance/payouts-engine";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
@@ -246,8 +246,12 @@ export interface TrackerRow {
   name: string;
   tier: AmbassadorTier;
   quarterConversions: number;
-  /** Platinum only: PLATINUM_QUARTERLY_BONUS_PER_CLIENT per client this quarter. */
-  platinum: { eligible: boolean; earned: number; state: BonusState; toPlatinum: number | null };
+  /**
+   * Platinum only: PLATINUM_QUARTERLY_BONUS_PER_CLIENT per client this quarter.
+   * `clients` is how many count; `countsFrom` is set for an executive who became
+   * Platinum during the quarter (only clients from that day count).
+   */
+  platinum: { eligible: boolean; clients: number; earned: number; state: BonusState; toPlatinum: number | null; countsFrom: string | null };
   /** `endDate` is the exclusive end (the first instant after the window); `lastDay` is the last day that counts, for display. */
   challenge: { count: number; target: number; completed: boolean; endDate: string; lastDay: string; extensionGranted: boolean; extensionEndDate: string | null; bonus: number; state: BonusState; canExtend: boolean };
 }
@@ -261,6 +265,47 @@ export interface QuarterTracker {
 }
 
 const CLOSED = ["Suspended", "Terminated"];
+
+export interface PlatinumBonusCount {
+  /** Clients that earn the Platinum bonus this quarter. */
+  clients: number;
+  /** For an executive (Platinum by office): the day they became Platinum; only clients from then count. */
+  countsFrom: Date | null;
+}
+
+/**
+ * The one definition of the Platinum quarterly bonus count, shared by the
+ * tracker (and so "Process Qn bonuses"), the Ambassador Dashboard and the
+ * Command Center alert. Only Platinum ambassadors appear in the result.
+ */
+export async function platinumBonusClients(
+  quarter: { start: Date; end: Date },
+  ambassadors: readonly { id: string; tier: AmbassadorTier; lifetimeConversions: number }[],
+  tx: Prisma.TransactionClient | typeof db = db
+): Promise<Map<string, PlatinumBonusCount>> {
+  const platinum = ambassadors.filter((a) => a.tier === TOP_TIER);
+  const out = new Map<string, PlatinumBonusCount>();
+  if (platinum.length === 0) return out;
+  const byOffice = new Set(platinum.filter((a) => platinumByOffice(a.tier, a.lifetimeConversions)).map((a) => a.id));
+  const [converted, promotions] = await Promise.all([
+    tx.ambassadorReferral.findMany({
+      where: { ambassadorId: { in: platinum.map((a) => a.id) }, status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } },
+      select: { ambassadorId: true, convertedAt: true },
+    }),
+    byOffice.size
+      ? tx.ambassadorTierLog.findMany({ where: { ambassadorId: { in: [...byOffice] }, toTier: TOP_TIER }, orderBy: { createdAt: "desc" }, select: { ambassadorId: true, createdAt: true } })
+      : Promise.resolve([] as { ambassadorId: string; createdAt: Date }[]),
+  ]);
+  const promotedAt = new Map<string, Date>();
+  for (const p of promotions) if (!promotedAt.has(p.ambassadorId)) promotedAt.set(p.ambassadorId, p.createdAt);
+  for (const a of platinum) {
+    const dates = converted.filter((c) => c.ambassadorId === a.id && c.convertedAt).map((c) => c.convertedAt!);
+    const office = byOffice.has(a.id);
+    const from = office ? promotedAt.get(a.id) ?? null : null;
+    out.set(a.id, { clients: platinumBonusClientCount(dates, { byOffice: office, promotedAt: from }), countsFrom: from });
+  }
+  return out;
+}
 
 function bonusState(earned: number, ended: boolean, record: { status: string } | undefined): BonusState {
   if (earned <= 0) return "NOT_EARNED";
@@ -279,6 +324,7 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
   ]);
   const convOf = new Map(conversions.map((c) => [c.ambassadorId, c._count._all]));
   const recordOf = new Map(records.map((r) => [r.bonusKey!, r]));
+  const bonusOf = await platinumBonusClients(quarter, ambassadors);
 
   // Extension conversions: a one-week extension lets conversions in the extra week count for the challenge.
   const extended = challenges.filter((c) => c.extensionGranted && c.extensionEndDate);
@@ -298,8 +344,12 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
       const completed = ch?.completed || challengeCount >= target;
       const challengeEnd = ch?.extensionGranted && ch.extensionEndDate ? ch.extensionEndDate : quarter.end;
       const challengeEnded = now.getTime() >= challengeEnd.getTime();
-      const isPlatinum = calculateTier(a.lifetimeConversions) === "PLATINUM";
-      const platinumEarned = isPlatinum ? inQuarter * PLATINUM_QUARTERLY_BONUS_PER_CLIENT : 0;
+      const bonus = bonusOf.get(a.id);
+      const isPlatinum = a.tier === TOP_TIER;
+      const platinumClients = bonus?.clients ?? 0;
+      const platinumEarned = isPlatinum ? platinumClients * PLATINUM_QUARTERLY_BONUS_PER_CLIENT : 0;
+      // An executive promoted during this quarter: say from when clients count.
+      const countsFrom = bonus?.countsFrom && bonus.countsFrom.getTime() > quarter.start.getTime() ? bonus.countsFrom.toISOString() : null;
       const challengeBonus = completed ? (ch?.bonusAmount ?? CHALLENGE_BONUS) : 0;
       return {
         id: a.id,
@@ -307,7 +357,14 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
         name: a.fullName,
         tier: a.tier,
         quarterConversions: inQuarter,
-        platinum: { eligible: isPlatinum, earned: platinumEarned, state: isPlatinum ? bonusState(platinumEarned, ended, recordOf.get(`platinum:${key}:${a.id}`)) : "NOT_EARNED", toPlatinum: isPlatinum ? null : 31 - a.lifetimeConversions },
+        platinum: {
+          eligible: isPlatinum,
+          clients: isPlatinum ? platinumClients : 0,
+          earned: platinumEarned,
+          state: isPlatinum ? bonusState(platinumEarned, ended, recordOf.get(`platinum:${key}:${a.id}`)) : "NOT_EARNED",
+          toPlatinum: isPlatinum ? null : Math.max(0, TOP_TIER_MIN_CONVERSIONS - a.lifetimeConversions),
+          countsFrom,
+        },
         challenge: {
           count: challengeCount,
           target,
@@ -355,7 +412,7 @@ export async function processQuarterBonuses(key: string, byUserId: string, now: 
   const month = tracker.quarter.payoutMonth;
   for (const r of tracker.rows) {
     const wanted: { bonusKey: string; amount: number; basis: string }[] = [];
-    if (r.platinum.earned > 0) wanted.push({ bonusKey: `platinum:${key}:${r.id}`, amount: r.platinum.earned, basis: `Platinum quarterly bonus ${tracker.quarter.label}: ${r.quarterConversions} client${r.quarterConversions === 1 ? "" : "s"} × ${formatNaira(PLATINUM_QUARTERLY_BONUS_PER_CLIENT)}` });
+    if (r.platinum.earned > 0) wanted.push({ bonusKey: `platinum:${key}:${r.id}`, amount: r.platinum.earned, basis: `Platinum quarterly bonus ${tracker.quarter.label}: ${r.platinum.clients} client${r.platinum.clients === 1 ? "" : "s"} × ${formatNaira(PLATINUM_QUARTERLY_BONUS_PER_CLIENT)}` });
     if (r.challenge.bonus > 0) wanted.push({ bonusKey: `challenge:${key}:${r.id}`, amount: r.challenge.bonus, basis: `Quarterly challenge ${tracker.quarter.label}: ${r.challenge.count} clients (target ${r.challenge.target})` });
     for (const w of wanted) {
       const existing = await db.payoutRecord.findUnique({ where: { bonusKey: w.bonusKey }, select: { id: true } });

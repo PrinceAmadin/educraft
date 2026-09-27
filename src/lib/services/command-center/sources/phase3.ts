@@ -1,5 +1,7 @@
+import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
-import { AMBASSADOR_TIERS, PLATINUM_QUARTERLY_BONUS_PER_CLIENT, tierFor } from "@/lib/finance/commission-config";
+import { AMBASSADOR_TIERS, PLATINUM_QUARTERLY_BONUS_PER_CLIENT } from "@/lib/finance/commission-config";
+import { platinumBonusClients } from "@/lib/services/ambassador-platform/commissions";
 import {
   RHYTHM_POSTS,
   contentConsistencyOf,
@@ -217,8 +219,8 @@ export async function platinumBonusAlerts(now: Date): Promise<CcAlert[] | null> 
           // requires Phase 3 merge: Ambassador.lifetimeConversions (what the tier ladder counts).
           p3.ambassador.findMany({
             where: { id: { in: [...clients.keys()] }, status: { notIn: [...CLOSED_AMBASSADOR_STATUSES] } },
-            select: { id: true, lifetimeConversions: true },
-          }) as Promise<{ id: string; lifetimeConversions: number }[]>,
+            select: { id: true, tier: true, lifetimeConversions: true },
+          }) as Promise<{ id: string; tier: AmbassadorTier; lifetimeConversions: number }[]>,
           // requires Phase 3 merge: PayoutRecord.bonusKey.
           p3.payoutRecord.findMany({
             where: { bonusKey: { startsWith: `platinum:${last.key}:` }, status: { not: "CANCELLED" } },
@@ -226,9 +228,11 @@ export async function platinumBonusAlerts(now: Date): Promise<CcAlert[] | null> 
           }) as Promise<BonusRecordRow[]>,
         ]);
         const recorded = new Set(records.map((r) => r.recipientId));
-        const owed = ambassadors.filter((a) => tierFor(a.lifetimeConversions) === "PLATINUM" && !recorded.has(a.id));
+        // The tracker's own count: the stored tier, and an executive's clients only from the day they became Platinum.
+        const bonusOf = await platinumBonusClients(last, ambassadors);
+        const owed = ambassadors.filter((a) => (bonusOf.get(a.id)?.clients ?? 0) > 0 && !recorded.has(a.id));
         if (owed.length > 0) {
-          const amount = owed.reduce((sum, a) => sum + (clients.get(a.id) ?? 0) * PLATINUM_QUARTERLY_BONUS_PER_CLIENT, 0);
+          const amount = owed.reduce((sum, a) => sum + (bonusOf.get(a.id)?.clients ?? 0) * PLATINUM_QUARTERLY_BONUS_PER_CLIENT, 0);
           alerts.push({
             key: `platinum_bonus:unprocessed:${last.key}`,
             severity: "critical",

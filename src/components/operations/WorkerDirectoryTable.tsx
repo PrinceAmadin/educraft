@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LuArrowRight, LuMessageCircle, LuTriangleAlert } from "react-icons/lu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { toWaNumber, waLink, greetingName } from "@/lib/whatsapp";
 import { cn, timeAgo } from "@/lib/utils";
 import type { WorkerDirectoryRow } from "@/lib/services/operations/workers-ops";
@@ -69,9 +70,12 @@ export function WorkerDirectoryTable({ rows }: { rows: WorkerDirectoryRow[] }) {
         {rows.map((row) => (
           <li key={row.id} className="surface p-4">
             <div className="flex items-center justify-between gap-2">
-              <Link href={`/admin/workers/${row.id}`} className="text-sm font-medium text-foreground hover:text-primary">
-                {row.fullName}
-              </Link>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <Link href={`/admin/workers/${row.id}`} className="truncate text-sm font-medium text-foreground hover:text-primary">
+                  {row.fullName}
+                </Link>
+                <RoleChip role={row.execRole} />
+              </span>
               <ActivityChip status={row.activity} />
             </div>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">{row.workerId}</p>
@@ -117,9 +121,12 @@ export function WorkerDirectoryTable({ rows }: { rows: WorkerDirectoryRow[] }) {
             {rows.map((row) => (
               <TableRow key={row.id}>
                 <TableCell>
-                  <Link href={`/admin/workers/${row.id}`} className="text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline">
-                    {row.fullName}
-                  </Link>
+                  <span className="flex items-center gap-1.5">
+                    <Link href={`/admin/workers/${row.id}`} className="text-sm font-medium text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline">
+                      {row.fullName}
+                    </Link>
+                    <RoleChip role={row.execRole} />
+                  </span>
                   <div className="font-mono text-xs text-muted-foreground">
                     {row.workerId}
                     {row.isQaReviewer ? " · QA reviewer" : ""}

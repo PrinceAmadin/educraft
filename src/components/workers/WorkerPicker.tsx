@@ -3,6 +3,7 @@
 import * as React from "react";
 import { LuCheck, LuSearch } from "react-icons/lu";
 import { Input } from "@/components/ui/input";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { cn } from "@/lib/utils";
 import type { WorkerRecommendation } from "@/lib/services/workers";
 
@@ -62,7 +63,10 @@ export function WorkerPicker({
               )}
             >
               <span className="min-w-0">
-                <span className="block truncate text-sm font-medium text-foreground">{w.fullName}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-sm font-medium text-foreground">{w.fullName}</span>
+                  <RoleChip role={w.execRole} className="h-5 px-1.5 text-[10px]" />
+                </span>
                 <span className="block truncate text-xs text-muted-foreground">
                   <span className="font-mono">{w.workerId}</span>
                   {w.specialties.length > 0 ? ` · ${w.specialties.join(", ")}` : ""} · load {w.load}

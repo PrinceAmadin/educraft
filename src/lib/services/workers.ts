@@ -2,6 +2,9 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId, TransitionError } from "@/lib/services/projects";
 import { notifyAdmins } from "@/lib/services/notifications";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 import {
   workerMetrics,
   WORKER_ACTIVE_STATUSES,
@@ -408,6 +411,8 @@ export interface WorkerRecommendation {
   avgDeliveryDays: number | null;
   /** True when a specialty matches the project's department. */
   specialtyMatch: boolean;
+  /** Set when the worker record is an executive's: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface AssignmentContext {
@@ -467,8 +472,11 @@ export async function getAssignmentContext(idOrCode: string): Promise<Assignment
       skills: true,
       maxConcurrentProjects: true,
       projects: { select: projectFactsSelect },
+      email: true,
+      user: { select: { email: true, role: true } },
     },
   });
+  const execIndex = await loadExecIndex();
 
   const normalizedDept = department.trim().toLowerCase();
 
@@ -494,6 +502,7 @@ export async function getAssignmentContext(idOrCode: string): Promise<Assignment
         revisionRate: m.revisionRate,
         avgDeliveryDays: m.avgDeliveryDays,
         specialtyMatch,
+        execRole: execRoleForRecord(execIndex, w),
       };
     })
     .sort((a, b) => {

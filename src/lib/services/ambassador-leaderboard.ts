@@ -1,6 +1,9 @@
 import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import { watDayStart } from "@/lib/click-tracking/peak-hours";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 
 /**
  * The ambassador leaderboard, ranked by unique link clicks. Ported from the
@@ -35,6 +38,8 @@ export interface LeaderboardEntry {
   slotCode: string | null;
   /** Unique clicks in the selected period. */
   clicks: number;
+  /** Set when the ambassador is an EduCraft executive: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface LeaderboardData {
@@ -55,16 +60,17 @@ async function computeLeaderboard(period: LeaderboardPeriod): Promise<Leaderboar
   const since = periodStart(period);
   const real = { isTestClick: false, archivedAt: null, quality: "UNIQUE" as const, ambassadorId: { not: null } };
 
-  const [ambassadors, periodClicks] = await Promise.all([
+  const [ambassadors, periodClicks, execIndex] = await Promise.all([
     db.ambassador.findMany({
       where: { status: "Active" },
-      select: { id: true, fullName: true, legacySlotId: true, university: { select: { abbreviation: true } } },
+      select: { id: true, fullName: true, legacySlotId: true, university: { select: { abbreviation: true } }, email: true, user: { select: { email: true, role: true } } },
     }),
     db.clickEvent.groupBy({
       by: ["ambassadorId"],
       where: since ? { ...real, timestamp: { gte: since } } : real,
       _count: { _all: true },
     }),
+    loadExecIndex(),
   ]);
 
   const clicksBy = new Map(periodClicks.map((g) => [g.ambassadorId!, g._count._all]));
@@ -76,6 +82,7 @@ async function computeLeaderboard(period: LeaderboardPeriod): Promise<Leaderboar
       school: a.university?.abbreviation ?? null,
       slotCode: a.legacySlotId,
       clicks: clicksBy.get(a.id) ?? 0,
+      execRole: execRoleForRecord(execIndex, a),
     }))
     // Most clicks first, ties by name. Zero-click ambassadors naturally land
     // at the bottom, sorted by name.
@@ -90,7 +97,7 @@ async function computeLeaderboard(period: LeaderboardPeriod): Promise<Leaderboar
 
 /** 5-minute shared cache per period. */
 export const getClickLeaderboard = (period: LeaderboardPeriod) =>
-  unstable_cache(() => computeLeaderboard(period), ["ambassador-click-leaderboard", period], {
+  unstable_cache(() => computeLeaderboard(period), ["ambassador-click-leaderboard", "v2-exec", period], {
     revalidate: LEADERBOARD_CACHE_SECONDS,
     tags: [LEADERBOARD_CACHE_TAG],
   })();

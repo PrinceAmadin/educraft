@@ -4,11 +4,20 @@ import { AMBASSADOR_TIERS, rateForTier } from "@/lib/finance/commission-config";
 /**
  * Tier rules for the Ambassador Platform. Pure: the thresholds come from
  * `AMBASSADOR_TIERS` in the finance config (the one source of truth), never
- * from numbers typed here. The tier is always derived from the lifetime
- * conversion count — nothing sets it by hand.
+ * from numbers typed here. The tier is derived from the lifetime conversion
+ * count — nothing sets it by hand — except that an executive's ambassador
+ * record (CEO, CFO, HOG, COO; see `executive-identity.ts`) is always the top
+ * tier (founder, 27 Sept 2026). `recountAmbassador` stores the result, so
+ * everything else reads the stored tier.
  */
 
 const LADDER = [...AMBASSADOR_TIERS].sort((a, b) => a.minConversions - b.minConversions);
+
+/** The top tier (Platinum). */
+export const TOP_TIER: AmbassadorTier = LADDER[LADDER.length - 1].name;
+
+/** Conversions the top tier takes when earned by count (31). */
+export const TOP_TIER_MIN_CONVERSIONS = LADDER[LADDER.length - 1].minConversions;
 
 /** The tier a lifetime conversion count earns. */
 export function calculateTier(lifetimeConversions: number): AmbassadorTier {
@@ -16,6 +25,11 @@ export function calculateTier(lifetimeConversions: number): AmbassadorTier {
   let tier: AmbassadorTier = LADDER[0].name;
   for (const step of LADDER) if (n >= step.minConversions) tier = step.name;
   return tier;
+}
+
+/** The tier an ambassador holds: an executive is always the top tier, everyone else by count. */
+export function ambassadorTier(lifetimeConversions: number, executive: boolean): AmbassadorTier {
+  return executive ? TOP_TIER : calculateTier(lifetimeConversions);
 }
 
 /** The next tier up, or null at Platinum. */
@@ -31,6 +45,38 @@ export function conversionsTillNextTier(lifetimeConversions: number): number | n
   if (!next) return null;
   const min = LADDER.find((t) => t.name === next)!.minConversions;
   return Math.max(0, min - Math.max(0, Math.floor(lifetimeConversions)));
+}
+
+/**
+ * Conversions to the next tier from the STORED tier: null at Platinum, so an
+ * executive (Platinum on few conversions) is never "2 away from Silver".
+ */
+export function toNextTier(tier: AmbassadorTier, lifetimeConversions: number): number | null {
+  return nextTier(tier) ? conversionsTillNextTier(lifetimeConversions) : null;
+}
+
+/** 0–100 progress from the STORED tier: 100 at Platinum. */
+export function tierProgressFor(tier: AmbassadorTier, lifetimeConversions: number): number {
+  return nextTier(tier) ? tierProgressPercent(lifetimeConversions) : 100;
+}
+
+/** Platinum without the conversions for it: an executive, Platinum by office. */
+export function platinumByOffice(tier: AmbassadorTier, lifetimeConversions: number): boolean {
+  return tier === TOP_TIER && calculateTier(lifetimeConversions) !== TOP_TIER;
+}
+
+/**
+ * How many of a Platinum ambassador's clients this quarter count toward the
+ * Platinum quarterly bonus. Platinum by count: every client converted in the
+ * quarter. An executive (Platinum by office): only the clients who paid on or
+ * after they became Platinum — nothing retroactive (founder, 27 Sept 2026) —
+ * and none when there is no promotion on record.
+ */
+export function platinumBonusClientCount(convertedAt: readonly Date[], opts: { byOffice: boolean; promotedAt: Date | null }): number {
+  if (!opts.byOffice) return convertedAt.length;
+  const from = opts.promotedAt;
+  if (!from) return 0;
+  return convertedAt.filter((d) => d.getTime() >= from.getTime()).length;
 }
 
 /** A Core may activate a sub-team from Silver up. */

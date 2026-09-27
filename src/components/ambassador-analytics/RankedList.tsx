@@ -3,6 +3,7 @@
 import * as React from "react";
 import { LuChevronDown, LuChevronUp } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { cn } from "@/lib/utils";
 import type { LeaderboardEntry } from "@/lib/services/ambassador-leaderboard";
 
@@ -56,11 +57,12 @@ export function RankedList({
               )}
             >
               <span className="font-mono text-sm tabular-nums text-muted-foreground">{e.rank}</span>
-              <span className="min-w-0">
-                <span className={cn("block truncate text-[15px]", me ? "font-semibold text-foreground" : "text-foreground")}>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className={cn("block min-w-0 truncate text-[15px]", me ? "font-semibold text-foreground" : "text-foreground")}>
                   {me ? "You" : e.name}
                   {e.school ? <span className="ml-2 text-[13px] font-normal text-muted-foreground">{e.school}</span> : null}
                 </span>
+                <RoleChip role={e.execRole} plain className="h-5 px-1.5 text-[10px]" />
               </span>
               <span className="hidden truncate font-mono text-xs text-muted-foreground md:block">
                 {e.slotCode ? `EduCraftA-${e.slotCode}` : "No slot yet"}

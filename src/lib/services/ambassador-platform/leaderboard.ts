@@ -5,6 +5,9 @@ import { spotlightMessage } from "@/lib/ambassadors/spotlight";
 import { shortDay, weekEnd, weekStart } from "@/lib/ambassadors/weeks";
 import { currentMonthKey, monthLabel } from "@/lib/services/finance/surplus";
 import { CHALLENGE_TARGET, currentQuarterKey, quarterFromKey } from "@/lib/services/ambassador-platform/commissions";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 
 /**
  * The Leaderboard (Phase 3 Section 5): four views ranked by conversions —
@@ -36,6 +39,8 @@ export interface LeaderboardRow {
   /** Commission on the conversions counted in this view: personal + Core override on their Subs'. */
   earnings: number;
   badges: Badge[];
+  /** Set when the record is an executive's: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface Leaderboard {
@@ -116,8 +121,8 @@ const REF_SELECT = {
   },
 } satisfies Prisma.AmbassadorReferralSelect;
 
-/** Badges for a set of ambassadors, as of `now`. */
-export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeConversions: number; createdAt: Date }[], now: Date = new Date()): Promise<Map<string, Badge[]>> {
+/** Badges for a set of ambassadors, as of `now`. `executive` marks a record that is Platinum by office. */
+export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeConversions: number; createdAt: Date; executive?: boolean }[], now: Date = new Date()): Promise<Map<string, Badge[]>> {
   const ids = ambassadors.map((a) => a.id);
   const out = new Map<string, Badge[]>();
   if (ids.length === 0) return out;
@@ -155,6 +160,7 @@ export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeCo
         challengeComplete: Boolean(ch?.completed) || inChallenge >= target,
         tierUpThisMonthTo: promotions.length ? (promotions[promotions.length - 1].toTier as AmbassadorTier) : null,
         backFromDormant: isBackFromDormant(thisMonth[0] ?? null, prevOf.get(a.id) ?? null, a.createdAt),
+        executive: a.executive,
       })
     );
   }
@@ -163,16 +169,21 @@ export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeCo
 
 export async function getLeaderboard(view: LeaderboardView, now: Date = new Date()): Promise<Leaderboard> {
   const period = periodFor(view, now);
-  const [ambassadors, refs] = await Promise.all([
+  const [found, refs, execIndex] = await Promise.all([
     db.ambassador.findMany({
       where: { status: { notIn: CLOSED } },
-      select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, createdAt: true, university: { select: { abbreviation: true } } },
+      select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, createdAt: true, university: { select: { abbreviation: true } }, email: true, user: { select: { email: true, role: true } } },
     }),
     db.ambassadorReferral.findMany({
       where: { status: "CONVERTED", ...(period.start && period.end ? { convertedAt: { gte: period.start, lt: period.end } } : {}) },
       select: REF_SELECT,
     }),
+    loadExecIndex(),
   ]);
+  const ambassadors = found.map((a) => {
+    const execRole = execRoleForRecord(execIndex, a);
+    return { ...a, execRole, executive: execRole != null };
+  });
   const open = new Set(ambassadors.map((a) => a.id));
   const counts = new Map<string, number>();
   for (const r of refs) counts.set(r.ambassadorId, (counts.get(r.ambassadorId) ?? 0) + 1);
@@ -189,7 +200,7 @@ export async function getLeaderboard(view: LeaderboardView, now: Date = new Date
   ranked.forEach((x, i) => {
     const prev = ranked[i - 1];
     const rank = prev && prev.conversions === x.conversions && prev.earnings === x.earnings ? rows[i - 1].rank : i + 1;
-    rows.push({ rank, id: x.a.id, code: x.a.ambassadorId, fullName: x.a.fullName, school: x.a.university?.abbreviation ?? null, tier: x.a.tier, conversions: x.conversions, earnings: x.earnings, badges: badges.get(x.a.id) ?? [] });
+    rows.push({ rank, id: x.a.id, code: x.a.ambassadorId, fullName: x.a.fullName, school: x.a.university?.abbreviation ?? null, tier: x.a.tier, conversions: x.conversions, earnings: x.earnings, badges: badges.get(x.a.id) ?? [], execRole: x.a.execRole });
   });
 
   return {

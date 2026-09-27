@@ -14,6 +14,9 @@ import {
   type WorkerActivityStatus,
 } from "@/lib/operations/worker-performance";
 import { deadlineInfo, type DeadlineUrgency } from "@/lib/utils";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 import type { Actor } from "@/lib/services/operations/actor";
 
 /**
@@ -76,6 +79,8 @@ export interface WorkerDirectoryRow {
   tier2Warning: boolean;
   lastActiveAt: string | null;
   isQaReviewer: boolean;
+  /** Set when the worker record is an executive's (CEO, CFO, HOG, COO): shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface WorkerDirectory {
@@ -116,11 +121,13 @@ export async function listWorkerDirectory(filters: WorkerDirectoryFilters, now: 
       maxConcurrentProjects: true,
       isQaReviewer: true,
       userId: true,
+      email: true,
+      user: { select: { email: true, role: true } },
       projects: { select: workerPerformanceSelect },
     },
   });
   const userIds = workers.map((w) => w.userId).filter((x): x is string => Boolean(x));
-  const [lastActive, flags] = await Promise.all([lastActiveByUser(userIds), tier2FlagCounts(workers.map((w) => w.id), now)]);
+  const [lastActive, flags, execIndex] = await Promise.all([lastActiveByUser(userIds), tier2FlagCounts(workers.map((w) => w.id), now), loadExecIndex()]);
 
   let rows: WorkerDirectoryRow[] = workers.map((w) => {
     const facts = toPerformanceFacts(w.projects);
@@ -148,6 +155,7 @@ export async function listWorkerDirectory(filters: WorkerDirectoryFilters, now: 
       tier2Warning: perf.tier2FlagCount >= TIER2_FLAG_WARNING,
       lastActiveAt: last?.toISOString() ?? null,
       isQaReviewer: w.isQaReviewer,
+      execRole: execRoleForRecord(execIndex, w),
     };
   });
   if (filters.status && filters.status !== "Terminated") rows = rows.filter((r) => r.activity === filters.status);

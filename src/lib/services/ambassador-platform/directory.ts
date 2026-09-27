@@ -1,6 +1,9 @@
 import { Prisma, type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
-import { activityStatus, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, nextTier, subTeamThresholdLabel, tierProgressPercent, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
+import { activityStatus, buildReferralCode, calculateTier, isEligibleForSubTeam, nextTier, subTeamThresholdLabel, tierProgressFor, toNextTier, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
+import { execRoleForRecord, type ExecIndex } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
 import { nextId } from "@/lib/services/projects";
 import { setAmbassadorParent, AmbassadorHierarchyError } from "@/lib/services/ambassadors";
@@ -37,6 +40,8 @@ export interface DirectoryRow {
   lastReferralAt: string | null;
   lastConversionAt: string | null;
   referralCode: string;
+  /** Set when the record is an executive's (CEO, CFO, HOG, COO): shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface DirectoryResult {
@@ -65,11 +70,13 @@ const ROW_SELECT = {
   parentId: true,
   parent: { select: { id: true, fullName: true } },
   _count: { select: { children: true } },
+  email: true,
+  user: { select: { email: true, role: true } },
 } satisfies Prisma.AmbassadorSelect;
 
 type RowSource = Prisma.AmbassadorGetPayload<{ select: typeof ROW_SELECT }>;
 
-function toRow(a: RowSource, now: Date): DirectoryRow {
+function toRow(a: RowSource, now: Date, execIndex: ExecIndex): DirectoryRow {
   return {
     id: a.id,
     ambassadorId: a.ambassadorId,
@@ -88,6 +95,7 @@ function toRow(a: RowSource, now: Date): DirectoryRow {
     lastReferralAt: a.lastReferralAt?.toISOString() ?? null,
     lastConversionAt: a.lastConversionAt?.toISOString() ?? null,
     referralCode: a.referralCode,
+    execRole: execRoleForRecord(execIndex, a),
   };
 }
 
@@ -120,11 +128,12 @@ export async function listDirectory(q: DirectoryQuery, now: Date = new Date()): 
         }
       : {}),
   };
-  const all = (await db.ambassador.findMany({ where, select: ROW_SELECT })).map((a) => toRow(a, now));
+  const [found, execIndex] = await Promise.all([db.ambassador.findMany({ where, select: ROW_SELECT }), loadExecIndex()]);
+  const all = found.map((a) => toRow(a, now, execIndex));
   let filtered = q.status ? all.filter((r) => r.activity === q.status) : all;
   if (q.near) {
     filtered = filtered.filter((r) => {
-      const left = conversionsTillNextTier(r.lifetimeConversions);
+      const left = toNextTier(r.tier, r.lifetimeConversions);
       return left != null && left > 0 && left <= 2;
     });
   }
@@ -427,8 +436,8 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
       conversionRate: a.lifetimeReferrals > 0 ? Math.round((conversions / a.lifetimeReferrals) * 100) : null,
       lifetimeEarnings: a.lifetimeEarnings,
       nextTier: nextTier(a.tier),
-      toNext: conversionsTillNextTier(conversions),
-      percent: tierProgressPercent(conversions),
+      toNext: toNextTier(a.tier, conversions),
+      percent: tierProgressFor(a.tier, conversions),
     },
     quarter: { label: quarter.label, conversions: quarter.conversions, challenge: quarter.challenge },
     subTeam: a.children.map((c) => ({ id: c.id, ambassadorId: c.ambassadorId, fullName: c.fullName, tier: c.tier, lifetimeConversions: c.lifetimeConversions, activity: activityStatus(c, now) })),
@@ -485,9 +494,10 @@ export async function createDirectoryAmbassador(input: CreateDirectoryAmbassador
     if (CLOSED_STATUSES.includes(core.status)) throw new DirectoryError(`${core.fullName} is ${core.status.toLowerCase()}`);
   }
 
-  for (let attempt = 0; attempt < 6; attempt++) {
+  let created: { id: string; ambassadorId: string; referralCode: string } | null = null;
+  for (let attempt = 0; attempt < 6 && !created; attempt++) {
     try {
-      return await db.ambassador.create({
+      created = await db.ambassador.create({
         data: {
           ambassadorId: await nextId("AMBASSADOR"),
           fullName: input.fullName,
@@ -514,7 +524,10 @@ export async function createDirectoryAmbassador(input: CreateDirectoryAmbassador
       throw error;
     }
   }
-  throw new DirectoryError("Could not allocate an ambassador id — try again");
+  if (!created) throw new DirectoryError("Could not allocate an ambassador id — try again");
+  // An executive's record (on one of their emails) starts at Platinum, not Bronze.
+  await recount(created.id);
+  return created;
 }
 
 /**

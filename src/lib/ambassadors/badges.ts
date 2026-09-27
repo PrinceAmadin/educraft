@@ -26,6 +26,8 @@ export interface BadgeInput {
   /** The tier they were promoted to this month, if any. */
   tierUpThisMonthTo: AmbassadorTier | null;
   backFromDormant: boolean;
+  /** An executive is Platinum by office: no "tier up" and no "N away from" badges. */
+  executive?: boolean;
 }
 
 export const ON_FIRE_THRESHOLD = 3;
@@ -35,9 +37,9 @@ export const DORMANT_DAYS = 30;
 export function badgesFor(input: BadgeInput): Badge[] {
   const out: Badge[] = [];
   if (input.challengeComplete) out.push({ kind: "CHALLENGE_COMPLETE", label: "Challenge complete" });
-  if (input.tierUpThisMonthTo) out.push({ kind: "TIER_UP", label: `Tier up (just hit ${tierLabel(input.tierUpThisMonthTo)})` });
+  if (input.tierUpThisMonthTo && !input.executive) out.push({ kind: "TIER_UP", label: `Tier up (just hit ${tierLabel(input.tierUpThisMonthTo)})` });
   if (input.conversionsLast7Days >= ON_FIRE_THRESHOLD) out.push({ kind: "ON_FIRE", label: "On fire" });
-  const left = conversionsTillNextTier(input.lifetimeConversions);
+  const left = input.executive ? null : conversionsTillNextTier(input.lifetimeConversions);
   const next = nextTier(calculateTier(input.lifetimeConversions));
   if (left != null && next && left > 0 && left <= NEAR_TIER_WITHIN) out.push({ kind: "NEAR_TIER", label: `${left} away from ${tierLabel(next)}` });
   if (input.backFromDormant) out.push({ kind: "BACK_FROM_DORMANT", label: "First conversion this month" });

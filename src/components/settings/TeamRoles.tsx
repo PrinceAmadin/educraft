@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/forms/Field";
+import { TagInput } from "@/components/forms/TagInput";
 import { RoleChip } from "@/components/layout/RoleChip";
 import { EXEC_ROLE_LABELS, INVITABLE_ROLES, ROLE_TITLES, isExecRole } from "@/lib/rbac";
 import { inviteExecutiveSchema, type InviteExecutiveInput } from "@/lib/validations/team";
@@ -36,6 +37,32 @@ async function call<T>(path: string, init: RequestInit): Promise<T> {
 
 function roleLabel(role: string) {
   return isExecRole(role) ? EXEC_ROLE_LABELS[role] : role === "OPS_MANAGER" ? "Operations Manager (retired)" : role;
+}
+
+const OTHER_EMAILS_HINT =
+  "Emails this person uses for an ambassador or worker account. Those records get the executive tag and Platinum. Those accounts never get HQ access.";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Lower-cased, de-duplicated; the first entry that is not an email address, if any. */
+function cleanOtherEmails(list: string[]): { emails: string[]; invalid: string | null } {
+  const emails = [...new Set(list.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  return { emails, invalid: emails.find((e) => !EMAIL_PATTERN.test(e)) ?? null };
+}
+
+/** "Also uses princeamadin25@gmail.com (worker ECW-0001, ambassador EC-A-00030)". */
+function OtherEmailsLine({ row }: { row: ExecutiveRow }) {
+  if (row.otherEmails.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+      {row.otherEmails.map((o) => (
+        <li key={o.email} className="break-all">
+          Also uses {o.email}
+          {o.holds.length ? ` (${o.holds.join(", ")})` : " (no account yet)"}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function TeamRoles({ executives, currentUserId }: { executives: ExecutiveRow[]; currentUserId: string }) {
@@ -74,6 +101,7 @@ export function TeamRoles({ executives, currentUserId }: { executives: Executive
                 </p>
                 <p className="text-[13px] text-muted-foreground">{e.title}</p>
                 <p className="mt-1 truncate text-xs text-muted-foreground">{e.email}</p>
+                <OtherEmailsLine row={e} />
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between gap-2">
@@ -121,7 +149,10 @@ export function TeamRoles({ executives, currentUserId }: { executives: Executive
                     <span className="text-xs text-muted-foreground">{roleLabel(e.role)}</span>
                   </span>
                 </td>
-                <td className="px-3 py-3 text-muted-foreground">{e.email}</td>
+                <td className="px-3 py-3 text-muted-foreground">
+                  {e.email}
+                  <OtherEmailsLine row={e} />
+                </td>
                 <td className="px-3 py-3">
                   <StatusBadge row={e} />
                 </td>
@@ -257,6 +288,8 @@ function InviteExecutiveForm({
   onCancel: () => void;
 }) {
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [otherEmails, setOtherEmails] = React.useState<string[]>([]);
+  const [otherEmailsError, setOtherEmailsError] = React.useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -281,10 +314,13 @@ function InviteExecutiveForm({
 
   const onSubmit = async (data: InviteExecutiveInput) => {
     setSubmitError(null);
+    const others = cleanOtherEmails(otherEmails);
+    setOtherEmailsError(others.invalid ? `${others.invalid} is not an email address` : null);
+    if (others.invalid) return;
     try {
       const created = await call<{ email: string; fullName: string; temporaryPassword: string }>("/api/admin/team", {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, otherEmails: others.emails }),
       });
       onDone(created);
     } catch (err) {
@@ -319,6 +355,9 @@ function InviteExecutiveForm({
         </Field>
         <Field label="Phone" htmlFor="phone" error={errors.phone?.message}>
           <Input id="phone" inputMode="tel" autoComplete="off" {...register("phone")} />
+        </Field>
+        <Field label="Other emails" htmlFor="otherEmails" error={otherEmailsError ?? undefined} hint={OTHER_EMAILS_HINT}>
+          <TagInput id="otherEmails" value={otherEmails} onChange={setOtherEmails} placeholder="Type an email, then press Enter" />
         </Field>
 
         {submitError ? (
@@ -368,6 +407,9 @@ function EditExecutiveForm({
   const [busy, setBusy] = React.useState<"save" | "reset" | "active" | "remove" | null>(null);
   const [confirmRemove, setConfirmRemove] = React.useState(false);
   const [alsoDeactivate, setAlsoDeactivate] = React.useState(true);
+  const savedOtherEmails = row.otherEmails.map((o) => o.email);
+  const [otherEmails, setOtherEmails] = React.useState<string[]>(savedOtherEmails);
+  const [otherEmailsError, setOtherEmailsError] = React.useState<string | null>(null);
   const isSuperAdmin = row.role === "SUPER_ADMIN";
 
   const {
@@ -381,9 +423,13 @@ function EditExecutiveForm({
 
   const onSubmit = async (data: EditFormValues) => {
     setError(null);
+    const others = cleanOtherEmails(otherEmails);
+    setOtherEmailsError(others.invalid ? `${others.invalid} is not an email address` : null);
+    if (others.invalid) return;
     setBusy("save");
     try {
       const patch: Record<string, unknown> = {};
+      if ([...others.emails].sort().join(",") !== [...savedOtherEmails].sort().join(",")) patch.otherEmails = others.emails;
       if (data.fullName !== row.fullName) patch.fullName = data.fullName;
       if (data.email !== row.email) patch.email = data.email;
       if (!isSuperAdmin && data.role !== row.role) patch.role = data.role;
@@ -476,6 +522,9 @@ function EditExecutiveForm({
         </Field>
         <Field label="Phone" htmlFor="edit-phone" error={errors.phone?.message}>
           <Input id="edit-phone" inputMode="tel" autoComplete="off" {...register("phone")} />
+        </Field>
+        <Field label="Other emails" htmlFor="edit-otherEmails" error={otherEmailsError ?? undefined} hint={OTHER_EMAILS_HINT}>
+          <TagInput id="edit-otherEmails" value={otherEmails} onChange={setOtherEmails} placeholder="Type an email, then press Enter" />
         </Field>
 
         {error ? (

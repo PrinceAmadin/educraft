@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BellOff, BellRing, Download, LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
+import { ArrowLeftRight, BellOff, BellRing, Download, LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
 import { usePwa } from "@/components/pwa/PwaProvider";
 import { usePush } from "@/hooks/use-push";
 import { signOutAndClear } from "@/lib/pwa/sign-out";
@@ -26,10 +26,20 @@ import {
 import { navForRole, type NavRole } from "@/lib/constants";
 import { initials } from "@/lib/utils";
 
+/** Another login of the same executive: switching signs out and opens sign-in with this email filled in. */
+export interface SwitchAccount {
+  email: string;
+  /** "EduCraft HQ", "my worker & ambassador account". */
+  label: string;
+}
+
 interface TopbarProps {
   role: NavRole;
   /** The login's `User.role`: which executive this is, if any. */
   userRole?: string;
+  /** Set on an executive's other-email login (a worker/ambassador login): their chip still shows. */
+  linkedExecRole?: string | null;
+  switchAccounts?: SwitchAccount[];
   /** Dashboards this login can open; a switcher shows when there is more than one. */
   portals?: NavRole[];
   name: string;
@@ -69,8 +79,10 @@ const PORTAL_LABELS: Record<string, string> = {
   client: "Client dashboard",
 };
 
-export function Topbar({ role, userRole, portals = [], name, email, roleLabel }: TopbarProps) {
+export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts = [], portals = [], name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role, userRole);
+  // The chip names the executive: their own login's role, or the one this login belongs to.
+  const chipRole = linkedExecRole ?? userRole;
   const otherPortals = portals.filter((p) => p !== role && PORTAL_LABELS[p]);
   const { canInstall, promptInstall } = usePwa();
   const push = usePush();
@@ -134,7 +146,7 @@ export function Topbar({ role, userRole, portals = [], name, email, roleLabel }:
               {role === "admin" ? (
                 <span className="hidden max-w-[180px] truncate text-sm font-medium text-foreground lg:inline">{name}</span>
               ) : null}
-              <RoleChip role={userRole} className="hidden sm:inline-flex" />
+              <RoleChip role={chipRole} className="hidden sm:inline-flex" />
               <Avatar>
                 <AvatarFallback>{initials(name)}</AvatarFallback>
               </Avatar>
@@ -145,7 +157,7 @@ export function Topbar({ role, userRole, portals = [], name, email, roleLabel }:
               <div className="flex flex-col gap-1">
                 <span className="flex items-center gap-2">
                   <span className="truncate text-sm font-semibold text-foreground">{name}</span>
-                  <RoleChip role={userRole} />
+                  <RoleChip role={chipRole} />
                 </span>
                 <span className="truncate text-xs text-muted-foreground">{email}</span>
                 <Badge variant="neutral" className="mt-1 w-fit">
@@ -176,6 +188,15 @@ export function Topbar({ role, userRole, portals = [], name, email, roleLabel }:
                   <Repeat2 />
                   Switch to {p === "admin" ? "EduCraft HQ" : PORTAL_LABELS[p].toLowerCase()}
                 </Link>
+              </DropdownMenuItem>
+            ))}
+            {switchAccounts.map((a) => (
+              <DropdownMenuItem key={a.email} onClick={() => void signOutAndClear(`/login?email=${encodeURIComponent(a.email)}`)}>
+                <ArrowLeftRight />
+                <span className="flex min-w-0 flex-col">
+                  <span>Switch to {a.label}</span>
+                  <span className="truncate text-xs text-muted-foreground">Signs out, then sign in as {a.email}</span>
+                </span>
               </DropdownMenuItem>
             ))}
             {canInstall ? (

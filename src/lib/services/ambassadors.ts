@@ -16,6 +16,7 @@ import {
 } from "@/lib/commission";
 import type { CreateAmbassadorInput, UpdateAmbassadorInput } from "@/lib/validations/ambassadors";
 import type { SetParentInput } from "@/lib/validations/commission";
+import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 
 export const AMBASSADOR_PAGE_SIZE = 20;
 
@@ -453,9 +454,10 @@ export async function getSchoolCoverage(): Promise<SchoolCoverageRow[]> {
 
 export async function createAmbassador(input: CreateAmbassadorInput) {
   // Single write. Regenerate the code / id and retry on a unique clash (P2002).
-  for (let attempt = 0; attempt < 4; attempt++) {
+  let created: { id: string; ambassadorId: string; referralCode: string } | null = null;
+  for (let attempt = 0; attempt < 4 && !created; attempt++) {
     try {
-      return await db.ambassador.create({
+      created = await db.ambassador.create({
         data: {
           ambassadorId: await nextId("AMBASSADOR"),
           fullName: input.fullName,
@@ -484,7 +486,10 @@ export async function createAmbassador(input: CreateAmbassadorInput) {
       throw error;
     }
   }
-  throw new TransitionError("Could not allocate an ambassador id — try again");
+  if (!created) throw new TransitionError("Could not allocate an ambassador id — try again");
+  // An executive's record (on one of their emails) starts at Platinum, not Bronze.
+  await recountAmbassador(db, created.id);
+  return created;
 }
 
 /** A refused edit or delete the admin can act on (shown in the dialog as-is). */
@@ -585,6 +590,11 @@ export async function updateAmbassador(id: string, input: UpdateAmbassadorInput)
     db.ambassador.update({ where: { id }, data, select: { status: true, tier: true } }),
     ...writes,
   ]);
+  // A new email can make the record an executive's (Platinum) or stop it being one.
+  if (data.email !== undefined) {
+    const recounted = await recountAmbassador(db, id);
+    if (recounted) return { status: updated.status, tier: recounted.tier as AmbassadorTier };
+  }
   return updated;
 }
 

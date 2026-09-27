@@ -7,6 +7,7 @@ import { LuCheck, LuCircleAlert, LuLoaderCircle, LuSearch, LuUserPlus } from "re
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { cn } from "@/lib/utils";
 import type { RecommendedWorkers } from "@/lib/services/operations/workers-ops";
 
@@ -124,6 +125,7 @@ export function QuickAssignDialog({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-semibold text-foreground">{w.fullName}</span>
+                        <RoleChip role={w.execRole} />
                         <span
                           className={cn(
                             "rounded-full px-2 py-0.5 text-[11px] font-medium",

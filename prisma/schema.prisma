@@ -111,6 +111,10 @@ model ExecProfile {
   title         String
   email         String
   phone         String?
+  /// Other addresses this person uses for an ambassador or worker account
+  /// (lower-case, at most 5). Records on these emails are the executive's:
+  /// they get the executive tag and Platinum, never HQ access. Super admin only.
+  otherEmails   String[] @default([])
   bankName      String?
   accountNumber String?
   accountName   String?

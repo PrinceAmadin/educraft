@@ -1,6 +1,7 @@
 import type { AmbassadorTier, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { activityStatus, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, nextTier, tierLabel } from "@/lib/ambassadors/tier-utils";
+import { activityStatus, isEligibleForSubTeam, nextTier, tierLabel, toNextTier } from "@/lib/ambassadors/tier-utils";
+import { platinumBonusClients } from "@/lib/services/ambassador-platform/commissions";
 import { AMBASSADOR_TIERS } from "@/lib/finance/commission-config";
 import { lastWeeks, weekStart } from "@/lib/ambassadors/weeks";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
@@ -110,11 +111,10 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
     db.ambassadorReferral.count({ where: { status: "CONVERTED", convertedAt: { gte: mStart, lt: mNext } } }),
     db.ambassadorReferral.count({ where: { status: "CONVERTED", convertedAt: { gte: lmStart, lt: mStart } } }),
   ]);
-  const [recent, weekRows, quarterConversions, challengesPaid, renewalsDue, rhythm] = await Promise.all([
+  const [recent, weekRows, challengesPaid, renewalsDue, rhythm] = await Promise.all([
     // Activity over the last 60 days, per ambassador, for "active this month" vs the previous window.
     db.ambassadorReferral.findMany({ where: { status: "CONVERTED", convertedAt: { gte: d60 } }, select: { ambassadorId: true, convertedAt: true } }),
     db.ambassadorReferral.findMany({ where: { status: { not: "CANCELLED" }, OR: [{ submittedAt: { gte: weeks[0].start } }, { convertedAt: { gte: weeks[0].start } }] }, select: { ambassadorId: true, submittedAt: true, convertedAt: true, status: true } }),
-    db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED", convertedAt: { gte: qStart } }, _count: { _all: true } }),
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: quarterKey, bonusPaid: true }, select: { ambassadorId: true } }),
     db.partnership.count({ where: renewalDueWhere(now) }),
     weekRhythm(now),
@@ -152,12 +152,13 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
   // ── Needs attention ──
   const inactive60 = ambassadors.filter((a) => activityStatus(a, now) === "INACTIVE").length;
   const nearPromotion = ambassadors.filter((a) => {
-    const left = conversionsTillNextTier(a.lifetimeConversions);
+    const left = toNextTier(a.tier, a.lifetimeConversions);
     return left != null && left > 0 && left <= 2;
   }).length;
   const paidSet = new Set(challengesPaid.map((c) => c.ambassadorId));
-  const quarterMap = new Map(quarterConversions.map((q) => [q.ambassadorId, q._count._all]));
-  const platinumBonus = ambassadors.filter((a) => calculateTier(a.lifetimeConversions) === "PLATINUM" && (quarterMap.get(a.id) ?? 0) > 0 && !paidSet.has(a.id)).length;
+  // The same count the quarterly tracker pays on (an executive's clients count from the day they became Platinum).
+  const bonusOf = await platinumBonusClients({ start: qStart, end: new Date(Date.UTC(qy, qm + 2, 1)) }, ambassadors);
+  const platinumBonus = ambassadors.filter((a) => (bonusOf.get(a.id)?.clients ?? 0) > 0 && !paidSet.has(a.id)).length;
   const readySubTeams = ambassadors.filter((a) => !a.parentId && isEligibleForSubTeam(a.tier) && a._count.children === 0).length;
 
   // ── Weekly chart ──

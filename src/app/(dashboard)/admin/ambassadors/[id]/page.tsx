@@ -13,6 +13,8 @@ import { LuLink, LuUserPlus } from "react-icons/lu";
 import { getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { getLinkedWorker } from "@/lib/services/linked-profiles";
 import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
+import { RoleChip } from "@/components/layout/RoleChip";
+import { execRoleOfAmbassador } from "@/lib/services/executives";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
@@ -52,7 +54,7 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, defaultParentRate, linkedWorker, session, universities, platform, subCandidates] = await Promise.all([
+  const [parentCandidates, defaultParentRate, linkedWorker, session, universities, platform, subCandidates, execRole] = await Promise.all([
     listParentCandidates(ambassador.id),
     getDefaultParentCommissionRate(),
     getLinkedWorker(ambassador.userId),
@@ -63,6 +65,7 @@ export default async function AmbassadorDetailPage({
     }),
     getDirectoryDetail(ambassador.id),
     listSubCandidates(ambassador.id),
+    execRoleOfAmbassador(ambassador.id),
   ]);
   if (!platform) notFound();
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
@@ -85,6 +88,7 @@ export default async function AmbassadorDetailPage({
               <h1 className="font-display text-xl font-bold tracking-tight text-foreground">
                 {ambassador.fullName}
               </h1>
+              <RoleChip role={execRole} />
               <TierBadge tier={ambassador.tier} />
               <ActivityBadge status={platform.activity} />
               <StatusPill

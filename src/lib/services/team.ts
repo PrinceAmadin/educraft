@@ -3,6 +3,9 @@ import { randomInt } from "crypto";
 import { Prisma, type UserRole } from "@prisma/client";
 import { db } from "@/lib/db";
 import { EXEC_ROLES, ROLE_TITLES, isExecRole } from "@/lib/rbac";
+import { normaliseEmail } from "@/lib/executive-identity";
+import { holdingsForEmails } from "@/lib/services/executives";
+import { refreshExecutiveTiersQuietly } from "@/lib/services/ambassador-platform/conversions";
 import type { BankDetailsInput, InviteExecutiveInput, UpdateExecutiveInput } from "@/lib/validations/team";
 
 /** A refusal the API turns into its HTTP status; the message is safe to show. */
@@ -29,6 +32,8 @@ export interface ExecutiveRow {
   /** False until their first password sign-in: an invited executive is "pending" until then. */
   hasSignedIn: boolean;
   createdAt: string;
+  /** Emails they use for an ambassador or worker account, with what each holds ("worker ECW-0001"). */
+  otherEmails: { email: string; holds: string[] }[];
 }
 
 function titleFor(role: UserRole): string {
@@ -48,9 +53,10 @@ export async function listExecutives(): Promise<ExecutiveRow[]> {
       isActive: true,
       lastSignInAt: true,
       createdAt: true,
-      execProfile: { select: { fullName: true, title: true, phone: true } },
+      execProfile: { select: { fullName: true, title: true, phone: true, otherEmails: true } },
     },
   });
+  const holdings = await holdingsForEmails(rows.flatMap((r) => r.execProfile?.otherEmails ?? []));
   // Founder first, then the executives in the order the matrix lists them.
   const rank = (role: UserRole) => (isExecRole(role) ? EXEC_ROLES.indexOf(role) : EXEC_ROLES.length);
   return rows
@@ -65,7 +71,46 @@ export async function listExecutives(): Promise<ExecutiveRow[]> {
       isActive: r.isActive,
       hasSignedIn: r.lastSignInAt !== null,
       createdAt: r.createdAt.toISOString(),
+      otherEmails: (r.execProfile?.otherEmails ?? []).map((email) => ({ email, holds: holdings.get(normaliseEmail(email)) ?? [] })),
     }));
+}
+
+/**
+ * Clean an executive's other emails (lower-case, no repeats) and refuse any
+ * that belong to someone else on the team: one email is one person. `userId`
+ * is null for an invite.
+ */
+async function checkOtherEmails(userId: string | null, ownEmail: string, list: readonly string[]): Promise<string[]> {
+  const own = normaliseEmail(ownEmail);
+  const cleaned = [...new Set(list.map(normaliseEmail).filter(Boolean))];
+  if (cleaned.includes(own)) throw new TeamError(`${own} is their own sign-in email. Other emails are for their ambassador or worker account.`);
+  if (cleaned.length === 0) return [];
+  const [staff, listed] = await Promise.all([
+    db.user.findMany({
+      where: { role: { in: TEAM_ROLES }, ...(userId ? { id: { not: userId } } : {}), OR: cleaned.map((email) => ({ email: { equals: email, mode: "insensitive" as const } })) },
+      select: { email: true },
+    }),
+    db.execProfile.findMany({
+      where: { ...(userId ? { userId: { not: userId } } : {}), otherEmails: { hasSome: cleaned } },
+      select: { fullName: true, otherEmails: true },
+    }),
+  ]);
+  if (staff.length) throw new TeamError(`${normaliseEmail(staff[0].email)} is another executive's sign-in email.`);
+  for (const p of listed) {
+    const clash = cleaned.find((e) => p.otherEmails.includes(e));
+    if (clash) throw new TeamError(`${clash} is already listed for ${p.fullName}.`);
+  }
+  return cleaned;
+}
+
+/** A login email another executive already lists as one of their other emails. */
+async function assertEmailNotListed(email: string, userId: string | null): Promise<void> {
+  const key = normaliseEmail(email);
+  const holder = await db.execProfile.findFirst({
+    where: { ...(userId ? { userId: { not: userId } } : {}), otherEmails: { has: key } },
+    select: { fullName: true },
+  });
+  if (holder) throw new TeamError(`${key} is listed as one of ${holder.fullName}'s other emails.`);
 }
 
 // No 0/O, 1/l/I: the founder reads this password out or pastes it into WhatsApp.
@@ -96,6 +141,8 @@ export async function inviteExecutive(
 ): Promise<{ id: string; email: string; fullName: string; temporaryPassword: string }> {
   const title = input.title?.trim() || ROLE_TITLES[input.role];
   const phone = input.phone?.trim() || null;
+  await assertEmailNotListed(input.email, null);
+  const otherEmails = await checkOtherEmails(null, input.email, input.otherEmails ?? []);
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
@@ -108,10 +155,12 @@ export async function inviteExecutive(
         passwordHash,
         role: input.role,
         isActive: true,
-        execProfile: { create: { fullName: input.fullName, title, email: input.email, phone } },
+        execProfile: { create: { fullName: input.fullName, title, email: input.email, phone, otherEmails } },
       },
       select: { id: true, email: true },
     });
+    // Records already on their emails become an executive's: Platinum from now.
+    await refreshExecutiveTiersQuietly(`invited ${user.email}`);
     return { ...user, fullName: input.fullName, temporaryPassword };
   } catch (err) {
     const message = uniqueViolation(err);
@@ -146,6 +195,9 @@ export async function updateExecutive(id: string, input: UpdateExecutiveInput, a
         ? titleFor(role)
         : undefined;
 
+  if (input.email !== undefined && normaliseEmail(input.email) !== normaliseEmail(user.email)) await assertEmailNotListed(input.email, id);
+  const otherEmails = input.otherEmails !== undefined ? await checkOtherEmails(id, input.email ?? user.email, input.otherEmails) : undefined;
+
   const userData: Prisma.UserUpdateInput = {};
   if (input.email !== undefined) userData.email = input.email;
   if (input.fullName !== undefined) userData.displayName = input.fullName;
@@ -163,6 +215,7 @@ export async function updateExecutive(id: string, input: UpdateExecutiveInput, a
           ...(title !== undefined ? { title } : {}),
           ...(input.email !== undefined ? { email: input.email } : {}),
           ...(phone !== undefined ? { phone } : {}),
+          ...(otherEmails !== undefined ? { otherEmails } : {}),
         },
         create: {
           userId: id,
@@ -170,6 +223,7 @@ export async function updateExecutive(id: string, input: UpdateExecutiveInput, a
           title: title ?? titleFor(role),
           email: input.email ?? user.email,
           phone: phone ?? null,
+          otherEmails: otherEmails ?? [],
         },
       }),
     ]);
@@ -177,6 +231,11 @@ export async function updateExecutive(id: string, input: UpdateExecutiveInput, a
     const message = uniqueViolation(err);
     if (message) throw new TeamError(message);
     throw err;
+  }
+
+  // Their emails decide which ambassador records are Platinum by office.
+  if (otherEmails !== undefined || input.email !== undefined || input.role !== undefined) {
+    await refreshExecutiveTiersQuietly(`updated ${input.email ?? user.email}`);
   }
 
   const row = (await listExecutives()).find((r) => r.id === id);
@@ -206,6 +265,8 @@ export async function removeExecutive(
       data: { role: "WORKER", ...(options.deactivate ? { isActive: false } : {}) },
     }),
   ]);
+  // No longer an executive: their ambassador records go back to the tier their count earns.
+  await refreshExecutiveTiersQuietly(`removed ${id}`);
   return { ok: true };
 }
 

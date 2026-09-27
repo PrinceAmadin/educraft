@@ -2,7 +2,8 @@
  * Phase 3 step 2: the tier utilities are pure, so they are proven here
  * without a database. `npm run check:tiers`.
  */
-import { activityStatus, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, percentLabel, subTeamThresholdLabel, tierProgressPercent, tierRate } from "../src/lib/ambassadors/tier-utils";
+import { activityStatus, ambassadorTier, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, percentLabel, platinumBonusClientCount, platinumByOffice, subTeamThresholdLabel, tierProgressFor, tierProgressPercent, tierRate, toNextTier, TOP_TIER, TOP_TIER_MIN_CONVERSIONS } from "../src/lib/ambassadors/tier-utils";
+import { buildExecIndex, execForRecord, execRoleForRecord } from "../src/lib/executive-identity";
 import { calculateAmbassadorSplit, COMMISSION_RATES, nairaPercent } from "../src/lib/finance/commission-config";
 import { badgesFor, isBackFromDormant, isPromotion } from "../src/lib/ambassadors/badges";
 import { leaderboardMessage, spotlightMessage } from "../src/lib/ambassadors/spotlight";
@@ -102,6 +103,42 @@ const board = leaderboardMessage("This month", [
 ]);
 expect("leaderboard message lines", board.split("\n").slice(0, 4), ["THIS MONTH", "", "1. Faith Bello (UNN) — 12 clients", "2. Moses Agu — 1 client"]);
 expect("no emoji in either message", [emoji.test(spot), emoji.test(board)], [false, false]);
+
+// Executives (founder, 27 Sept 2026): an executive's ambassador record is always Platinum.
+expect("an executive is Platinum whatever the count", [ambassadorTier(0, true), ambassadorTier(2, true), ambassadorTier(40, true)], ["PLATINUM", "PLATINUM", "PLATINUM"]);
+expect("everyone else by count", [ambassadorTier(0, false), ambassadorTier(6, false), ambassadorTier(31, false)], ["BRONZE", "SILVER", "PLATINUM"]);
+expect("top tier and its floor", [TOP_TIER, TOP_TIER_MIN_CONVERSIONS], ["PLATINUM", 31]);
+expect("stored Platinum on 2 conversions: nothing to the next tier, progress full", [toNextTier("PLATINUM", 2), tierProgressFor("PLATINUM", 2)], [null, 100]);
+expect("stored tier matches the count: same as before", [toNextTier("BRONZE", 5), tierProgressFor("BRONZE", 3), toNextTier("SILVER", 14)], [1, 50, 2]);
+expect("Platinum by office vs by count", [platinumByOffice("PLATINUM", 2), platinumByOffice("PLATINUM", 31), platinumByOffice("GOLD", 2)], [true, false, false]);
+expect("an executive is never 'away' from a tier and never 'tier up'", kinds(badgesFor({ ...quiet, lifetimeConversions: 5, tierUpThisMonthTo: "PLATINUM", executive: true })), []);
+expect("but an executive can still be on fire", kinds(badgesFor({ ...quiet, lifetimeConversions: 5, conversionsLast7Days: 3, executive: true })), ["ON_FIRE"]);
+
+// The Platinum quarterly bonus: an executive counts only clients paid on or after becoming Platinum.
+const q = [new Date("2026-08-02T10:00:00Z"), new Date("2026-09-10T10:00:00Z"), new Date("2026-09-28T10:00:00Z")];
+expect("Platinum by count: every client in the quarter", platinumBonusClientCount(q, { byOffice: false, promotedAt: null }), 3);
+expect("executive promoted 27 Sept: only the 28 Sept client", platinumBonusClientCount(q, { byOffice: true, promotedAt: new Date("2026-09-27T20:00:00Z") }), 1);
+expect("executive promoted before the quarter: all of them", platinumBonusClientCount(q, { byOffice: true, promotedAt: new Date("2026-06-01T00:00:00Z") }), 3);
+expect("executive with no promotion on record: none", platinumBonusClientCount(q, { byOffice: true, promotedAt: null }), 0);
+
+// Which records are an executive's: the login's email when there is a login, else the record's own.
+const index = buildExecIndex([
+  { userId: "u-ceo", role: "SUPER_ADMIN", email: "educraft611@gmail.com", fullName: "Prince Amadin", otherEmails: ["princeamadin25@gmail.com"] },
+  { userId: "u-coo", role: "COO", email: "coo@example.com", fullName: "The COO", otherEmails: [] },
+  { userId: "u-ops", role: "OPS_MANAGER", email: "ops@example.com", otherEmails: [] },
+  { userId: "u-w", role: "WORKER", email: "worker@example.com", otherEmails: ["stray@example.com"] },
+  { userId: "u-hog", role: "HOG", email: "hog@example.com", otherEmails: ["coo@example.com", " HOG.Alt@Example.com "] },
+]);
+expect("an executive's own login", execRoleForRecord(index, { email: null, user: { email: "coo@example.com", role: "COO" } }), "COO");
+expect("a login on an other email (a worker login)", execRoleForRecord(index, { email: "princeamadin25@gmail.com", user: { email: "princeamadin25@gmail.com", role: "WORKER" } }), "SUPER_ADMIN");
+expect("emails ignore case and spaces", execRoleForRecord(index, { email: null, user: { email: "PrinceAmadin25@Gmail.com", role: "WORKER" } }), "SUPER_ADMIN");
+expect("a record with no login uses its own email", execRoleForRecord(index, { email: "hog.alt@example.com", user: null }), "HOG");
+expect("the login email wins over the record's own email", execRoleForRecord(index, { email: "princeamadin25@gmail.com", user: { email: "someone@example.com", role: "WORKER" } }), null);
+expect("OPS_MANAGER counts as COO", execRoleForRecord(index, { user: { email: "ops@example.com", role: "OPS_MANAGER" } }), "COO");
+expect("a non-executive's list is ignored", execRoleForRecord(index, { email: "stray@example.com", user: null }), null);
+expect("a login email is never taken by someone else's other email", execForRecord(index, { user: { email: "coo@example.com", role: "COO" } })?.userId, "u-coo");
+expect("everyone else is not an executive", execRoleForRecord(index, { email: "eddyprince26.freelancer@gmail.com", user: { email: "eddyprince26.freelancer@gmail.com", role: "WORKER" } }), null);
+expect("the primary email comes back for the switcher", execForRecord(index, { user: { email: "princeamadin25@gmail.com", role: "WORKER" } })?.primaryEmail, "educraft611@gmail.com");
 
 // Weeks start on Monday in WAT: Sunday 23:30 UTC is already Monday 00:30 in Lagos.
 expect("ISO week keys", [isoWeekKey(new Date("2026-09-24T12:00:00Z")), isoWeekKey(new Date("2027-01-01T12:00:00Z"))], ["2026-W39", "2026-W53"]);

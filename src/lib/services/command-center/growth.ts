@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { PAID_ORDER } from "@/lib/ambassador";
 import { tierFor } from "@/lib/finance/commission-config";
+import { execForRecord } from "@/lib/executive-identity";
+import { loadExecIndex } from "@/lib/services/executives";
 import { fractionToPercent } from "@/lib/command-center/rag";
 import {
   currentMonthKey,
@@ -60,6 +62,8 @@ interface AmbassadorRow {
   id: string;
   createdAt: Date;
   status: string;
+  /** An executive's record: Platinum by office, whatever the ladder says. */
+  executive?: boolean;
 }
 
 /** Instants that count toward each ambassador's tier, per ambassador id. */
@@ -138,7 +142,7 @@ function tierDistribution(ladder: Ladder, roster: readonly AmbassadorRow[], mont
     for (const a of roster) {
       if (a.createdAt.getTime() >= cutoff) continue;
       const conversions = (ladder.get(a.id) ?? []).filter((at) => at < cutoff).length;
-      point[TIER_FIELD[tierFor(conversions)]] += 1;
+      point[TIER_FIELD[a.executive ? "PLATINUM" : tierFor(conversions)]] += 1;
     }
     return point;
   });
@@ -250,16 +254,18 @@ export async function getGrowth(now: Date = new Date()): Promise<GrowthPayload> 
   const { start, end } = monthBounds(month);
 
   // Group 1: the month's referrals and projects, the roster, the thresholds.
-  const [referrals, [projectsCreated, ambassadorDriven], ambassadors, thresholds] = await Promise.all([
+  const [referrals, [projectsCreated, ambassadorDriven], roster, thresholds, execIndex] = await Promise.all([
     referralsBetween(start, end),
     db.$transaction([
       db.project.count({ where: { createdAt: { gte: start, lt: end } } }),
       db.project.count({ where: { createdAt: { gte: start, lt: end }, ambassadorId: { not: null } } }),
     ]),
     // Every ambassador, whatever their status: the tier chart, the trend and "joined this month" filter this one list.
-    db.ambassador.findMany({ select: { id: true, createdAt: true, status: true } }),
+    db.ambassador.findMany({ select: { id: true, createdAt: true, status: true, email: true, user: { select: { email: true, role: true } } } }),
     getThresholds(),
+    loadExecIndex(),
   ]);
+  const ambassadors: AmbassadorRow[] = roster.map((a) => ({ id: a.id, createdAt: a.createdAt, status: a.status, executive: execForRecord(execIndex, a) != null }));
 
   // Group 2: every conversion (one all-time read serves the funnel, the trend, the schools, the top five
   // and the tier ladder) and the month's promotions.

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LuCrown } from "react-icons/lu";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { cn } from "@/lib/utils";
 import type { LeaderboardEntry, LeaderboardPeriod } from "@/lib/services/ambassador-leaderboard";
 
@@ -67,6 +68,7 @@ export function Podium({ top, meId }: { top: LeaderboardEntry[]; meId: string })
             <p className={cn("w-full truncate text-[13px] font-semibold sm:text-[15px]", me ? "text-primary" : "text-foreground")}>
               {me ? "You" : e.name}
             </p>
+            <RoleChip role={e.execRole} plain className="my-0.5 h-5 px-1.5 text-[10px]" />
             <p className="w-full truncate font-mono text-[11px] text-muted-foreground">
               {e.slotCode ? `EduCraftA-${e.slotCode}` : e.school ?? ""}
             </p>

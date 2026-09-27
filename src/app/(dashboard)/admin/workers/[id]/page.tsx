@@ -8,6 +8,8 @@ import { getWorkerDetail } from "@/lib/services/workers";
 import { getWorkerProfileOps } from "@/lib/services/operations/workers-ops";
 import { getLinkedAmbassador } from "@/lib/services/linked-profiles";
 import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
+import { RoleChip } from "@/components/layout/RoleChip";
+import { execRoleOfWorker } from "@/lib/services/executives";
 import { WorkerStatusControl } from "@/components/workers/WorkerStatusControl";
 import { WorkerProjectHistory } from "@/components/workers/WorkerProjectHistory";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
@@ -39,7 +41,7 @@ const ACTIVITY_TEXT: Record<string, string> = {
 };
 
 export default async function WorkerDetailPage({ params, searchParams }: { params: { id: string }; searchParams: { flag?: string } }) {
-  const [data, ops, session] = await Promise.all([getWorkerDetail(params.id), getWorkerProfileOps(params.id), auth()]);
+  const [data, ops, session, execRole] = await Promise.all([getWorkerDetail(params.id), getWorkerProfileOps(params.id), auth(), execRoleOfWorker(params.id)]);
   if (!data || !ops) notFound();
 
   const { worker, metrics } = data;
@@ -61,7 +63,10 @@ export default async function WorkerDetailPage({ params, searchParams }: { param
       <div className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{worker.fullName}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">{worker.fullName}</h1>
+              <RoleChip role={execRole} />
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">
               <span className={cn("font-medium", ACTIVITY_TEXT[ops.activity])}>{ops.activity}</span>
               {" · "}Joined {formatDate(worker.createdAt)}

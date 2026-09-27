@@ -4,6 +4,7 @@ import { LuMedal, LuTrophy } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
+import { RoleChip } from "@/components/layout/RoleChip";
 import { LeaderboardBadges } from "@/components/ambassadors/platform/LeaderboardBadges";
 import { CopyTextButton, SpotlightPicker } from "@/components/ambassadors/platform/SpotlightPicker";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -66,9 +67,12 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
                     <Rank rank={r.rank} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
-                        <Link href={`/admin/ambassadors/${r.id}`} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary">
-                          {r.fullName}
-                        </Link>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <Link href={`/admin/ambassadors/${r.id}`} className="min-w-0 truncate text-sm font-medium text-foreground hover:text-primary">
+                            {r.fullName}
+                          </Link>
+                          <RoleChip role={r.execRole} />
+                        </span>
                         <TierBadge tier={r.tier} />
                       </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">
@@ -99,9 +103,12 @@ export default async function LeaderboardPage({ searchParams }: { searchParams: 
                           <Rank rank={r.rank} />
                         </TableCell>
                         <TableCell>
-                          <Link href={`/admin/ambassadors/${r.id}`} className="text-sm font-medium text-foreground hover:text-primary">
-                            {r.fullName}
-                          </Link>
+                          <span className="flex items-center gap-1.5">
+                            <Link href={`/admin/ambassadors/${r.id}`} className="text-sm font-medium text-foreground hover:text-primary">
+                              {r.fullName}
+                            </Link>
+                            <RoleChip role={r.execRole} />
+                          </span>
                           <div className="font-mono text-xs text-muted-foreground">{r.code}</div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{r.school ?? "—"}</TableCell>

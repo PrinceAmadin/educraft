@@ -2,6 +2,9 @@ import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { activityStatus, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
+import { execRoleForRecord } from "@/lib/executive-identity";
+import type { ExecRole } from "@/lib/rbac";
+import { loadExecIndex } from "@/lib/services/executives";
 
 /**
  * The Network Map (Phase 3 Section 3): the Core/Sub structure as a card tree.
@@ -21,6 +24,8 @@ export interface NetworkPerson {
   activity: ActivityStatus;
   /** Account state when it is not Active (Suspended, Paused, Lapsed). */
   accountStatus: string | null;
+  /** Set when the record is an executive's: shown as a tag. */
+  execRole: ExecRole | null;
 }
 
 export interface NetworkCluster extends NetworkPerson {
@@ -41,7 +46,7 @@ export interface NetworkMap {
 }
 
 export async function getNetworkMap(now: Date = new Date()): Promise<NetworkMap> {
-  const rows = await db.ambassador.findMany({
+  const [rows, execIndex] = await Promise.all([db.ambassador.findMany({
     where: { status: { not: "Terminated" } },
     select: {
       id: true,
@@ -57,8 +62,10 @@ export async function getNetworkMap(now: Date = new Date()): Promise<NetworkMap>
       createdAt: true,
       parentId: true,
       parent: { select: { fullName: true, status: true } },
+      email: true,
+      user: { select: { email: true, role: true } },
     },
-  });
+  }), loadExecIndex()]);
   const person = (a: (typeof rows)[number]): NetworkPerson => ({
     id: a.id,
     code: a.ambassadorId,
@@ -69,6 +76,7 @@ export async function getNetworkMap(now: Date = new Date()): Promise<NetworkMap>
     conversions: a.lifetimeConversions,
     activity: activityStatus(a, now),
     accountStatus: a.status === "Active" ? null : a.status,
+    execRole: execRoleForRecord(execIndex, a),
   });
   const present = new Set(rows.map((r) => r.id));
   const byParent = new Map<string, (typeof rows)[number][]>();

@@ -1,9 +1,18 @@
 import { z } from "zod";
 import { phoneSchema } from "@/lib/validations/clients";
 import { INVITABLE_ROLES } from "@/lib/rbac";
+import { MAX_OTHER_EMAILS } from "@/lib/executive-identity";
 
 const blank = z.literal("");
 const optionalText = (max: number) => z.string().trim().max(max).optional().or(blank);
+
+/**
+ * Other emails an executive uses for an ambassador or worker account. Records on
+ * them get the executive tag and Platinum; those accounts never get HQ access.
+ */
+const otherEmails = z
+  .array(z.string().trim().toLowerCase().email("Enter a valid email").max(160))
+  .max(MAX_OTHER_EMAILS, `At most ${MAX_OTHER_EMAILS} other emails`);
 
 /** Settings > Team & Roles: invite an executive. SUPER_ADMIN is never on offer here. */
 export const inviteExecutiveSchema = z.object({
@@ -12,6 +21,7 @@ export const inviteExecutiveSchema = z.object({
   role: z.enum(INVITABLE_ROLES, { errorMap: () => ({ message: "Choose a role" }) }),
   title: optionalText(120),
   phone: phoneSchema.optional().or(blank),
+  otherEmails: otherEmails.optional(),
 });
 export type InviteExecutiveInput = z.infer<typeof inviteExecutiveSchema>;
 
@@ -24,6 +34,7 @@ export const updateExecutiveSchema = z
     title: optionalText(120),
     phone: phoneSchema.optional().or(blank),
     isActive: z.boolean().optional(),
+    otherEmails: otherEmails.optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: "Nothing to change" });
 export type UpdateExecutiveInput = z.infer<typeof updateExecutiveSchema>;
