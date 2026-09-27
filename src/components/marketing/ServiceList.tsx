@@ -44,15 +44,6 @@ const SERVICES: Service[] = [
   },
   {
     index: "04",
-    title: "CV & Career",
-    href: "/services#career",
-    from: "₦8,000",
-    summary:
-      "Professional CVs, résumés and profiles written to get you past the first screen.",
-    meta: ["ATS aware", "Cover letters", "3 days"],
-  },
-  {
-    index: "05",
     title: "Editing & Formatting",
     href: "/services#editing",
     from: "₦5,000",
@@ -61,7 +52,7 @@ const SERVICES: Service[] = [
     meta: ["APA · Harvard · IEEE", "Proofreading", "4 days"],
   },
   {
-    index: "06",
+    index: "05",
     title: "Combos",
     href: "/services#combos",
     from: "₦85,000",

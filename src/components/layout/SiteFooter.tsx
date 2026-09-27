@@ -19,7 +19,7 @@ const GROUPS = [
       { label: "Final year projects", href: "/services" },
       { label: "Reports & papers", href: "/services" },
       { label: "Presentations", href: "/services" },
-      { label: "CV & career", href: "/services" },
+      { label: "Letters & essays", href: "/services" },
       { label: "Editing & formatting", href: "/services" },
     ],
   },

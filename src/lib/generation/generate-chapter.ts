@@ -32,6 +32,7 @@ import { getApprovedBrief, type ApprovedBrief } from "@/lib/research/source-stag
 import { toPromptPrimarySources } from "./approved-inputs";
 import { pausesBeforeChapter } from "./dynamic-data-form";
 import { attachmentRefs, loadDataAttachments, pauseDataForChapter, type AttachmentRef } from "@/lib/services/data-pause";
+import { secondaryDataForChapter } from "@/lib/services/secondary-data";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -219,6 +220,14 @@ export async function startChapterGeneration(input: StartChapterInput) {
       }
       if (JSON.stringify(input.prompt.workerData ?? []) !== JSON.stringify(stored)) {
         throw new GenerationError("This data is not the verified data from the pause.", true);
+      }
+      // D5: Mode 5 Chapters 4 and 5 are written from the fetched dataset, exactly as stored.
+      const dataset = await secondaryDataForChapter(tx, project.id, approved.mode, chapter);
+      if (approved.mode === 5 && chapter >= 4 && !dataset) {
+        throw new GenerationError(`Chapter ${chapter} of a Mode 5 project is written from the secondary data. Fetch it first (it is read from Chapter 3).`, true);
+      }
+      if (JSON.stringify(input.prompt.secondaryData ?? null) !== JSON.stringify(dataset ?? null)) {
+        throw new GenerationError("This secondary data is not the project's current dataset.", true);
       }
       const attachments = await attachmentRefs(tx, project.id, stored);
 

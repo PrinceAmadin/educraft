@@ -106,6 +106,28 @@ export interface ChapterPromptInput {
    * answers, text read from Word/Excel/CSV files, and the PDFs and images attached to the call).
    */
   workerData?: WorkerData[];
+  /**
+   * D5: Mode 5 only, Chapters 4 and 5: the dataset fetched from the World Bank and the CBN for
+   * Chapter 3's model, with the descriptive statistics and correlations computed from it.
+   */
+  secondaryData?: PromptSecondaryData;
+}
+
+export interface PromptSecondaryData {
+  period: { start: number; end: number };
+  /** The model equation and estimation technique as Chapter 3 states them. */
+  equation: string;
+  technique: string;
+  /** "27 Sept 2026" */
+  fetchedOn: string;
+  /** One line per column: what it is, its unit, its source. */
+  notes: string[];
+  csv: string;
+  /** The EViews-layout descriptive statistics and the Pearson correlation matrix, as text tables. */
+  statsTable: string;
+  correlationTable: string;
+  /** Variables or years the dataset lacks, each with its reason. */
+  missing: string[];
 }
 
 export interface PromptPrimarySource {
@@ -227,7 +249,39 @@ export const LOADER_TEXT = {
     kind === "case"
       ? "For any other point that needs a court decision, write [CASE TO BE SUPPLIED]; never invent a case name or citation."
       : "For any other point that needs an archival source, write [ARCHIVE TO BE SUPPLIED]; never invent an archival source.",
+  /** D5: the fetched Mode 5 dataset (Chapters 4 and 5). */
+  secondaryDataIntro: (start: number, end: number, fetchedOn: string) =>
+    `This is the project's dataset: annual data for Nigeria, ${start}–${end}, fetched on ${fetchedOn} from the sources named in the notes, for the model and period Chapter Three specifies. The values are levels, in the units the notes give; any logarithms or differences the model uses are taken during estimation.`,
+  secondaryDataModel: (equation: string, technique: string) =>
+    `The model (Chapter Three): ${equation || "as specified in Chapter Three"}. Estimation technique: ${technique || "as stated in Chapter Three"}.`,
+  secondaryDataComputed:
+    "EduCraft computed the descriptive statistics and the correlation matrix below from this dataset. Use them exactly, figure for figure, in the descriptive statistics and correlation tables (Sections 4.1 and 4.2), and interpret them; do not recompute them or round them differently.",
+  secondaryDataPlaceholder:
+    "The unit root, cointegration, lag selection, estimation (regression), diagnostic, stability and Granger causality results are produced by EduCraft's specialist in EViews or Stata from this dataset, and they are not available yet. Write each of those tables with its full title, rows and columns, and put [DATA NOT PROVIDED — COO TO REVIEW] in every cell that would hold a result. Write the text around each table in general terms, and write [DATA NOT PROVIDED — COO TO REVIEW] in place of any sentence that would state a result. Never invent a statistic, coefficient, p-value or test outcome.",
+  secondaryDataChapterFive:
+    "Chapter Four's estimation results are not available yet: their tables carry [DATA NOT PROVIDED — COO TO REVIEW]. Do not state any estimated relationship, coefficient, significance level or test outcome; wherever a finding, conclusion or recommendation depends on one, write [DATA NOT PROVIDED — COO TO REVIEW] in its place. What the dataset itself shows (its period, levels and trends, and the descriptive statistics) may be stated.",
+  secondaryDataMissing: (lines: string[]) =>
+    `These variables or years are not in the dataset. Leave their cells empty in any data table and write [DATA NOT PROVIDED — COO TO REVIEW] where a result needs them. ${lines.join(" ")}`,
+  secondaryDataCitation:
+    "Name the data source under every table and figure built from this dataset (for example: Source: World Bank, World Development Indicators, 2026; or Source: Central Bank of Nigeria, 2026). These data sources are not works in the reference list.",
 } as const;
+
+/** D5: the dataset part of a Mode 5 Chapter 4 or 5 prompt. */
+function secondaryDataPart(data: PromptSecondaryData, chapter: ChapterNumber): string[] {
+  const clean = (s: string) => neutralize(s.trim());
+  return [
+    LOADER_TEXT.secondaryDataIntro(data.period.start, data.period.end, clean(data.fetchedOn)),
+    LOADER_TEXT.secondaryDataModel(clean(data.equation), clean(data.technique)),
+    `Notes on the data:\n${data.notes.map(clean).join("\n")}`,
+    `The dataset (CSV):\n${clean(data.csv)}`,
+    LOADER_TEXT.secondaryDataComputed,
+    `Descriptive statistics:\n${clean(data.statsTable)}`,
+    `Correlation matrix (Pearson):\n${clean(data.correlationTable)}`,
+    chapter === 4 ? LOADER_TEXT.secondaryDataPlaceholder : LOADER_TEXT.secondaryDataChapterFive,
+    ...(data.missing.length ? [LOADER_TEXT.secondaryDataMissing(data.missing.map(clean))] : []),
+    LOADER_TEXT.secondaryDataCitation,
+  ];
+}
 
 /** One line of the approved list. */
 export function formatPrimarySource(kind: "case" | "archive", s: PromptPrimarySource): string {
@@ -828,6 +882,16 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     const title = "THE PROJECT'S DATA";
     parts.push({ title, text: render(title, [neutralize(formatWorkerData(input.workerData))]) });
     used.push(`d3c:data from ${input.workerData.length} pause${input.workerData.length === 1 ? "" : "s"}`);
+  }
+
+  // D5: the fetched dataset, Mode 5 Chapters 4 and 5 only.
+  if (input.secondaryData) {
+    if (input.mode !== 5 || (chapter !== 4 && chapter !== 5)) {
+      throw new PromptAssemblyError("Secondary data goes into Chapters 4 and 5 of Mode 5 projects only.");
+    }
+    const title = "THE PROJECT'S SECONDARY DATA";
+    parts.push({ title, text: render(title, secondaryDataPart(input.secondaryData, chapter)) });
+    used.push(`d5:dataset ${input.secondaryData.period.start}-${input.secondaryData.period.end}`);
   }
 
   // Strip pointers to the image rules: they send the model to a file it cannot see

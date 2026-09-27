@@ -187,11 +187,12 @@ export async function readFirstBytes(pathname: string, count = 16): Promise<Uint
 
 /**
  * The server saves a file itself (never a browser upload): a Supreme Court
- * judgment PDF for the D3b source stage. The path must be a valid stored path
- * and the bytes within that purpose's limit; an existing file is never
- * overwritten.
+ * judgment PDF for the D3b source stage, or a fetched Mode 5 dataset (D5).
+ * The path must be a valid stored path and the bytes within that purpose's
+ * limit; an existing file is never overwritten. Returns the store's URL (it
+ * needs a credential: link to a download route, never to it).
  */
-export async function putPrivateFile(pathname: string, bytes: Uint8Array, contentType: string): Promise<void> {
+export async function putPrivateFile(pathname: string, bytes: Uint8Array, contentType: string): Promise<{ url: string }> {
   const parsed = parseStoredPath(pathname);
   if (!parsed) throw new Error("Invalid private path");
   if (bytes.byteLength > maxBytesFor(parsed.purpose)) throw new Error("File is too large");
@@ -203,15 +204,16 @@ export async function putPrivateFile(pathname: string, bytes: Uint8Array, conten
       },
     });
     await writeLocalFile(pathname, body, maxBytesFor(parsed.purpose));
-    return;
+    return { url: `local-file:${pathname}` };
   }
-  await put(pathname, Buffer.from(bytes), {
+  const blob = await put(pathname, Buffer.from(bytes), {
     access: "private",
     contentType,
     addRandomSuffix: false,
     allowOverwrite: false,
     ...(await blobAuth()),
   });
+  return { url: blob.url };
 }
 
 export async function deleteStoredFile(pathname: string): Promise<void> {

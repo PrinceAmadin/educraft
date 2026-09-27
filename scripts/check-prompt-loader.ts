@@ -460,6 +460,39 @@ async function main() {
   has("D3b: other Humanities departments keep the list-only archive rule", english.text, LOADER_TEXT.primarySourcesRule("archive"));
   lacks("D3b: …and get no approved list", english.text, "APPROVED ARCHIVAL SOURCES");
 
+  // ── D5: the fetched dataset in Mode 5 Chapters 4 and 5 ──
+  const DATASET: NonNullable<ChapterPromptInput["secondaryData"]> = {
+    period: { start: 2000, end: 2023 },
+    equation: "GDP = β0 + β1INF + β2EXR + μ",
+    technique: "ARDL",
+    fetchedOn: "27 Sept 2026",
+    notes: ["Year: calendar year. Annual data, 2000–2023.", "GDP: Gross domestic product, US$ billion. Source: World Bank, World Development Indicators (NY.GDP.MKTP.CD)."],
+    csv: "Year,GDP,INF,EXR\n2000,69.45,6.93,101.70\n2001,{HOD},18.87,111.23",
+    statsTable: "Statistic | GDP | INF | EXR\n--- | --- | --- | ---\nMean | 1.0000 | 2.0000 | 3.0000",
+    correlationTable: " | GDP | INF\n--- | --- | ---\nGDP | 1.0000 | 0.5000",
+    missing: ["NSE (All-share index): Not available from the World Bank or the CBN automatically."],
+  };
+  const eco4 = await loadChapterPrompt(input({ chapter: 4, department: "Economics", mode: 5, secondaryData: DATASET }));
+  has("D5 Ch4: the dataset part", eco4.text, "═══ THE PROJECT'S SECONDARY DATA ═══");
+  has("D5 Ch4: the intro with the period and date", eco4.text, LOADER_TEXT.secondaryDataIntro(2000, 2023, "27 Sept 2026"));
+  has("D5 Ch4: the model", eco4.text, LOADER_TEXT.secondaryDataModel("GDP = β0 + β1INF + β2EXR + μ", "ARDL"));
+  has("D5 Ch4: the CSV", eco4.text, "Year,GDP,INF,EXR\n2000,69.45,6.93,101.70");
+  lacks("D5 Ch4: braces in the data never become a placeholder", eco4.text, "{HOD}");
+  has("D5 Ch4: the computed statistics, used exactly", eco4.text, LOADER_TEXT.secondaryDataComputed);
+  has("D5 Ch4: the statistics table", eco4.text, "Mean | 1.0000 | 2.0000 | 3.0000");
+  has("D5 Ch4: estimation tables carry the placeholder", eco4.text, LOADER_TEXT.secondaryDataPlaceholder);
+  has("D5 Ch4: the placeholder wording is the founder's", eco4.text, "[DATA NOT PROVIDED — COO TO REVIEW]");
+  has("D5 Ch4: what is missing", eco4.text, "NSE (All-share index): Not available");
+  has("D5 Ch4: datasets are cited by name, not listed as references", eco4.text, LOADER_TEXT.secondaryDataCitation);
+  expect("D5 Ch4: recorded in blocksUsed", eco4.blocksUsed.includes("d5:dataset 2000-2023"), true);
+  const eco5 = await loadChapterPrompt(input({ chapter: 5, department: "Economics", mode: 5, secondaryData: { ...DATASET, missing: [] } }));
+  has("D5 Ch5: no estimation result may be stated", eco5.text, LOADER_TEXT.secondaryDataChapterFive);
+  lacks("D5 Ch5: not the Chapter 4 table rule", eco5.text, LOADER_TEXT.secondaryDataPlaceholder);
+  lacks("D5: no missing line when nothing is missing", eco5.text, "These variables or years are not in the dataset");
+  lacks("D5: a Mode 5 chapter without a dataset has no data part", (await loadChapterPrompt(input({ chapter: 4, department: "Economics", mode: 5 }))).text, "THE PROJECT'S SECONDARY DATA");
+  await refuses("D5: a dataset outside Mode 5 is refused", () => loadChapterPrompt(input({ chapter: 4, department: "Marketing", mode: 2, secondaryData: DATASET })), /Chapters 4 and 5 of Mode 5 projects only/);
+  await refuses("D5: a dataset in Chapter 3 is refused", () => loadChapterPrompt(input({ chapter: 3, department: "Economics", mode: 5, secondaryData: DATASET })), /Chapters 4 and 5 of Mode 5 projects only/);
+
   if (process.argv.includes("--print")) {
     console.log("\n" + "━".repeat(100) + "\nCHAPTER 1 — ELECTRICAL ENGINEERING — MODE 3 (full assembled prompt)\n" + "━".repeat(100) + "\n");
     console.log(eee.text);

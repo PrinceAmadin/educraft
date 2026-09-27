@@ -55,7 +55,7 @@ export function Hero() {
               Academic and technical work, researched, written and quality-reviewed by specialists.
             </p>
             <p className="mt-5 hidden max-w-[46ch] text-base leading-[1.7] text-muted-foreground sm:block lg:text-[1.0625rem]">
-              Final year projects, seminar reports, presentations, CVs and more — researched,
+              Final year projects, seminar reports, presentations, IT reports and more — researched,
               written and quality-reviewed by field specialists.
             </p>
           </Reveal>

@@ -9,7 +9,7 @@ const COLUMNS = [
       { label: "Final year projects", href: "/services#final-year" },
       { label: "Reports & papers", href: "/services#reports" },
       { label: "Presentations", href: "/services#presentations" },
-      { label: "CV & career", href: "/services#career" },
+      { label: "Letters & essays", href: "/services" },
       { label: "Editing & formatting", href: "/services#editing" },
     ],
   },

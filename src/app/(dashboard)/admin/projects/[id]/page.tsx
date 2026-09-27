@@ -28,6 +28,8 @@ import { db } from "@/lib/db";
 import { ModeCard } from "@/components/projects/mode/ModeCard";
 import { DataPauseReviewCard } from "@/components/worker/DataPauseReviewCard";
 import { getAdminPauses } from "@/lib/services/data-pause";
+import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard";
+import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
 
 export const dynamic = "force-dynamic";
@@ -62,7 +64,7 @@ export default async function ProjectDetailPage({
   ]);
   if (!project) notFound();
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
-  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses] = await Promise.all([
+  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
     listDeliverablesForAdmin(project.id),
@@ -72,6 +74,8 @@ export default async function ProjectDetailPage({
     reportProject ? getModeCard(project.id).then((r) => r.card) : Promise.resolve(null),
     // D4: the report's data pauses (the client's files, checked by the specialist or here).
     reportProject ? getAdminPauses(project.id) : Promise.resolve([]),
+    // D5: a Mode 5 project's dataset (World Bank + CBN), fetched once Chapter 3 is written.
+    reportProject ? secondaryDataStatus(project.id, project.projectId) : Promise.resolve(null),
   ]);
   const dataToCheck = pauses.some((p) => p.status === "SUBMITTED");
   const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED")).length;
@@ -103,6 +107,13 @@ export default async function ProjectDetailPage({
                     isAdmin
                   />
                 ))}
+                {secondary?.eligible ? (
+                  <SecondaryDataCard
+                    initial={secondary}
+                    endpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/generation/fetch-secondary-data`}
+                    filesBase={`/api/admin/projects/${encodeURIComponent(project.projectId)}`}
+                  />
+                ) : null}
                 <ModeCard initial={modeCard} />
               </div>
             ),

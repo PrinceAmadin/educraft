@@ -15,6 +15,11 @@ export function projectNotFound() {
   return NextResponse.json({ error: "Project not found" }, { status: 404 });
 }
 
+/** D5: a refused or failed secondary-data fetch, with the request log and what is missing when there is one. */
+export function secondaryDataErrorBody(error: { message: string; code?: string; details?: unknown }) {
+  return { error: error.message, ...(error.code ? { code: error.code } : {}), ...(error.details ? (error.details as object) : {}) };
+}
+
 export function badChapter() {
   return NextResponse.json({ error: "chapter must be a number from 1 to 5" }, { status: 400 });
 }

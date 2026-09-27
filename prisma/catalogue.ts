@@ -4,23 +4,22 @@ import { PricingModel, ServiceCategory } from "@prisma/client";
  * The EduCraft service catalogue — the single source for both `prisma/seed.ts`
  * and `scripts/sync-service-catalogue.ts`.
  *
- * Prices follow the current flyers (DATA/pricing/):
+ * Prices and the order below follow the founder's price list,
+ * EduCraft_Price_List.docx (Sept 2026), section by section:
  *
- *   Normal Pricelist.png       general price list
- *   FYP Pricelist combo.png    final year services + combos
+ *   Section A  Final year services: 1. Final Year Report, 2. Final Year Combo
+ *              (express delivery +₦5,000)
+ *   Section B  General academic services: PowerPoint slides, IT report /
+ *              seminar, academic writing, letter writing, proofreading and
+ *              formatting (express delivery +₦2,000)
  *
- * Where the flyers disagree, the final year flyer wins for final year work:
- *   - Assignment-based report     from ₦5,000 (₦5k–10k)
- *   - Editing & formatting        20% under 50 pages, 25% at 50+ (general)
- *   - Final year editing          10% under 50 pages, 15% at 50+ (FYB flyer)
- *   - Express delivery            +₦2,000 general, +₦5,000 final year
+ * The list's order is the display order (the sync writes each service's
+ * position as its sortOrder). Ranges ("₦5,000 – ₦10,000") are stored as
+ * VARIABLE from the lower figure, with the full range in the description;
+ * percentage-priced editing carries its rate in the description.
  *
- * Ranges on the flyers ("₦10k–15k") are stored as VARIABLE from the lower
- * figure, with the full range in the description.
- *
- * Every price here is on one of the two flyers. Documents & diagrams
- * (watermark removal, PDF/image conversion, diagrams, UML) are NOT offered and
- * are retired below.
+ * Not on the list but kept: the chapter-based final year report
+ * (FYP-CHAPTERS), priced from the full report's own prices.
  */
 
 export type CatalogueService = {
@@ -40,7 +39,25 @@ const EXPRESS_GENERAL = 2000;
 const EXPRESS_FINAL_YEAR = 5000;
 
 export const SERVICE_CATALOGUE: CatalogueService[] = [
-  // ── Academic writing ──
+  // ── Section A.1: Final year report ──
+  {
+    serviceCode: "PPT-FYP",
+    serviceName: "PowerPoint (FYP Defence Slides)",
+    category: ServiceCategory.DESIGN,
+    basePrice: 13000,
+    intakeFormTemplate: "design_presentation",
+    estimatedDays: 5,
+    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+  },
+  {
+    serviceCode: "FYP-PROP",
+    serviceName: "Final Year Project (Proposal Only)",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 20000,
+    intakeFormTemplate: "academic_fyp_proposal",
+    estimatedDays: 7,
+    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+  },
   {
     serviceCode: "FYP-FULL",
     serviceName: "Final Year Project (Full)",
@@ -53,23 +70,14 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     variants: [{ name: "With Data Analysis", priceAddon: 20000 }],
   },
   {
-    serviceCode: "FYP-PROP",
-    serviceName: "Final Year Project (Proposal Only)",
+    serviceCode: "ENT-PROJ",
+    serviceName: "ENT Project Report",
     category: ServiceCategory.ACADEMIC,
-    basePrice: 20000,
-    intakeFormTemplate: "academic_fyp_proposal",
+    basePrice: 30000,
+    intakeFormTemplate: "academic_termpaper",
     estimatedDays: 7,
+    description: "Entrepreneurship (ENT) project report.",
     expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
-  },
-  {
-    serviceCode: "FYP-CH4",
-    serviceName: "Final Year Project (Chapter 4 Only)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 25000,
-    intakeFormTemplate: "academic_fyp_chapter",
-    estimatedDays: 7,
-    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
-    variants: [{ name: "With Data Analysis", priceAddon: 6500 }],
   },
   {
     serviceCode: "SEM",
@@ -90,111 +98,18 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     description: "Report prepared for journal or conference publication.",
     expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
   },
-  {
-    serviceCode: "IT-3M",
-    serviceName: "IT Report (1–3 Months)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 15000,
-    intakeFormTemplate: "academic_it",
-    estimatedDays: 7,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "IT-6M",
-    serviceName: "IT Report (4–6 Months)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 20000,
-    intakeFormTemplate: "academic_it",
-    estimatedDays: 10,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "IT-PPT",
-    serviceName: "PowerPoint + IT / Seminar Report",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 28000,
-    intakeFormTemplate: "academic_it",
-    estimatedDays: 10,
-    description: "The written IT or seminar report together with its presentation slides.",
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "ASSIGN",
-    serviceName: "Assignment-Based Report",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 5000,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "academic_termpaper",
-    estimatedDays: 5,
-    description: "₦5,000–₦10,000 depending on length and depth.",
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "TERM",
-    serviceName: "Term Paper",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 15000,
-    intakeFormTemplate: "academic_termpaper",
-    estimatedDays: 7,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "MINI",
-    serviceName: "Mini Project Report",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 15000,
-    intakeFormTemplate: "academic_mini",
-    estimatedDays: 10,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
 
-  // ── Research & analysis ──
+  // ── Section A.2: Final year combo ──
   {
-    serviceCode: "THESIS",
-    serviceName: "Thesis / Dissertation",
+    serviceCode: "FYP-CH4",
+    serviceName: "Final Year Project (Chapter 4 Only)",
     category: ServiceCategory.ACADEMIC,
-    basePrice: 70000,
-    intakeFormTemplate: "academic_fyp",
-    estimatedDays: 30,
+    basePrice: 25000,
+    intakeFormTemplate: "academic_fyp_chapter",
+    estimatedDays: 7,
     expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+    variants: [{ name: "With Data Analysis", priceAddon: 6500 }],
   },
-  {
-    serviceCode: "CASE",
-    serviceName: "Case Study Analysis",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 31500,
-    intakeFormTemplate: "academic_casestudy",
-    estimatedDays: 10,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "BIZ-PROP",
-    serviceName: "Business Proposal",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 30000,
-    intakeFormTemplate: "academic_termpaper",
-    estimatedDays: 7,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-
-  // ── Chapter-based final year reports ──
-  // Priced per chapter as a share of the full report (see src/lib/chapter-pricing.ts).
-  // basePrice is the full report without data analysis; the option is the same
-  // report with it. The public price is worked out from the chapters picked.
-  {
-    serviceCode: "FYP-CHAPTERS",
-    serviceName: "Final Year Project (Chapter-based)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 70000,
-    intakeFormTemplate: "academic_fyp",
-    estimatedDays: 14,
-    description:
-      "Order only the chapters you need. Chapter 1: 12%, Chapter 2: 18%, Chapter 3: 30%, Chapter 4: 35%, Chapter 5: 5% of the full report price.",
-    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
-    variants: [{ name: "With Data Analysis", priceAddon: 20000 }],
-  },
-
-  // ── Final year combos ──
   {
     serviceCode: "COMBO-PR",
     serviceName: "Proposal + Report (without DA)",
@@ -250,7 +165,24 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
   },
 
-  // ── Presentations ──
+  // ── Chapter-based final year reports (not on the price list; kept) ──
+  // Priced per chapter as a share of the full report (see src/lib/chapter-pricing.ts).
+  // basePrice is the full report without data analysis; the option is the same
+  // report with it. The public price is worked out from the chapters picked.
+  {
+    serviceCode: "FYP-CHAPTERS",
+    serviceName: "Final Year Project (Chapter-based)",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 70000,
+    intakeFormTemplate: "academic_fyp",
+    estimatedDays: 14,
+    description:
+      "Order only the chapters you need. Chapter 1: 12%, Chapter 2: 18%, Chapter 3: 30%, Chapter 4: 35%, Chapter 5: 5% of the full report price.",
+    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+    variants: [{ name: "With Data Analysis", priceAddon: 20000 }],
+  },
+
+  // ── Section B.1: PowerPoint slides ──
   {
     serviceCode: "PPT-DESIGN",
     serviceName: "PowerPoint (Design Only)",
@@ -270,20 +202,118 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     estimatedDays: 4,
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
+
+  // ── Section B.2: IT report / seminar ──
   {
-    serviceCode: "PPT-FYP",
-    serviceName: "PowerPoint (FYP Defence Slides)",
-    category: ServiceCategory.DESIGN,
-    basePrice: 13000,
-    intakeFormTemplate: "design_presentation",
-    estimatedDays: 5,
-    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+    serviceCode: "EDIT-IT",
+    serviceName: "Editing (Existing IT / Seminar Report)",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 8000,
+    intakeFormTemplate: "editing",
+    estimatedDays: 4,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "IT-3M",
+    serviceName: "IT Report (1–3 Months)",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 15000,
+    intakeFormTemplate: "academic_it",
+    estimatedDays: 7,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "IT-6M",
+    serviceName: "IT Report (4–6 Months)",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 20000,
+    intakeFormTemplate: "academic_it",
+    estimatedDays: 10,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "IT-PPT",
+    serviceName: "PowerPoint + IT / Seminar Report",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 28000,
+    intakeFormTemplate: "academic_it",
+    estimatedDays: 10,
+    description: "The written IT or seminar report together with its presentation slides.",
+    expressDeliverySurcharge: EXPRESS_GENERAL,
   },
 
-  // ── Letters & essays ──
+  // ── Section B.3: Academic writing ──
+  {
+    serviceCode: "ASSIGN",
+    serviceName: "Assignment-Based Report",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 5000,
+    pricingModel: PricingModel.VARIABLE,
+    intakeFormTemplate: "academic_termpaper",
+    estimatedDays: 5,
+    description: "₦5,000–₦10,000 depending on length and depth.",
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "TERM",
+    serviceName: "Term Paper",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 15000,
+    intakeFormTemplate: "academic_termpaper",
+    estimatedDays: 7,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "MINI",
+    serviceName: "Mini Project Report",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 15000,
+    intakeFormTemplate: "academic_mini",
+    estimatedDays: 10,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "BIZ-PROP",
+    serviceName: "ENT Business Proposal",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 30000,
+    intakeFormTemplate: "academic_termpaper",
+    estimatedDays: 7,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "CASE",
+    serviceName: "Case Study Analysis",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 31500,
+    intakeFormTemplate: "academic_casestudy",
+    estimatedDays: 10,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    // Section B on the price list, so general express (+₦2,000; it was +₦5,000 before).
+    serviceCode: "THESIS",
+    serviceName: "Thesis / Dissertation",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 70000,
+    intakeFormTemplate: "academic_fyp",
+    estimatedDays: 30,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+
+  // ── Section B.4: Letter writing ──
   {
     serviceCode: "LTR-INF",
     serviceName: "Informal Letter",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 5000,
+    intakeFormTemplate: "letter",
+    estimatedDays: 2,
+    expressDeliverySurcharge: EXPRESS_GENERAL,
+  },
+  {
+    serviceCode: "LTR-APP",
+    serviceName: "Application / Cover Letter",
     category: ServiceCategory.ACADEMIC,
     basePrice: 5000,
     intakeFormTemplate: "letter",
@@ -309,47 +339,7 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
 
-  // ── Career ──
-  {
-    serviceCode: "LTR-APP",
-    serviceName: "Application / Cover Letter",
-    category: ServiceCategory.CAREER,
-    basePrice: 5000,
-    intakeFormTemplate: "letter",
-    estimatedDays: 2,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "CV",
-    serviceName: "CV / Resume",
-    category: ServiceCategory.CAREER,
-    basePrice: 10000,
-    intakeFormTemplate: "career_cv",
-    estimatedDays: 4,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-  {
-    serviceCode: "PROFILE",
-    serviceName: "Professional Profile",
-    category: ServiceCategory.CAREER,
-    basePrice: 8000,
-    intakeFormTemplate: "career_profile",
-    estimatedDays: 3,
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
-
-  // ── Editing & formatting ──
-  {
-    serviceCode: "EDIT-SM",
-    serviceName: "Editing & Formatting (under 50 pages)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 0,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "editing",
-    estimatedDays: 4,
-    description: "Priced at 20% of the original project cost.",
-    expressDeliverySurcharge: EXPRESS_GENERAL,
-  },
+  // ── Section B.5: Proofreading & formatting ──
   {
     serviceCode: "EDIT-LG",
     serviceName: "Editing & Formatting (50+ pages)",
@@ -362,48 +352,33 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
   {
-    serviceCode: "EDIT-FYP-SM",
-    serviceName: "Final Year Project Editing (under 50 pages)",
+    serviceCode: "EDIT-SM",
+    serviceName: "Editing & Formatting (under 50 pages)",
     category: ServiceCategory.ACADEMIC,
     basePrice: 0,
     pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "editing",
-    estimatedDays: 5,
-    description: "Priced at 10% of the original project cost.",
-    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
-  },
-  {
-    serviceCode: "EDIT-FYP-LG",
-    serviceName: "Final Year Project Editing (50+ pages)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 0,
-    pricingModel: PricingModel.VARIABLE,
-    intakeFormTemplate: "editing",
-    estimatedDays: 7,
-    description: "Priced at 15% of the original project cost.",
-    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
-  },
-  {
-    serviceCode: "EDIT-IT",
-    serviceName: "Editing (Existing IT / Seminar Report)",
-    category: ServiceCategory.ACADEMIC,
-    basePrice: 8000,
     intakeFormTemplate: "editing",
     estimatedDays: 4,
+    description: "Priced at 20% of the original project cost.",
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
 ];
 
 /**
- * Services that appear on no current flyer. The sync deactivates them — it
+ * Services that are not on the price list. The sync deactivates them — it
  * never deletes, because existing projects reference them.
  *
- *   DATA     Data Analysis Only — not on any flyer
- *   FORMAT   Formatting Only (₦5,000) — flyer 4.png prices formatting as a
- *            percentage, which EDIT-SM / EDIT-LG already cover
- *   GD-FLY   Graphic Design (Flyer) — not on any flyer
+ *   DATA     Data Analysis Only — not offered on its own
+ *   FORMAT   Formatting Only (₦5,000) — formatting is priced as a percentage,
+ *            which EDIT-SM / EDIT-LG already cover
+ *   GD-FLY   Graphic Design (Flyer) — not offered
  *   WATERMARK, WM-COMPLEX, WM-MARKS, PDF-MOD, PDF-WORD, IMG-WORD, DIAGRAM, UML
  *            Documents & diagrams — not offered (founder, Sept 2026)
+ *   CV, PROFILE
+ *            CV / Resume and Professional Profile — switched off (founder,
+ *            27 Sept 2026: not on EduCraft_Price_List.docx)
+ *   EDIT-FYP-SM, EDIT-FYP-LG
+ *            Final year editing at 10% / 15% — switched off (same decision)
  */
 export const RETIRED_SERVICE_CODES = [
   "DATA",
@@ -417,4 +392,8 @@ export const RETIRED_SERVICE_CODES = [
   "IMG-WORD",
   "DIAGRAM",
   "UML",
+  "CV",
+  "PROFILE",
+  "EDIT-FYP-SM",
+  "EDIT-FYP-LG",
 ] as const;

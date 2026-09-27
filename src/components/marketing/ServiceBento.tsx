@@ -43,22 +43,18 @@ const LAYOUT: Record<
     area: "lg:col-span-1 lg:row-span-1 min-h-[200px] sm:min-h-0 lg:min-h-[200px]",
     sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
   },
-  career: {
-    dirs: ["cv_img"],
-    area: "lg:col-span-1 lg:row-span-1 min-h-[220px] sm:min-h-0 lg:min-h-[190px]",
-    sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
-    // CVs are pages, not photographs — fanned cards on the tile field.
-    media: "cv",
-  },
+  // CV & Career was switched off with the Sept 2026 price list; its tile (the fanned
+  // CV deck, media "cv") can come back here if CVs are offered again.
   editing: {
     dirs: ["report_img", "fyb_img"],
-    area: "lg:col-span-2 lg:row-span-1 min-h-[200px] sm:min-h-0 lg:min-h-[190px]",
-    sizes: "(min-width: 1024px) 66vw, (min-width: 640px) 50vw, 100vw",
+    area: "lg:col-span-1 lg:row-span-1 min-h-[200px] sm:min-h-0 lg:min-h-[190px]",
+    sizes: "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
   },
   combined: {
     dirs: ["fyb_img"],
-    area: "lg:col-span-3 lg:row-span-1 min-h-[200px] sm:min-h-0 lg:min-h-[190px]",
-    sizes: "100vw",
+    // Beside Editing on desktop; full width under the two-column tablet grid.
+    area: "sm:col-span-2 lg:col-span-2 lg:row-span-1 min-h-[200px] sm:min-h-0 lg:min-h-[190px]",
+    sizes: "(min-width: 1024px) 66vw, 100vw",
   },
 };
 
@@ -67,7 +63,6 @@ const CELL_COPY: Record<string, string> = {
   "final-year": "Full five-chapter reports, proposals and data analysis.",
   reports: "Seminar, IT and term papers.",
   presentations: "Defence and class decks.",
-  career: "CVs, résumés and profiles.",
   editing: "Proofreading, editing and department formatting.",
   combined: "Proposal, report and defence deck, bundled.",
 };

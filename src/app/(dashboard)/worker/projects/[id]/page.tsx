@@ -13,6 +13,8 @@ import { ResearchPanel } from "@/components/worker/ResearchPanel";
 import { WorkerDeliverablesPanel } from "@/components/worker/WorkerDeliverablesPanel";
 import { DataPauseReviewCard } from "@/components/worker/DataPauseReviewCard";
 import { getWorkerPauseView } from "@/lib/services/data-pause";
+import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard";
+import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -63,7 +65,8 @@ export default async function WorkerAssignmentPage({
   const showRevisionFeedback = project.status === "REVISION_NEEDED" && project.qaNotes;
   const routeBase = `/api/worker/projects/${encodeURIComponent(project.projectId)}`;
   // D4: the report waits here for the client's data; the worker checks it (and may add their own).
-  const pause = await getWorkerPauseView(worker.id, project.projectId);
+  // D5: Mode 5 projects get their dataset fetched from the World Bank and the CBN once Chapter 3 is written.
+  const [pause, secondary] = await Promise.all([getWorkerPauseView(worker.id, project.projectId), secondaryDataStatus(project.id, project.projectId)]);
 
   const deliverables = (await listDeliverablesForWorker(project.id)).map((d) => {
     const open = canSubmitDeliverable(d.kind, project.status);
@@ -201,7 +204,18 @@ export default async function WorkerAssignmentPage({
               </div>
             ),
           },
-          { id: "research", label: "Research", content: <ResearchPanel projectCode={project.projectId} /> },
+          {
+            id: "research",
+            label: "Research",
+            content: (
+              <div className="space-y-8">
+                <ResearchPanel projectCode={project.projectId} />
+                {secondary.eligible ? (
+                  <SecondaryDataCard initial={secondary} endpoint={`${routeBase}/generation/fetch-secondary-data`} filesBase={routeBase} />
+                ) : null}
+              </div>
+            ),
+          },
           {
             id: "documents",
             label: "Documents",

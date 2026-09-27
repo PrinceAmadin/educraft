@@ -5,9 +5,10 @@ import { formatNaira } from "@/lib/utils";
  *
  * The database category (ACADEMIC / DESIGN / CAREER / DIGITAL) is too coarse
  * for a student scanning a price list — "ACADEMIC" holds final year projects,
- * letters and editing alike. These groups follow the flyers instead, and a
- * service is placed by its code so a new service lands in the right group
- * without a schema change. Anything unmatched falls back on its category.
+ * letters and editing alike. These groups follow the sections of the price
+ * list (EduCraft_Price_List.docx, Sept 2026), in its order, and a service is
+ * placed by its code so a new service lands in the right group without a
+ * schema change. Anything unmatched falls back on its category.
  */
 
 export interface ServiceGroup {
@@ -19,14 +20,15 @@ export interface ServiceGroup {
 }
 
 export const SERVICE_GROUPS: ServiceGroup[] = [
+  // Section A: final year services.
   { key: "fyp", label: "Final year reports", pill: "Final year" },
   { key: "combos", label: "Final year combos", pill: "Combos" },
+  // Section B: general academic services.
+  { key: "presentations", label: "PowerPoint slides", pill: "Slides" },
+  { key: "it", label: "IT report / seminar", pill: "IT" },
   { key: "academic", label: "Academic writing", pill: "Academic" },
-  { key: "research", label: "Research & analysis", pill: "Research" },
-  { key: "presentations", label: "Presentations", pill: "Presentations" },
-  { key: "career", label: "Career & professional", pill: "Career" },
-  { key: "letters", label: "Letters & essays", pill: "Letters" },
-  { key: "editing", label: "Editing & formatting", pill: "Editing" },
+  { key: "letters", label: "Letter writing", pill: "Letters" },
+  { key: "editing", label: "Proofreading & formatting", pill: "Editing" },
   // Last on purpose: available, but not promoted next to the full reports.
   { key: "chapters", label: "Chapter-based final year projects", pill: "Chapters" },
 ];
@@ -45,26 +47,26 @@ export interface ServiceTab {
 export const SERVICE_TABS: ServiceTab[] = [
   { key: "fyp", label: "Final year", groups: ["fyp", "combos"] },
   { key: "chapters", label: "Chapter-based FYP", groups: ["chapters"] },
-  { key: "other", label: "Other", groups: ["academic", "research", "presentations", "career", "letters", "editing"] },
-  { key: "all", label: "All", groups: ["fyp", "combos", "academic", "research", "presentations", "career", "letters", "editing"] },
+  { key: "other", label: "Other", groups: ["presentations", "it", "academic", "letters", "editing"] },
+  { key: "all", label: "All", groups: ["fyp", "combos", "presentations", "it", "academic", "letters", "editing"] },
 ];
 
+// First match wins, so the specific rules come before the general ones.
 const CODE_RULES: [RegExp, string][] = [
-  [/^COMBO/, "combos"],
+  [/^COMBO|^FYP-CH4$/, "combos"],
   [/^FYP-CHAP/, "chapters"],
-  [/^(FYP|THESIS|SEM$|PUB$|PPT-FYP|EDIT-FYP)/, "fyp"],
+  [/^(FYP|SEM$|PUB$|PPT-FYP$|ENT-PROJ$)/, "fyp"],
   [/^PPT/, "presentations"],
+  [/^(IT-|EDIT-IT$)/, "it"],
   [/^(EDIT|FORMAT|PROOF)/, "editing"],
-  [/^(CV|PROFILE|LTR-APP)/, "career"],
   [/^(LTR|ESSAY)/, "letters"],
-  [/^(CASE|BIZ|DATA)/, "research"],
 ];
 
 const CATEGORY_FALLBACK: Record<string, string> = {
   ACADEMIC: "academic",
   LEARNING: "academic",
   DESIGN: "presentations",
-  CAREER: "career",
+  CAREER: "letters",
   DIGITAL: "academic",
 };
 

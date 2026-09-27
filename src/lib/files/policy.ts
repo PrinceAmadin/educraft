@@ -59,7 +59,7 @@ export type UploaderRole = "WORKER" | "ADMIN" | "CLIENT";
 
 export const UPLOAD_PURPOSES: readonly UploadPurpose[] = ["deliverable", "message", "data"];
 
-/** Everything the private store holds: uploads plus "source", files the server itself saves (court judgment PDFs, D3b). */
+/** Everything the private store holds: uploads plus "source", files the server itself saves (court judgment PDFs, D3b; Mode 5 datasets, D5). */
 export type StoredPurpose = UploadPurpose | "source";
 
 /** What the caller's route knows about the upload (D4): whose project it is and whether it is paused for data. */
@@ -104,7 +104,8 @@ const TYPES: Record<string, string> = {
 const EXTENSIONS: Record<StoredPurpose, readonly string[]> = {
   deliverable: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "png", "jpg", "jpeg"],
   message: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "webp"],
-  source: ["pdf"],
+  // Written by the server only, never uploaded: judgment PDFs (D3b) and the fetched Mode 5 dataset (D5).
+  source: ["pdf", "csv"],
   // What Claude can read directly (PDF, images) or what we turn into text (Word, Excel, CSV).
   data: ["pdf", "docx", "xlsx", "csv", "png", "jpg", "jpeg"],
 };

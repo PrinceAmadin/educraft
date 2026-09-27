@@ -1,7 +1,6 @@
 import {
   IconBrief,
   IconBundle,
-  IconCareer,
   IconDelivery,
   IconEditing,
   IconProject,
@@ -94,18 +93,8 @@ export const SERVICES: Service[] = [
     href: "/services#presentations",
   },
   {
-    id: "career",
-    index: "04",
-    title: "CV & Career",
-    price: "from ₦8,000",
-    body: "Professional CVs, résumés and profiles built to get you past the first screen.",
-    scope: "CV · Résumé · Profile",
-    icon: IconCareer,
-    href: "/services#career",
-  },
-  {
     id: "editing",
-    index: "05",
+    index: "04",
     title: "Editing & Formatting",
     price: "from ₦5,000",
     body: "Proofreading, full editing and department-standard formatting for work you've already written.",
@@ -115,7 +104,7 @@ export const SERVICES: Service[] = [
   },
   {
     id: "combined",
-    index: "06",
+    index: "05",
     title: "Combined Packages",
     price: "from ₦85,000",
     body: "Proposal, report and defence deck bundled together for less than the parts.",

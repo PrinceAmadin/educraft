@@ -55,7 +55,7 @@ export function provisionalReminderEmail(input: {
     "",
     `Your client link: ${input.referralLink}`,
     "",
-    "Share it with a final-year student who needs help with a project, seminar report, term paper or CV. When they open it, WhatsApp opens with a message that already says you referred them.",
+    "Share it with a final-year student who needs help with a project, seminar report, term paper or IT report. When they open it, WhatsApp opens with a message that already says you referred them.",
     "",
     `Your dashboard: ${input.dashboardUrl}`,
     "",
@@ -77,7 +77,7 @@ export function provisionalReminderEmail(input: {
       )}" style="color:#0D9488;text-decoration:none;font-weight:600">${escapeHtml(input.referralLink)}</a></p>
     </div>
     ${p(
-      "Share it with a final-year student who needs help with a project, seminar report, term paper or CV. When they open it, WhatsApp opens with a message that already says you referred them."
+      "Share it with a final-year student who needs help with a project, seminar report, term paper or IT report. When they open it, WhatsApp opens with a message that already says you referred them."
     )}
     ${button(input.dashboardUrl, "Open my dashboard")}
     ${p("If nothing comes through before the deadline, the slot goes back on the board for another applicant. You are welcome to apply again.")}`

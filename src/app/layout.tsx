@@ -54,7 +54,7 @@ export const metadata: Metadata = {
     template: `%s · ${APP_NAME}`,
   },
   description:
-    "Final year projects, seminar reports, defence decks and CVs — researched, written and quality-checked by specialists, for university students across Nigeria.",
+    "Final year projects, seminar reports, defence decks and IT reports — researched, written and quality-checked by specialists, for university students across Nigeria.",
   icons: {
     icon: [
       { url: "/icons/icon.svg", type: "image/svg+xml" },
