@@ -1,25 +1,31 @@
 import { z } from "zod";
 import { uploadedFileSchema } from "@/lib/validations/deliverables";
+import { MAX_SUBMITTED_FILES } from "@/lib/generation/dynamic-data-form";
 
-/** D3c: what the worker sends at a pause (one entry per upload slot: a new upload, or a file already sent that stays). */
-export const submitPauseSchema = z.object({
-  pauseId: z.string().min(8).max(40),
-  answers: z.record(z.string().max(40), z.union([z.string().max(2000), z.number()])).default({}),
-  files: z
-    .array(
-      z
-        .object({
-          slot: z.string().min(1).max(40),
-          upload: uploadedFileSchema.optional(),
-          keepFileId: z.string().min(8).max(40).optional(),
-        })
-        .refine((f) => Boolean(f.upload) !== Boolean(f.keepFileId), "Each slot takes a new upload or a file already sent"),
-    )
-    .max(3, "At most three files"),
-});
+const pauseId = z.string().min(8).max(40);
+const answers = z.record(z.string().max(40), z.union([z.string().max(2000), z.number()])).default({});
+const files = z
+  .array(uploadedFileSchema)
+  .min(1, "Add at least one file.")
+  .max(MAX_SUBMITTED_FILES, `Send at most ${MAX_SUBMITTED_FILES} files at a time.`);
 
-/** D3c: the founder and the COO open a pause by hand (D4 does it automatically) or ask for the request again. */
+/** D4: what the client sends at a pause (files already uploaded to the private store, and the answers). */
+export const clientDataUploadSchema = z.object({ pauseId, files, answers });
+
+/** D4: the specialist's actions on a pause (worker page, and the founder/COO Report tab). */
+const specialistActions = [
+  z.object({ action: z.literal("add_files"), pauseId, files }),
+  z.object({ action: z.literal("save_answers"), pauseId, answers }),
+  z.object({ action: z.literal("verify"), pauseId, chapterFileIds: z.array(z.string().min(8).max(40)).max(40).default([]) }),
+  z.object({ action: z.literal("request_more"), pauseId, note: z.string().trim().max(1000).optional().or(z.literal("")) }),
+] as const;
+
+export const workerPauseActionSchema = z.discriminatedUnion("action", [...specialistActions]);
+
+/** D3c/D4: the founder and the COO also open a pause by hand (the chapter orchestrator will do it), redraft or cancel. */
 export const pauseActionSchema = z.discriminatedUnion("action", [
+  ...specialistActions,
   z.object({ action: z.literal("open"), afterChapter: z.number().int().min(1).max(4) }),
-  z.object({ action: z.literal("regenerate_form"), pauseId: z.string().min(8).max(40) }),
+  z.object({ action: z.literal("regenerate_form"), pauseId }),
+  z.object({ action: z.literal("cancel"), pauseId }),
 ]);

@@ -9,6 +9,7 @@ import {
   extensionOf,
   maxBytesFor,
   UPLOAD_PURPOSES,
+  type UploadContext,
   type UploaderRole,
   type UploadPurpose,
 } from "@/lib/files/policy";
@@ -57,6 +58,8 @@ export async function handleUploadRequest(
     projectDbId: string;
     /** Null when this caller may upload for that purpose/target now, else the reason they can't. */
     checkTarget: (purpose: UploadPurpose, targetId: string) => Promise<string | null>;
+    /** What the route knows about the caller and the project, for canUpload (D4: a client at a data pause). */
+    uploadContext?: UploadContext;
   }
 ): Promise<NextResponse> {
   let json: unknown;
@@ -93,7 +96,7 @@ export async function handleUploadRequest(
     if (!parsed.success) return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     const { purpose, targetId, fileName, size } = parsed.data;
 
-    if (!canUpload(ctx.role, purpose)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    if (!canUpload(ctx.role, purpose, ctx.uploadContext)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const contentType = contentTypeFor(purpose, fileName);
     if (!contentType) {
       return NextResponse.json({ error: "That kind of file can't be uploaded here." }, { status: 400 });

@@ -608,7 +608,8 @@ model ProjectFile {
   /// The content type we decided from the file's extension and first bytes.
   fileType   String?
   // from_client, from_worker, qa_reviewed, delivered,
-  // supervisor_correction, ch34_data, department_outline, message_attachment
+  // supervisor_correction, ch34_data, department_outline, message_attachment,
+  // data_upload (D4: a file sent at a data pause, by the client or the specialist)
   category   String
   uploadedBy String?
   /// WORKER / ADMIN / CLIENT for files uploaded to the private store.
@@ -624,7 +625,7 @@ model ProjectFile {
   messageId     String?
   message       ProjectMessage?     @relation(fields: [messageId], references: [id])
   version       DeliverableVersion?
-  /// D3c: a data file the worker sent at a pipeline pause (category ch34_data), and which of the form's file slots it fills.
+  /// D3c/D4: a data file sent at a pipeline pause (category data_upload; uploaderRole says who sent it), and its slot if any.
   pauseId       String?
   pause         PipelinePause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
   pauseSlot     String?
@@ -2280,12 +2281,12 @@ model WorkerNote {
   @@index([workerId, createdAt])
 }
 
-/// D3c: the report pipeline waits here for the worker's data (Modes 2 and 4 after Chapter 3;
+/// D3c/D4: the report pipeline waits here for the client's data (Modes 2 and 4 after Chapter 3;
 /// Mode 3 after Chapter 2 for the build specifications and after Chapter 3 for the results).
 enum DataPauseStatus {
-  OPEN // waiting for the worker's data
-  SUBMITTED // the worker sent it; the COO resumes the report
-  RESUMED
+  OPEN // waiting for the client's files (also after the specialist asks for more)
+  SUBMITTED // the client sent them; the specialist is checking
+  RESUMED // verified by the specialist: the report carries on
   CANCELLED
 }
 
@@ -2300,8 +2301,8 @@ enum DataPauseKind {
   RESULTS // after Chapter 3: the analysed data for Chapters 4 and 5
 }
 
-/// D3c: one pause point of one project, with the data request Claude drafted for it (saved, so it
-/// survives the worker closing the page) and what the worker sent back.
+/// D3c/D4: one pause point of one project, with the data request Claude drafted for it (saved, so it
+/// survives a closed page), what the client sent, and the specialist's verification.
 model PipelinePause {
   id              String          @id @default(cuid())
   projectId       String
@@ -2312,7 +2313,7 @@ model PipelinePause {
   status          DataPauseStatus @default(OPEN)
   formStatus      DataFormStatus  @default(GENERATING)
   formTitle       String?
-  /// The project-specific instruction the worker sees on the banner.
+  /// The project-specific instruction the client sees on the banner.
   formDescription String?         @db.Text
   /// { files: [...], fields: [...], checklist: [...] } (dynamic-data-form.ts)
   formSpec        Json?
@@ -2322,9 +2323,21 @@ model PipelinePause {
   answers         Json?
   submittedAt     DateTime?
   submittedById   String?
+  /// When the specialist verified the data (status RESUMED), and who.
   resumedAt       DateTime?
+  resumedById     String?
   cancelledAt     DateTime?
   openedById      String?
+  /// D4: when the client's delivery date froze (the request became visible to them).
+  clockPausedAt   DateTime?
+  /// D4: days added back onto the delivery date when the pause ended (verified or cancelled).
+  pausedDays      Int?
+  /// D4: the specialist's note when asking the client for more files (shown on the client's banner).
+  workerNote      String?         @db.Text
+  /// D4: 1 for the first request, +1 each time the specialist asks for more.
+  round           Int             @default(1)
+  /// D4: the PDFs and images the specialist ticked for the chapters (Word/Excel/CSV always go, as text).
+  chapterFileIds  String[]        @default([])
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   files           ProjectFile[]

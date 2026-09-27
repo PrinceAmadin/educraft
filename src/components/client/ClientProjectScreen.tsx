@@ -10,6 +10,8 @@ import { ClientPaymentsPanel } from "@/components/client/ClientPaymentsPanel";
 import { ClientPayButton } from "@/components/client/ClientPayButton";
 import { MessageThread } from "@/components/messages/MessageThread";
 import { ClientDocumentsTab } from "@/components/client/ClientDocumentsTab";
+import { ClientDataPauseBanner } from "@/components/client/ClientDataPauseBanner";
+import { getClientPauseView } from "@/lib/services/client-data-pause";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
 /**
@@ -59,12 +61,24 @@ export async function ClientProjectScreen({
 }
 
 async function ProgressTab({ view, preview }: { view: ClientProjectView; preview: boolean }) {
-  const updates = await listUpdates(view.id, { take: 40 });
+  const [updates, dataPause] = await Promise.all([
+    listUpdates(view.id, { take: 40 }),
+    // D4: the report waiting for the client's data files (only while one is active).
+    view.dataPause ? getClientPauseView(view.id) : Promise.resolve(null),
+  ]);
   const { progress, countdown } = view;
   const tone = progress.tone;
 
   return (
     <div className="space-y-10">
+      {dataPause ? (
+        <ClientDataPauseBanner
+          key={`${dataPause.id}-${dataPause.round}-${dataPause.status}`}
+          projectCode={view.code}
+          initial={dataPause}
+          preview={preview}
+        />
+      ) : null}
       <section
         className={cn(
           "rounded-2xl p-5",

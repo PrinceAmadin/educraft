@@ -26,6 +26,8 @@ import { getExpectedHours } from "@/lib/services/operations/pipeline";
 import { firstName } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { ModeCard } from "@/components/projects/mode/ModeCard";
+import { DataPauseReviewCard } from "@/components/worker/DataPauseReviewCard";
+import { getAdminPauses } from "@/lib/services/data-pause";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +62,7 @@ export default async function ProjectDetailPage({
   ]);
   if (!project) notFound();
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
-  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard] = await Promise.all([
+  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
     listDeliverablesForAdmin(project.id),
@@ -68,7 +70,10 @@ export default async function ProjectDetailPage({
     getExpectedHours(),
     // D3: the research-mode card the COO approves, for written reports only.
     reportProject ? getModeCard(project.id).then((r) => r.card) : Promise.resolve(null),
+    // D4: the report's data pauses (the client's files, checked by the specialist or here).
+    reportProject ? getAdminPauses(project.id) : Promise.resolve([]),
   ]);
+  const dataToCheck = pauses.some((p) => p.status === "SUBMITTED");
   const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED")).length;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
 
@@ -86,8 +91,21 @@ export default async function ProjectDetailPage({
       ? [
           {
             id: "report",
-            label: modeCard.status === "APPROVED" || modeCard.generationStarted ? "Report" : "Report · mode",
-            content: <ModeCard initial={modeCard} />,
+            label: dataToCheck ? "Report · data to check" : modeCard.status === "APPROVED" || modeCard.generationStarted ? "Report" : "Report · mode",
+            content: (
+              <div className="space-y-8">
+                {pauses.map((p) => (
+                  <DataPauseReviewCard
+                    key={`${p.id}-${p.status}-${p.round}`}
+                    initial={p}
+                    actionEndpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/data-pause`}
+                    uploadEndpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/upload`}
+                    isAdmin
+                  />
+                ))}
+                <ModeCard initial={modeCard} />
+              </div>
+            ),
           },
         ]
       : []),

@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     projectDbId: project.id,
     checkTarget: async (purpose, targetId) => {
       if (purpose === "data") {
-        // D3c: only into this project's own open pause, once its data request is ready.
+        // D3c/D4: the specialist's own files, only into this project's active pause once its request is ready.
         const pause = await db.pipelinePause.findFirst({
           where: { id: targetId, projectId: project.id, status: { in: ["OPEN", "SUBMITTED"] }, formStatus: "READY" },
           select: { id: true },

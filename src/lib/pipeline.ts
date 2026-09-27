@@ -44,9 +44,17 @@ export interface TransitionCandidate {
    * fourth is a new order, so the move into corrections is refused at three.
    */
   correctionRounds?: number;
+  /**
+   * D4: the report is paused for the client's data files (a data pause OPEN or
+   * SUBMITTED). Its own clock already holds the delivery date, so the older
+   * "waiting for client" pause is refused meanwhile (two clocks would add the
+   * same days twice).
+   */
+  activeDataPause?: boolean;
 }
 
 export const MAX_REVISIONS = 3;
+export const DATA_PAUSE_OVERLAP_MESSAGE = "The report is already paused for the client's data files. Use that request, or cancel it first.";
 
 /**
  * Allowed forward transitions, keyed by current status. Admin-only holds
@@ -90,7 +98,12 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
     },
   ],
   IN_PROGRESS: [
-    { to: "AWAITING_CLIENT_INPUT", action: "Pause for client input", requiresNote: true },
+    {
+      to: "AWAITING_CLIENT_INPUT",
+      action: "Pause for client input",
+      requiresNote: true,
+      guard: (p) => (p.activeDataPause ? DATA_PAUSE_OVERLAP_MESSAGE : null),
+    },
     {
       to: "SUBMITTED",
       action: "Mark submitted",
@@ -189,7 +202,8 @@ export function toCandidate(project: {
   files: { category: string }[];
   deliverables?: { versions: { releaseNo: number | null }[] }[];
   supervisorCorrectionCount?: number;
-  _count?: { correctionRounds?: number };
+  /** `pauses` = data pauses OPEN or SUBMITTED (select it with that filter). */
+  _count?: { correctionRounds?: number; pauses?: number };
 }): TransitionCandidate {
   const hasRequirementDetail =
     Boolean(project.specialInstructions?.trim()) ||
@@ -211,6 +225,7 @@ export function toCandidate(project: {
     workerFileCount: project.files.filter((f) => f.category === "from_worker").length,
     finalAwaitingRelease: finalAwaitingRelease(project.deliverables ?? []),
     correctionRounds: roundsSoFar(project._count?.correctionRounds ?? 0, project.supervisorCorrectionCount ?? 0),
+    activeDataPause: (project._count?.pauses ?? 0) > 0,
   };
 }
 

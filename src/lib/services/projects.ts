@@ -16,6 +16,7 @@ import {
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { formatNaira } from "@/lib/utils";
+import { pausedDaysBetween, shiftedDeadlines } from "@/lib/pause-clock";
 import { proBonoFinancials } from "@/lib/pro-bono";
 import {
   MAX_REVISIONS,
@@ -265,8 +266,8 @@ const detailInclude = {
     where: { kind: "FINAL", archivedAt: null },
     select: { versions: { select: { releaseNo: true } } },
   },
-  // For the correction-limit guard (see toCandidate).
-  _count: { select: { correctionRounds: true } },
+  // For the correction-limit guard and the data-pause guard (see toCandidate).
+  _count: { select: { correctionRounds: true, pauses: { where: { status: { in: ["OPEN", "SUBMITTED"] } } } } },
 } satisfies Prisma.ProjectInclude;
 
 export type ProjectDetail = Prisma.ProjectGetPayload<{ include: typeof detailInclude }>;
@@ -388,7 +389,7 @@ export async function transitionProject(
       supervisorCorrectionCount: true,
       worker: { select: { userId: true } },
       files: { where: { category: "from_worker" }, select: { id: true } },
-      _count: { select: { files: true, correctionRounds: true } },
+      _count: { select: { files: true, correctionRounds: true, pauses: { where: { status: { in: ["OPEN", "SUBMITTED"] } } } } },
       deliverables: {
         where: { kind: "FINAL", archivedAt: null },
         select: { versions: { select: { releaseNo: true } } },
@@ -419,6 +420,8 @@ export async function transitionProject(
     finalAwaitingRelease: finalAwaitingRelease(project.deliverables),
     // Three supervisor-correction rounds are in the service; the guard refuses a fourth.
     correctionRounds: roundsSoFar(project._count.correctionRounds, project.supervisorCorrectionCount),
+    // A data pause keeps its own clock: no second "waiting for client" pause on top.
+    activeDataPause: project._count.pauses > 0,
   };
 
   const rule = allowedTransitions(candidate).find((r) => r.to === to);
@@ -477,20 +480,8 @@ export async function transitionProject(
   if (to === "AWAITING_CLIENT_INPUT") {
     data.deadlinePausedAt = now;
   } else if (project.status === "AWAITING_CLIENT_INPUT" && project.deadlinePausedAt) {
-    const pausedDays = Math.ceil(
-      (now.getTime() - project.deadlinePausedAt.getTime()) / 86_400_000
-    );
     data.deadlinePausedAt = null;
-    data.deadlinePausedDays = { increment: pausedDays };
-    if (project.internalDeadline && pausedDays > 0) {
-      data.internalDeadline = new Date(
-        project.internalDeadline.getTime() + pausedDays * 86_400_000
-      );
-    }
-    // The client's date waits for them too.
-    if (project.expectedDeliveryAt && pausedDays > 0) {
-      data.expectedDeliveryAt = new Date(project.expectedDeliveryAt.getTime() + pausedDays * 86_400_000);
-    }
+    Object.assign(data, shiftedDeadlines(project, pausedDaysBetween(project.deadlinePausedAt, now)));
   }
 
   const feed = statusFeedEntry(project.status, to);

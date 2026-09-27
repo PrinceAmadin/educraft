@@ -51,7 +51,8 @@ export const LOCK_TEXT: Record<LockReason, string> = {
 
 /**
  * deliverable: a chapter or document version. message: an attachment in the client thread.
- * data: the worker's analysed data at a report pipeline pause (D3c).
+ * data: a data file at a report pipeline pause (D3c/D4): sent by the client, checked and
+ * added to by the specialist.
  */
 export type UploadPurpose = "deliverable" | "message" | "data";
 export type UploaderRole = "WORKER" | "ADMIN" | "CLIENT";
@@ -61,8 +62,25 @@ export const UPLOAD_PURPOSES: readonly UploadPurpose[] = ["deliverable", "messag
 /** Everything the private store holds: uploads plus "source", files the server itself saves (court judgment PDFs, D3b). */
 export type StoredPurpose = UploadPurpose | "source";
 
-export function canUpload(role: UploaderRole, purpose: UploadPurpose): boolean {
-  if (purpose === "deliverable" || purpose === "data") return role === "WORKER" || role === "ADMIN";
+/** What the caller's route knows about the upload (D4): whose project it is and whether it is paused for data. */
+export interface UploadContext {
+  /** The uploader is the client who owns the project. */
+  ownsProject?: boolean;
+  /** The project has a data pause waiting for the client's files. */
+  activeDataPause?: boolean;
+}
+
+/**
+ * Who may upload what. Chapters: workers and admins only. Message attachments:
+ * clients and admins. Data files: workers and admins, and a client only on
+ * their own project while it waits for their data (the one narrow exception).
+ */
+export function canUpload(role: UploaderRole, purpose: UploadPurpose, ctx: UploadContext = {}): boolean {
+  if (purpose === "deliverable") return role === "WORKER" || role === "ADMIN";
+  if (purpose === "data") {
+    if (role === "CLIENT") return ctx.ownsProject === true && ctx.activeDataPause === true;
+    return role === "WORKER" || role === "ADMIN";
+  }
   return role === "CLIENT" || role === "ADMIN";
 }
 
@@ -92,7 +110,7 @@ const EXTENSIONS: Record<StoredPurpose, readonly string[]> = {
 };
 
 const MB = 1024 * 1024;
-const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB, data: 20 * MB };
+const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB, data: 25 * MB };
 
 export function maxBytesFor(purpose: StoredPurpose): number {
   return MAX_BYTES[purpose];
@@ -119,7 +137,7 @@ export function acceptAttribute(purpose: UploadPurpose): string {
 }
 
 export function allowedKindsLabel(purpose: UploadPurpose): string {
-  if (purpose === "data") return "PDF, Word, Excel, CSV or images (PNG, JPG), up to 20 MB";
+  if (purpose === "data") return "PDF, Word, Excel, CSV or images (PNG, JPG), up to 25 MB each";
   return purpose === "deliverable"
     ? "Word, PDF, PowerPoint, Excel, ZIP or images, up to 50 MB"
     : "Word, PDF, PowerPoint, Excel or photos, up to 25 MB";

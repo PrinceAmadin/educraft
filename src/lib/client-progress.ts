@@ -31,6 +31,28 @@ export interface ClientStep {
 
 export type ProgressTone = "normal" | "attention" | "paused" | "closed" | "done";
 
+/**
+ * D4: the report is paused for the client's data files. "waiting": we asked and
+ * are waiting for them (again, after the specialist asks for more). "checking":
+ * they sent them and the specialist is checking. Null: no data pause.
+ */
+export type DataPauseState = "waiting" | "checking" | null;
+
+/** From the project's ready, active pause (see CLIENT_PAUSE_SELECT): OPEN = "waiting", SUBMITTED = "checking". */
+export function clientPauseState(pauses: { status: string }[]): DataPauseState {
+  const p = pauses[0];
+  if (!p) return null;
+  return p.status === "SUBMITTED" ? "checking" : p.status === "OPEN" ? "waiting" : null;
+}
+
+/** The Prisma select for it: the client never sees a request still being drafted. */
+export const CLIENT_PAUSE_SELECT = {
+  where: { status: { in: ["OPEN" as const, "SUBMITTED" as const] }, formStatus: "READY" as const },
+  select: { status: true },
+  orderBy: { afterChapter: "asc" as const },
+  take: 1,
+};
+
 export interface ClientProgress {
   steps: ClientStep[];
   /** 0-100, for the progress bar. */
@@ -50,6 +72,8 @@ export interface ProgressInput {
   heldFrom?: ProjectStatus | null;
   /** Chapters released to the client so far, for "2 of 5 chapters ready". */
   chapters?: { ready: number; total: number } | null;
+  /** D4: the report waits for the client's data files. */
+  dataPause?: DataPauseState;
 }
 
 const LABELS: Record<ClientStepKey, string> = {
@@ -106,8 +130,20 @@ const STATUS_STEP: Record<ProjectStatus, ClientStepKey> = {
 const FINISHED: ProjectStatus[] = ["DELIVERED", "SUPERVISOR_CORRECTIONS", "COMPLETED"];
 const HOLDS: ProjectStatus[] = ["ON_HOLD", "DISPUTED"];
 
+/** D4: what the client reads while the report waits for their data files. */
+export const DATA_PAUSE_TEXT = {
+  headlineWaiting: "We're waiting for your data files to continue.",
+  headlineChecking: "Thank you. Your specialist is checking the files you sent.",
+  stepWaiting: "Waiting for your data",
+  stepChecking: "Checking your data",
+  countdownWaiting: "Delivery date paused — waiting for your files",
+  countdownChecking: "Delivery date paused while your specialist checks your files",
+} as const;
+
 function headlineFor(input: ProgressInput): { headline: string; tone: ProgressTone } {
   const balancePaid = input.balanceStatus === "Verified";
+  if (input.dataPause === "waiting") return { headline: DATA_PAUSE_TEXT.headlineWaiting, tone: "attention" };
+  if (input.dataPause === "checking") return { headline: DATA_PAUSE_TEXT.headlineChecking, tone: "normal" };
   switch (input.status) {
     case "NEW":
       return { headline: "Pay your downpayment so we can start.", tone: "attention" };
@@ -183,6 +219,8 @@ export function clientProgress(input: ProgressInput): ClientProgress {
       if (key === "payment") detail = "Pay your downpayment to start";
       if (key === "balance") detail = "Pay your balance to unlock delivery";
       if (key === "writing" && effective === "AWAITING_CLIENT_INPUT") detail = "Waiting for you";
+      else if (key === "writing" && input.dataPause === "waiting") detail = DATA_PAUSE_TEXT.stepWaiting;
+      else if (key === "writing" && input.dataPause === "checking") detail = DATA_PAUSE_TEXT.stepChecking;
       else if (key === "writing" && input.chapters && input.chapters.total > 0 && input.chapters.ready > 0) {
         detail = `${input.chapters.ready} of ${input.chapters.total} chapters ready`;
       }
@@ -213,6 +251,8 @@ export function deliveryCountdown(input: {
   expectedDeliveryAt: Date | null;
   deadlinePausedAt: Date | null;
   status: ProjectStatus;
+  /** D4: a data pause freezes the date until the specialist verifies the files. */
+  dataPause?: DataPauseState;
   now?: Date;
 }): DeliveryCountdown {
   const date = input.expectedDeliveryAt;
@@ -220,6 +260,9 @@ export function deliveryCountdown(input: {
   if (input.status === "CANCELLED" || input.status === "REFUNDED") return { date: null, label: "", tone: "normal" };
   // Nothing has started before the downpayment: a date here would be a promise we haven't made.
   if (input.status === "NEW") return { date: null, label: "Your delivery date is set once your downpayment is in.", tone: "normal" };
+  // The date moves on by the days paused once the files are verified.
+  if (input.dataPause === "waiting") return { date, label: DATA_PAUSE_TEXT.countdownWaiting, tone: "gold" };
+  if (input.dataPause === "checking") return { date, label: DATA_PAUSE_TEXT.countdownChecking, tone: "normal" };
   if (input.deadlinePausedAt) {
     return { date, label: "Paused while we wait for you. The date moves on by the days paused.", tone: "gold" };
   }

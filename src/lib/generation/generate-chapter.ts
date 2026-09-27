@@ -210,15 +210,15 @@ export async function startChapterGeneration(input: StartChapterInput) {
       if (JSON.stringify(input.prompt.primarySources ?? null) !== JSON.stringify(toPromptPrimarySources(brief) ?? null)) {
         throw new GenerationError(`These ${brief.kind === "ARCHIVE" ? "archival sources" : "cases"} are not the ones the COO approved.`, true);
       }
-      // D3c: a chapter after a data pause needs exactly the data the worker sent there (its PDFs and images ride with every call).
+      // D3c/D4: a chapter after a data pause needs exactly the verified data from there (its ticked PDFs and images ride with every call).
       const needed = pausesBeforeChapter(approved.mode, chapter);
       const stored = await pauseDataForChapter(tx, project.id, approved.mode, chapter);
       if (stored.length < needed.length) {
         const missing = needed.filter((n) => !stored.some((d) => d.afterChapter === n));
-        throw new GenerationError(`Chapter ${chapter} needs the worker's data from the pause after Chapter ${missing.join(" and ")}, which has not been sent.`, true);
+        throw new GenerationError(`Chapter ${chapter} needs the client's data from the pause after Chapter ${missing.join(" and ")}, which has not been verified.`, true);
       }
       if (JSON.stringify(input.prompt.workerData ?? []) !== JSON.stringify(stored)) {
-        throw new GenerationError("This data is not the data the worker sent at the pause.", true);
+        throw new GenerationError("This data is not the verified data from the pause.", true);
       }
       const attachments = await attachmentRefs(tx, project.id, stored);
 

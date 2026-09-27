@@ -47,3 +47,21 @@ export function statusFeedEntry(from: ProjectStatus, to: ProjectStatus): FeedTex
       return null;
   }
 }
+
+/** D4: every sentence the client reads about a data pause outside the request itself (notifications, email, feed). */
+export const DATA_PAUSE_CLIENT_TEXT = {
+  requestTitle: "EduCraft needs your data files",
+  requestBody: "Your specialist has reached a point in your report where they need data files from you. Please log in to upload them.",
+  requestWait: "Your delivery date waits while we wait for your files.",
+  requestCta: "Upload my files",
+  requestFeedTitle: "We need your data files",
+  requestFeedBody: "Open the Progress tab to see exactly what to upload. Your delivery date waits while we wait for your files.",
+  receivedFeedTitle: "Your files were received",
+  receivedFeedBody: "Your files were received. We'll review them shortly.",
+  moreTitle: "Your specialist needs a little more",
+  moreBody: "Open the Progress tab to see what else to upload.",
+  checkedTitle: "Your files are checked",
+  checkedBody: "Your specialist has checked your files. Work on your report continues and your delivery date has moved on by the days we waited.",
+  cancelledTitle: "We don't need the data files after all",
+  cancelledBody: "Work on your report continues and your delivery date has moved on by the days we waited.",
+} as const;

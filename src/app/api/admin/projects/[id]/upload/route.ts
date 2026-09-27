@@ -23,7 +23,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     projectDbId: project.id,
     checkTarget: async (purpose, targetId) => {
       if (purpose === "message") return targetId === MESSAGE_TARGET ? null : "Invalid upload.";
-      if (purpose === "data") return "Data files are sent by the assigned worker at a pause.";
+      if (purpose === "data") {
+        // D4: the founder or COO adds files to a data pause the way a specialist would.
+        const pause = await db.pipelinePause.findFirst({
+          where: { id: targetId, projectId: project.id, status: { in: ["OPEN", "SUBMITTED"] }, formStatus: "READY" },
+          select: { id: true },
+        });
+        return pause ? null : "This project is not waiting for data.";
+      }
       const d = await db.projectDeliverable.findFirst({
         where: { id: targetId, projectId: project.id },
         select: { id: true },

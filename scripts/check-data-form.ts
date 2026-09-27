@@ -22,7 +22,7 @@ import {
   pausesBeforeChapter,
   readFormSpec,
   validateDataForm,
-  validateSubmission,
+  validateAnswers,
   type DataFormContext,
   type DataFormSpec,
   type WorkerData,
@@ -141,6 +141,7 @@ async function main() {
     objectives: ["To measure satisfaction with library services", "To test whether opening hours predict satisfaction"],
     chapters: [{ number: 3, text: "3.1 Research Design\n\nA survey of 350 students." + "y".repeat(50_000) }],
     checklist: ["SPSS output (.sav)", "Cronbach's Alpha"],
+    dataFrom: "ANALYSED",
   };
   const user = dataFormUserPrompt(ctx);
   check("the request names the topic, mode and objectives", user.includes(TOPIC) && user.includes("Mode 2") && user.includes("2. To test whether opening hours predict satisfaction"));
@@ -149,6 +150,12 @@ async function main() {
   const spec = dataFormUserPrompt({ ...ctx, mode: 3, kind: "SPECIFICATION", afterChapter: 2, chapters: [{ number: 1, text: "c1" }, { number: 2, text: "c2" }] });
   check("a specification pause explains the build, without the results checklist", spec.includes(DATA_FORM_TEXT.purpose.SPECIFICATION) && !spec.includes(DATA_FORM_TEXT.checklistIntro));
   check("the system prompt lists only the mode's formats", DATA_FORM_TEXT.system(MODE_FORMATS[3]).includes("pdf, png, jpg, docx"));
+  check("D4: an order without Data Analysis asks for the client's own analysis", user.includes(DATA_FORM_TEXT.dataFrom.ANALYSED) && !user.includes(DATA_FORM_TEXT.dataFrom.RAW));
+  const raw = dataFormUserPrompt({ ...ctx, dataFrom: "RAW" });
+  check("D4: an order with Data Analysis asks for the raw data", raw.includes(DATA_FORM_TEXT.dataFrom.RAW) && !raw.includes(DATA_FORM_TEXT.dataFrom.ANALYSED));
+  check("D4: a specification pause has no raw/analysed line", !spec.includes(DATA_FORM_TEXT.dataFrom.RAW) && !spec.includes(DATA_FORM_TEXT.dataFrom.ANALYSED));
+  const sys = DATA_FORM_TEXT.system(MODE_FORMATS[2]);
+  check("D4: the request is written for the client", sys.includes('write to them as "you"') && sys.includes('"your specialist"'));
 
   // ─── Chapter 4's own checklist, from the prompt files ─────────────────────
   const cl2 = await dataInputChecklist(2);
@@ -159,16 +166,15 @@ async function main() {
   check("Mode 4's checklist is about lab data", cl4.some((l) => /ANOVA|laboratory|lab/i.test(l)), cl4);
   check("Mode 1 has no data checklist", (await dataInputChecklist(1)).length === 0);
 
-  // ─── A worker's submission ────────────────────────────────────────────────
+  // ─── The answers to the request's questions ───────────────────────────────
   const form = (good as { form: DataFormSpec }).form;
-  const sub = validateSubmission(form, { distributed: 350, returned: "312", software: "  SPSS 26 " }, ["spss_output"]);
-  check("a complete submission passes and is trimmed", sub.ok && sub.answers.software === "SPSS 26" && sub.answers.distributed === "350");
-  const missing = validateSubmission(form, { distributed: "350" }, []);
-  check("missing fields and the required file are listed", !missing.ok && missing.problems.includes('Fill in "Software and version".') && missing.problems.includes('Upload "SPSS output (PDF)".'));
-  const bad = validateSubmission(form, { distributed: "three hundred", returned: "1", software: "x", faculty: "Medicine" }, ["spss_output", "spss_output", "other"]);
+  const sub = validateAnswers(form, { distributed: 350, returned: "312", software: "  SPSS 26 " });
+  check("complete answers pass and are trimmed", sub.ok && sub.answers.software === "SPSS 26" && sub.answers.distributed === "350");
+  const missing = validateAnswers(form, { distributed: "350" });
+  check("missing required answers are listed", !missing.ok && missing.problems.includes('Fill in "Software and version".'));
+  const bad = validateAnswers(form, { distributed: "three hundred", returned: "1", software: "x", faculty: "Medicine" });
   check("a word in a number field is refused", !bad.ok && bad.problems.some((p) => p.includes("must be a number")));
   check("a select answer outside its options is refused", !bad.ok && bad.problems.some((p) => p.includes("Pick one of the choices")));
-  check("an unknown slot and a doubled slot are refused", !bad.ok && bad.problems.some((p) => p.includes("does not have")) && bad.problems.some((p) => p.includes("one file per")));
 
   // ─── What the later chapters get ──────────────────────────────────────────
   const data: WorkerData[] = [
@@ -180,17 +186,17 @@ async function main() {
       checklist: form.checklist,
       answers: [{ label: "Questionnaires distributed", value: "350" }],
       files: [
-        { fileId: "f1", name: "spss.pdf", slot: "spss_output", kind: "document", text: null },
-        { fileId: "f2", name: "responses.xlsx", slot: "responses", kind: "text", text: "Q1,Q2\n4,5" },
+        { fileId: "f1", name: "spss.pdf", from: "the specialist", kind: "document", text: null },
+        { fileId: "f2", name: "responses.xlsx", from: "the client", kind: "text", text: "Q1,Q2\n4,5" },
       ],
     },
   ];
   const block = formatWorkerData(data);
   check("the data text carries the request word for word", block.includes(`What was asked for: ${form.description}`));
   check("the data text carries the answers and the Excel text", block.includes("- Questionnaires distributed: 350") && block.includes("Q1,Q2\n4,5"));
-  check("a PDF is named as attached, never pasted", block.includes("spss.pdf (spss_output) is attached to this message") && !block.includes("f1"));
+  check("a PDF is named as attached, never pasted", block.includes("spss.pdf (sent by the specialist) is attached to this message") && block.includes("File responses.xlsx (sent by the client), as text:") && !block.includes("f1"));
   check("the no-invention rule and placeholder are there", block.includes("never invent") && block.includes("[DATA NOT PROVIDED — COO TO REVIEW]"));
-  const huge = formatWorkerData([{ ...data[0], files: [{ name: "a.csv", slot: "a", kind: "text", text: "z".repeat(70_000) }, { name: "b.csv", slot: "b", kind: "text", text: "w".repeat(70_000) }] }]);
+  const huge = formatWorkerData([{ ...data[0], files: [{ name: "a.csv", from: "the client", kind: "text", text: "z".repeat(70_000) }, { name: "b.csv", from: "the client", kind: "text", text: "w".repeat(70_000) }] }]);
   check("all the files of a pause share one 80,000-character budget", huge.length < 82_000 && huge.includes("[… cut to keep the prompt within its limit]"));
   const spec3 = formatWorkerData([{ ...data[0], kind: "SPECIFICATION", afterChapter: 2 }]);
   check("a specification says to describe only what was built", spec3.includes("Describe the system only as it states"));
@@ -221,8 +227,8 @@ async function main() {
   check("no data, no data part", !without.text.includes("THE PROJECT'S DATA"));
 
   // ─── Files: policy, first bytes, extraction ───────────────────────────────
-  check("workers and admins may send data files; clients may not", canUpload("WORKER", "data") && canUpload("ADMIN", "data") && !canUpload("CLIENT", "data"));
-  check("data files are at most 20 MB", maxBytesFor("data") === 20 * 1024 * 1024);
+  check("workers and admins may send data files; a client without an active pause may not",canUpload("WORKER", "data") && canUpload("ADMIN", "data") && !canUpload("CLIENT", "data"));
+  check("data files are at most 25 MB each (D4)", maxBytesFor("data") === 25 * 1024 * 1024);
   check("csv and xlsx have content types", contentTypeFor("data", "a.csv") === "text/csv" && contentTypeFor("data", "a.xlsx") !== null);
   check("a .pptx is not a data file", contentTypeFor("data", "a.pptx") === null);
   check("the picker offers the data formats", acceptAttribute("data").includes(".xlsx") && allowedKindsLabel("data").includes("Excel"));

@@ -11,7 +11,7 @@ import { fileHref } from "@/lib/files/links";
 import { WorkerAssignmentActions } from "@/components/worker/WorkerAssignmentActions";
 import { ResearchPanel } from "@/components/worker/ResearchPanel";
 import { WorkerDeliverablesPanel } from "@/components/worker/WorkerDeliverablesPanel";
-import { DataPauseBanner } from "@/components/worker/DataPauseBanner";
+import { DataPauseReviewCard } from "@/components/worker/DataPauseReviewCard";
 import { getWorkerPauseView } from "@/lib/services/data-pause";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
@@ -62,7 +62,7 @@ export default async function WorkerAssignmentPage({
   const earlierLinks = project.files.filter((f) => f.category === "from_worker" && !f.deliverableId);
   const showRevisionFeedback = project.status === "REVISION_NEEDED" && project.qaNotes;
   const routeBase = `/api/worker/projects/${encodeURIComponent(project.projectId)}`;
-  // D3c: the report waits here for this project's data (asked for in the project's own terms).
+  // D4: the report waits here for the client's data; the worker checks it (and may add their own).
   const pause = await getWorkerPauseView(worker.id, project.projectId);
 
   const deliverables = (await listDeliverablesForWorker(project.id)).map((d) => {
@@ -149,7 +149,14 @@ export default async function WorkerAssignmentPage({
         </div>
       ) : null}
 
-      {pause ? <DataPauseBanner key={pause.id} projectCode={project.projectId} initial={pause} /> : null}
+      {pause ? (
+        <DataPauseReviewCard
+          key={`${pause.id}-${pause.status}-${pause.round}`}
+          initial={pause}
+          actionEndpoint={`${routeBase}/data-pause`}
+          uploadEndpoint={`${routeBase}/upload`}
+        />
+      ) : null}
 
       <WorkerAssignmentActions projectCode={project.projectId} status={project.status} />
 

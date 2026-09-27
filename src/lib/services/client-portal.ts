@@ -2,9 +2,12 @@ import type { ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { ClientScope } from "@/lib/api";
 import {
+  CLIENT_PAUSE_SELECT,
+  clientPauseState,
   clientProgress,
   deliveryCountdown,
   type ClientProgress,
+  type DataPauseState,
   type DeliveryCountdown,
 } from "@/lib/client-progress";
 import { balancePayable, downpaymentDue } from "@/lib/payment-rules";
@@ -66,6 +69,8 @@ const viewSelect = {
     where: { archivedAt: null, kind: "CHAPTER" },
     select: { versions: { where: { releaseNo: { not: null } }, select: { id: true }, take: 1 } },
   },
+  // D4: the report waiting for the client's data files (a ready request only).
+  pauses: CLIENT_PAUSE_SELECT,
 } as const;
 
 type ViewRow = {
@@ -85,7 +90,11 @@ type ViewRow = {
   service: { serviceName: string };
   researchJob: { status: string } | null;
   deliverables: { versions: { id: string }[] }[];
+  pauses: { status: string }[];
 };
+
+/** Statuses where a data pause can hold the work (never on a closed or unpaid project). */
+const PAUSABLE: ProjectStatus[] = ["ASSIGNED", "IN_PROGRESS", "REVISION_NEEDED"];
 
 export interface ClientProjectView {
   id: string;
@@ -110,6 +119,8 @@ export interface ClientProjectView {
   balanceUnlocks: string | null;
   /** How many items that is (for "it's" vs "each is"). */
   balanceUnlockCount: number;
+  /** D4: the report waits for the client's data files ("waiting") or checks them ("checking"). */
+  dataPause: DataPauseState;
 }
 
 async function heldFromFor(projectDbId: string, status: ProjectStatus): Promise<ProjectStatus | null> {
@@ -123,7 +134,9 @@ async function heldFromFor(projectDbId: string, status: ProjectStatus): Promise<
 }
 
 function toView(row: ViewRow, heldFrom: ProjectStatus | null, unreadMessages: number): ClientProjectView {
+  const dataPause = PAUSABLE.includes(row.status) ? clientPauseState(row.pauses) : null;
   const progress = clientProgress({
+    dataPause,
     status: row.status,
     isProBono: row.isProBono,
     downpaymentStatus: row.downpaymentStatus,
@@ -139,6 +152,7 @@ function toView(row: ViewRow, heldFrom: ProjectStatus | null, unreadMessages: nu
     expectedDeliveryAt: row.expectedDeliveryAt,
     deadlinePausedAt: row.deadlinePausedAt,
     status: row.status,
+    dataPause,
   });
   return {
     id: row.id,
@@ -160,6 +174,7 @@ function toView(row: ViewRow, heldFrom: ProjectStatus | null, unreadMessages: nu
     unreadMessages,
     balanceUnlocks: null,
     balanceUnlockCount: 0,
+    dataPause,
   };
 }
 
@@ -253,6 +268,7 @@ export async function listClientProjectCards(scope: ClientScope): Promise<Client
       const view = toView(row, await heldFromFor(row.id, row.status), unread.get(row.id) ?? 0);
       let nextAction: string | null = null;
       if (view.canPayDownpayment) nextAction = "Pay your downpayment";
+      else if (view.dataPause === "waiting") nextAction = "Upload your data files";
       else if (view.status === "AWAITING_CLIENT_INPUT") nextAction = "We need something from you";
       else if (view.unreadMessages > 0) nextAction = view.unreadMessages === 1 ? "1 new message" : `${view.unreadMessages} new messages`;
       else if (view.status === "APPROVED" && view.canPayBalance) nextAction = "Pay your balance to unlock delivery";
