@@ -33,7 +33,7 @@ export function buildPrivatePath(input: {
 /** A path an UPLOAD may use (chapters and message attachments only). */
 export function parsePrivatePath(pathname: string): PrivatePath | null {
   const parsed = parseStoredPath(pathname);
-  if (!parsed || (parsed.purpose !== "deliverable" && parsed.purpose !== "message")) return null;
+  if (!parsed || (parsed.purpose !== "deliverable" && parsed.purpose !== "message" && parsed.purpose !== "data")) return null;
   return { ...parsed, purpose: parsed.purpose };
 }
 
@@ -53,7 +53,7 @@ export function parseStoredPath(pathname: string): StoredPath | null {
   if (parts.length !== 5 || parts[0] !== "projects") return null;
   const [, projectDbId, purpose, targetId, name] = parts;
   if (!ID.test(projectDbId) || !TARGET.test(targetId) || !NAME.test(name)) return null;
-  if (purpose !== "deliverable" && purpose !== "message" && purpose !== "source") return null;
+  if (purpose !== "deliverable" && purpose !== "message" && purpose !== "data" && purpose !== "source") return null;
   return { projectDbId, purpose, targetId, name };
 }
 

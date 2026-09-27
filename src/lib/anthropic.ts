@@ -293,6 +293,13 @@ export async function callClaudeWithWebSearch<T>({
 
 /** A prompt-cache breakpoint: everything up to and including the marked block is cached for 5 minutes. */
 export type CacheControl = { type: "ephemeral" };
+/** A PDF or an image sent as it is (Claude reads its tables and charts). */
+export type ClaudeAttachmentBlock =
+  | { type: "document"; source: { type: "base64"; media_type: "application/pdf"; data: string }; title?: string; cache_control?: CacheControl }
+  | { type: "image"; source: { type: "base64"; media_type: "image/png" | "image/jpeg"; data: string }; cache_control?: CacheControl };
+
+export type ClaudeContentBlock = ClaudeTextBlock | ClaudeAttachmentBlock;
+
 export interface ClaudeTextBlock {
   type: "text";
   text: string;
@@ -309,7 +316,8 @@ export interface ClaudeStreamInput {
   /** Stable instructions first: this is the cached prefix. */
   system: ClaudeTextBlock[];
   /** The one user turn, as blocks so breakpoints can sit on them. */
-  user: ClaudeTextBlock[];
+  /** Text, plus D3c's data files (a PDF document or an image) where a chapter carries them. */
+  user: ClaudeContentBlock[];
   /** Keep the same tools on every call that shares a cached prefix: tools render before the system prompt. */
   tools?: ClaudeToolDefinition[];
   /** Changing tool_choice keeps the tools and system cache (the messages cache is rebuilt). */

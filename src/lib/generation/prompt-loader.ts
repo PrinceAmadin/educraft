@@ -40,6 +40,7 @@ import path from "node:path";
 import mammoth from "mammoth";
 import type { Project, Reference } from "@prisma/client";
 import { referenceListEntries } from "@/lib/research-references-doc";
+import { formatWorkerData, type WorkerData } from "./dynamic-data-form";
 import {
   MODE_NAMES,
   matchDepartment,
@@ -100,6 +101,11 @@ export interface ChapterPromptInput {
    * department, where the list-only rule applies as before.
    */
   primarySources?: PromptPrimarySources;
+  /**
+   * D3c: what EduCraft's worker sent at the pipeline pauses before this chapter (the request, the
+   * answers, text read from Word/Excel/CSV files, and the PDFs and images attached to the call).
+   */
+  workerData?: WorkerData[];
 }
 
 export interface PromptPrimarySource {
@@ -392,6 +398,25 @@ function parseChapterFile(chapter: FileChapter, fileName: string, paragraphs: st
   if (open) throw fail(`[${open}] is never closed`);
   if (!blocks.has("SHARED: ALL DEPARTMENTS")) throw fail("no [SHARED: ALL DEPARTMENTS] block");
   return { chapter, fileName, allModesRules, routingIntro: trimBlank(routingIntro), modeBlocks, headerExtras, blocks };
+}
+
+/**
+ * D3c: the data a chapter file's own "DATA INPUT CHECKLIST" asks for in one mode (Chapter 4 by
+ * default), so the data request at a pause asks for exactly what that chapter checks before writing.
+ */
+export async function dataInputChecklist(mode: ResearchModeNumber, chapter: ChapterNumber = 4): Promise<string[]> {
+  const lib = await loadPromptLibrary();
+  const file = lib.chapters.get(chapter);
+  if (!file) return [];
+  const out: string[] = [];
+  for (const g of file.headerExtras) {
+    if (!g.byMode || !g.paragraphs.some((p) => /DATA INPUT CHECKLIST/i.test(p))) continue;
+    for (const p of g.byMode.get(mode)?.slice(1) ?? []) {
+      const line = p.replace(/^[\s\u2610\u25a1\u25a2*-]+/, "").trim();
+      if (line) out.push(line);
+    }
+  }
+  return out;
 }
 
 function splitChecklistByMode(group: string[]): HeaderExtra {
@@ -796,6 +821,13 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
       ]),
     });
     used.push(`d3b:${approved.items.length} approved ${approved.kind === "case" ? "cases" : "archival sources"}, ${unsupported.length} points without one`);
+  }
+
+  // D3c: the worker's data from the pauses before this chapter (the files themselves ride with the call).
+  if (input.workerData?.length) {
+    const title = "THE PROJECT'S DATA";
+    parts.push({ title, text: render(title, [neutralize(formatWorkerData(input.workerData))]) });
+    used.push(`d3c:data from ${input.workerData.length} pause${input.workerData.length === 1 ? "" : "s"}`);
   }
 
   // Strip pointers to the image rules: they send the model to a file it cannot see

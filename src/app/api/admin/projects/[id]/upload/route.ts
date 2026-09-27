@@ -23,6 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     projectDbId: project.id,
     checkTarget: async (purpose, targetId) => {
       if (purpose === "message") return targetId === MESSAGE_TARGET ? null : "Invalid upload.";
+      if (purpose === "data") return "Data files are sent by the assigned worker at a pause.";
       const d = await db.projectDeliverable.findFirst({
         where: { id: targetId, projectId: project.id },
         select: { id: true },

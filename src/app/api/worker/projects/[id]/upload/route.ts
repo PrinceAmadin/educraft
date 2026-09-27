@@ -22,6 +22,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     role: "WORKER",
     projectDbId: project.id,
     checkTarget: async (purpose, targetId) => {
+      if (purpose === "data") {
+        // D3c: only into this project's own open pause, once its data request is ready.
+        const pause = await db.pipelinePause.findFirst({
+          where: { id: targetId, projectId: project.id, status: { in: ["OPEN", "SUBMITTED"] }, formStatus: "READY" },
+          select: { id: true },
+        });
+        return pause ? null : "This project is not waiting for data.";
+      }
       if (purpose !== "deliverable") return "Workers upload chapters and documents only.";
       const d = await db.projectDeliverable.findFirst({
         where: { id: targetId, projectId: project.id, archivedAt: null },

@@ -373,21 +373,34 @@ export function stepEstimateMs(step: { kind: "plan" } | { kind: "part"; targetWo
 // ─── Request layout (prompt caching) ────────────────────────────────────────
 
 /** Same shape as anthropic.ts's ClaudeTextBlock (kept here so this module stays free of the database). */
-export interface UserBlock {
+export interface TextBlock {
   type: "text";
   text: string;
   cache_control?: { type: "ephemeral" };
 }
+
+/** D3c: the worker's data file sent to Claude as it is (a PDF document or an image). */
+export type AttachmentBlock =
+  | { type: "document"; source: { type: "base64"; media_type: "application/pdf"; data: string }; title?: string; cache_control?: { type: "ephemeral" } }
+  | { type: "image"; source: { type: "base64"; media_type: "image/png" | "image/jpeg"; data: string }; cache_control?: { type: "ephemeral" } };
+
+export type UserBlock = TextBlock | AttachmentBlock;
 const CACHED = { type: "ephemeral" } as const;
+
+/** The data attachments after the brief, the last one marked as a cache point (paid once per chapter, then read from cache). */
+function withCachePoint(attachments: AttachmentBlock[]): UserBlock[] {
+  return attachments.map((a, i) => (i === attachments.length - 1 ? { ...a, cache_control: CACHED } : { ...a }));
+}
 
 /**
  * The planning call: the brief (cached with the prompt before it), then the
  * instruction. Every call of a run sends the prompt as the system block with
  * its own breakpoint.
  */
-export function outlineUserBlocks(briefText: string, chapter: number): UserBlock[] {
+export function outlineUserBlocks(briefText: string, chapter: number, attachments: AttachmentBlock[] = []): UserBlock[] {
   return [
     { type: "text", text: briefText, cache_control: CACHED },
+    ...withCachePoint(attachments),
     { type: "text", text: GENERATION_TEXT.outlineInstruction(chapter) },
   ];
 }
@@ -396,13 +409,22 @@ export function outlineUserBlocks(briefText: string, chapter: number): UserBlock
  * A writing call: the brief, the plan (breakpoint), each written part as its
  * own block (breakpoint on the last, so the next part reads this call's cache
  * entry), then the instruction, which is never cached. With the system
- * block's breakpoint that is at most 3 of the 4 allowed.
+ * block's breakpoint that is at most 3 of the 4 allowed; D3c's data attachments
+ * (after the brief) take the 4th.
  */
-export function partUserBlocks(p: { briefText: string; plan: ChapterPlan; partialOutput: string | null; chapter: number; partIndex: number }): UserBlock[] {
+export function partUserBlocks(p: {
+  briefText: string;
+  plan: ChapterPlan;
+  partialOutput: string | null;
+  chapter: number;
+  partIndex: number;
+  attachments?: AttachmentBlock[];
+}): UserBlock[] {
   const written = p.plan.parts.slice(0, p.partIndex);
   const texts = p.partialOutput ? (splitParts(p.partialOutput, written.map((w) => w.chars ?? 0)) ?? [p.partialOutput]) : [];
   return [
     { type: "text", text: p.briefText },
+    ...withCachePoint(p.attachments ?? []),
     { type: "text", text: planText(p.plan), cache_control: CACHED },
     ...texts.map(
       (t, i): UserBlock => ({

@@ -261,8 +261,9 @@ const marks = (bs: { cache_control?: unknown }[]) => bs.map((b) => (b.cache_cont
 check("cache: part 1 = brief, plan*, instruction", marks(b0) === "010" && b0.length === 3, marks(b0));
 check("cache: part 3 = brief, plan*, part1, part2*, instruction", marks(b2) === "01010" && b2.length === 5, marks(b2));
 check("cache: at most 3 breakpoints with the system block (4 allowed)", 1 + marks(b2).split("").filter((c) => c === "1").length <= 4);
-check("cache: part 2's written block is byte-identical inside part 3's request (prefix reuse)", b1[2].text === b2[2].text && b1[1].text === b2[1].text && b1[0].text === b2[0].text);
-check("cache: written text is labelled once, on the first part", b2[2].text.startsWith(GENERATION_TEXT.writtenSoFar(1)) && !b2[3].text.startsWith("CHAPTER"));
+const txt = (b: { type: string }) => ("text" in b ? String((b as { text: string }).text) : "");
+check("cache: part 2's written block is byte-identical inside part 3's request (prefix reuse)", txt(b1[2]) === txt(b2[2]) && txt(b1[1]) === txt(b2[1]) && txt(b1[0]) === txt(b2[0]));
+check("cache: written text is labelled once, on the first part", txt(b2[2]).startsWith(GENERATION_TEXT.writtenSoFar(1)) && !txt(b2[3]).startsWith("CHAPTER"));
 const b2bad = partUserBlocks({ briefText: "BRIEF", plan: donePlan, partialOutput: joinParts(partTexts) + "x", chapter: 1, partIndex: 2 });
 check("cache: lengths that do not add up fall back to one block", b2bad.length === 4);
 

@@ -8,6 +8,7 @@
 import { db } from "@/lib/db";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { getApprovedBrief, type ApprovedBrief } from "@/lib/research/source-stage-actions";
+import { pauseDataForChapter } from "@/lib/services/data-pause";
 import type { ChapterNumber, ChapterPromptInput, PromptPrimarySources, PromptReference } from "./prompt-loader";
 
 /** The approved sources in the loader's shape (null for departments with no source stage). */
@@ -92,5 +93,7 @@ export async function approvedChapterInput(projectIdOrCode: string, chapter: Cha
     },
     references: references as PromptReference[],
     primarySources: toPromptPrimarySources(brief),
+    // D3c: the worker's data from the pauses before this chapter (empty when the chapter needs none).
+    workerData: await pauseDataForChapter(db, project.id, settings.mode, chapter),
   };
 }

@@ -49,17 +49,20 @@ export const LOCK_TEXT: Record<LockReason, string> = {
 
 // ── Uploads ──────────────────────────────────────────────────
 
-/** deliverable: a chapter or document version. message: an attachment in the client thread. */
-export type UploadPurpose = "deliverable" | "message";
+/**
+ * deliverable: a chapter or document version. message: an attachment in the client thread.
+ * data: the worker's analysed data at a report pipeline pause (D3c).
+ */
+export type UploadPurpose = "deliverable" | "message" | "data";
 export type UploaderRole = "WORKER" | "ADMIN" | "CLIENT";
 
-export const UPLOAD_PURPOSES: readonly UploadPurpose[] = ["deliverable", "message"];
+export const UPLOAD_PURPOSES: readonly UploadPurpose[] = ["deliverable", "message", "data"];
 
 /** Everything the private store holds: uploads plus "source", files the server itself saves (court judgment PDFs, D3b). */
 export type StoredPurpose = UploadPurpose | "source";
 
 export function canUpload(role: UploaderRole, purpose: UploadPurpose): boolean {
-  if (purpose === "deliverable") return role === "WORKER" || role === "ADMIN";
+  if (purpose === "deliverable" || purpose === "data") return role === "WORKER" || role === "ADMIN";
   return role === "CLIENT" || role === "ADMIN";
 }
 
@@ -77,16 +80,19 @@ const TYPES: Record<string, string> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   webp: "image/webp",
+  csv: "text/csv",
 };
 
 const EXTENSIONS: Record<StoredPurpose, readonly string[]> = {
   deliverable: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "png", "jpg", "jpeg"],
   message: ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "png", "jpg", "jpeg", "webp"],
   source: ["pdf"],
+  // What Claude can read directly (PDF, images) or what we turn into text (Word, Excel, CSV).
+  data: ["pdf", "docx", "xlsx", "csv", "png", "jpg", "jpeg"],
 };
 
 const MB = 1024 * 1024;
-const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB };
+const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB, data: 20 * MB };
 
 export function maxBytesFor(purpose: StoredPurpose): number {
   return MAX_BYTES[purpose];
@@ -113,6 +119,7 @@ export function acceptAttribute(purpose: UploadPurpose): string {
 }
 
 export function allowedKindsLabel(purpose: UploadPurpose): string {
+  if (purpose === "data") return "PDF, Word, Excel, CSV or images (PNG, JPG), up to 20 MB";
   return purpose === "deliverable"
     ? "Word, PDF, PowerPoint, Excel, ZIP or images, up to 50 MB"
     : "Word, PDF, PowerPoint, Excel or photos, up to 25 MB";
@@ -145,6 +152,12 @@ export function magicMatches(fileName: string, head: Uint8Array): boolean {
       return starts(0xff, 0xd8, 0xff);
     case "webp":
       return starts(0x52, 0x49, 0x46, 0x46) && head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50;
+    case "csv": {
+      // Plain text: no NUL bytes, and not an HTML page renamed to .csv.
+      if (head.length === 0 || head.some((b) => b === 0)) return false;
+      const start = new TextDecoder().decode(head).replace(/^\uFEFF/, "").trimStart().toLowerCase();
+      return !start.startsWith("<");
+    }
     default:
       return false;
   }

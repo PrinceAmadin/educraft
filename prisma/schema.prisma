@@ -576,6 +576,7 @@ model Project {
   researchMode          ResearchMode?
   brief                 ProjectBrief?
   sources               ProjectSource[]
+  pauses                PipelinePause[]
 
   @@index([status])
   @@index([clientId])
@@ -623,11 +624,18 @@ model ProjectFile {
   messageId     String?
   message       ProjectMessage?     @relation(fields: [messageId], references: [id])
   version       DeliverableVersion?
+  /// D3c: a data file the worker sent at a pipeline pause (category ch34_data), and which of the form's file slots it fills.
+  pauseId       String?
+  pause         PipelinePause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
+  pauseSlot     String?
+  /// D3c: text read from a Word, CSV or Excel data file for the chapter prompts (PDFs and images go to Claude as they are).
+  extractedText String?             @db.Text
   createdAt  DateTime @default(now())
 
   @@index([projectId, category])
   @@index([deliverableId])
   @@index([messageId])
+  @@index([pauseId])
 }
 
 // ─── DELIVERABLES ───────────────────────────────────────
@@ -1512,6 +1520,8 @@ model GenerationCheckpoint {
   promptMeta Json
   /// Run options (effort; a simulated failure for tests, ignored in production).
   options    Json?
+  /// D3c: the worker's data files (PDFs, images) sent to Claude with every call of this chapter, frozen at the start.
+  attachments Json?
 
   /// The plan from the outline step: numbered sections with word targets,
   /// packed into parts, with each part's result once written.
@@ -2268,4 +2278,57 @@ model WorkerNote {
   createdAt  DateTime @default(now())
 
   @@index([workerId, createdAt])
+}
+
+/// D3c: the report pipeline waits here for the worker's data (Modes 2 and 4 after Chapter 3;
+/// Mode 3 after Chapter 2 for the build specifications and after Chapter 3 for the results).
+enum DataPauseStatus {
+  OPEN // waiting for the worker's data
+  SUBMITTED // the worker sent it; the COO resumes the report
+  RESUMED
+  CANCELLED
+}
+
+enum DataFormStatus {
+  GENERATING
+  READY
+  FAILED // the form could not be drafted; the COO asks again (never a generic form)
+}
+
+enum DataPauseKind {
+  SPECIFICATION // Mode 3 after Chapter 2: what was built, for Chapter 3
+  RESULTS // after Chapter 3: the analysed data for Chapters 4 and 5
+}
+
+/// D3c: one pause point of one project, with the data request Claude drafted for it (saved, so it
+/// survives the worker closing the page) and what the worker sent back.
+model PipelinePause {
+  id              String          @id @default(cuid())
+  projectId       String
+  project         Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  afterChapter    Int
+  kind            DataPauseKind
+  mode            Int
+  status          DataPauseStatus @default(OPEN)
+  formStatus      DataFormStatus  @default(GENERATING)
+  formTitle       String?
+  /// The project-specific instruction the worker sees on the banner.
+  formDescription String?         @db.Text
+  /// { files: [...], fields: [...], checklist: [...] } (dynamic-data-form.ts)
+  formSpec        Json?
+  formError       String?
+  formGeneratedAt DateTime?
+  /// { <field key>: value }
+  answers         Json?
+  submittedAt     DateTime?
+  submittedById   String?
+  resumedAt       DateTime?
+  cancelledAt     DateTime?
+  openedById      String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  files           ProjectFile[]
+
+  @@unique([projectId, afterChapter])
+  @@index([status])
 }

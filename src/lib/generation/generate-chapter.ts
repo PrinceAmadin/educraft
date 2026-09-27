@@ -30,6 +30,8 @@ import { matchDepartment, resolveSection } from "./department-map";
 import { ModeNotApprovedError, lockApprovedMode, type ApprovedModeSettings } from "@/lib/services/research-mode";
 import { getApprovedBrief, type ApprovedBrief } from "@/lib/research/source-stage-actions";
 import { toPromptPrimarySources } from "./approved-inputs";
+import { pausesBeforeChapter } from "./dynamic-data-form";
+import { attachmentRefs, loadDataAttachments, pauseDataForChapter, type AttachmentRef } from "@/lib/services/data-pause";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -208,6 +210,17 @@ export async function startChapterGeneration(input: StartChapterInput) {
       if (JSON.stringify(input.prompt.primarySources ?? null) !== JSON.stringify(toPromptPrimarySources(brief) ?? null)) {
         throw new GenerationError(`These ${brief.kind === "ARCHIVE" ? "archival sources" : "cases"} are not the ones the COO approved.`, true);
       }
+      // D3c: a chapter after a data pause needs exactly the data the worker sent there (its PDFs and images ride with every call).
+      const needed = pausesBeforeChapter(approved.mode, chapter);
+      const stored = await pauseDataForChapter(tx, project.id, approved.mode, chapter);
+      if (stored.length < needed.length) {
+        const missing = needed.filter((n) => !stored.some((d) => d.afterChapter === n));
+        throw new GenerationError(`Chapter ${chapter} needs the worker's data from the pause after Chapter ${missing.join(" and ")}, which has not been sent.`, true);
+      }
+      if (JSON.stringify(input.prompt.workerData ?? []) !== JSON.stringify(stored)) {
+        throw new GenerationError("This data is not the data the worker sent at the pause.", true);
+      }
+      const attachments = await attachmentRefs(tx, project.id, stored);
 
       const existing = await tx.generationCheckpoint.findUnique({
         where: { projectId_chapterNumber: { projectId: project.id, chapterNumber: chapter } },
@@ -235,6 +248,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
           promptMeta: promptMeta as Prisma.InputJsonValue,
           options: (input.options ?? {}) as Prisma.InputJsonValue,
           requestedById: input.requestedById ?? null,
+          ...(attachments.length ? { attachments: attachments as unknown as Prisma.InputJsonValue } : {}),
         },
         select: SNAPSHOT_SELECT,
       });
@@ -290,6 +304,12 @@ function options(cp: GenerationCheckpoint): GenerationOptions {
   return (cp.options ?? {}) as GenerationOptions;
 }
 
+/** D3c: the worker's PDFs and images frozen on this chapter's checkpoint, read back for the call. */
+async function dataAttachments(cp: GenerationCheckpoint) {
+  const refs = Array.isArray(cp.attachments) ? (cp.attachments as unknown as AttachmentRef[]) : [];
+  return refs.length ? loadDataAttachments(refs) : [];
+}
+
 function systemBlocks(cp: GenerationCheckpoint): ClaudeTextBlock[] {
   return [{ type: "text", text: cp.promptText, cache_control: CACHE }];
 }
@@ -326,7 +346,7 @@ async function planChapter(cp: GenerationCheckpoint, ctx: StepContext): Promise<
   const chapter = cp.chapterNumber;
   yieldIfNoTime(ctx, stepEstimateMs({ kind: "plan" }));
   const result = await callClaude(cp, {
-    user: outlineUserBlocks(cp.briefText, chapter),
+    user: outlineUserBlocks(cp.briefText, chapter, await dataAttachments(cp)),
     toolChoice: { type: "auto" },
     maxTokens: OUTLINE_MAX_TOKENS,
     deadline: ctx.deadline,
@@ -377,7 +397,7 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
   const headingNumbers = partUnits(plan, part).map((u) => unitHeadingNumber(plan, u));
 
   const wordsBefore = plan.parts.slice(0, k).reduce((n, p) => n + (p.words ?? 0), 0);
-  const user = partUserBlocks({ briefText: cp.briefText, plan, partialOutput: cp.partialOutput, chapter, partIndex: k });
+  const user = partUserBlocks({ briefText: cp.briefText, plan, partialOutput: cp.partialOutput, chapter, partIndex: k, attachments: await dataAttachments(cp) });
 
   // Live progress: the streaming text is saved every few thousand characters, one write at a time.
   let draft = "";

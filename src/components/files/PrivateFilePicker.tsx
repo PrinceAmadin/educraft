@@ -21,6 +21,8 @@ export function PrivateFilePicker({
   label = "Choose a file",
   disabled = false,
   id,
+  accept,
+  hint,
 }: {
   endpoint: string;
   purpose: UploadPurpose;
@@ -31,6 +33,9 @@ export function PrivateFilePicker({
   label?: string;
   disabled?: boolean;
   id: string;
+  /** Narrower than the purpose allows (e.g. one data slot that takes PDF only). */
+  accept?: string;
+  hint?: string;
 }) {
   const input = React.useRef<HTMLInputElement>(null);
   const [progress, setProgress] = React.useState<number | null>(null);
@@ -119,7 +124,7 @@ export function PrivateFilePicker({
             ref={input}
             id={id}
             type="file"
-            accept={acceptAttribute(purpose)}
+            accept={accept ?? acceptAttribute(purpose)}
             className="sr-only"
             disabled={disabled}
             onChange={(e) => onPick(e.target.files?.[0])}
@@ -129,7 +134,7 @@ export function PrivateFilePicker({
         </label>
       )}
 
-      {!value && !uploading ? <p className="text-xs text-muted-foreground">{allowedKindsLabel(purpose)}</p> : null}
+      {!value && !uploading ? <p className="text-xs text-muted-foreground">{hint ?? allowedKindsLabel(purpose)}</p> : null}
 
       {error ? (
         <p className="flex items-start gap-2 text-sm text-danger" role="alert">
