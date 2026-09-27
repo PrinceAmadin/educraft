@@ -27,7 +27,9 @@
 import { PrismaClient } from "@prisma/client";
 import { recountAmbassador } from "../src/lib/services/ambassador-platform/conversions";
 import { reconcileProjectPayouts } from "../src/lib/services/finance/payouts-engine";
-import { calculateTier } from "../src/lib/ambassadors/tier-utils";
+import { ambassadorTier } from "../src/lib/ambassadors/tier-utils";
+import { execForRecord } from "../src/lib/executive-identity";
+import { loadExecIndex } from "../src/lib/services/executives";
 
 const db = new PrismaClient();
 const apply = process.argv.includes("--apply");
@@ -114,16 +116,18 @@ async function main() {
 
   // 4. Recount everyone. The dry run previews every tier that would move, so
   //    the founder sees who goes up or down before anything is written.
-  const ambassadors = await db.ambassador.findMany({ select: { id: true, fullName: true, tier: true, lifetimeConversions: true } });
+  const ambassadors = await db.ambassador.findMany({ select: { id: true, fullName: true, tier: true, lifetimeConversions: true, email: true, user: { select: { email: true, role: true } } } });
   console.log(`4. Recount ${ambassadors.length} ambassador(s)`);
   if (!apply) {
     const existing = await db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED" }, _count: { _all: true } });
     const converted = new Map(existing.map((e) => [e.ambassadorId, e._count._all]));
     for (const p of projects) if (p.downpaymentStatus === "Verified") converted.set(p.ambassadorId!, (converted.get(p.ambassadorId!) ?? 0) + 1);
+    // The same rule recountAmbassador applies: an executive's record stays Platinum.
+    const execIndex = await loadExecIndex(db);
     let moves = 0;
     for (const a of ambassadors) {
       const n = converted.get(a.id) ?? 0;
-      const tier = calculateTier(n);
+      const tier = ambassadorTier(n, execForRecord(execIndex, a) != null);
       if (tier !== a.tier) {
         moves += 1;
         console.log(`   would move ${a.fullName}: ${a.tier} → ${tier} (${n} conversion${n === 1 ? "" : "s"})`);
