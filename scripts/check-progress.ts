@@ -206,6 +206,7 @@ const view: RunView = {
   startedByName: "Emmanuel Mebawondu",
   requestedAt: "2026-09-28T09:00:00.000Z",
   paused: false,
+  schedulerQuiet: false,
   generationStarted: true,
   references: 52,
   research: "PASSED",

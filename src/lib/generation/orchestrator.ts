@@ -44,7 +44,19 @@ import { ACTIVE_STATUSES, GenerationError, failChapterGeneration, stallChapterGe
 import { scheduleGenerationStep } from "./generation-runner";
 import { isReportTemplate } from "./generation-state";
 import { PromptAssemblyError, loadChapterPrompt, type ChapterNumber } from "./prompt-loader";
-import { START_SELECT, generationPaused, getRunView, researchState, startVerdict, type RunView, type StartProject } from "./orchestrator-view";
+import {
+  START_SELECT,
+  currentRunner,
+  generationPaused,
+  getRunView,
+  researchState,
+  schedulerQuiet,
+  schedulerSeenAt,
+  schedulerSeenSetting,
+  startVerdict,
+  type RunView,
+  type StartProject,
+} from "./orchestrator-view";
 import {
   ORCHESTRATOR_TEXT,
   RUN_LEASE_MS,
@@ -56,6 +68,7 @@ import {
   nextCheckDelayMs,
   noticeKey,
   pickStarts,
+  schedulerNoteIsDue,
   slotHolders,
   statusAfter,
   withNotice,
@@ -64,7 +77,7 @@ import {
   type OrchestratorFacts,
 } from "./orchestrator-rules";
 
-export { GENERATION_PAUSED_SETTING, generationPaused, getRunView, runViewKey, type RunView } from "./orchestrator-view";
+export { GENERATION_PAUSED_SETTING, currentRunner, generationPaused, getRunView, runViewKey, schedulerQuiet, type RunView } from "./orchestrator-view";
 
 const TAG = "[orchestrator]";
 /** The most runs one tick works on (the rest wait for the next, 30 seconds later). */
@@ -76,12 +89,7 @@ const STEPS_PER_RUN = 4;
 /** The slots are claimed under this advisory lock (any fixed number; "EDUC" + "D9"). */
 const SLOT_LOCK_KEY = 4_544_539_009;
 
-// ─── Which server, and the internal calls ────────────────────────────────────
-
-/** A run belongs to the server that started it; a tick only works on its own server's runs. */
-export function currentRunner(): string {
-  return process.env.ORCHESTRATOR_RUNNER || process.env.VERCEL_ENV || "development";
-}
+// ─── The internal calls ──────────────────────────────────────────────────────
 
 function secret(): string {
   const s = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
@@ -107,11 +115,29 @@ export const verifyQualityToken = (projectDbId: string, token: string | null) =>
  * tick) or the scheduler's secret (the Supabase job). Without
  * ORCHESTRATOR_TICK_SECRET the scheduler is simply refused.
  */
-export function verifyTickRequest(headers: Headers): boolean {
-  if (sameToken(signTickToken(), headers.get("x-orchestrator-token"))) return true;
+export function tickCaller(headers: Headers): "route" | "scheduler" | null {
+  if (sameToken(signTickToken(), headers.get("x-orchestrator-token"))) return "route";
   const scheduler = process.env.ORCHESTRATOR_TICK_SECRET;
-  if (!scheduler) return false;
-  return sameToken(`Bearer ${scheduler}`, headers.get("authorization"));
+  if (!scheduler) return null;
+  return sameToken(`Bearer ${scheduler}`, headers.get("authorization")) ? "scheduler" : null;
+}
+
+export const verifyTickRequest = (headers: Headers): boolean => tickCaller(headers) !== null;
+
+/**
+ * Writes down that the scheduler called, at most once a minute. Start and the
+ * Report tab read it: a scheduler that has stopped calling is the one thing
+ * the watchdog cannot notice, because the watchdog runs on its calls.
+ */
+export async function noteSchedulerTick(): Promise<void> {
+  try {
+    const now = new Date();
+    if (!schedulerNoteIsDue(await schedulerSeenAt(), now)) return;
+    const key = schedulerSeenSetting(currentRunner());
+    await db.setting.upsert({ where: { key }, update: { value: now.toISOString() }, create: { key, value: now.toISOString() } });
+  } catch (error) {
+    console.warn(`${TAG} the scheduler's call could not be written down`, error instanceof Error ? error.message : error);
+  }
 }
 
 function internalHeaders(extra: Record<string, string>): Record<string, string> {
@@ -743,7 +769,7 @@ async function startProject(idOrCode: string): Promise<StartProject> {
  */
 export async function requestGeneration(idOrCode: string, actor: OrchestratorActor, opts: { confirmNoReferences?: boolean } = {}): Promise<RunView> {
   const project = await startProject(idOrCode);
-  const verdict = startVerdict(project, Boolean(opts.confirmNoReferences));
+  const verdict = startVerdict(project, Boolean(opts.confirmNoReferences), await schedulerQuiet());
   if (verdict.refusals.length) {
     const already = verdict.refusals.includes(ORCHESTRATOR_TEXT.refuse.alreadyStarted);
     throw new OrchestratorError(verdict.refusals[0], 409, already ? "ALREADY_STARTED" : "NOT_READY", { refusals: verdict.refusals, warnings: verdict.warnings });

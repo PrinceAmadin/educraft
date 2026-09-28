@@ -13,6 +13,8 @@ import {
   MAX_FETCH_ATTEMPTS,
   MAX_GATE_ATTEMPTS,
   MAX_PAUSE_DRAFTS,
+  SCHEDULER_NOTE_EVERY_MS,
+  SCHEDULER_QUIET_MS,
   ACTION_TEXT,
   ORCHESTRATOR_TEXT,
   QUIET_MS,
@@ -34,6 +36,9 @@ import {
   pickStarts,
   runLine,
   runViewForWorker,
+  runViewKey,
+  schedulerIsQuiet,
+  schedulerNoteIsDue,
   sequenceFor,
   slotHolders,
   statusAfter,
@@ -271,7 +276,7 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
   check("readiness: no references and no confirmation starts nothing", noRefs.kind === "ATTENTION" && noRefs.reason === "NO_REFERENCES", noRefs);
   check("readiness: …but a confirmed start goes ahead", same(decide(facts({ research: { state: "NONE", kept: 0 }, run: { allowNoReferences: true } })), { kind: "NEED_SLOT", chapter: 1 }));
 
-  const start: StartFacts = { isReport: true, modeApproved: true, projectStatus: "IN_PROGRESS", hasSpecialist: true, chapters: [1, 2, 3, 4, 5], research: { state: "PASSED", kept: 50 }, existing: null, chaptersWritten: 0, confirmNoReferences: false };
+  const start: StartFacts = { schedulerQuiet: false, isReport: true, modeApproved: true, projectStatus: "IN_PROGRESS", hasSpecialist: true, chapters: [1, 2, 3, 4, 5], research: { state: "PASSED", kept: 50 }, existing: null, chaptersWritten: 0, confirmNoReferences: false };
   check("Start: a ready project", same(checkStart(start), { refusals: [], warnings: [], needsConfirmation: false }));
   check("Start: refused before the mode is approved", checkStart({ ...start, modeApproved: false }).refusals.includes(ORCHESTRATOR_TEXT.refuse.modeNotApproved));
   check("Start: refused for a project that is not a report", checkStart({ ...start, isReport: false }).refusals.includes(ORCHESTRATOR_TEXT.refuse.notReport));
@@ -282,7 +287,20 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
   check("Start: refused while the research is running", checkStart({ ...start, research: { state: "RUNNING", kept: 0 } }).refusals.includes(ORCHESTRATOR_TEXT.refuse.researchRunning));
   check("Start: refused for a cancelled project", checkStart({ ...start, projectStatus: "CANCELLED" }).refusals.includes(ORCHESTRATOR_TEXT.refuse.closed));
   const gaps = checkStart({ ...start, chapters: [2, 4] });
-  check("Start: an order with gaps is refused, with the reason", gaps.refusals.length === 1 && gaps.refusals[0].includes("Chapter 2, 4"), gaps);
+  check("Start: an order with gaps is refused, with the reason", gaps.refusals.length === 1 && gaps.refusals[0].startsWith("This order is for Chapters 2 and 4."), gaps);
+
+  // The scheduler's calls carry a report from chapter to chapter, and the watchdog runs on them.
+  const at = new Date("2026-09-28T10:00:00.000Z");
+  const ago = (ms: number) => new Date(at.getTime() - ms);
+  check("scheduler: never seen is quiet", schedulerIsQuiet(null, at));
+  check("scheduler: seen 90 seconds ago is not quiet", !schedulerIsQuiet(ago(90_000), at));
+  check("scheduler: seen exactly five minutes ago is not quiet yet", !schedulerIsQuiet(ago(SCHEDULER_QUIET_MS), at));
+  check("scheduler: seen six minutes ago is quiet", schedulerIsQuiet(ago(6 * 60_000), at));
+  check("scheduler: its call is written down at most once a minute", schedulerNoteIsDue(null, at) && !schedulerNoteIsDue(ago(30_000), at) && schedulerNoteIsDue(ago(60_000), at));
+  check("scheduler: the note is written often enough that a calling scheduler never reads as quiet", SCHEDULER_NOTE_EVERY_MS + 2 * 30_000 < SCHEDULER_QUIET_MS);
+  const quiet = checkStart({ ...start, schedulerQuiet: true });
+  check("Start: refused while the scheduler is not calling, with the reason", quiet.refusals.length === 1 && quiet.refusals[0] === ORCHESTRATOR_TEXT.refuse.schedulerQuiet && !quiet.needsConfirmation, quiet);
+  check("Start: a quiet scheduler also stops Start again after Stop", checkStart({ ...start, existing: "STOPPED", schedulerQuiet: true }).refusals.includes(ORCHESTRATOR_TEXT.refuse.schedulerQuiet));
   check("Start: Chapter 4 alone is refused", checkStart({ ...start, chapters: [4] }).refusals.length === 1);
   check("Start: Chapters 1 to 3 are fine", checkStart({ ...start, chapters: [1, 2, 3] }).refusals.length === 0);
   const bare = checkStart({ ...start, research: { state: "NONE", kept: 0 } });
@@ -552,6 +570,7 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
     startedByName: "Emmanuel",
     requestedAt: null,
     paused: false,
+    schedulerQuiet: true,
     generationStarted: true,
     references: 50,
     research: "PASSED",
@@ -581,6 +600,9 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
     "specialist: no buttons, no reasons, no names",
     forSpecialist.every((v) => v.actions.length === 0 && !v.canStart && !v.canStop && v.start === null && v.detail === null && v.startedByName === null && v.cancelledPauseId === null),
   );
+  check("specialist: the scheduler is the founder's and the COO's matter", forSpecialist.every((v) => v.schedulerQuiet === false));
+  const live = view("GENERATING", "Chapter Three is being written.");
+  check("the Report tab is sent again when the scheduler goes quiet or comes back", runViewKey(live) !== runViewKey({ ...live, schedulerQuiet: false }));
 }
 
 // ─── Result ──────────────────────────────────────────────────────────────────

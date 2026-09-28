@@ -16,7 +16,7 @@ import {
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Button } from "@/components/ui/button";
-import { ACTION_TEXT, START_TEXT, type AttentionAction, type RunView } from "@/lib/generation/orchestrator-rules";
+import { ACTION_TEXT, ORCHESTRATOR_TEXT, START_TEXT, type AttentionAction, type RunView } from "@/lib/generation/orchestrator-rules";
 import { cn } from "@/lib/utils";
 
 const LOOK: Record<RunView["status"], { icon: IconType; tone: string; surface: string; spin?: boolean }> = {
@@ -143,6 +143,8 @@ export function OrchestratorPanel({
   const refusals = run.start?.refusals ?? [];
   const warnings = run.start?.warnings ?? [];
   const showStart = Boolean(endpoints) && (run.status === "NOT_STARTED" || run.status === "STOPPED");
+  // Before Start the same sentence is among the refusals; on a report that is under way it stands alone.
+  const schedulerNotice = Boolean(endpoints) && run.schedulerQuiet && !showStart && run.status !== "COMPLETE";
 
   return (
     <section className={cn("space-y-4 rounded-2xl p-4 sm:p-5", look.surface)} aria-labelledby="run-heading" data-run-status={run.status} data-run-reason={run.reason ?? ""}>
@@ -162,6 +164,12 @@ export function OrchestratorPanel({
         {run.startedByName && run.status !== "NOT_STARTED" ? <p className="text-xs text-muted-foreground">Started by {run.startedByName}.</p> : null}
       </div>
 
+      {schedulerNotice ? (
+        <p className="flex max-w-prose items-start gap-2 text-sm text-foreground" data-run-scheduler-quiet>
+          <LuTriangleAlert className="mt-0.5 size-4 shrink-0 text-gold" aria-hidden />
+          {ORCHESTRATOR_TEXT.schedulerQuiet}
+        </p>
+      ) : null}
       {showStart && refusals.length ? (
         <ul className="space-y-1 text-sm text-muted-foreground" aria-label="Before this report can start">
           {refusals.map((r) => (

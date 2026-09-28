@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
-import { tickOrchestrator, verifyTickRequest } from "@/lib/generation/orchestrator";
+import { noteSchedulerTick, tickCaller, tickOrchestrator } from "@/lib/generation/orchestrator";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,7 +19,10 @@ export const maxDuration = 300;
  * its report (for tests and for checking by hand).
  */
 export async function POST(req: NextRequest) {
-  if (!verifyTickRequest(req.headers)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const caller = tickCaller(req.headers);
+  if (!caller) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Start is refused, and a live report says so, when the scheduler has stopped calling.
+  if (caller === "scheduler") waitUntil(noteSchedulerTick());
 
   const body = (await req.json().catch(() => null)) as { depth?: unknown; only?: unknown } | null;
   // The scheduler's tick is the first function of its chain; a tick fired by one of our routes is the second.

@@ -404,7 +404,26 @@ export function sequenceFor(mode: number, chapters: readonly number[]): Sequence
 
 // ─── Before Start ────────────────────────────────────────────────────────────
 
+/**
+ * The scheduler's ticks are what carry a report from one chapter to the next,
+ * and what the watchdog runs on. When it has not called for this long, nothing
+ * would carry on by itself: Start is refused and a live report says so.
+ */
+export const SCHEDULER_QUIET_MS = 5 * 60_000;
+/** The scheduler's call is written down at most this often (it calls every 30 seconds). */
+export const SCHEDULER_NOTE_EVERY_MS = 60_000;
+
+export function schedulerIsQuiet(seenAt: Date | null, now: Date): boolean {
+  return seenAt === null || now.getTime() - seenAt.getTime() > SCHEDULER_QUIET_MS;
+}
+
+export function schedulerNoteIsDue(seenAt: Date | null, now: Date): boolean {
+  return seenAt === null || now.getTime() - seenAt.getTime() >= SCHEDULER_NOTE_EVERY_MS;
+}
+
 export interface StartFacts {
+  /** The scheduler has not called in the last five minutes. */
+  schedulerQuiet: boolean;
   isReport: boolean;
   modeApproved: boolean;
   projectStatus: ProjectStatus;
@@ -435,6 +454,7 @@ export function checkStart(f: StartFacts): StartVerdict {
   else if (!WORKING.has(f.projectStatus)) refusals.push(f.hasSpecialist ? ORCHESTRATOR_TEXT.refuse.notInProgress : ORCHESTRATOR_TEXT.refuse.noSpecialist);
   if (f.chapters.length === 0 || !f.chapters.every((n, i) => n === i + 1)) refusals.push(ORCHESTRATOR_TEXT.refuse.gaps(f.chapters));
   if (f.research.state === "RUNNING") refusals.push(ORCHESTRATOR_TEXT.refuse.researchRunning);
+  if (f.schedulerQuiet) refusals.push(ORCHESTRATOR_TEXT.refuse.schedulerQuiet);
   let needsConfirmation = false;
   if (f.research.state !== "RUNNING" && f.research.kept === 0) {
     warnings.push(ORCHESTRATOR_TEXT.warnNoReferences);
@@ -547,10 +567,13 @@ export const ORCHESTRATOR_TEXT = {
     gaps: (chapters: readonly number[]) =>
       chapters.length === 0
         ? "The order has no chapters."
-        : `This order is for Chapter ${chapters.join(", ")}. Orders that do not run from Chapter 1 without a gap are written by the specialist, because each chapter is written from the ones before it.`,
+        : `This order is for ${chapterList(chapters)}. Orders that do not run from Chapter 1 without a gap are written by the specialist, because each chapter is written from the ones before it.`,
     researchRunning: "The research is still running. Start once it has finished.",
     paused: "Generation is switched off in the settings. Nothing new starts until it is switched on.",
+    schedulerQuiet: "The scheduler has not called HQ in the last 5 minutes, so a report would stop after its first chapter. Nothing can start until it is calling again.",
   },
+  /** On a report that is already being written. */
+  schedulerQuiet: "The scheduler has not called HQ in the last 5 minutes. The report does not carry on by itself until it does.",
   warnNoReferences: "This project has no verified references. The chapters would be written without sources and the report will fail the quality check.",
   // Bell and email
   notice: {
@@ -697,6 +720,8 @@ export interface RunView {
   requestedAt: string | null;
   /** The off switch is on: nothing new starts. */
   paused: boolean;
+  /** The scheduler has not called in the last five minutes: nothing carries on by itself. */
+  schedulerQuiet: boolean;
   /** Any chapter exists: the research can no longer be re-run. */
   generationStarted: boolean;
   /** Verified references on the project, for the Research line. */
@@ -719,6 +744,7 @@ export function runViewKey(v: RunView): string {
     v.canStart,
     v.canStop,
     v.paused,
+    v.schedulerQuiet,
     v.generationStarted,
     v.references,
     v.research,
@@ -751,5 +777,5 @@ export function runViewForWorker(v: RunView): RunView {
           : v.status === "QUALITY_FAILED"
             ? v.line.replace(QUALITY_FAILED_NEXT.staff, QUALITY_FAILED_NEXT.specialist)
             : v.line;
-  return { ...v, line, actions: [], canStart: false, canStop: false, start: null, detail: null, startedByName: null, cancelledPauseId: null };
+  return { ...v, line, actions: [], canStart: false, canStop: false, start: null, detail: null, startedByName: null, cancelledPauseId: null, schedulerQuiet: false };
 }
