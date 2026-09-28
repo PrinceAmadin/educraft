@@ -675,6 +675,42 @@ export async function cancelDataPause(pauseId: string): Promise<boolean> {
   return done;
 }
 
+/**
+ * D9, founder/COO: a cancelled request is asked for again. Without its data the
+ * chapters after the pause can never be written, so cancelling must not be a
+ * dead end. The client is asked afresh (a new round) and the date freezes
+ * again from now; the days of the first wait were already added when it was
+ * cancelled.
+ */
+export async function reopenDataPause(pauseId: string): Promise<void> {
+  const pause = await db.pipelinePause.findUnique({
+    where: { id: pauseId },
+    select: { id: true, projectId: true, status: true, formStatus: true, round: true, project: { select: { projectId: true, status: true, worker: { select: { userId: true } } } } },
+  });
+  if (!pause) throw new DataPauseError("Pause not found", 404);
+  if (pause.status !== "CANCELLED") throw new DataPauseError("Only a cancelled request can be reopened.");
+  if (pause.project.status === "AWAITING_CLIENT_INPUT") {
+    throw new DataPauseError("The project is already waiting for the client. Resume it first, then ask for the data files.");
+  }
+  const ready = pause.formStatus === "READY";
+  const round = pause.round + 1;
+  const moved = await db.pipelinePause.updateMany({
+    where: { id: pause.id, status: "CANCELLED" },
+    data: {
+      status: "OPEN",
+      cancelledAt: null,
+      round,
+      workerNote: null,
+      // The client can see a request that is ready straight away, so the date freezes now; one still to be drafted freezes when it is.
+      clockPausedAt: ready ? new Date() : null,
+      ...(ready ? {} : { formStatus: "GENERATING", formError: null }),
+    },
+  });
+  if (moved.count === 0) throw new DataPauseError("This pause has moved on. Refresh the page.");
+  if (ready) await announceRequest(pause.projectId, pause.id, round, pause.project.projectId, pause.project.worker?.userId ?? null);
+  else await draftForm(pause.id);
+}
+
 // ─── Into the chapters ──────────────────────────────────────────────────────
 
 /**

@@ -227,11 +227,46 @@ export function subsectionNumber(heading: string): string | null {
 }
 
 /**
+ * The model sometimes sends a list as a JSON string (seen live in D3b, and in
+ * D9's live test on a chapter plan, where the refused plan cost a whole
+ * planning call). A list that arrives as text is read as the list it is; what
+ * cannot be read is left for the schema to refuse.
+ */
+function asList(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : value;
+  } catch {
+    return value;
+  }
+}
+
+function unwrapLists(input: unknown): unknown {
+  let plan = input;
+  if (typeof plan === "string") {
+    try {
+      plan = JSON.parse(plan);
+    } catch {
+      return input;
+    }
+  }
+  if (Array.isArray(plan)) plan = { sections: plan };
+  if (!plan || typeof plan !== "object") return input;
+  const sections = asList((plan as { sections?: unknown }).sections);
+  if (!Array.isArray(sections)) return { ...(plan as object), sections };
+  return {
+    ...(plan as object),
+    sections: sections.map((s) => (s && typeof s === "object" && "subsections" in s ? { ...(s as object), subsections: asList((s as { subsections?: unknown }).subsections) } : s)),
+  };
+}
+
+/**
  * Checks the planning tool's input. Throws PlanError (worth a retry) when the
  * plan is unusable. Sub-sections given without a number are numbered in order.
  */
 export function parsePlanInput(input: unknown, chapter: number): PlanSection[] {
-  const parsed = planSchema.safeParse(input);
+  const parsed = planSchema.safeParse(unwrapLists(input));
   if (!parsed.success) throw new PlanError(`The chapter plan was not valid: ${parsed.error.issues[0]?.message ?? "unknown problem"}`);
   const sections = parsed.data.sections;
   const wrongChapter = sections.filter((s) => !new RegExp(`^${chapter}\\.\\d+$`).test(s.number));
@@ -394,30 +429,38 @@ export type AttachmentBlock =
 export type UserBlock = TextBlock | AttachmentBlock;
 const CACHED = { type: "ephemeral" } as const;
 
-/** The data attachments after the brief, the last one marked as a cache point (paid once per chapter, then read from cache). */
+/** The data attachments after the brief, the last one marked as a cache point. */
 function withCachePoint(attachments: AttachmentBlock[]): UserBlock[] {
   return attachments.map((a, i) => (i === attachments.length - 1 ? { ...a, cache_control: CACHED } : { ...a }));
 }
 
 /**
- * The planning call: the brief (cached with the prompt before it), then the
- * instruction. Every call of a run sends the prompt as the system block with
- * its own breakpoint.
+ * Claude allows four cache points in a call. Since D9 the prompt takes two of
+ * them (the project block and the chapter block, both system blocks), which
+ * leaves two for the user message in every call.
+ */
+export const MAX_CACHE_POINTS = 4;
+export const SYSTEM_CACHE_POINTS = 2;
+
+/**
+ * The planning call: the brief and the data attachments (one cache point, on
+ * the last of them), then the instruction.
  */
 export function outlineUserBlocks(briefText: string, chapter: number, attachments: AttachmentBlock[] = []): UserBlock[] {
   return [
-    { type: "text", text: briefText, cache_control: CACHED },
+    { type: "text", text: briefText, ...(attachments.length ? {} : { cache_control: CACHED }) },
     ...withCachePoint(attachments),
     { type: "text", text: GENERATION_TEXT.outlineInstruction(chapter) },
   ];
 }
 
 /**
- * A writing call: the brief, the plan (breakpoint), each written part as its
- * own block (breakpoint on the last, so the next part reads this call's cache
- * entry), then the instruction, which is never cached. With the system
- * block's breakpoint that is at most 3 of the 4 allowed; D3c's data attachments
- * (after the brief) take the 4th.
+ * A writing call: the brief, the data attachments, the plan (cache point),
+ * each written part as its own block (cache point on the last, so the next
+ * part reads this call's cache entry), then the instruction, which is never
+ * cached. The attachments carry no cache point of their own here: the plan's,
+ * straight after them, covers them, and with the two system blocks a third
+ * would make five.
  */
 export function partUserBlocks(p: {
   briefText: string;
@@ -431,7 +474,7 @@ export function partUserBlocks(p: {
   const texts = p.partialOutput ? (splitParts(p.partialOutput, written.map((w) => w.chars ?? 0)) ?? [p.partialOutput]) : [];
   return [
     { type: "text", text: p.briefText },
-    ...withCachePoint(p.attachments ?? []),
+    ...(p.attachments ?? []).map((a): UserBlock => ({ ...a })),
     { type: "text", text: planText(p.plan), cache_control: CACHED },
     ...texts.map(
       (t, i): UserBlock => ({

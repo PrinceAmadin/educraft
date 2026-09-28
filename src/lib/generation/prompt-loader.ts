@@ -1,18 +1,30 @@
 /**
  * Phase D1 — the chapter prompt loader. Reads the prompt library in prompts/ (Word
  * files, read with mammoth, never edited) once per process, then assembles the full
- * instruction prompt for one chapter of one project, in the founder-approved order:
+ * instruction prompt for one chapter of one project, in the founder-approved order
+ * (28 Sept 2026, Phase D9: the references moved from the end to the top):
  *
- *   1. MODE INSTRUCTIONS   — this chapter's all-modes rules and its block for the approved mode
- *   2. SHARED              — [SHARED: ALL DEPARTMENTS]
- *   3. DEPARTMENT          — the resolved [DEPARTMENT: X] section(s), then EduCraft's notes
- *   4. TEMPLATE B / CITATION — Template B quality gate (Mode 1) and the citation mode block
- *   5. SHARED RULES        — voice, formatting, anti-AI and reference rules (+ the project's style)
- *   6. IMAGE RULES         — Chapter 2 (Chapters 3 and 4 get the figure placeholder rule only)
- *   7. VERIFIED REFERENCES — the kept references from the project's research job
- *   8. placeholders filled — any {TOKEN} without a value throws before anything reaches Claude
+ *   THE PROJECT BLOCK — the same, byte for byte, for every chapter of a project, so the
+ *   chapters that follow each other read it from Claude's prompt cache:
+ *   1. SHARED RULES        — voice, formatting, anti-AI and reference rules (+ the project's style)
+ *   2. VERIFIED REFERENCES — the kept references from the project's research job, each in
+ *                            APA 7th followed by its abstract, then the approved cases (Law)
+ *                            or archival sources (History)
  *
- * In part 3, a Template B block comes before the department section that extends it,
+ *   THE CHAPTER BLOCK — this chapter's own instructions and data:
+ *   3. MODE INSTRUCTIONS   — this chapter's all-modes rules and its block for the approved mode
+ *   4. SHARED              — [SHARED: ALL DEPARTMENTS]
+ *   5. DEPARTMENT          — the resolved [DEPARTMENT: X] section(s), then EduCraft's notes
+ *   6. TEMPLATE B / CITATION — Template B quality gate (Mode 1) and the citation mode block
+ *   7. IMAGE RULES         — Chapter 2 (Chapters 3 and 4 get the figure placeholder rule only)
+ *   8. THE PROJECT'S DATA  — the verified data from the pauses, and the Mode 5 dataset
+ *   9. placeholders filled — any {TOKEN} without a value throws before anything reaches Claude
+ *
+ * A project with no verified references still assembles (founder, D9): the references
+ * part is left out, a rule tells the model to write [REFERENCE TO BE SUPPLIED] instead of
+ * inventing a source, and the prompt carries a warning for whoever starts the chapter.
+ *
+ * In part 5, a Template B block comes before the department section that extends it,
  * because those sections refer to it as "above" (e.g. HUMANITIES in Chapter 3 is written
  * "in addition to TEMPLATE_B_THEMATIC above").
  *
@@ -91,7 +103,7 @@ export interface ChapterPromptInput {
   /** Values taken from generated chapters: undefined = not extracted yet (throws where needed),
    *  an empty list = the chapter genuinely has none. */
   fromEarlierChapters?: { objectives?: string[]; researchQuestions?: string[]; hypotheses?: string[] };
-  /** Reference rows with status KEPT on the project's finished research job. */
+  /** Reference rows with status KEPT on the project's finished research job. An empty list assembles with a warning (D9). */
   references: PromptReference[];
   /** Per-project override of the department's non-human-samples flag, and what the samples are (A2). */
   samples?: { nonHuman?: boolean | null; description?: string | null };
@@ -150,7 +162,18 @@ export interface PromptPrimarySources {
 }
 
 export interface AssembledChapterPrompt {
+  /** The whole prompt: the project block, a blank gap, then the chapter block. */
   text: string;
+  /**
+   * D9: the opening every chapter of the project shares (the rule files, the referencing
+   * style, the references and any approved cases or archival sources). `text` starts with
+   * exactly this, so a caller can send it as its own cached block.
+   */
+  projectBlock: string;
+  /** The rest: this chapter's own instructions and data. */
+  chapterBlock: string;
+  /** Things whoever starts the chapter should know (no verified references). Empty when all is well. */
+  warnings: string[];
   /** Rough size (characters ÷ 4) for logging before the Claude call; the API reports the real count. */
   approxTokens: number;
   department: string;
@@ -192,8 +215,8 @@ export const LOADER_TEXT = {
   noMinimumPages: "No school minimum given — use the department page range",
   inTextPlacement: "Not applicable — in-text citations with a References list",
   chapterFourTitleTemplateA: "Not applicable (Template A)",
-  /** Q3 — a kept reference with no abstract is listed, never dropped. */
-  abstractUnavailable: "abstract unavailable",
+  /** Q3 — a kept reference with no abstract is listed, never dropped; this line stands where its abstract would. */
+  abstractUnavailable: "Abstract unavailable.",
 
   // Loader wording, for the founder to review.
   nonHumanDefault: "non-human (for example chemical, material, plant, animal or microbial)",
@@ -229,6 +252,15 @@ export const LOADER_TEXT = {
       primary ? `, and the ${primary === "case" ? "court decisions in the APPROVED CASES" : "records in the APPROVED ARCHIVAL SOURCES"} list that follows` : ""
     }. EduCraft's research step found and checked them (OpenAlex); they are listed in APA 7th format so you can identify them, each followed by its abstract. Cite them in ${style}. ` +
     `Report a study's methods and findings only as far as its abstract states them; where the abstract is unavailable, cite the work only for what its title states. Never add volume, issue, page or publisher details that are not listed. Do not cite anything that is not on this list.`,
+  /** D9: what the prompt files' {VERIFIED_REFERENCES} placeholder reads as. */
+  referencesPointer: "the VERIFIED REFERENCES list near the start of this prompt",
+  noReferencesPointer: "the verified references (none were supplied for this project: see NO VERIFIED REFERENCES near the start of this prompt)",
+  /** D9: a project with no verified references (its research has not run, or kept nothing). */
+  noReferences: (primary?: "case" | "archive") =>
+    `No verified references were supplied for this project, so no published work may be cited by name${
+      primary ? `; the ${primary === "case" ? "court decisions in the APPROVED CASES" : "records in the APPROVED ARCHIVAL SOURCES"} list that follows may still be cited` : ""
+    }. Where a statement needs a source, write [REFERENCE TO BE SUPPLIED] in place of the citation, and EduCraft's specialist will supply it. Never invent an author, a title, a year or a source. Statutes and the Constitution may still be cited by name.`,
+  noReferencesWarning: "This project has no verified references. The chapter is written with [REFERENCE TO BE SUPPLIED] wherever a source is needed, and the report will fail the quality check until its research is done.",
   /** Law and Humanities: court cases and archival sources come only from the list (Q4). */
   primarySourcesRule: (kind: "case" | "archive") =>
     kind === "case"
@@ -763,8 +795,13 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   const placement = resolveCitationPlacement(input.project.referencingStyle, template, section, input.citationPlacement);
   const { blocks: deptBlocks, fallbackNotes } = resolveBlocks(lib, planBlocks(chapter, template, section));
   const combinedResults = Boolean(entry.pureScience) && section === "MEDICAL_SCIENCE" && input.mode === 4;
+  /** The project block: the same for every chapter of the project. */
+  const projectParts: { title: string; text: string }[] = [];
+  const usedProject: string[] = [];
+  /** The chapter block. */
   const parts: { title: string; text: string }[] = [];
   const used: string[] = [];
+  const warnings: string[] = [];
 
   // 1. Mode instructions: the chapter's all-modes rules, then its block for the approved mode.
   //    A thematic Chapter 4 skips the Chapter 4 cardinal rules (founder-confirmed): they govern data chapters
@@ -826,15 +863,16 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     parts.push({ title: "CITATION MODE BLOCK", text: render("CITATION MODE BLOCK", citationModeBlock(ch1, placement, input.project.referencingStyle)) });
   }
 
-  // 5. The four shared rules files, then the project's style, which overrides reference_rules.md's APA default.
-  for (const rule of lib.sharedRules) parts.push({ title: rule.title, text: render(rule.title, [rule.text]) });
-  used.push("shared:voice, formatting, anti-AI, reference rules");
-  parts.push({
+  // The project block, part 1: the four shared rules files, then the project's style, which overrides
+  // reference_rules.md's APA default.
+  for (const rule of lib.sharedRules) projectParts.push({ title: rule.title, text: render(rule.title, [rule.text]) });
+  usedProject.push("shared:voice, formatting, anti-AI, reference rules");
+  projectParts.push({
     title: "REFERENCING STYLE FOR THIS PROJECT",
     text: render("REFERENCING STYLE FOR THIS PROJECT", [...styleStatement(input.project.referencingStyle, style, placement, ch1), LOADER_TEXT.noDirectQuotes]),
   });
 
-  // 6. Image rules: Chapter 2 (C3). Chapters 3 and 4, which ask for diagrams, charts and screenshots, get the placeholder rule.
+  // 7. Image rules: Chapter 2 (C3). Chapters 3 and 4, which ask for diagrams, charts and screenshots, get the placeholder rule.
   if (chapter === 2) {
     used.push("ch2:IMAGE RULES (curated)");
     parts.push({ title: "IMAGE RULES", text: render("IMAGE RULES", [...lib.imageRules, LOADER_TEXT.figurePlaceholder, LOADER_TEXT.noImageSearch]) });
@@ -843,13 +881,10 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     parts.push({ title: "FIGURES", text: render("FIGURES", [LOADER_TEXT.figurePlaceholder, LOADER_TEXT.noImageSearch]) });
   }
 
-  // 7. Verified references: the KEPT rows of the project's finished research job.
-  if (input.references.length === 0) {
-    throw new PromptAssemblyError("No verified references. The project's research must finish before chapters are generated.");
-  }
-  // Q3: every kept reference with its OpenAlex abstract, or "abstract unavailable" (never dropped).
+  // The project block, part 2: the verified references (the KEPT rows of the project's research job).
+  // Q3: every kept reference with its OpenAlex abstract, or "Abstract unavailable." (never dropped).
   const entries = referenceListEntries(input.references).map(
-    ({ text: line, ref }) => `${neutralize(line)}\nAbstract: ${ref.abstract?.trim() ? neutralize(abstractText(ref.abstract)) : LOADER_TEXT.abstractUnavailable}`,
+    ({ text: line, ref }) => `${neutralize(line)}\n${ref.abstract?.trim() ? `Abstract: ${neutralize(abstractText(ref.abstract))}` : LOADER_TEXT.abstractUnavailable}`,
   );
   // Q4: cases and archival sources come only from the list; a point with none gets the last-resort placeholder.
   // D3b: Law and the History department carry the list the COO approved, after the references.
@@ -858,14 +893,22 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (approved?.kind === "case" && !lawSection) throw new PromptAssemblyError("Approved cases were given for a project that is not in a Law section.");
   if (approved?.kind === "archive" && entry.name !== "History") throw new PromptAssemblyError("Approved archival sources were given for a project outside the History department.");
   const primarySources = approved ? [] : lawSection ? [LOADER_TEXT.primarySourcesRule("case")] : section === "HUMANITIES" ? [LOADER_TEXT.primarySourcesRule("archive")] : [];
-  used.push(`research:${entries.length} verified references with abstracts`);
-  parts.push({ title: "VERIFIED REFERENCES", text: render("VERIFIED REFERENCES", [LOADER_TEXT.referencesIntro(entries.length, style, approved?.kind), ...primarySources, entries.join("\n\n")]) });
+  if (entries.length > 0) {
+    usedProject.push(`research:${entries.length} verified references with abstracts`);
+    projectParts.push({ title: "VERIFIED REFERENCES", text: render("VERIFIED REFERENCES", [LOADER_TEXT.referencesIntro(entries.length, style, approved?.kind), ...primarySources, entries.join("\n\n")]) });
+  } else {
+    // D9 (founder): a project with no research still assembles. Nothing may be cited by name, and whoever starts the chapter is told.
+    console.warn(`[prompt-loader] no verified references: Chapter ${chapter} of "${input.project.projectTitle ?? "an untitled project"}" is assembled without a references list`);
+    warnings.push(LOADER_TEXT.noReferencesWarning);
+    usedProject.push("research:no verified references");
+    projectParts.push({ title: "NO VERIFIED REFERENCES", text: render("NO VERIFIED REFERENCES", [LOADER_TEXT.noReferences(approved?.kind), ...primarySources]) });
+  }
   if (approved) {
     const title = approved.kind === "case" ? "APPROVED CASES" : "APPROVED ARCHIVAL SOURCES";
     const intro = approved.kind === "case" ? LOADER_TEXT.approvedCasesIntro(approved.items.length) : LOADER_TEXT.approvedArchivesIntro(approved.items.length);
     const lines = approved.items.map((s, i) => `${i + 1}. ${formatPrimarySource(approved.kind, s)}`);
     const unsupported = approved.unsupportedPoints.map((p) => neutralize(p.replace(/\s+/g, " ").trim())).filter(Boolean);
-    parts.push({
+    projectParts.push({
       title,
       text: render(title, [
         intro,
@@ -874,7 +917,7 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
         LOADER_TEXT.approvedOnlyRule(approved.kind),
       ]),
     });
-    used.push(`d3b:${approved.items.length} approved ${approved.kind === "case" ? "cases" : "archival sources"}, ${unsupported.length} points without one`);
+    usedProject.push(`d3b:${approved.items.length} approved ${approved.kind === "case" ? "cases" : "archival sources"}, ${unsupported.length} points without one`);
   }
 
   // D3c: the worker's data from the pauses before this chapter (the files themselves ride with the call).
@@ -897,47 +940,81 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   // Strip pointers to the image rules: they send the model to a file it cannot see
   // ("chapter_2_literature_review.docx") and to the search/download/embed process.
   // Chapter 3's [FIG] tag carried a search query; it now carries the placeholder.
-  let text = parts
-    .map((p) => p.text.split("\n\n").filter((para) => !IMAGE_POINTER.test(para) || p.title === "IMAGE RULES").join("\n\n"))
-    .join("\n\n\n")
-    .replace(/\[FIG\] search_query \|/g, "[FIG] [FIGURE PLACEHOLDER: description of figure needed] |");
+  const join = (list: { title: string; text: string }[]) =>
+    list
+      .map((p) => p.text.split("\n\n").filter((para) => !IMAGE_POINTER.test(para) || p.title === "IMAGE RULES").join("\n\n"))
+      .join("\n\n\n")
+      .replace(/\[FIG\] search_query \|/g, "[FIG] [FIGURE PLACEHOLDER: description of figure needed] |");
 
-  // 8. Placeholders. Every {TOKEN} in the assembled instructions must have a value, or nothing is sent.
+  // 9. Placeholders. Every {TOKEN} in the assembled instructions must have a value, or nothing is sent.
   const conclusionOnlyFive = combinedResults || section === "LAW_NON_DOCTRINAL";
-  const values = placeholderValues(input, { departmentName: neutralize(match.displayName), template, style, placement, deptBlocks, conclusionOnlyFive });
-  const missing = new Set<string>();
-  text = text.replace(TOKEN, (_m, token: string) => {
-    const resolve = values[token];
-    if (!resolve) {
-      missing.add(`${token} (unknown placeholder)`);
-      return `{${token}}`;
-    }
-    try {
-      return resolve();
-    } catch (err) {
-      missing.add(`${token}: ${(err as Error).message}`);
-      return `{${token}}`;
-    }
+  const values = placeholderValues(input, {
+    departmentName: neutralize(match.displayName),
+    template,
+    style,
+    placement,
+    deptBlocks,
+    conclusionOnlyFive,
+    hasReferences: entries.length > 0,
   });
+  const missing = new Set<string>();
+  const fill = (raw: string) =>
+    raw
+      .replace(TOKEN, (_m, token: string) => {
+        const resolve = values[token];
+        if (!resolve) {
+          missing.add(`${token} (unknown placeholder)`);
+          return `{${token}}`;
+        }
+        try {
+          return resolve();
+        } catch (err) {
+          missing.add(`${token}: ${(err as Error).message}`);
+          return `{${token}}`;
+        }
+      })
+      .replace(/\n{4,}/g, "\n\n\n")
+      .trim();
+  // The two blocks are filled apart, so nothing in the chapter block can change a character of the project block.
+  const projectBlock = fill(join(projectParts));
+  const chapterBlock = fill(join(parts));
   if (missing.size > 0) {
     throw new PromptAssemblyError(`Chapter ${chapter} prompt has unfilled placeholders — ${[...missing].join("; ")}`);
   }
+  const text = `${projectBlock}${BLOCK_GAP}${chapterBlock}`;
   const leftover = text.match(TOKEN);
   if (leftover) throw new PromptAssemblyError(`Chapter ${chapter} prompt still contains ${[...new Set(leftover)].join(", ")} after filling.`);
-  text = text.replace(/\n{4,}/g, "\n\n\n").trim();
 
   return {
     text,
+    projectBlock,
+    chapterBlock,
+    warnings,
     approxTokens: Math.ceil(text.length / 4),
     department: match.displayName,
     section,
     template,
     referencingStyle: style,
     citationPlacement: placement,
-    blocksUsed: used,
+    blocksUsed: [...usedProject, ...used],
     fallback: { used: fallbackNotes.length > 0, note: fallbackNotes.join(" ") || null },
-    parts: parts.map((p) => ({ title: p.title, chars: p.text.length })),
+    parts: [...projectParts, ...parts].map((p) => ({ title: p.title, chars: p.text.length })),
   };
+}
+
+/** What separates the project block from the chapter block in the whole prompt. */
+export const BLOCK_GAP = "\n\n\n";
+
+/**
+ * The two blocks of a stored prompt, for the Claude call: the project block
+ * (cached once, read by the project's other chapters) and the chapter block.
+ * `projectBlockChars` comes from the chapter's promptMeta; a prompt stored
+ * before D9 has none and goes out as one block.
+ */
+export function splitPromptBlocks(promptText: string, projectBlockChars: number | null | undefined): [string] | [string, string] {
+  const n = typeof projectBlockChars === "number" && Number.isInteger(projectBlockChars) ? projectBlockChars : 0;
+  if (n <= 0 || n + BLOCK_GAP.length >= promptText.length || promptText.slice(n, n + BLOCK_GAP.length) !== BLOCK_GAP) return [promptText];
+  return [promptText.slice(0, n), promptText.slice(n + BLOCK_GAP.length)];
 }
 
 /** The Chapter 1 citation block for the placement: MODE A, B or C (plus MLA entry templates), or the in-text rule. */
@@ -982,6 +1059,8 @@ function placeholderValues(
     deptBlocks: ResolvedBlock[];
     /** Chapter Five carries no discussion (pure sciences with combined results; non-doctrinal Law). */
     conclusionOnlyFive: boolean;
+    /** False for a project with no verified references (D9). */
+    hasReferences: boolean;
   },
 ): Record<string, () => string> {
   const p = input.project;
@@ -1017,7 +1096,7 @@ function placeholderValues(
     REFERENCING_STYLE: () => ctx.style,
     CITATION_PLACEMENT: () => PLACEMENT_LABEL[ctx.placement],
     CITATION_MODE_BLOCK: () => "the CITATION MODE BLOCK in this prompt",
-    VERIFIED_REFERENCES: () => "the VERIFIED REFERENCES list at the end of this prompt",
+    VERIFIED_REFERENCES: () => (ctx.hasReferences ? LOADER_TEXT.referencesPointer : LOADER_TEXT.noReferencesPointer),
     // B4: Chapter 1 gets the whole-report target; Chapters 4 and 5 get their section's per-chapter range.
     MINIMUM_PAGES: () => {
       if (input.chapter === 1) {

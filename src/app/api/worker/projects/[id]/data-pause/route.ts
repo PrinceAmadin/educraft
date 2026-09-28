@@ -5,6 +5,7 @@ import { parseBody } from "@/lib/services/operations/route-helpers";
 import { addSpecialistFiles, getWorkerPauseView, requestMoreFiles, saveAnswers, verifyDataPause } from "@/lib/services/data-pause";
 import { dataPauseErrorResponse } from "@/lib/services/data-pause-errors";
 import { workerPauseActionSchema } from "@/lib/validations/data-pause";
+import { nudge } from "@/lib/generation/orchestrator";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,6 +46,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     else if (b.action === "save_answers") await saveAnswers(project.id, b.pauseId, b.answers);
     else if (b.action === "verify") await verifyDataPause(actor, project.id, b.pauseId, b.chapterFileIds);
     else await requestMoreFiles(project.id, b.pauseId, b.note || null);
+    // D9: verified data is what the report's run was waiting for; its next chapter starts when a slot is free.
+    if (b.action === "verify") await nudge(project.id);
     const pause = await getWorkerPauseView(guard.workerId, project.id);
     return NextResponse.json({ pause }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveGenerationProject } from "@/lib/generation/generate-chapter";
+import { wakeRun } from "@/lib/generation/orchestrator";
 import { projectNotFound } from "@/lib/generation/route-helpers";
 import { opsGuard } from "@/lib/services/operations/route-helpers";
 import { runQualityGate } from "@/lib/quality-gate";
@@ -22,6 +23,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     const project = await resolveGenerationProject(params.id);
     if (!project) return projectNotFound();
     const result = await runQualityGate(project.id, guard.actor);
+    await wakeRun(project.id); // D9: the report's run reads this result on its next tick
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return qualityErrorResponse("POST /api/admin/projects/[id]/quality/run", error);

@@ -298,3 +298,82 @@ export function paidIntakeFailedAlert(input: {
     actionUrl: input.newProjectUrl,
   });
 }
+
+// ── Report production (Phase D9) ─────────────────────────────
+
+/**
+ * A generated report passed the quality check and is in the QA queue. The
+ * subject is the founder's wording.
+ */
+export function reportReadyAlert(input: {
+  projectCode: string;
+  title: string | null;
+  department: string | null;
+  client: string | null;
+  specialist: string | null;
+  /** "87 of 89" */
+  score: string;
+  chapters: number;
+  express: boolean;
+  /** Until when the specialist may still recall it, already formatted. */
+  recallUntil: string | null;
+  passedAt: string;
+  reviewUrl: string;
+}): AlertEmail {
+  return alertEmail({
+    audience: "operations",
+    subject: `Report ready for your review — ${input.projectCode}`,
+    eyebrow: "Report production",
+    heading: `Report ready for your review — ${input.projectCode}`,
+    intro: `Every chapter of ${input.projectCode} is written and the report passed the quality check. It is in the QA queue, waiting for a reviewer.`,
+    rows: [
+      { label: "Project", value: input.projectCode, mono: true },
+      { label: "Topic", value: input.title },
+      { label: "Department", value: input.department },
+      { label: "Client", value: input.client },
+      { label: "Specialist", value: input.specialist },
+      { label: "Chapters", value: String(input.chapters), mono: true },
+      { label: "Quality check", value: `${input.score} checks passed`, mono: true },
+      { label: "Express delivery", value: input.express ? "Yes" : null },
+      { label: "Specialist may recall until", value: input.recallUntil },
+      { label: "Passed on", value: input.passedAt },
+    ],
+    actionLabel: "Open the QA queue",
+    actionUrl: input.reviewUrl,
+  });
+}
+
+/**
+ * Report generation stopped and needs the founder or the COO: a chapter
+ * stalled or failed, or the report passed but could not be sent to QA.
+ */
+export function reportStoppedAlert(input: {
+  projectCode: string;
+  /** The alert's subject and heading, e.g. "EC-00012: Chapter 3 has stalled". */
+  headline: string;
+  /** What happened and what to do, in one or two sentences. */
+  what: string;
+  title: string | null;
+  chapter: number | null;
+  /** The error or reason on record, shown as it is. */
+  detail: string | null;
+  at: string;
+  reportUrl: string;
+}): AlertEmail {
+  return alertEmail({
+    audience: "operations",
+    subject: input.headline,
+    eyebrow: "Report production",
+    heading: input.headline,
+    intro: input.what,
+    rows: [
+      { label: "Project", value: input.projectCode, mono: true },
+      { label: "Topic", value: input.title },
+      { label: "Chapter", value: input.chapter ? String(input.chapter) : null, mono: true },
+      { label: "Noticed on", value: input.at },
+    ],
+    quote: { label: "On record", body: input.detail },
+    actionLabel: "Open the Report tab",
+    actionUrl: input.reportUrl,
+  });
+}

@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Textarea } from "@/components/ui/textarea";
 import { cn, formatDateTime } from "@/lib/utils";
 import { PHASES, estimateEta, formatEta } from "@/lib/research-eta";
+import { RESEARCH_LOCKED_TOOLTIP } from "@/lib/generation/orchestrator-rules";
 
 interface ReferenceRow {
   id: string;
@@ -168,11 +169,16 @@ function RerunControl({
   if (rerun.lockedByGeneration) {
     return (
       <div className="min-w-0 space-y-1.5">
-        <Button size="sm" variant="outline" disabled>
-          <LuRotateCcw className="size-4" aria-hidden />
-          Run research again
-        </Button>
-        <p className="text-xs text-muted-foreground">Chapters have been written from this research, so it can no longer be re-run.</p>
+        {/* The span carries the tooltip: a disabled button takes no pointer events of its own. */}
+        <span className="inline-block" title={RESEARCH_LOCKED_TOOLTIP}>
+          <Button size="sm" variant="outline" disabled aria-disabled data-research-rerun>
+            <LuRotateCcw className="size-4" aria-hidden />
+            Run research again
+          </Button>
+        </span>
+        <p className="text-xs text-muted-foreground" data-research-locked-hint>
+          {RESEARCH_LOCKED_TOOLTIP}
+        </p>
       </div>
     );
   }

@@ -32,6 +32,7 @@ import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard"
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
 import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
+import { ResearchRerunControl } from "@/components/projects/ResearchRerunControl";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
 
@@ -112,9 +113,14 @@ export default async function ProjectDetailPage({
                     uploadEndpoint={`${adminBase}/upload`}
                     actionEndpoint={`${adminBase}/data-pause`}
                     downloadUrl={`${adminBase}/documents/docx`}
+                    // D9: Start, Stop, Continue and a chapter's restart, for the founder and the COO.
+                    controls={{ generation: `${adminBase}/generation`, dataPause: `${adminBase}/data-pause` }}
                   />
                 ) : null}
-                {generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? <QualityGatePanel endpoint={`${adminBase}/quality`} canRegenerate /> : null}
+                {generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? (
+                  // The key is the last quality run: a check the orchestrator ran by itself reloads the panel.
+                  <QualityGatePanel key={generation.run?.gateRanAt ?? "not-run"} endpoint={`${adminBase}/quality`} canRegenerate />
+                ) : null}
                 {pauses.map((p) => (
                   <DataPauseReviewCard
                     key={`${p.id}-${p.status}-${p.round}-${p.files.length}`}
@@ -129,6 +135,15 @@ export default async function ProjectDetailPage({
                     initial={secondary}
                     endpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/generation/fetch-secondary-data`}
                     filesBase={`/api/admin/projects/${encodeURIComponent(project.projectId)}`}
+                  />
+                ) : null}
+                {generation?.run ? (
+                  // D9: the research can be run again until the first chapter exists; then the button stays, greyed out.
+                  <ResearchRerunControl
+                    endpoint={`${adminBase}/research/rerun`}
+                    references={generation.run.references}
+                    research={generation.run.research}
+                    generationStarted={generation.run.generationStarted}
                   />
                 ) : null}
                 <ModeCard initial={modeCard} />

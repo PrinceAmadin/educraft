@@ -47,7 +47,7 @@ import {
 import { db } from "@/lib/db";
 import { downloadName } from "@/lib/files/policy";
 import { readSubmittedContact } from "@/lib/submitted-contact";
-import { orderedChapters, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
+import { expectedChapters, orderedChapters } from "@/lib/deliverables";
 import { isReportTemplate } from "@/lib/generation/generation-state";
 import { chapterTitle } from "@/lib/generation/progress-events";
 import { CERTIFICATE_AWARDS, degreeName, getDegreeFromDepartment, lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
@@ -225,11 +225,9 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
     throw new AssemblyError("This project is not a written report.", 404, "NOT_A_REPORT");
   }
 
-  const ordered = orderedChapters(project.additionalData);
-  const chapterBased = project.service.serviceCode === "FYP-CHAPTERS" && ordered.length > 0;
-  const expected = chapterBased
-    ? ordered
-    : Array.from({ length: Math.min(MAX_REPORT_CHAPTERS, Math.max(1, project.chapterCount ?? MAX_REPORT_CHAPTERS)) }, (_, i) => i + 1);
+  const chapterBased =
+    (project.service.serviceCode === "FYP-CHAPTERS" && orderedChapters(project.additionalData).length > 0) || project.service.serviceCode === "FYP-CH4";
+  const expected = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
 
   const [runs, references, settings] = await Promise.all([
     db.generationCheckpoint.findMany({

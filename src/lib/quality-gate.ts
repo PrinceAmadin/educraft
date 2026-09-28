@@ -675,7 +675,11 @@ export async function regenerateChapterForQuality(
     if (error instanceof GenerationError) throw new QualityGateError(error.message, 409, "GENERATION_REFUSED");
     throw error;
   }
-  await scheduleGenerationStep(checkpoint.id);
+  // The chapter exists from here on. If handing it to the runner fails (a timeout), it is carried
+  // on by the orchestrator's next tick, or when its progress is next opened: not an error.
+  await scheduleGenerationStep(checkpoint.id).catch((error) =>
+    console.warn("[quality gate] the re-generated chapter was not handed to the runner yet", checkpoint.id, error instanceof Error ? error.message : error),
+  );
 
   const stored = readStored(project.qaReview?.qualityReport);
   if (stored) {

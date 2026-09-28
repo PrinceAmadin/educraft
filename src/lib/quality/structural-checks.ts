@@ -7,6 +7,7 @@
 
 import { parseChapter, type Block } from "@/lib/assembly/parse-chapter";
 import { findPlaceholders } from "@/lib/assembly/text-rules";
+import { hypothesesOf, researchQuestionsOf } from "@/lib/generation/chapter-one-statements";
 import { countWords, missingHeadings } from "@/lib/generation/chapter-plan";
 import type { SectionKey } from "@/lib/generation/department-map";
 import type { CitationMatch } from "./citation-check";
@@ -186,7 +187,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   }
 
   // ── ST3–ST7 required sections ────────────────────────────────────────────
-  const hypothesesInCh1 = extractStatements(byNumber.get(1), /hypothes[ie]s/i);
+  const hypothesesInCh1 = hypothesesOf(byNumber.get(1));
   sectionCtx.hasHypotheses = hypothesesInCh1.length > 0;
   for (let n = 1; n <= 5; n++) {
     const id = `ST${n + 2}`;
@@ -277,7 +278,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   {
     const c1 = byNumber.get(1);
     const c4 = byNumber.get(4);
-    const questions = extractStatements(c1, /research questions?/i).filter((q) => /\?\s*$/.test(q) || /^(?:what|how|to what|is|are|does|do|which|why)\b/i.test(q));
+    const questions = researchQuestionsOf(c1);
     const hypotheses = hypothesesInCh1;
     const na = !c1 || !c4 || input.template === "B" || (questions.length === 0 && hypotheses.length === 0);
     const issues: QualityIssue[] = [];
@@ -412,7 +413,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     const issues: QualityIssue[] = [];
     for (const c of chapters) {
       const found = findPlaceholders(c.text);
-      const review = found.filter((p) => /COO TO REVIEW|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|OBJECTIVE NOT MET/.test(p));
+      const review = found.filter((p) => /COO TO REVIEW|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|REFERENCE TO BE SUPPLIED|OBJECTIVE NOT MET/.test(p));
       const tasks = found.filter((p) => !review.includes(p));
       const count = (list: string[]) => [...new Set(list)].map((p) => `${p}${list.filter((x) => x === p).length > 1 ? ` (${list.filter((x) => x === p).length})` : ""}`).join(", ");
       if (review.length) issues.push({ level: "FAIL", message: `Chapter ${WORDS[c.number]} still carries ${count(review)}.`, chapter: c.number, fix: "Resolve every review placeholder: supply the data, case or source, or rewrite the passage." });
@@ -435,27 +436,9 @@ function dedupe(issues: QualityIssue[]): QualityIssue[] {
   });
 }
 
-/** Lines stated under a Chapter One heading (research questions, hypotheses): its list items and questions. */
-export function extractStatements(chapter: { blocks: Block[] } | undefined, heading: RegExp): string[] {
-  if (!chapter) return [];
-  const out: string[] = [];
-  let inside = false;
-  for (const b of chapter.blocks) {
-    if (b.kind === "heading") {
-      inside = heading.test(b.text);
-      continue;
-    }
-    if (!inside) continue;
-    if (b.kind === "list") out.push(...b.items.map((i) => plainText(i.text)));
-    if (b.kind === "paragraph") {
-      for (const line of b.text.split(/\n/)) {
-        const t = plainText(line);
-        if (/^(?:H[oO0₀]?\s?\d|H[₀0]\d|RQ\s?\d)/.test(t) || /\?\s*$/.test(t)) out.push(t.replace(/^(?:H[oO0₀]?\s?\d+|H[₀0]\d+|RQ\s?\d+)\s*[:.)-]?\s*/, ""));
-      }
-    }
-  }
-  return out.filter((s) => s.length > 10);
-}
+// Chapter One's research questions and hypotheses are read by src/lib/generation/chapter-one-statements.ts,
+// the same reader the chapter orchestrator uses, so ST10 traces exactly what Chapters Four and Five were given.
+export { extractStatements } from "@/lib/generation/chapter-one-statements";
 
 const STOP = new Set("the a an of in on to and or for is are was were be by with at from that this there any no not its their between among what how which does do has have will significant relationship effect influence".split(" "));
 const content = (s: string) => normaliseForMatch(s).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w));

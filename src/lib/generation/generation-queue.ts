@@ -2,14 +2,14 @@
  * Phase D6: the report generation queue, derived from existing rows (founder,
  * 27 Sept: no new table). Pure.
  *
- * A report project joins the queue when the COO approves its research mode
- * and leaves when its first chapter starts. Express orders go first, then the
- * order of approval. The estimated start assumes MAX_CONCURRENT_GENERATIONS
- * projects generate at once, each taking the average time of finished
- * projects (DEFAULT_PROJECT_MINUTES until MIN_FINISHED_FOR_AVERAGE have
- * finished). Nothing starts projects in this order yet: D10 adds the processor
- * that does (sharing orderQueue) and turns these two numbers into settings, so
- * until then the time is an estimate and the card says so.
+ * A report project joins the queue when the founder or the COO presses Start
+ * (D9; until then an approved project simply waits for that) and leaves when
+ * it gets a slot. Express orders go first, then the order of approval. The
+ * chapter orchestrator (orchestrator.ts) starts projects in exactly this
+ * order, MAX_CONCURRENT_GENERATIONS at a time. The estimated start assumes
+ * each takes the average time of finished projects (DEFAULT_PROJECT_MINUTES
+ * until MIN_FINISHED_FOR_AVERAGE have finished), so it is an estimate and the
+ * card says so. D10 turns the two numbers into settings.
  */
 
 export const MAX_CONCURRENT_GENERATIONS = 3;
@@ -95,10 +95,18 @@ export function queueStateFrom(input: QueueInput): QueueState {
  * chapter has started), else not ready (queueStateFrom turns a queue member
  * into "queued").
  */
-export function projectPhase(opts: { runs: { chapterNumber: number; status: string }[]; activePause: boolean; chapterCount: number; approved?: boolean }): Exclude<QueueStatus, "queued"> {
+export function projectPhase(opts: {
+  runs: { chapterNumber: number; status: string }[];
+  activePause: boolean;
+  chapterCount: number;
+  /** The project's own chapters (expectedChapters); 1 to chapterCount when left out. */
+  chapters?: readonly number[];
+  approved?: boolean;
+}): Exclude<QueueStatus, "queued"> {
   if (opts.activePause) return "paused";
   const completed = new Set(opts.runs.filter((r) => r.status === "COMPLETED").map((r) => r.chapterNumber));
-  if (opts.runs.length && Array.from({ length: opts.chapterCount }, (_, i) => i + 1).every((n) => completed.has(n))) return "done";
+  const chapters = opts.chapters?.length ? opts.chapters : Array.from({ length: opts.chapterCount }, (_, i) => i + 1);
+  if (opts.runs.length && chapters.every((n) => completed.has(n))) return "done";
   if (opts.runs.length) return "generating";
   return "not_ready";
 }

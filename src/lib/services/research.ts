@@ -14,6 +14,7 @@ import {
   GoogleDriveError,
 } from "@/lib/google-drive";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
+import { isStaffRole } from "@/lib/roles";
 import { ledgerRunFinished } from "@/lib/services/operations/research-ledger";
 import { createPendingBrief } from "@/lib/research/source-stage";
 import { claimRun, getRerunState, releaseClaim } from "@/lib/services/research-runs";
@@ -84,9 +85,10 @@ interface ProjectContext {
   universityName: string | null;
 }
 
-async function loadProjectContext(workerId: string, idOrCode: string): Promise<ProjectContext> {
+/** `workerId` null = the founder or the COO, who may act on any project (D9). */
+async function loadProjectContext(workerId: string | null, idOrCode: string): Promise<ProjectContext> {
   const project = await db.project.findFirst({
-    where: { workerId, OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    where: { ...(workerId ? { workerId } : {}), OR: [{ id: idOrCode }, { projectId: idOrCode }] },
     select: {
       id: true,
       projectId: true,
@@ -94,7 +96,7 @@ async function loadProjectContext(workerId: string, idOrCode: string): Promise<P
       client: { select: { department: true, university: { select: { name: true } } } },
     },
   });
-  if (!project) throw new ResearchError("Assignment not found");
+  if (!project) throw new ResearchError(workerId ? "Assignment not found" : "Project not found");
   if (!project.projectTitle) throw new ResearchError("This project needs a title before research can run");
 
   return {
@@ -154,6 +156,27 @@ export async function rerunResearchJob(workerId: string, idOrCode: string, userI
   }
 }
 
+/**
+ * D9: the founder or the COO re-runs a project's research from its Report tab.
+ * They are the approvers, so no request is needed; the claim still refuses once
+ * a chapter exists, and the run is logged and shown in the research ledger like
+ * any other.
+ */
+export async function rerunResearchAsAdmin(idOrCode: string, userId: string, targetCount = TARGET_REFERENCES) {
+  const project = await loadProjectContext(null, idOrCode);
+
+  const claim = await claimRun(project.id, userId, { approver: true });
+  try {
+    await resetResearchJob(null, project.id);
+    return await db.researchJob.create({
+      data: { projectId: project.id, requestedById: userId, targetCount },
+    });
+  } catch (error) {
+    await releaseClaim(claim);
+    throw error;
+  }
+}
+
 export async function getResearchJob(workerId: string, idOrCode: string) {
   const project = await db.project.findFirst({
     where: { workerId, OR: [{ id: idOrCode }, { projectId: idOrCode }] },
@@ -192,12 +215,12 @@ export async function getResearchOverview(workerId: string, idOrCode: string) {
  * and never blocks the reset). The project's Drive folder itself is kept and
  * reused by the next run.
  */
-export async function resetResearchJob(workerId: string, idOrCode: string): Promise<void> {
+export async function resetResearchJob(workerId: string | null, idOrCode: string): Promise<void> {
   const project = await db.project.findFirst({
-    where: { workerId, OR: [{ id: idOrCode }, { projectId: idOrCode }] },
+    where: { ...(workerId ? { workerId } : {}), OR: [{ id: idOrCode }, { projectId: idOrCode }] },
     select: { id: true },
   });
-  if (!project) throw new ResearchError("Assignment not found");
+  if (!project) throw new ResearchError(workerId ? "Assignment not found" : "Project not found");
 
   const job = await db.researchJob.findUnique({
     where: { projectId: project.id },
@@ -849,12 +872,23 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
         where: { researchJobId: job.id, status: "KEPT", driveFileId: { not: null }, NOT: { driveFileId: "SKIPPED" } },
       }),
     ]);
+    const message = `${ctx.projectId}: ${total} verified references ready (${withPdf} with PDFs, ${total - withPdf} reference-only).`;
+    // D9: a run the founder or the COO started opens their own page; the assigned specialist is told as well.
+    const [starter, assigned] = await Promise.all([
+      db.user.findUnique({ where: { id: job.requestedById }, select: { role: true } }),
+      db.project.findUnique({ where: { id: job.projectId }, select: { worker: { select: { userId: true } } } }),
+    ]);
+    const byStaff = isStaffRole(starter?.role);
     await notifyUsers([job.requestedById], {
       title: "Research complete",
-      message: `${ctx.projectId}: ${total} verified references ready (${withPdf} with PDFs, ${total - withPdf} reference-only).`,
+      message,
       type: "success",
-      link: `/worker/projects/${ctx.projectId}`,
+      link: byStaff ? `/admin/projects/${ctx.projectId}?tab=report` : `/worker/projects/${ctx.projectId}`,
     });
+    const specialist = assigned?.worker?.userId;
+    if (byStaff && specialist && specialist !== job.requestedById) {
+      await notifyUsers([specialist], { title: "Research complete", message, type: "success", link: `/worker/projects/${ctx.projectId}` });
+    }
   }
   return { job: next, done: true };
 }

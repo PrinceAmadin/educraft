@@ -115,3 +115,26 @@ export function orderedChapters(additionalData: unknown): number[] {
   if (!Array.isArray(raw)) return [];
   return normalizeChapters(raw.map((n) => Number(n)).filter((n) => Number.isFinite(n)));
 }
+
+/**
+ * The chapters a report project has, in order: the ones ordered (a
+ * chapter-based order), Chapter 4 alone (FYP-CH4), else 1 to its chapter
+ * count. One rule for the chapter orchestrator, the progress dashboard, the
+ * queue and the assembly, so they can never disagree about an order such as
+ * "Chapters 2 and 4".
+ */
+export function expectedChapters(p: { serviceCode: string | null | undefined; additionalData: unknown; chapterCount: number | null | undefined }): number[] {
+  const code = (p.serviceCode ?? "").toUpperCase();
+  if (code === CHAPTER_SERVICE_CODE) {
+    const ordered = orderedChapters(p.additionalData);
+    if (ordered.length > 0) return ordered;
+  }
+  if (code === "FYP-CH4") return [4];
+  const count = Math.min(MAX_REPORT_CHAPTERS, Math.max(1, Math.round(p.chapterCount ?? MAX_REPORT_CHAPTERS)));
+  return Array.from({ length: count }, (_, i) => i + 1);
+}
+
+/** True when the chapters are 1, 2, … N with no gap: the only orders the orchestrator writes on its own. */
+export function runsFromChapterOne(chapters: readonly number[]): boolean {
+  return chapters.length > 0 && chapters.every((n, i) => n === i + 1);
+}

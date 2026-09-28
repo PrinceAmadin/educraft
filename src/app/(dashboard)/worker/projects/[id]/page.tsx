@@ -73,7 +73,8 @@ export default async function WorkerAssignmentPage({
   const [pause, secondary, dashboard] = await Promise.all([
     getWorkerPauseView(worker.id, project.projectId),
     secondaryDataStatus(project.id, project.projectId),
-    generationDashboardFor(project.id),
+    // A specialist sees where the report's run stands, without the founder's and the COO's buttons (D9).
+    generationDashboardFor(project.id, "worker"),
   ]);
   const renderedAt = new Date().toISOString();
   const pauseCard = pause ? (
@@ -248,7 +249,7 @@ export default async function WorkerAssignmentPage({
                         actionEndpoint={`${routeBase}/data-pause`}
                         downloadUrl={`${routeBase}/documents/docx`}
                       />
-                      <QualityGatePanel endpoint={`${routeBase}/quality`} canRegenerate={false} />
+                      <QualityGatePanel key={dashboard.run?.gateRanAt ?? "not-run"} endpoint={`${routeBase}/quality`} canRegenerate={false} />
                       {pauseCard}
                       {secondaryCard}
                     </div>

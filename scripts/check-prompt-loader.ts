@@ -22,12 +22,14 @@ import {
   type SectionKey,
 } from "../src/lib/generation/department-map";
 import {
+  BLOCK_GAP,
   LOADER_TEXT,
   describePromptLibrary,
   extractDepartmentSection,
   getModeInstructions,
   loadChapterPrompt,
   loadPromptLibrary,
+  splitPromptBlocks,
   type ChapterNumber,
   type ChapterPromptInput,
 } from "../src/lib/generation/prompt-loader";
@@ -177,7 +179,8 @@ async function main() {
   sharedFilesPresent("Ch2 Economics", eco.text);
   has("Ch2 Economics: image rules included", eco.text, "═══ IMAGE RULES ═══");
   has("Ch2 Economics: exact figure placeholder instruction (C3)", eco.text, LOADER_TEXT.figurePlaceholder);
-  const imagePart = eco.text.slice(eco.text.indexOf("═══ IMAGE RULES ═══"), eco.text.indexOf("═══ VERIFIED REFERENCES ═══"));
+  const imagePart = eco.chapterBlock.slice(eco.chapterBlock.indexOf("═══ IMAGE RULES ═══"));
+  lacks("Ch2 image rules: they are the last part of the chapter block", imagePart.slice(3), "═══ ");
   lacks("Ch2 image rules: no instruction to search, download or embed (apart from the ban itself)", imagePart.replace(LOADER_TEXT.noImageSearch, ""), /\b(search\w*|download\w*|embed\w*)\b/i);
   lacks("Ch2 image rules: the 'never insert a placeholder' rule is gone", imagePart, /Never insert a placeholder/i);
   has("Ch2 image rules: the content-driven judgement is kept", imagePart, "THE CORE PRINCIPLE");
@@ -190,7 +193,7 @@ async function main() {
   expect("Ch3 Law: doctrinal, Template B, NALT footnotes", [law.section, law.template, law.referencingStyle, law.citationPlacement], ["LAW_DOCTRINAL", "B", "NALT", "MODE_C"]);
   has("Ch3 Law: the five-chapter note overrides the Law section's six chapters", law.text, LOADER_TEXT.fiveChapters);
   has("Ch3 Law: court cases only from the list, else the last-resort placeholder", law.text, LOADER_TEXT.primarySourcesRule("case"));
-  expect("Ch3 Law: blocks used", law.blocksUsed.slice(0, 4), ["ch3:MODE 1", "ch3:SHARED", "ch3:TEMPLATE_B_THEMATIC", "ch3:LAW_DOCTRINAL_CH3"]);
+  expect("Ch3 Law: blocks used", law.blocksUsed.filter((b) => b.startsWith("ch3:")).slice(0, 4), ["ch3:MODE 1", "ch3:SHARED", "ch3:TEMPLATE_B_THEMATIC", "ch3:LAW_DOCTRINAL_CH3"]);
   expect("Ch3 Law: TEMPLATE_B_THEMATIC comes before the Law section that says 'above'", law.text.indexOf("[DEPARTMENT: TEMPLATE_B_THEMATIC]") < law.text.indexOf("[DEPARTMENT: LAW_DOCTRINAL_CH3]"), true);
   has("Ch3 Law: Template B quality gate", law.text, "QB1: No 'Methodology' chapter");
   has("Ch3 Law: MODE C citation block with the NALT repeat rule", law.text, "NALT Law Projects (NALT + MODE C)");
@@ -276,7 +279,8 @@ async function main() {
 
   // ── References: abstracts (Q3), statutes, no quotations (Q6) ────────────────────────────
   has("each reference carries its abstract", eee.text, "Abstract: A prepaid energy meter built on an ESP32");
-  has("a reference without an abstract is kept and marked", eee.text, "Low-Cost Current Sensing for Smart Metering.\nAbstract: abstract unavailable");
+  has("a reference without an abstract is kept and marked", eee.text, "Low-Cost Current Sensing for Smart Metering.\nAbstract unavailable.");
+  lacks("the old wording is gone from the list", eee.text, "Abstract: abstract unavailable");
   has("statutes and the Constitution may be cited by name", eee.text, "apart from statutes and the Constitution, which you may cite by name");
   has("the abstract rule is stated", eee.text, "Report a study's methods and findings only as far as its abstract states them");
   has("no direct quotations; pinpoints left as p. [page] (Q6)", eee.text, LOADER_TEXT.noDirectQuotes);
@@ -315,6 +319,7 @@ async function main() {
       ? [{ mode: entry.defaultMode }]
       : [{ mode: 3, override: "ENGINEERING" }, { mode: 4, override: "MEDICAL_SCIENCE" }, { mode: 2, override: "BUSINESS" }];
     for (const run of runs) {
+      let projectBlock: string | null = null;
       for (let c = 1; c <= 5; c++) {
         try {
           const p = await loadChapterPrompt(
@@ -327,6 +332,11 @@ async function main() {
           for (const h of SHARED_HEADINGS) if (!p.text.includes(h)) problems.push(`${entry.name} ch${c}: missing ${h}`);
           if (!p.text.includes(LOADER_TEXT.noDirectQuotes)) problems.push(`${entry.name} ch${c}: no-quotation rule missing`);
           if (!p.text.includes("Abstract: ")) problems.push(`${entry.name} ch${c}: abstracts missing`);
+          // D9: one project block for the whole project, so Chapters 2 to 5 read it from the prompt cache.
+          if (projectBlock === null) projectBlock = p.projectBlock;
+          else if (p.projectBlock !== projectBlock) problems.push(`${entry.name} ch${c}: the project block differs from Chapter 1's`);
+          if (p.text !== `${p.projectBlock}${BLOCK_GAP}${p.chapterBlock}`) problems.push(`${entry.name} ch${c}: the prompt is not its two blocks joined`);
+          if (p.warnings.length) problems.push(`${entry.name} ch${c}: unexpected warning — ${p.warnings.join(" ")}`);
         } catch (err) {
           problems.push(`${entry.name} Mode ${run.mode} ch${c}: ${(err as Error).message}`);
         }
@@ -460,7 +470,6 @@ async function main() {
   await refuses("Chapter 4 without Chapter 1's objectives is refused", () => loadChapterPrompt(input({ chapter: 4, fromEarlierChapters: {} })), /OBJECTIVES: Chapter One's objectives have not been extracted/);
   await refuses("B5: a thematic Chapter 1 waits for the card's titles", () => loadChapterPrompt(input({ chapter: 1, department: "History", mode: 1, thematicTitles: {} })), /missing: Chapter 3, Chapter 4/);
   await refuses("there is no Chapter 6 in any department (Q1/Q2)", () => loadChapterPrompt(input({ chapter: 6 as ChapterNumber, department: "Law", mode: 1, project: { referencingStyle: "NALT" } })), /Chapter 6 does not exist; reports have five chapters at most/);
-  await refuses("no references, no prompt (B7)", () => loadChapterPrompt(input({ references: [] })), /No verified references/);
   await refuses("NALT placement cannot be overridden", () => loadChapterPrompt(input({ department: "Law", mode: 1, project: { referencingStyle: "NALT" }, citationPlacement: "MODE_B" })), /NALT always uses page footnotes/);
   await refuses("thematic placement cannot be overridden (B3)", () => loadChapterPrompt(input({ chapter: 1, department: "History", mode: 1, citationPlacement: "MODE_A" })), /Thematic reports use MODE B/);
   await refuses("an impossible chapter number is refused", () => loadChapterPrompt(input({ chapter: 7 as ChapterNumber })), /Chapter 7 does not exist/);
@@ -547,6 +556,49 @@ async function main() {
   await refuses("D5: a dataset outside Mode 5 is refused", () => loadChapterPrompt(input({ chapter: 4, department: "Marketing", mode: 2, secondaryData: DATASET })), /Chapters 4 and 5 of Mode 5 projects only/);
   await refuses("D5: a dataset in Chapter 3 is refused", () => loadChapterPrompt(input({ chapter: 3, department: "Economics", mode: 5, secondaryData: DATASET })), /Chapters 4 and 5 of Mode 5 projects only/);
 
+  // ── D9: the references at the top, in a block every chapter of the project shares ──
+  {
+    const at = (text: string, needle: string) => text.indexOf(needle);
+    const order = ["═══ EDUCRAFT VOICE RULES ═══", "═══ REFERENCING RULES ═══", "═══ REFERENCING STYLE FOR THIS PROJECT ═══", "═══ VERIFIED REFERENCES ═══", "═══ MODE INSTRUCTIONS", "═══ SHARED INSTRUCTIONS ═══", "═══ DEPARTMENT INSTRUCTIONS"];
+    const places = order.map((o) => at(eee.text, o));
+    expect("D9: every part of the new order is there", places.every((n) => n >= 0), true);
+    expect("D9: shared rules, then the references, then the chapter's instructions and its department section", [...places].sort((a, b) => a - b), places);
+    expect("D9: the prompt opens with the project block", eee.text.startsWith(eee.projectBlock), true);
+    has("D9: the references are in the project block", eee.projectBlock, "═══ VERIFIED REFERENCES ═══");
+    lacks("D9: no chapter instruction is in the project block", eee.projectBlock, "═══ MODE INSTRUCTIONS");
+    lacks("D9: no reference is in the chapter block", eee.chapterBlock, "═══ VERIFIED REFERENCES ═══");
+    lacks("D9: the project block carries no placeholder", eee.projectBlock, TOKEN);
+    has("D9: the prompt files' pointer to the list reads 'near the start'", LOADER_TEXT.referencesPointer, "near the start of this prompt");
+    lacks("D9: nothing says the list is at the end", eee.text, "at the end of this prompt");
+    expect("D9: a stored prompt splits into its two blocks", splitPromptBlocks(eee.text, eee.projectBlock.length), [eee.projectBlock, eee.chapterBlock]);
+    expect("D9: a prompt stored before D9 goes out as one block", splitPromptBlocks(eee.text, undefined), [eee.text]);
+    expect("D9: a wrong split point is never used", splitPromptBlocks(eee.text, eee.projectBlock.length - 5), [eee.text]);
+    has("D9 Law: the approved cases are in the project block, after the references", lawCases.projectBlock.slice(lawCases.projectBlock.indexOf("═══ VERIFIED REFERENCES ═══")), "═══ APPROVED CASES ═══");
+    has("D9 History: so are the approved archival sources", histArchives.projectBlock.slice(histArchives.projectBlock.indexOf("═══ VERIFIED REFERENCES ═══")), "═══ APPROVED ARCHIVAL SOURCES ═══");
+    const lawCases5 = await loadChapterPrompt(input({ chapter: 5, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, primarySources: CASES }));
+    expect("D9 Law: Chapters 2 and 5 share one project block, cases included", lawCases5.projectBlock === lawCases.projectBlock, true);
+    const otherRefs = await loadChapterPrompt(input({ references: REFERENCES.slice(0, 2) }));
+    expect("D9: another project's references make another project block", otherRefs.projectBlock === eee.projectBlock, false);
+
+    // A project with no verified references still assembles (this reverses B7, "no references, no prompt").
+    const none = await loadChapterPrompt(input({ references: [] }));
+    expect("D9 no research: the prompt assembles with one warning", none.warnings, [LOADER_TEXT.noReferencesWarning]);
+    lacks("D9 no research: no references list", none.text, "═══ VERIFIED REFERENCES ═══");
+    has("D9 no research: the rule that stands in its place", none.text, LOADER_TEXT.noReferences());
+    has("D9 no research: a source is never invented", none.text, "[REFERENCE TO BE SUPPLIED]");
+    has("D9 no research: recorded in blocksUsed", none.blocksUsed.join("|"), "research:no verified references");
+    sharedFilesPresent("D9 no research", none.text);
+    lacks("D9 no research: no unfilled placeholder", none.text, TOKEN);
+    const none4 = await loadChapterPrompt(input({ chapter: 4, references: [] }));
+    has("D9 no research: a later chapter's pointer says there are none", none4.text, LOADER_TEXT.noReferencesPointer);
+    lacks("D9 no research: …and never points at a list that is not there", none4.text, LOADER_TEXT.referencesPointer);
+    const lawNone = await loadChapterPrompt(input({ chapter: 2, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, primarySources: CASES, references: [] }));
+    has("D9 no research, Law: the approved cases are still listed", lawNone.text, "═══ APPROVED CASES ═══");
+    has("D9 no research, Law: and may still be cited", lawNone.text, LOADER_TEXT.noReferences("case"));
+    const lawNoneNoCases = await loadChapterPrompt(input({ chapter: 2, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, references: [] }));
+    has("D9 no research, Law with no source stage: the case placeholder rule stays", lawNoneNoCases.text, LOADER_TEXT.primarySourcesRule("case"));
+  }
+
   if (process.argv.includes("--print")) {
     console.log("\n" + "━".repeat(100) + "\nCHAPTER 1 — ELECTRICAL ENGINEERING — MODE 3 (full assembled prompt)\n" + "━".repeat(100) + "\n");
     console.log(eee.text);
@@ -554,7 +606,7 @@ async function main() {
   console.log(`\nSample prompts written to ${path.relative(process.cwd(), SAMPLES_DIR)}/`);
   console.log(`${passes} checks passed, ${failures} failed.`);
   if (failures > 0) process.exit(1);
-  console.log("The prompt loader matches the approved Phase D1 rules.");
+  console.log("The prompt loader matches the approved Phase D1 rules and the D9 reference wiring.");
 }
 
 main().catch((err) => {

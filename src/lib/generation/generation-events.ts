@@ -6,6 +6,7 @@
  *   chapter_progress  { chapterNum, progressPercent, status, part, partCount, retrying? }
  *   chapter_complete  { chapterNum, outputLength, words, tokensUsed, outputTokens, costNaira }
  *   chapter_failed    { chapterNum, error, partsWritten, partCount }
+ *   chapter_stalled   { chapterNum, error, partsWritten, partCount }  (D9: the watchdog stopped it)
  *   generation_idle   { chapters }  (nothing running for the chapters watched)
  *
  * Events describe the current state, so a reconnecting client simply gets
@@ -17,11 +18,14 @@ export type GenerationEventName =
   | "chapter_progress"
   | "chapter_complete"
   | "chapter_failed"
+  | "chapter_stalled"
   | "generation_idle"
   // D6 (progress-events.ts): the data pauses and the generation queue.
   | "pipeline_paused"
   | "pipeline_resumed"
-  | "queue_position";
+  | "queue_position"
+  // D9: where the report's run stands (the orchestrator).
+  | "run_state";
 
 /**
  * Who a stream is for. "legacy" is D2's /events shape (unchanged); "worker"
@@ -65,7 +69,7 @@ export function isActive(s: Pick<SnapshotLike, "status">): boolean {
   return ACTIVE.has(s.status);
 }
 
-/** Lower-case status for clients: pending, outlining, writing, completed, failed. */
+/** Lower-case status for clients: pending, outlining, writing, completed, failed, stalled. */
 export function statusName(status: GenerationStatus): string {
   return status.toLowerCase();
 }
@@ -97,11 +101,11 @@ export function eventForSnapshot(s: SnapshotLike, opts: { nairaRate: number; out
       data: { chapterNum: s.chapterNumber, words: opts.output?.words ?? 0, durationSeconds: durationSeconds(s), ...(audience === "admin" ? cost : {}) },
     };
   }
-  if (s.status === "FAILED") {
+  if (s.status === "FAILED" || s.status === "STALLED") {
     return {
-      event: "chapter_failed",
+      event: s.status === "STALLED" ? "chapter_stalled" : "chapter_failed",
       id,
-      data: { chapterNum: s.chapterNumber, error: s.errorMessage ?? s.lastError ?? "Generation stopped", partsWritten: s.partCursor, partCount: s.partCount },
+      data: { chapterNum: s.chapterNumber, error: s.errorMessage ?? s.lastError ?? "Generation stopped", partsWritten: s.partCursor, partCount: s.partCount, progressPercent: s.progressPercent },
     };
   }
   return {
@@ -126,7 +130,10 @@ export function formatSse(e: GenerationEvent): string {
 /**
  * An unfinished run nobody is working on: its lease has lapsed and nothing has
  * moved for `staleMs` (longer than any wait between two slices). The stream
- * restarts such a run.
+ * restarts such a run. This is the normal hand-over between slices (the
+ * orchestrator calls it "quiet"), not the STALLED status: a chapter is STALLED
+ * when the watchdog found no part finished for 90 minutes, and then only a
+ * person restarts it.
  */
 export function isStalled(s: SnapshotLike, now: number, staleMs = 75_000): boolean {
   if (!isActive(s)) return false;

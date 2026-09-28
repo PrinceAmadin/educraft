@@ -3,7 +3,8 @@ import { generationContext, listPauseSnapshots, projectPhase } from "@/lib/servi
 import { queueStateFor } from "@/lib/services/generation-queue";
 import { chapterOutputStatsMany, listGenerationSnapshots } from "./generate-chapter";
 import { eventForSnapshot, formatSse, isActive, isStalled, snapshotKey, type EventAudience, type GenerationEvent } from "./generation-events";
-import { isPauseActive, pauseKey, pausedEvent, queueEvent, queueKey, resumedEvent } from "./progress-events";
+import { isPauseActive, pauseKey, pausedEvent, queueEvent, queueKey, resumedEvent, runStateEvent, runViewKey } from "./progress-events";
+import { getRunView, runViewForWorker } from "./orchestrator-view";
 import { scheduleGenerationStep } from "./generation-runner";
 
 /** How often the stream reads the database. */
@@ -72,6 +73,7 @@ export function generationEventStream(opts: GenerationStreamOptions): Response {
       /** pause id -> the key last sent, or "ended" once pipeline_resumed went out. */
       const lastPause = new Map<string, string>();
       let lastQueue: string | null = null;
+      let lastRun: string | null = null;
       let lastWrite = Date.now();
       let idleSent = false;
       let errors = 0;
@@ -125,13 +127,24 @@ export function generationEventStream(opts: GenerationStreamOptions): Response {
 
           const context = await contextRead;
           if (opts.queue && context && tick % QUEUE_EVERY_TICKS === 0) {
-            const phase = projectPhase({ approved: context.approved, runs: rows, activePause: pauses.some(isPauseActive), chapterCount: context.chapterCount });
+            const phase = projectPhase({ approved: context.approved, runs: rows, activePause: pauses.some(isPauseActive), chapterCount: context.chapterCount, chapters: context.chapters });
             const state = await queueStateFor(opts.projectId, phase, new Date(now));
             const key = queueKey(state);
             if (key !== lastQueue) {
               lastQueue = key;
               send(formatSse(queueEvent(state)));
               lastWrite = now;
+            }
+            // D9: the report's run (a specialist sees its state, not the founder's and the COO's buttons).
+            const view = await getRunView(opts.projectId);
+            if (view) {
+              const shown = audience === "worker" ? runViewForWorker(view) : view;
+              const runKey = runViewKey(shown);
+              if (runKey !== lastRun) {
+                lastRun = runKey;
+                send(formatSse(runStateEvent(shown)));
+                lastWrite = now;
+              }
             }
           }
 

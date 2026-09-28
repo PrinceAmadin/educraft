@@ -27,6 +27,8 @@ import {
   joinParts,
   missingHeadings,
   nonAnswerReason,
+  MAX_CACHE_POINTS,
+  SYSTEM_CACHE_POINTS,
   outlineUserBlocks,
   packParts,
   parsePlanInput,
@@ -189,6 +191,15 @@ throws("plan: a duplicated number refused", () => parsePlanInput({ sections: [ra
 throws("plan: a chapter of 300 words refused", () => parsePlanInput({ sections: [{ number: "1.1", heading: "Short", subsections: [], targetWords: 300 }] }, 1), PlanError);
 throws("plan: no sections refused", () => parsePlanInput({ sections: [] }, 1), PlanError);
 throws("plan: not an object refused", () => parsePlanInput(null, 1), PlanError);
+// D9's live test: the model sent the sections as a JSON string, and the refused plan cost a whole planning call.
+check("plan: sections sent as a JSON string are read as the list", JSON.stringify(parsePlanInput({ sections: JSON.stringify(rawPlan.sections) }, 1)) === JSON.stringify(sections));
+check("plan: a whole plan sent as a JSON string", JSON.stringify(parsePlanInput(JSON.stringify(rawPlan), 1)) === JSON.stringify(sections));
+check(
+  "plan: sub-sections sent as a JSON string",
+  JSON.stringify(parsePlanInput({ sections: rawPlan.sections.map((s) => ({ ...s, subsections: JSON.stringify(s.subsections) })) }, 1)) === JSON.stringify(sections),
+);
+check("plan: a bare list of sections", JSON.stringify(parsePlanInput(rawPlan.sections, 1)) === JSON.stringify(sections));
+throws("plan: text that is not a list is still refused", () => parsePlanInput({ sections: "1.1 Background, 1.2 Problem" }, 1), PlanError);
 
 const parts = packParts(sections);
 check("pack: 3 parts (900+500+600 | 2500 | 300+200)", parts.length === 3 && parts[0].sections.join() === "1.1,1.2,1.3" && parts[1].sections.join() === "1.4" && parts[2].sections.join() === "1.5,1.6", parts);
@@ -260,7 +271,25 @@ const b1 = partUserBlocks({ briefText: "BRIEF", plan: donePlan, partialOutput: p
 const marks = (bs: { cache_control?: unknown }[]) => bs.map((b) => (b.cache_control ? 1 : 0)).join("");
 check("cache: part 1 = brief, plan*, instruction", marks(b0) === "010" && b0.length === 3, marks(b0));
 check("cache: part 3 = brief, plan*, part1, part2*, instruction", marks(b2) === "01010" && b2.length === 5, marks(b2));
-check("cache: at most 3 breakpoints with the system block (4 allowed)", 1 + marks(b2).split("").filter((c) => c === "1").length <= 4);
+// D9: the prompt is two system blocks (the project block and the chapter block), each a cache point.
+const points = (bs: { cache_control?: unknown }[]) => SYSTEM_CACHE_POINTS + bs.filter((b) => b.cache_control).length;
+check("cache: the prompt takes two of the four cache points", SYSTEM_CACHE_POINTS === 2 && MAX_CACHE_POINTS === 4);
+check("cache: planning call = 3 cache points", points(outlineBlocks) === 3, points(outlineBlocks));
+check("cache: first part = 3 cache points", points(b0) === 3, points(b0));
+check("cache: a later part = 4 cache points, never more", points(b2) === 4 && points(b1) === 4, [points(b1), points(b2)]);
+{
+  const pdf = { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: "JVBERi0=" } };
+  const png = { type: "image" as const, source: { type: "base64" as const, media_type: "image/png" as const, data: "iVBORw==" } };
+  const withData = [
+    outlineUserBlocks("BRIEF", 4, [pdf, png]),
+    partUserBlocks({ briefText: "BRIEF", plan, partialOutput: null, chapter: 1, partIndex: 0, attachments: [pdf, png] }),
+    partUserBlocks({ briefText: "BRIEF", plan: donePlan, partialOutput: partTexts[0], chapter: 1, partIndex: 1, attachments: [pdf, png] }),
+    partUserBlocks({ briefText: "BRIEF", plan: donePlan, partialOutput: joinParts(partTexts), chapter: 1, partIndex: 2, attachments: [pdf, png] }),
+  ];
+  check("cache: with data files, no call passes four cache points", withData.every((bs) => points(bs) <= MAX_CACHE_POINTS), withData.map(points));
+  check("cache: with data files, the planning call caches up to the last file", marks(withData[0]) === "0010", marks(withData[0]));
+  check("cache: with data files, a writing call leaves the files to the plan's cache point", marks(withData[1]) === "00010" && marks(withData[3]) === "0001010", [marks(withData[1]), marks(withData[3])]);
+}
 const txt = (b: { type: string }) => ("text" in b ? String((b as { text: string }).text) : "");
 check("cache: part 2's written block is byte-identical inside part 3's request (prefix reuse)", txt(b1[2]) === txt(b2[2]) && txt(b1[1]) === txt(b2[1]) && txt(b1[0]) === txt(b2[0]));
 check("cache: written text is labelled once, on the first part", txt(b2[2]).startsWith(GENERATION_TEXT.writtenSoFar(1)) && !txt(b2[3]).startsWith("CHAPTER"));

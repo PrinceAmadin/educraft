@@ -7,6 +7,7 @@
 
 import type { GenerationStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { expectedChapters } from "@/lib/deliverables";
 import { countWords } from "@/lib/generation/chapter-plan";
 import { isReportTemplate } from "@/lib/generation/generation-state";
 import { listGenerationSnapshots, type GenerationSnapshot } from "@/lib/generation/generate-chapter";
@@ -21,6 +22,7 @@ import {
   type PauseView,
 } from "@/lib/generation/progress-events";
 import { queueStateFor } from "@/lib/services/generation-queue";
+import { getRunView, runViewForWorker, type RunView } from "@/lib/generation/orchestrator-view";
 
 const ACTIVE_RUN: GenerationStatus[] = ["PENDING", "OUTLINING", "WRITING"];
 
@@ -69,7 +71,10 @@ export { projectPhase };
 export interface ProjectGenerationContext {
   projectId: string;
   projectCode: string;
+  /** How many chapters the project has (chapters.length). */
   chapterCount: number;
+  /** The project's own chapters, in order (expectedChapters): 1 to 5, or the ones a chapter-based order bought. */
+  chapters: number[];
   mode: number | null;
   approved: boolean;
   thematic: { chapter3: string | null; chapter4: string | null };
@@ -83,15 +88,18 @@ export async function generationContext(projectId: string): Promise<ProjectGener
       id: true,
       projectId: true,
       chapterCount: true,
-      service: { select: { intakeFormTemplate: true } },
+      additionalData: true,
+      service: { select: { intakeFormTemplate: true, serviceCode: true } },
       researchMode: { select: { modeNumber: true, isLocked: true, thematicTitleChapter3: true, thematicTitleChapter4: true } },
     },
   });
   if (!p || !isReportTemplate(p.service.intakeFormTemplate)) return null;
+  const chapters = expectedChapters({ serviceCode: p.service.serviceCode, additionalData: p.additionalData, chapterCount: p.chapterCount });
   return {
     projectId: p.id,
     projectCode: p.projectId,
-    chapterCount: Math.min(5, Math.max(1, p.chapterCount ?? 5)),
+    chapterCount: chapters.length,
+    chapters,
     mode: p.researchMode?.isLocked ? p.researchMode.modeNumber : null,
     approved: Boolean(p.researchMode?.isLocked),
     thematic: { chapter3: p.researchMode?.thematicTitleChapter3 ?? null, chapter4: p.researchMode?.thematicTitleChapter4 ?? null },
@@ -100,8 +108,7 @@ export async function generationContext(projectId: string): Promise<ProjectGener
 
 /** One card per chapter from the runs (a chapter with no run is pending, with the reason when known). */
 export function chapterCards(ctx: ProjectGenerationContext, runs: GenerationSnapshot[], opts: { activePauseAfter: number | null; hasSecondaryData: boolean; words?: Map<number, number> }): ChapterCardView[] {
-  return Array.from({ length: ctx.chapterCount }, (_, i) => {
-    const n = i + 1;
+  return ctx.chapters.map((n) => {
     const run = runs.find((r) => r.chapterNumber === n);
     const base: ChapterCardView = {
       chapterNum: n,
@@ -130,8 +137,16 @@ export function chapterCards(ctx: ProjectGenerationContext, runs: GenerationSnap
         waitingFor: null,
       };
     }
-    if (run.status === "FAILED") {
-      return { ...base, status: "failed", progressPercent: run.progressPercent, part: run.partCursor, partCount: run.partCount, error: run.errorMessage ?? run.lastError ?? "Generation stopped", waitingFor: null };
+    if (run.status === "FAILED" || run.status === "STALLED") {
+      return {
+        ...base,
+        status: run.status === "STALLED" ? "stalled" : "failed",
+        progressPercent: run.progressPercent,
+        part: run.partCursor,
+        partCount: run.partCount,
+        error: run.errorMessage ?? run.lastError ?? "Generation stopped",
+        waitingFor: null,
+      };
     }
     return {
       ...base,
@@ -152,26 +167,34 @@ export interface GenerationDashboardState {
   chapters: ChapterCardView[];
   pause: PauseView | null;
   queue: QueueState;
+  /** D9: where the report's run stands (Start, the queue, a pause, the quality check). */
+  run: RunView | null;
 }
 
-/** The first, server-rendered state of the dashboard; null for projects that are not written reports. */
-export async function generationDashboardFor(projectId: string): Promise<GenerationDashboardState | null> {
+/**
+ * The first, server-rendered state of the dashboard; null for projects that
+ * are not written reports. A specialist gets the run's state without the
+ * founder's and the COO's buttons.
+ */
+export async function generationDashboardFor(projectId: string, audience: "admin" | "worker" = "admin"): Promise<GenerationDashboardState | null> {
   const ctx = await generationContext(projectId);
   if (!ctx) return null;
-  const [runs, pauses, dataset] = await Promise.all([
+  const [runs, pauses, dataset, runView] = await Promise.all([
     listGenerationSnapshots(projectId),
     listPauseSnapshots(projectId),
     ctx.mode === 5 ? db.projectFile.count({ where: { projectId, category: "secondary_data", deletedAt: null } }) : Promise.resolve(0),
+    getRunView(projectId),
   ]);
   const active = pauses.find(isPauseActive) ?? null;
   const words = await completedWords(runs);
-  const phase = projectPhase({ approved: ctx.approved, runs, activePause: Boolean(active), chapterCount: ctx.chapterCount });
+  const phase = projectPhase({ approved: ctx.approved, runs, activePause: Boolean(active), chapterCount: ctx.chapterCount, chapters: ctx.chapters });
   return {
     projectCode: ctx.projectCode,
     mode: ctx.mode,
     chapters: chapterCards(ctx, runs, { activePauseAfter: active?.afterChapter ?? null, hasSecondaryData: dataset > 0, words }),
     pause: active ? pauseView(active) : null,
     queue: await queueStateFor(projectId, phase),
+    run: runView && audience === "worker" ? runViewForWorker(runView) : runView,
   };
 }
 

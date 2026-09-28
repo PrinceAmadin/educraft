@@ -588,10 +588,15 @@ export async function transitionProject(
   }
   // Every submission needs a reviewer, including a resubmission after a revision.
   if (to === "SUBMITTED") {
+    // A submission with no person behind it is a generated report that passed the quality gate (D8/D9):
+    // the founder's wording, and the one bell for it (the orchestrator adds the email).
+    const bySystem = changedById === null;
     await notifyOperations({
-      title: project.status === "REVISION_NEEDED" ? "Revised work submitted" : "Work submitted",
-      message: `${project.projectId} has been submitted and needs a QA reviewer.`,
-      type: "info",
+      title: bySystem ? `Report ready for your review — ${project.projectId}` : project.status === "REVISION_NEEDED" ? "Revised work submitted" : "Work submitted",
+      message: bySystem
+        ? `${project.projectId} passed the quality check and is in the QA queue.${note ? ` ${note}` : ""}`
+        : `${project.projectId} has been submitted and needs a QA reviewer.`,
+      type: bySystem ? "success" : "info",
       link: "/admin/qa",
     });
   }

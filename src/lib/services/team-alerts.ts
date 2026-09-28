@@ -8,11 +8,14 @@ import {
   ambassadorApplicationAlert,
   paidIntakeFailedAlert,
   paidOrderAlert,
+  reportReadyAlert,
+  reportStoppedAlert,
   workerApplicationAlert,
   type AlertAudience,
   type AlertEmail,
 } from "@/lib/emails/team-alerts";
 import { getAlertEmails } from "@/lib/services/settings";
+import { mayNotify } from "@/lib/qa-scope";
 import { statusLabel } from "@/lib/status";
 import { REACH_ROLES } from "@/lib/constants";
 import { isLegacyApplication, reachSizeLabel, scoreApplication } from "@/lib/ambassador-score";
@@ -22,7 +25,9 @@ import { formatDate, formatNaira } from "@/lib/utils";
  * Gmail alerts for the moments someone outside HQ asks for our attention: an
  * ambassador applies, a worker applies, a client's downpayment is confirmed by
  * Paystack on an order (and the rare paid order that could not become a
- * project).
+ * project). Since Phase D9 also the two moments report production asks for
+ * the COO: a report that passed the quality check and is ready for review,
+ * and a report whose generation stopped.
  *
  * Who gets them: the founder's inbox (Settings > General > Email alerts) gets
  * every alert; ambassador applications also go to the Head of Growth, worker
@@ -78,13 +83,17 @@ async function audienceLogins(audience: AlertAudience) {
   });
 }
 
-/** Everyone an alert for this audience goes to. */
+/**
+ * Everyone an alert for this audience goes to. A test run on a made-up project
+ * narrows this to its own inboxes (qa-scope.ts); production never does.
+ */
 export async function alertRecipients(audience: AlertAudience): Promise<{ to: string[]; skipped: string[] }> {
   const [founder, logins] = await Promise.all([getAlertEmails(), audienceLogins(audience)]);
-  return mergeAlertRecipients(
+  const merged = mergeAlertRecipients(
     founder,
     logins.map((u) => u.email)
   );
+  return { to: merged.to.filter(mayNotify), skipped: merged.skipped };
 }
 
 export interface AlertRoleRecipient {
@@ -140,6 +149,10 @@ async function deliver(
     if (!mail) return;
     const { to, skipped } = await alertRecipients(audience);
     if (skipped.length) console.warn(`[team-alert] ${label}: skipped placeholder ${skipped.join(", ")}`);
+    if (to.length === 0) {
+      console.warn(`[team-alert] ${label}: not sent: nobody to send it to`);
+      return;
+    }
     const sent = await sendMail({ to: to.join(", "), ...mail });
     // Emails are not logged: the count is enough to tell whether the executive was included.
     if (sent.ok) console.info(`[team-alert] ${label}: sent to ${to.length} inbox(es) (founder + ${ALERT_AUDIENCE_EXEC[audience]})`);
@@ -376,6 +389,66 @@ export function alertPaidIntakeFailed(
       service,
       paidAt: watDateTime(payment.paidOn),
       newProjectUrl: `${siteUrl()}/admin/projects/new`,
+    });
+  });
+}
+
+// ── Report production (Phase D9) ─────────────────────────────
+
+/**
+ * A generated report passed the quality check and is in the QA queue: the
+ * email twin of the "Report ready for your review" notification.
+ */
+export function alertReportReady(projectDbId: string, result: { score: number | null; total: number | null; passedAt: Date }): void {
+  queue(`report ready ${projectDbId}`, "operations", async () => {
+    const project = await db.project.findUnique({
+      where: { id: projectDbId },
+      select: {
+        projectId: true,
+        projectTitle: true,
+        isExpressDelivery: true,
+        chapterCount: true,
+        client: { select: { fullName: true, department: true } },
+        worker: { select: { fullName: true } },
+        researchMode: { select: { department: true } },
+        qaReview: { select: { recallWindowExpiresAt: true } },
+        _count: { select: { generationCheckpoints: { where: { status: "COMPLETED" } } } },
+      },
+    });
+    if (!project) return null;
+    return reportReadyAlert({
+      projectCode: project.projectId,
+      title: project.projectTitle,
+      department: project.researchMode?.department ?? project.client.department,
+      client: project.client.fullName,
+      specialist: project.worker?.fullName ?? null,
+      score: `${result.score ?? "—"} of ${result.total ?? 89}`,
+      chapters: project._count.generationCheckpoints,
+      express: project.isExpressDelivery,
+      recallUntil: project.qaReview?.recallWindowExpiresAt ? watDateTime(project.qaReview.recallWindowExpiresAt) : null,
+      passedAt: watDateTime(result.passedAt),
+      reviewUrl: `${siteUrl()}/admin/qa`,
+    });
+  });
+}
+
+/** Report generation stopped and needs the founder or the COO. */
+export function alertReportStopped(
+  projectDbId: string,
+  event: { headline: (code: string) => string; what: (code: string) => string; chapter: number | null; detail: string | null; at: Date },
+): void {
+  queue(`report stopped ${projectDbId}`, "operations", async () => {
+    const project = await db.project.findUnique({ where: { id: projectDbId }, select: { projectId: true, projectTitle: true } });
+    if (!project) return null;
+    return reportStoppedAlert({
+      projectCode: project.projectId,
+      headline: event.headline(project.projectId),
+      what: event.what(project.projectId),
+      title: project.projectTitle,
+      chapter: event.chapter,
+      detail: event.detail,
+      at: watDateTime(event.at),
+      reportUrl: `${siteUrl()}/admin/projects/${project.projectId}?tab=report`,
     });
   });
 }

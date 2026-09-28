@@ -8,12 +8,14 @@ import {
   getAdminPauses,
   openDataPause,
   regenerateDataForm,
+  reopenDataPause,
   requestMoreFiles,
   saveAnswers,
   verifyDataPause,
 } from "@/lib/services/data-pause";
 import { dataPauseErrorResponse } from "@/lib/services/data-pause-errors";
 import { pauseActionSchema } from "@/lib/validations/data-pause";
+import { nudge } from "@/lib/generation/orchestrator";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,7 +36,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 /**
  * POST { action, ... }. Founder and COO only:
  *  - open { afterChapter }: pause the report there and draft the client's data request
- *    (the chapter orchestrator will do this on its own); regenerate_form; cancel
+ *    (the chapter orchestrator does this on its own); regenerate_form; cancel; reopen
+ *    (a cancelled request, asked for again)
  *  - the specialist's actions, when the founder or COO checks the data themselves:
  *    add_files, save_answers, verify, request_more
  */
@@ -54,10 +57,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const owned = await db.pipelinePause.count({ where: { id: b.pauseId, projectId: project.id } });
       if (!owned) throw new DataPauseError("Pause not found", 404);
       if (!(await cancelDataPause(b.pauseId))) throw new DataPauseError("This pause has already ended.");
+    } else if (b.action === "reopen") {
+      const owned = await db.pipelinePause.count({ where: { id: b.pauseId, projectId: project.id } });
+      if (!owned) throw new DataPauseError("Pause not found", 404);
+      await reopenDataPause(b.pauseId);
     } else if (b.action === "add_files") await addSpecialistFiles(actor, project.id, b.pauseId, b.files);
     else if (b.action === "save_answers") await saveAnswers(project.id, b.pauseId, b.answers);
     else if (b.action === "verify") await verifyDataPause(actor, project.id, b.pauseId, b.chapterFileIds);
     else await requestMoreFiles(project.id, b.pauseId, b.note || null);
+    // D9: a verified, cancelled, reopened or redrafted request is what the report's run was waiting for.
+    if (b.action === "verify" || b.action === "cancel" || b.action === "reopen" || b.action === "open" || b.action === "regenerate_form") await nudge(project.id);
     return NextResponse.json({ pauses: await getAdminPauses(project.id) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return dataPauseErrorResponse("POST /api/admin/projects/[id]/data-pause", error);

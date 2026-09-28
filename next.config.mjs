@@ -15,14 +15,21 @@ const nextConfig = {
 
   /**
    * The prompt library is read from disk at run time (src/lib/generation/prompt-loader.ts,
-   * the quality gate's voice rules). Routes that start a chapter or run the gate
-   * need prompts/ in their function bundle, or Vercel's file tracing leaves it out.
+   * the quality gate's voice rules, the data request's checklist). Routes that start a
+   * chapter, run the gate or draft a data request need prompts/ in their function
+   * bundle, or Vercel's file tracing leaves it out.
    */
   experimental: {
     outputFileTracingIncludes: {
       "/api/admin/projects/[id]/quality/run": ["./prompts/**/*"],
       "/api/worker/projects/[id]/quality/run": ["./prompts/**/*"],
       "/api/admin/projects/[id]/quality/regenerate": ["./prompts/**/*"],
+      // D9: the orchestrator's tick starts chapters and drafts data requests; the internal gate; Start's rehearsal; Continue.
+      "/api/internal/orchestrator/tick": ["./prompts/**/*"],
+      "/api/internal/quality/run": ["./prompts/**/*"],
+      "/api/admin/projects/[id]/generation/start": ["./prompts/**/*"],
+      "/api/admin/projects/[id]/generation/continue": ["./prompts/**/*"],
+      "/api/admin/projects/[id]/data-pause": ["./prompts/**/*"],
     },
   },
   images: {

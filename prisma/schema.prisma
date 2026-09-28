@@ -577,6 +577,7 @@ model Project {
   workerFlags          WorkerFlag[]
   // Phase D (report production)
   generationCheckpoints GenerationCheckpoint[]
+  orchestratorRun       OrchestratorRun?
   researchMode          ResearchMode?
   brief                 ProjectBrief?
   sources               ProjectSource[]
@@ -1395,6 +1396,7 @@ enum GenerationStatus {
   WRITING // writing the planned parts, one per step
   COMPLETED // fullOutput holds the whole chapter
   FAILED // retries ran out or the error cannot be retried; partialOutput keeps the parts already written
+  STALLED // D9: no plan or part finished for 90 minutes although the orchestrator kept carrying it on; only the founder or the COO restarts it
 }
 
 /// D3b: where a project's objectives and (Law/History) sources stand.
@@ -1562,12 +1564,101 @@ model GenerationCheckpoint {
   /// Consecutive failed steps; reset on success.
   failedSteps Int       @default(0)
   lastError   String?
+  /// D9: when the plan or a part was last SAVED (or the run was restarted). The watchdog's clock: unlike lastStepAt it
+  /// does not move on a draft save or a failed attempt, so a chapter that keeps crashing cannot look healthy.
+  lastProgressAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([projectId, chapterNumber])
   @@index([status])
+}
+
+// ─── D9: THE CHAPTER ORCHESTRATOR ───────────────────────
+// One row per report project, from the moment the founder or the COO presses
+// Start. It holds where the report stands between chapters (the chapters'
+// own state stays on GenerationCheckpoint, the pauses on PipelinePause, the
+// quality gate's result on QaReview). The orchestrator's tick reads those and
+// this row, decides the next action and performs it; running it twice
+// changes nothing.
+enum OrchestratorStatus {
+  QUEUED // Start was pressed (or a data pause was verified); waiting for one of the generation slots
+  GENERATING // a chapter is being written; holds a slot
+  WAITING_FOR_DATA // a data pause is open; the slot is released
+  FETCHING_DATA // Mode 5: fetching the dataset after Chapter 3; holds a slot
+  QUALITY_CHECK // every chapter is written; the quality gate has been asked for
+  QUALITY_FAILED // the gate failed; waits for the founder or the COO to re-generate chapters
+  HELD // the project is On hold, Disputed or Awaiting client input (or its research is running again); carries on by itself
+  NEEDS_ATTENTION // something needs a person; `reason` says what
+  COMPLETE // the gate passed and the report is in the QA queue
+  STOPPED // stopped by the founder or the COO, or the project was cancelled or refunded
+}
+
+model OrchestratorRun {
+  id        String             @id @default(cuid())
+  projectId String             @unique
+  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status    OrchestratorStatus @default(QUEUED)
+  /// The chapter being written, or the next one to write.
+  currentChapter Int?
+  /// A code from orchestrator-rules.ts (CHAPTER_FAILED, CHAPTER_STALLED, PAUSE_CANCELLED…), with the detail a person reads.
+  reason       String?
+  reasonDetail String? @db.Text
+  /// The status to go back to when a hold ends.
+  resumeStatus OrchestratorStatus?
+
+  /// Which server owns the run ("production", "preview", "development"): a tick only works on its own server's runs,
+  /// so a local test can never be picked up by production, or the reverse.
+  runner String
+
+  /// User.id and name of whoever pressed Start: the actor of the data fetch and the quality gate.
+  startedById   String
+  startedByName String
+  requestedAt   DateTime  @default(now())
+  /// When its first chapter started.
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  stoppedById   String?
+
+  /// The founder or the COO confirmed a start with no verified references.
+  allowNoReferences Boolean @default(false)
+
+  /// Chapter One's research questions and hypotheses, read once it is written; Chapters 2 to 5 are written from them.
+  researchQuestions  String[]  @default([])
+  hypotheses         String[]  @default([])
+  statementsReadAt   DateTime?
+  /// The founder or the COO chose to continue although none could be read.
+  statementsAccepted Boolean   @default(false)
+
+  // ── Attempts (each is capped, then the run needs a person) ──
+  pauseDraftAttempts Int       @default(0)
+  fetchAttempts      Int       @default(0)
+  gateAttempts       Int       @default(0)
+  gateRequestedAt    DateTime?
+  gateError          String?
+
+  // ── The watchdog ──
+  /// Times the orchestrator carried the current chapter on since it last made progress.
+  kickCount  Int       @default(0)
+  lastKickAt DateTime?
+
+  // ── Background execution ──
+  /// A tick working on this run holds this lease, so two ticks never act on one project at once.
+  lockedUntil DateTime?
+  lastTickAt  DateTime?
+  /// A parked run (complete, failed the gate, stopped, waiting for a person) is looked at again only after this.
+  nextCheckAt DateTime?
+
+  /// Keys of the alerts already sent ("stalled:<checkpoint>", "ready:<gate run>"), so none is ever sent twice.
+  /// The default matters: a list left out of an insert is NULL in Postgres, and no list filter ever matches NULL.
+  announced String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([runner, status])
 }
 
 // ─── RESEARCH RUN CONTROL ───────────────────────────────

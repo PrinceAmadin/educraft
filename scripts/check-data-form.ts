@@ -30,7 +30,7 @@ import {
 import { MAX_EXTRACTED_CHARS, capText, dataFileKind, extractDataText, roughPdfPages } from "../src/lib/files/extract-text";
 import { acceptAttribute, allowedKindsLabel, canUpload, contentTypeFor, magicMatches, maxBytesFor } from "../src/lib/files/policy";
 import { parsePrivatePath } from "../src/lib/files/paths";
-import { buildPlan, outlineUserBlocks, partUserBlocks, type AttachmentBlock, type UserBlock } from "../src/lib/generation/chapter-plan";
+import { MAX_CACHE_POINTS, SYSTEM_CACHE_POINTS, buildPlan, outlineUserBlocks, partUserBlocks, type AttachmentBlock, type UserBlock } from "../src/lib/generation/chapter-plan";
 import { dataInputChecklist, loadChapterPrompt, type ChapterPromptInput } from "../src/lib/generation/prompt-loader";
 
 let passed = 0;
@@ -272,11 +272,12 @@ async function main() {
     { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBERi0=" }, title: "spss.pdf" },
     { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw==" } },
   ];
-  const breakpoints = (blocks: UserBlock[]) => blocks.filter((b) => b.cache_control).length + 1; // + the system block
+  const breakpoints = (blocks: UserBlock[]) => blocks.filter((b) => b.cache_control).length + SYSTEM_CACHE_POINTS; // + the prompt's two system blocks (D9)
   const outline = outlineUserBlocks("BRIEF", 4, att);
   check("plan call: brief, then the attachments, then the instruction", outline[0].type === "text" && outline[1].type === "document" && outline[2].type === "image" && outline[3].type === "text");
   check("plan call: only the last attachment is a cache point", !outline[1].cache_control && Boolean(outline[2].cache_control));
-  check("plan call: at most 4 cache breakpoints", breakpoints(outline) <= 4, breakpoints(outline));
+  check("plan call: the brief leaves the cache point to the last attachment", !outline[0].cache_control);
+  check("plan call: at most 4 cache breakpoints", breakpoints(outline) <= MAX_CACHE_POINTS, breakpoints(outline));
   check("plan call: no attachments, same blocks as before", outlineUserBlocks("BRIEF", 4).length === 2);
 
   const plan = buildPlan([
@@ -290,8 +291,9 @@ async function main() {
   plan.parts[0].chars = written.split("\n\n[H2] 4.2")[0].length;
   const p2 = partUserBlocks({ briefText: "BRIEF", plan, partialOutput: written, chapter: 4, partIndex: Math.min(2, plan.parts.length - 1), attachments: att });
   check("writing call: attachments right after the brief", p0[1].type === "document" && p0[2].type === "image");
-  check("writing call, first part: at most 4 cache breakpoints", breakpoints(p0) <= 4, breakpoints(p0));
-  check("writing call, later part: at most 4 cache breakpoints", breakpoints(p2) <= 4, { bp: breakpoints(p2), lengths });
+  check("writing call: the attachments carry no cache point of their own", !p0[1].cache_control && !p0[2].cache_control && !p2[2].cache_control);
+  check("writing call, first part: at most 4 cache breakpoints", breakpoints(p0) <= MAX_CACHE_POINTS, breakpoints(p0));
+  check("writing call, later part: at most 4 cache breakpoints", breakpoints(p2) <= MAX_CACHE_POINTS, { bp: breakpoints(p2), lengths });
   check("the attachments are not changed in place", !att[1].cache_control);
 }
 

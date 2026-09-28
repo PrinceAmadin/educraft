@@ -39,7 +39,9 @@
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
     "catalogue:sync": "dotenv -e .env.local -- tsx scripts/sync-service-catalogue.ts",
     "check:assembly": "tsx scripts/check-assembly.ts",
-    "check:quality": "tsx scripts/check-quality.ts"
+    "check:quality": "tsx scripts/check-quality.ts",
+    "check:orchestrator": "tsx scripts/check-orchestrator.ts",
+    "orchestrator:schedule": "dotenv -e .env.local -- tsx scripts/setup-orchestrator-schedule.ts"
   },
   "prisma": {
     "seed": "dotenv -e .env.local -- tsx prisma/seed.ts"

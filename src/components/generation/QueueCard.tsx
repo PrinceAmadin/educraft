@@ -64,7 +64,7 @@ export function QueueCard({ queue, now }: { queue: QueueState; now: Date }) {
   }
 
   const states = {
-    not_ready: { icon: LuHourglass, title: "Not in the generation queue yet", body: "A report joins the queue once its research mode is approved and the project is in progress.", className: "text-muted-foreground" },
+    not_ready: { icon: LuHourglass, title: "Not in the generation queue yet", body: "A report joins the queue when the founder or the COO starts it, once its research mode is approved and the project is in progress.", className: "text-muted-foreground" },
     generating: { icon: LuLoaderCircle, title: "Generating", body: "This report has started; its chapters are written here.", className: "text-primary" },
     paused: { icon: LuCirclePause, title: "Paused for data", body: "Generation carries on once the data is verified.", className: "text-gold" },
     done: { icon: LuCircleCheck, title: "All chapters written", body: "Every chapter of this report is complete.", className: "text-success" },

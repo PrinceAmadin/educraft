@@ -22,10 +22,12 @@ const specialistActions = [
 
 export const workerPauseActionSchema = z.discriminatedUnion("action", [...specialistActions]);
 
-/** D3c/D4: the founder and the COO also open a pause by hand (the chapter orchestrator will do it), redraft or cancel. */
+/** D3c/D4: the founder and the COO also open a pause by hand (the chapter orchestrator does it on its own), redraft, cancel or reopen. */
 export const pauseActionSchema = z.discriminatedUnion("action", [
   ...specialistActions,
   z.object({ action: z.literal("open"), afterChapter: z.number().int().min(1).max(4) }),
   z.object({ action: z.literal("regenerate_form"), pauseId }),
   z.object({ action: z.literal("cancel"), pauseId }),
+  /** D9: a cancelled request is asked for again (the report cannot go past it without the data). */
+  z.object({ action: z.literal("reopen"), pauseId }),
 ]);

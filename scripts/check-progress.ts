@@ -4,11 +4,13 @@
  * statuses and events, the derived generation queue (order, position,
  * estimate, keys), the project's phase, chapter titles and waiting reasons,
  * overall progress, and the chapter events per audience (the D2 /events shape
- * unchanged; workers never get Claude costs).
+ * unchanged; workers never get Claude costs). D9: the stalled-chapter event and
+ * the report's run as each audience sees it.
  *
  *   npm run check:progress
  */
-import { eventForSnapshot, formatSse, type SnapshotLike } from "../src/lib/generation/generation-events";
+import { eventForSnapshot, formatSse, isActive, isStalled, type SnapshotLike } from "../src/lib/generation/generation-events";
+import { runViewForWorker, runViewKey, type RunView } from "../src/lib/generation/orchestrator-rules";
 import {
   averageProjectMinutes,
   DEFAULT_PROJECT_MINUTES,
@@ -33,6 +35,7 @@ import {
   queueEvent,
   queueKey,
   resumedEvent,
+  runStateEvent,
   waitingReason,
   type PauseSnapshot,
 } from "../src/lib/generation/progress-events";
@@ -181,9 +184,46 @@ check("chapter_progress carries chapterNum and progressPercent", progress.event 
 const failed = eventForSnapshot({ ...base, status: "FAILED", errorMessage: "Claude was overloaded" }, { nairaRate: 1500, audience: "worker" });
 check("chapter_failed carries chapterNum and error", failed.event === "chapter_failed" && failed.data.error === "Claude was overloaded");
 
+// ─── D9: a stalled chapter, and the report's run ─────────────────────────────
+const stalled = eventForSnapshot({ ...base, status: "STALLED", progressPercent: 61, partCursor: 1, errorMessage: "No part was finished for 90 minutes." }, { nairaRate: 1500, audience: "worker" });
+check("chapter_stalled is its own event, with the chapter, the reason and how far it got", stalled.event === "chapter_stalled" && stalled.data.chapterNum === 2 && stalled.data.error === "No part was finished for 90 minutes." && stalled.data.partsWritten === 1 && stalled.data.progressPercent === 61, stalled);
+check("a failed chapter also says how far it got", failed.data.progressPercent === 100);
+check("a stalled chapter is not being written", !isActive({ status: "STALLED" }) && !isActive({ status: "FAILED" }) && isActive({ status: "WRITING" }));
+check("a stalled chapter is never carried on by the stream", !isStalled({ ...base, status: "STALLED", lastStepAt: new Date("2026-09-27T10:00:00Z") }, new Date("2026-09-27T13:00:00Z").getTime()));
+check("a stalled chapter counts what it wrote towards the whole", overallPercent([{ status: "complete", progressPercent: 100 }, { status: "stalled", progressPercent: 40 }]) === 70);
+
+const view: RunView = {
+  status: "NEEDS_ATTENTION",
+  label: "Needs attention",
+  line: "Chapter Three made no progress for 90 minutes and was stopped. The parts already written are kept.",
+  detail: "No part was finished for 90 minutes.",
+  reason: "CHAPTER_STALLED",
+  currentChapter: 3,
+  actions: ["RETRY_CHAPTER"],
+  canStart: false,
+  canStop: true,
+  start: null,
+  startedByName: "Emmanuel Mebawondu",
+  requestedAt: "2026-09-28T09:00:00.000Z",
+  paused: false,
+  generationStarted: true,
+  references: 52,
+  research: "PASSED",
+  gateRanAt: null,
+  cancelledPauseId: "pause-1",
+};
+const runFrame = formatSse(runStateEvent(view));
+check("run_state is one SSE frame with the run as the Report tab shows it", runFrame.startsWith("event: run_state\ndata: ") && runFrame.endsWith("\n\n") && JSON.parse(runFrame.split("data: ")[1]).status === "NEEDS_ATTENTION");
+const forWorker = runViewForWorker(view);
+check("a specialist sees the state and its sentence", forWorker.status === view.status && forWorker.line === view.line && forWorker.currentChapter === 3 && forWorker.generationStarted);
+check("…never the buttons, who started it, the error on record or the request to reopen", forWorker.actions.length === 0 && !forWorker.canStop && !forWorker.canStart && forWorker.startedByName === null && forWorker.detail === null && forWorker.cancelledPauseId === null && forWorker.start === null, forWorker);
+check("the run is sent again only when what it shows changes", runViewKey(view) === runViewKey({ ...view }) && runViewKey(view) !== runViewKey({ ...view, status: "GENERATING" }) && runViewKey(view) !== runViewKey({ ...view, currentChapter: 4 }));
+check("…a new quality result and the first chapter both count as a change", runViewKey(view) !== runViewKey({ ...view, gateRanAt: "2026-09-28T10:00:00.000Z" }) && runViewKey(view) !== runViewKey({ ...view, generationStarted: false }));
+check("the run carries no cost", !/cost|naira|token/i.test(JSON.stringify(view)));
+
 if (failures.length) {
   console.error(`${failures.length} FAILED:\n  - ${failures.join("\n  - ")}`);
   console.error(`${passed} passed.`);
   process.exit(1);
 }
-console.log(`${passed} checks passed. The Phase D6 progress rules hold.`);
+console.log(`${passed} checks passed. The Phase D6 progress rules hold, with D9's run state.`);

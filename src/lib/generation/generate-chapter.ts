@@ -11,7 +11,12 @@
  *   end     COMPLETED: fullOutput holds the chapter. FAILED: retries ran out
  *           or the error cannot be retried; partialOutput keeps the parts
  *           already written and retryChapterGeneration carries on from the
- *           part that failed.
+ *           part that failed. STALLED (D9): the orchestrator's watchdog found
+ *           no plan or part saved for 90 minutes; restarted the same way.
+ *
+ * The prompt goes to Claude as two system blocks (D9): the project block,
+ * which every chapter of the project shares and the chapters after the first
+ * read from the prompt cache, then the chapter block.
  *
  * Steps are driven by generation-runner.ts (lease, time slices, retries).
  * Every step is compare-and-set on the status and part it read, so a step
@@ -25,7 +30,7 @@ import { db } from "@/lib/db";
 import { costUsd, usdToNairaRate } from "@/lib/ai-usage-log";
 import { ClaudeStreamError, streamClaude, type ClaudeEffort, type ClaudeStreamInput, type ClaudeStreamResult, type ClaudeTextBlock } from "@/lib/anthropic";
 import type { ClaudeUsage } from "@/lib/anthropic-stream";
-import { loadChapterPrompt, type ChapterPromptInput } from "./prompt-loader";
+import { loadChapterPrompt, splitPromptBlocks, type ChapterPromptInput } from "./prompt-loader";
 import { matchDepartment, resolveSection } from "./department-map";
 import { ModeNotApprovedError, lockApprovedMode, type ApprovedModeSettings } from "@/lib/services/research-mode";
 import { getApprovedBrief, type ApprovedBrief } from "@/lib/research/source-stage-actions";
@@ -65,11 +70,29 @@ const DRAFT_SAVE_MS = 8000;
 
 export const ACTIVE_STATUSES: GenerationStatus[] = ["PENDING", "OUTLINING", "WRITING"];
 
+/**
+ * Why a start was refused, for callers that must tell one refusal from another
+ * (the orchestrator: a chapter someone else has just started is not a problem,
+ * a project whose data was never verified is).
+ */
+export type GenerationErrorCode =
+  | "PROJECT_NOT_FOUND"
+  | "NO_OBJECTIVES"
+  | "NO_TITLE"
+  | "MODE_NOT_APPROVED"
+  | "WRONG_MODE"
+  | "STALE_INPUT"
+  | "PAUSE_NOT_VERIFIED"
+  | "DATASET_MISSING"
+  | "ALREADY_RUNNING"
+  | "ALREADY_EXISTS";
+
 /** `fatal`: retrying cannot help (a refusal, a bad request, a broken plan in the prompt). */
 export class GenerationError extends Error {
   constructor(
     message: string,
     readonly fatal = false,
+    readonly code: GenerationErrorCode | null = null,
   ) {
     super(message);
   }
@@ -142,15 +165,15 @@ export async function startChapterGeneration(input: StartChapterInput) {
     where: { OR: [{ id: input.project }, { projectId: input.project }] },
     select: { id: true, projectId: true },
   });
-  if (!project) throw new GenerationError("Project not found", true);
+  if (!project) throw new GenerationError("Project not found", true, "PROJECT_NOT_FOUND");
 
   const chapter = input.prompt.chapter;
   const earlier = input.prompt.fromEarlierChapters ?? {};
   const objectives = (earlier.objectives ?? []).map((o) => o.trim()).filter(Boolean);
   // Founder's rule: the objectives come from the approved research step, never invented inside a chapter.
-  if (objectives.length === 0) throw new GenerationError("The approved objectives are missing: they come from the research step, and every chapter is written to them.", true);
+  if (objectives.length === 0) throw new GenerationError("The approved objectives are missing: they come from the research step, and every chapter is written to them.", true, "NO_OBJECTIVES");
   const title = input.prompt.project.projectTitle?.trim();
-  if (!title) throw new GenerationError("The project needs a title before chapters are generated.", true);
+  if (!title) throw new GenerationError("The project needs a title before chapters are generated.", true, "NO_TITLE");
 
   const assembled = await loadChapterPrompt(input.prompt);
   const briefText = buildChapterBrief({
@@ -178,6 +201,9 @@ export async function startChapterGeneration(input: StartChapterInput) {
     fallback: assembled.fallback,
     approxTokens: assembled.approxTokens,
     references: input.prompt.references.length,
+    // D9: where the project block ends, so every call can send it as its own cached block.
+    projectBlockChars: assembled.projectBlock.length,
+    warnings: assembled.warnings,
   };
 
   try {
@@ -188,49 +214,49 @@ export async function startChapterGeneration(input: StartChapterInput) {
       try {
         approved = await lockApprovedMode(tx, project.id);
       } catch (error) {
-        if (error instanceof ModeNotApprovedError) throw new GenerationError(error.message, true);
+        if (error instanceof ModeNotApprovedError) throw new GenerationError(error.message, true, "MODE_NOT_APPROVED");
         throw error;
       }
       if (approved.mode !== input.prompt.mode) {
-        throw new GenerationError(`This chapter was asked for in Mode ${input.prompt.mode}, but the COO approved Mode ${approved.mode}.`, true);
+        throw new GenerationError(`This chapter was asked for in Mode ${input.prompt.mode}, but the COO approved Mode ${approved.mode}.`, true, "WRONG_MODE");
       }
       const approvedEntry = matchDepartment(approved.department)?.entry;
       const approvedSection = approvedEntry ? resolveSection(approvedEntry, approved.mode, approved.sectionOverride) : null;
       if (assembled.section !== approvedSection) {
-        throw new GenerationError(`This chapter would use the ${assembled.section} section, but the COO approved ${approvedSection ?? "a different department"}.`, true);
+        throw new GenerationError(`This chapter would use the ${assembled.section} section, but the COO approved ${approvedSection ?? "a different department"}.`, true, "WRONG_MODE");
       }
       // D3b: exactly the approved objectives (same words, same order) and exactly the approved cases or archival sources.
       let brief: ApprovedBrief;
       try {
         brief = await getApprovedBrief(tx, project.id);
       } catch (error) {
-        if (error instanceof ModeNotApprovedError) throw new GenerationError(error.message, true);
+        if (error instanceof ModeNotApprovedError) throw new GenerationError(error.message, true, "MODE_NOT_APPROVED");
         throw error;
       }
       const given = earlier.objectives ?? [];
       if (given.length !== brief.objectives.length || given.some((o, i) => o !== brief.objectives[i])) {
-        throw new GenerationError("These objectives are not the ones the COO approved. Every chapter uses the approved objectives word for word.", true);
+        throw new GenerationError("These objectives are not the ones the COO approved. Every chapter uses the approved objectives word for word.", true, "STALE_INPUT");
       }
       if (JSON.stringify(input.prompt.primarySources ?? null) !== JSON.stringify(toPromptPrimarySources(brief) ?? null)) {
-        throw new GenerationError(`These ${brief.kind === "ARCHIVE" ? "archival sources" : "cases"} are not the ones the COO approved.`, true);
+        throw new GenerationError(`These ${brief.kind === "ARCHIVE" ? "archival sources" : "cases"} are not the ones the COO approved.`, true, "STALE_INPUT");
       }
       // D3c/D4: a chapter after a data pause needs exactly the verified data from there (its ticked PDFs and images ride with every call).
       const needed = pausesBeforeChapter(approved.mode, chapter);
       const stored = await pauseDataForChapter(tx, project.id, approved.mode, chapter);
       if (stored.length < needed.length) {
         const missing = needed.filter((n) => !stored.some((d) => d.afterChapter === n));
-        throw new GenerationError(`Chapter ${chapter} needs the client's data from the pause after Chapter ${missing.join(" and ")}, which has not been verified.`, true);
+        throw new GenerationError(`Chapter ${chapter} needs the client's data from the pause after Chapter ${missing.join(" and ")}, which has not been verified.`, true, "PAUSE_NOT_VERIFIED");
       }
       if (JSON.stringify(input.prompt.workerData ?? []) !== JSON.stringify(stored)) {
-        throw new GenerationError("This data is not the verified data from the pause.", true);
+        throw new GenerationError("This data is not the verified data from the pause.", true, "STALE_INPUT");
       }
       // D5: Mode 5 Chapters 4 and 5 are written from the fetched dataset, exactly as stored.
       const dataset = await secondaryDataForChapter(tx, project.id, approved.mode, chapter);
       if (approved.mode === 5 && chapter >= 4 && !dataset) {
-        throw new GenerationError(`Chapter ${chapter} of a Mode 5 project is written from the secondary data. Fetch it first (it is read from Chapter 3).`, true);
+        throw new GenerationError(`Chapter ${chapter} of a Mode 5 project is written from the secondary data. Fetch it first (it is read from Chapter 3).`, true, "DATASET_MISSING");
       }
       if (JSON.stringify(input.prompt.secondaryData ?? null) !== JSON.stringify(dataset ?? null)) {
-        throw new GenerationError("This secondary data is not the project's current dataset.", true);
+        throw new GenerationError("This secondary data is not the project's current dataset.", true, "STALE_INPUT");
       }
       const attachments = await attachmentRefs(tx, project.id, stored);
 
@@ -240,13 +266,14 @@ export async function startChapterGeneration(input: StartChapterInput) {
       });
       if (existing) {
         const running = ACTIVE_STATUSES.includes(existing.status) && existing.lockedUntil && existing.lockedUntil > new Date();
-        if (running) throw new GenerationError(`Chapter ${chapter} is being generated now.`, true);
+        if (running) throw new GenerationError(`Chapter ${chapter} is being generated now.`, true, "ALREADY_RUNNING");
         if (!input.replace) {
           throw new GenerationError(
             existing.status === "COMPLETED"
               ? `Chapter ${chapter} has already been generated. Regenerating replaces it.`
               : `Chapter ${chapter} already has a run (${existing.status.toLowerCase()}). Resume it or replace it.`,
             true,
+            "ALREADY_EXISTS",
           );
         }
         await tx.generationCheckpoint.delete({ where: { id: existing.id } });
@@ -260,6 +287,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
           promptMeta: promptMeta as Prisma.InputJsonValue,
           options: (input.options ?? {}) as Prisma.InputJsonValue,
           requestedById: input.requestedById ?? null,
+          lastProgressAt: new Date(),
           ...(attachments.length ? { attachments: attachments as unknown as Prisma.InputJsonValue } : {}),
         },
         select: SNAPSHOT_SELECT,
@@ -267,19 +295,26 @@ export async function startChapterGeneration(input: StartChapterInput) {
     }, { timeout: 20_000, maxWait: 10_000 });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new GenerationError(`Chapter ${chapter} was started by someone else just now.`, true);
+      throw new GenerationError(`Chapter ${chapter} was started by someone else just now.`, true, "ALREADY_RUNNING");
     }
     throw error;
   }
 }
 
-/** A FAILED run carries on from the part that failed (parts already written are kept). Returns false if it was not FAILED. */
+/** The statuses a person restarts from: FAILED (retries ran out) and STALLED (the watchdog, D9). */
+export const RESTARTABLE_STATUSES: GenerationStatus[] = ["FAILED", "STALLED"];
+
+/**
+ * A FAILED or STALLED run carries on from the part that stopped (parts already
+ * written are kept). Returns false if it was neither.
+ */
 export async function retryChapterGeneration(checkpointId: string): Promise<boolean> {
   const row = await db.generationCheckpoint.findUnique({ where: { id: checkpointId }, select: { status: true, plan: true } });
-  if (!row || row.status !== "FAILED") return false;
+  if (!row || !RESTARTABLE_STATUSES.includes(row.status)) return false;
+  const now = new Date();
   const res = await db.generationCheckpoint.updateMany({
-    where: { id: checkpointId, status: "FAILED" },
-    data: { status: row.plan ? "WRITING" : "OUTLINING", failedSteps: 0, errorMessage: null, lastError: null, lockedUntil: null, draftText: null, lastStepAt: new Date() },
+    where: { id: checkpointId, status: row.status },
+    data: { status: row.plan ? "WRITING" : "OUTLINING", failedSteps: 0, errorMessage: null, lastError: null, lockedUntil: null, draftText: null, lastStepAt: now, lastProgressAt: now },
   });
   return res.count > 0;
 }
@@ -322,8 +357,15 @@ async function dataAttachments(cp: GenerationCheckpoint) {
   return refs.length ? loadDataAttachments(refs) : [];
 }
 
-function systemBlocks(cp: GenerationCheckpoint): ClaudeTextBlock[] {
-  return [{ type: "text", text: cp.promptText, cache_control: CACHE }];
+/**
+ * The prompt as system blocks, each a cache point: the project block (the same
+ * for every chapter of the project), then the chapter block. A prompt frozen
+ * before D9 has no split and goes out as one block.
+ */
+export function systemBlocks(cp: Pick<GenerationCheckpoint, "promptText" | "promptMeta">): ClaudeTextBlock[] {
+  const meta = (cp.promptMeta ?? {}) as { projectBlockChars?: unknown };
+  const chars = typeof meta.projectBlockChars === "number" ? meta.projectBlockChars : null;
+  return splitPromptBlocks(cp.promptText, chars).map((text) => ({ type: "text", text, cache_control: CACHE }));
 }
 
 /** Calls Claude and adds the call's tokens and cost (failed attempts too) to the run's totals. */
@@ -386,6 +428,7 @@ async function planChapter(cp: GenerationCheckpoint, ctx: StepContext): Promise<
       draftText: null,
       progressPercent: computeProgress({ status: "WRITING", previous: cp.progressPercent, targetWords: plan.targetWords, wordsWritten: 0 }),
       lastStepAt: new Date(),
+      lastProgressAt: new Date(),
     },
   }));
   return { done: res.count === 0 };
@@ -474,6 +517,7 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
       partialOutput,
       draftText: null,
       lastStepAt: now,
+      lastProgressAt: now,
       ...(last
         ? { status: "COMPLETED" as const, fullOutput: partialOutput, progressPercent: 100, completedAt: now, errorMessage: null, lastError: null }
         : { progressPercent: computeProgress({ status: "WRITING", previous: progress, targetWords: plan.targetWords, wordsWritten: wordsBefore + words }) }),
@@ -487,6 +531,19 @@ export async function failChapterGeneration(checkpointId: string, message: strin
   const res = await db.generationCheckpoint.updateMany({
     where: { id: checkpointId, status: { in: ACTIVE_STATUSES } },
     data: { status: "FAILED", errorMessage: message, lastError: message, failedSteps, lockedUntil: null, lastStepAt: new Date() },
+  });
+  return res.count > 0;
+}
+
+/**
+ * D9, the watchdog: marks a run STALLED (no plan or part saved for 90 minutes
+ * although it was carried on). Everything written is kept. A slice still
+ * holding the run loses it: its next save is compare-and-set on the status.
+ */
+export async function stallChapterGeneration(checkpointId: string, message: string): Promise<boolean> {
+  const res = await db.generationCheckpoint.updateMany({
+    where: { id: checkpointId, status: { in: ACTIVE_STATUSES } },
+    data: { status: "STALLED", errorMessage: message, lastError: message, lockedUntil: null, lastStepAt: new Date() },
   });
   return res.count > 0;
 }
@@ -507,6 +564,7 @@ export const SNAPSHOT_SELECT = {
   lastError: true,
   lockedUntil: true,
   lastStepAt: true,
+  lastProgressAt: true,
   startedAt: true,
   completedAt: true,
   createdAt: true,

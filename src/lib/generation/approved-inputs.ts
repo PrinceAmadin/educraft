@@ -65,7 +65,8 @@ export async function approvedChapterInput(projectIdOrCode: string, chapter: Cha
     getApprovedBrief(db, project.id),
     db.reference.findMany({
       where: { projectId: project.id, status: "KEPT" },
-      orderBy: [{ classification: "asc" }, { citedByCount: "desc" }],
+      // The id settles ties, so every chapter of a project gets the list in the same order (the prompt cache depends on it).
+      orderBy: [{ classification: "asc" }, { citedByCount: "desc" }, { id: "asc" }],
       select: { title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true, abstract: true },
     }),
   ]);

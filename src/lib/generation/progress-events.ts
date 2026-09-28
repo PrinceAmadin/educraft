@@ -5,12 +5,14 @@
  *   pipeline_paused   { pauseId, pausePhase, afterChapter, title, message, uploadRequired, status, statusLine, dataFrom, round, clientFiles, specialistFiles, note }
  *   pipeline_resumed  { pauseId, pausePhase, afterChapter, verifiedAt | cancelledAt }
  *   queue_position    { status, position, queueLength, estimatedStartTime, basis }
+ *   run_state         the report's run as the Report tab shows it (D9, orchestrator-view.ts)
  *
  * Every sentence a worker reads about a pause is in PAUSE_PHASE_TEXT and
  * PAUSE_STATUS_TEXT, for the founder to review.
  */
 import type { GenerationEvent } from "./generation-events";
 import type { QueueState } from "./generation-queue";
+import { runViewKey, type RunView } from "./orchestrator-rules";
 
 export type PausePhase = "SURVEY_DATA" | "BUILD_SPECIFICATION" | "TEST_RESULTS" | "LAB_DATA";
 export type PauseDisplayStatus = "preparing" | "draft_failed" | "waiting_for_client" | "client_sent";
@@ -157,6 +159,13 @@ export function queueEvent(q: QueueState): GenerationEvent {
   return { event: "queue_position", id: `queue:${queueKey(q)}`, data: q as unknown as Record<string, unknown> };
 }
 
+/** D9: the report's run. Sent on connect and whenever what the panel shows changes. */
+export function runStateEvent(v: RunView): GenerationEvent {
+  return { event: "run_state", data: v as unknown as Record<string, unknown> };
+}
+
+export { runViewKey };
+
 // ─── Chapter titles on the cards ─────────────────────────────────────────────
 
 const STANDARD_TITLES: Record<number, string[]> = {
@@ -178,7 +187,7 @@ export function chapterTitle(mode: number | null, chapter: number, thematic: { c
 
 // ─── One chapter card ────────────────────────────────────────────────────────
 
-export type ChapterCardStatus = "pending" | "generating" | "complete" | "failed";
+export type ChapterCardStatus = "pending" | "generating" | "complete" | "failed" | "stalled";
 
 export interface ChapterCardView {
   chapterNum: number;
@@ -213,6 +222,6 @@ export function waitingReason(n: number, opts: { activePauseAfter: number | null
 /** Overall progress: the mean of the chapters, a complete chapter counting 100. */
 export function overallPercent(cards: Pick<ChapterCardView, "status" | "progressPercent">[]): number {
   if (!cards.length) return 0;
-  const sum = cards.reduce((s, c) => s + (c.status === "complete" ? 100 : c.status === "pending" ? 0 : Math.max(0, Math.min(100, c.progressPercent))), 0);
+  const sum = cards.reduce((s, c) => s + (c.status === "complete" ? 100 : c.status === "pending" ? 0 : Math.max(0, Math.min(100, c.progressPercent))), 0); // a failed or stalled chapter counts what it wrote
   return Math.round(sum / cards.length);
 }

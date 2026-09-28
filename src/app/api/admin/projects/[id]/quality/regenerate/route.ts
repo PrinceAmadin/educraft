@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveGenerationProject } from "@/lib/generation/generate-chapter";
+import { wakeRun } from "@/lib/generation/orchestrator";
 import { projectNotFound } from "@/lib/generation/route-helpers";
 import { opsGuard, parseBody } from "@/lib/services/operations/route-helpers";
 import { regenerateChapterForQuality } from "@/lib/quality-gate";
@@ -22,7 +23,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     const project = await resolveGenerationProject(params.id);
     if (!project) return projectNotFound();
-    return NextResponse.json(await regenerateChapterForQuality(project.id, body.data.chapter, guard.actor), { status: 202 });
+    const result = await regenerateChapterForQuality(project.id, body.data.chapter, guard.actor);
+    // D9: once the chapter is written again, the orchestrator runs the quality check by itself.
+    await wakeRun(project.id);
+    return NextResponse.json(result, { status: 202 });
   } catch (error) {
     return qualityErrorResponse("POST /api/admin/projects/[id]/quality/regenerate", error);
   }

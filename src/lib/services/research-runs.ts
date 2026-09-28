@@ -99,8 +99,12 @@ export interface RunClaim {
  * Takes one run's worth of allowance, or throws ResearchApprovalRequiredError.
  * A project with no job and no history is an initial run (always free);
  * anything else is a re-run.
+ *
+ * `approver` (D9): the run is started by the founder or the COO, who are the
+ * ones who approve re-runs, so it needs no request. Everything else holds: the
+ * project lock, the refusal once chapters exist, the run log and the ledger.
  */
-export async function claimRun(projectDbId: string, userId: string): Promise<RunClaim> {
+export async function claimRun(projectDbId: string, userId: string, opts: { approver?: boolean } = {}): Promise<RunClaim> {
   return db.$transaction(async (tx) => {
     // Serialise claims per project — without this, two clicks at once would
     // both read "one free re-run left".
@@ -117,7 +121,7 @@ export async function claimRun(projectDbId: string, userId: string): Promise<Run
     // B7: under the same project lock the start of a chapter takes, so the two can never interleave.
     if (!initial && (await hasGenerationStarted(projectDbId, tx))) throw new ResearchLockedError();
 
-    if (!initial && reruns >= FREE_RERUNS) {
+    if (!initial && reruns >= FREE_RERUNS && !opts.approver) {
       const now = new Date();
       const approved = await tx.researchRerunRequest.findFirst({
         where: { projectId: projectDbId, status: "APPROVED", approvedUntil: { gte: now } },

@@ -2,6 +2,7 @@ import { Prisma, type UserRole } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { sendPushToUsers } from "@/lib/services/push";
+import { mayNotify } from "@/lib/qa-scope";
 
 export type NotificationType = "info" | "warning" | "urgent" | "success";
 
@@ -34,17 +35,21 @@ export async function notifyUsers(
   waitUntil(sendPushToUsers(ids, { title: input.title, body: input.message, url: input.link }));
 }
 
-/** Notify every active user holding a role (e.g. SUPER_ADMIN, OPS_MANAGER). */
+/**
+ * Notify every active user holding a role (e.g. SUPER_ADMIN, OPS_MANAGER).
+ * A test run on a made-up project narrows this to its own logins (qa-scope.ts);
+ * production never does.
+ */
 export async function notifyRole(
   role: UserRole | UserRole[],
   input: NotificationInput
 ): Promise<void> {
   const users = await db.user.findMany({
     where: { role: { in: Array.isArray(role) ? role : [role] }, isActive: true },
-    select: { id: true },
+    select: { id: true, email: true },
   });
   await notifyUsers(
-    users.map((u) => u.id),
+    users.filter((u) => mayNotify(u.email)).map((u) => u.id),
     input
   );
 }

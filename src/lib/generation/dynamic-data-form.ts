@@ -21,26 +21,11 @@ import { callClaudeForJson } from "@/lib/anthropic";
 import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { MODE_NAMES, type ResearchModeNumber } from "@/lib/generation/department-map";
 import { listFrom } from "@/lib/research/source-policy";
-
-export type PauseKind = "SPECIFICATION" | "RESULTS";
+import type { PauseKind } from "./pause-points";
 
 // ─── Where the pipeline pauses ───────────────────────────────────────────────
-
-const PAUSE_POINTS: Record<number, number[]> = { 1: [], 2: [3], 3: [2, 3], 4: [3], 5: [] };
-
-/** The chapters after which a mode's pipeline waits for the worker's data. */
-export function pausePointsFor(mode: number): number[] {
-  return PAUSE_POINTS[mode] ?? [];
-}
-
-export function pauseKind(mode: number, afterChapter: number): PauseKind {
-  return mode === 3 && afterChapter === 2 ? "SPECIFICATION" : "RESULTS";
-}
-
-/** The pauses whose data a chapter needs (every pause before it): Chapter 4 in Mode 2 needs the pause after Chapter 3. */
-export function pausesBeforeChapter(mode: number, chapter: number): number[] {
-  return pausePointsFor(mode).filter((p) => p < chapter);
-}
+// The rule itself is in pause-points.ts (pure, so the orchestrator's rules and the screens can read it).
+export { pauseKind, pausePointsFor, pausesBeforeChapter, type PauseKind } from "./pause-points";
 
 // ─── The form ────────────────────────────────────────────────────────────────
 
