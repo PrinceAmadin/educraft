@@ -67,6 +67,15 @@ export function firstName(name: string | null | undefined, fallback = "there") {
   return first && first.length > 0 ? first : fallback;
 }
 
+/**
+ * Dates and times are Nigerian time everywhere. Without a fixed zone the server
+ * (UTC on Vercel) and the browser (WAT) print different text for the same
+ * moment, and React throws a hydration error on every client component that
+ * shows one (#425/#422, seen on the worker project page once it had timestamped
+ * document versions).
+ */
+const APP_TIME_ZONE = "Africa/Lagos";
+
 /** "Aug 16, 2026" — the app's standard short date. */
 export function formatDate(value: Date | string | null | undefined) {
   if (value == null) return "—";
@@ -76,6 +85,7 @@ export function formatDate(value: Date | string | null | undefined) {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: APP_TIME_ZONE,
   }).format(d);
 }
 
@@ -90,6 +100,7 @@ export function formatDateTime(value: Date | string | null | undefined) {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: APP_TIME_ZONE,
   }).format(d);
 }
 
