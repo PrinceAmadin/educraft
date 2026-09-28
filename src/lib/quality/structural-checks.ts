@@ -320,21 +320,75 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   }
 
   // ── ST12 reference count ─────────────────────────────────────────────────
+  //
+  // Standard (Template A) reports are counted by the number of DISTINCT verified references cited
+  // in (Author, Year) form across the chapters. Note-style reports (Template B and any MODE_A/B/C
+  // placement) have no author-date markers, so their count is the total number of endnote entries
+  // across the chapters. Both are held to REFERENCE_MINIMUM.
   {
     const min = input.chapterBased ? REFERENCE_MINIMUM.chapterBased : REFERENCE_MINIMUM.full;
-    const n = input.citations.cited.length;
+    let n: number;
+    let howCounted: string;
+    if (input.citations.noteStyle) {
+      n = chapters.reduce((total, c) => {
+        const block = c.blocks.find((b): b is Extract<Block, { kind: "endnotes" }> => b.kind === "endnotes");
+        return total + (block?.lines.filter((line) => /^\s*\**\s*\d{1,3}[.)]\s+\S/.test(line)).length ?? 0);
+      }, 0);
+      howCounted = "endnote entries";
+    } else {
+      n = input.citations.cited.length;
+      howCounted = "verified references cited";
+    }
     push(
       "ST12",
-      n >= min ? [] : [{ level: "FAIL", message: `The chapters cite ${n} verified reference${n === 1 ? "" : "s"}; ${input.chapterBased ? "a chapter-based order" : "a full report"} needs at least ${min}.`, fix: "Cite more of the verified references where they support the text." }],
-      `${n} verified references cited (at least ${min}).`,
+      n >= min ? [] : [{ level: "FAIL", message: `The chapters carry ${n} ${howCounted}; ${input.chapterBased ? "a chapter-based order" : "a full report"} needs at least ${min}.`, fix: input.citations.noteStyle ? "Add more endnote entries where sources are used." : "Cite more of the verified references where they support the text." }],
+      `${n} ${howCounted} (at least ${min}).`,
     );
   }
 
   // ── ST13 citation placement ──────────────────────────────────────────────
+  //
+  // Standard (Template A) reports cite (Author, Year) in the text. Chapters 1 and 2 must cite at
+  // least one verified reference, and Chapter 5 introduces no new source.
+  //
+  // Thematic reports (Template B, Humanities and doctrinal Law) and any other note-style placement
+  // cite by superscript number and list the notes at the end of each chapter. The (Author, Year) rule
+  // does not apply, so this branch checks the note structure instead: at least one note marker in the
+  // body, an endnote list at the chapter's end, and no more markers than there are entries in the
+  // list. This was known from the D9 test: Project A's Chapter One read as "cites no verified
+  // reference" against the inline rule although it was written in endnote style.
   {
     const issues: QualityIssue[] = [];
     const refsIn = (n: number) => new Set(input.citations.matched.filter((m) => m.use.chapter === n).flatMap((m) => m.refs.map((r) => r.id)));
-    for (const n of [1, 2]) if (byNumber.has(n) && refsIn(n).size === 0) issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} cites no verified reference.`, chapter: n, fix: "Support the chapter's claims with the verified references." });
+    if (input.citations.noteStyle) {
+      const noteMarkerCount = (c: Parsed): number => {
+        // ^3, ^{12}, ^[3] and a trailing "[3]" after a word or punctuation: the same set the assembly
+        // renders as superscripts.
+        const bare = readable(c.blocks.filter((b) => b.kind !== "endnotes"));
+        const matches = bare.match(/\^\{?\[?\d{1,3}\]?\}?|(?<=[\p{L}.,;:!?)"'’”])\[\d{1,3}\](?![\p{L}\d])/gu) ?? [];
+        return matches.length;
+      };
+      const endnoteCount = (c: Parsed): number => {
+        const block = c.blocks.find((b): b is Extract<Block, { kind: "endnotes" }> => b.kind === "endnotes");
+        if (!block) return 0;
+        return block.lines.filter((line) => /^\s*\**\s*\d{1,3}[.)]\s+\S/.test(line)).length;
+      };
+      for (const n of [1, 2]) {
+        const c = byNumber.get(n);
+        if (!c) continue;
+        const markers = noteMarkerCount(c);
+        const notes = endnoteCount(c);
+        if (markers === 0 && notes === 0) {
+          issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} carries no note references or endnote list, so it cites nothing.`, chapter: n, fix: "Add note markers (^1, ^2 …) where sources are used and list the notes at the chapter's end." });
+        } else if (markers > 0 && notes === 0) {
+          issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} has ${markers} note reference${markers === 1 ? "" : "s"} in the text but no numbered [ENDNOTES] list at the end.`, chapter: n, fix: "Add an [ENDNOTES] block at the chapter's end with one entry per marker." });
+        } else if (markers > notes) {
+          issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} has ${markers} note references but only ${notes} entries in its endnote list.`, chapter: n, fix: "Add the missing endnote entries, or drop the extra markers." });
+        }
+      }
+    } else {
+      for (const n of [1, 2]) if (byNumber.has(n) && refsIn(n).size === 0) issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} cites no verified reference.`, chapter: n, fix: "Support the chapter's claims with the verified references." });
+    }
     if (input.template === "A" && byNumber.has(2)) {
       const two = refsIn(2).size;
       const most = chapters.filter((c) => c.number !== 2).map((c) => ({ n: c.number, k: refsIn(c.number).size })).sort((a, b) => b.k - a.k)[0];
@@ -413,7 +467,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     const issues: QualityIssue[] = [];
     for (const c of chapters) {
       const found = findPlaceholders(c.text);
-      const review = found.filter((p) => /COO TO REVIEW|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|REFERENCE TO BE SUPPLIED|OBJECTIVE NOT MET/.test(p));
+      const review = found.filter((p) => /COO TO REVIEW|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|REFERENCE TO BE SUPPLIED|OBJECTIVE NOT MET|N_DISTRIBUTED|N_RETURNED|N_USABLE|RESPONSE_RATE|POPULATION_SIZE|SAMPLE_SIZE|FIELDWORK_PERIOD/.test(p));
       const tasks = found.filter((p) => !review.includes(p));
       const count = (list: string[]) => [...new Set(list)].map((p) => `${p}${list.filter((x) => x === p).length > 1 ? ` (${list.filter((x) => x === p).length})` : ""}`).join(", ");
       if (review.length) issues.push({ level: "FAIL", message: `Chapter ${WORDS[c.number]} still carries ${count(review)}.`, chapter: c.number, fix: "Resolve every review placeholder: supply the data, case or source, or rewrite the passage." });

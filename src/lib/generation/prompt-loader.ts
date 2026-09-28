@@ -53,6 +53,7 @@ import mammoth from "mammoth";
 import type { Project, Reference } from "@prisma/client";
 import { referenceListEntries } from "@/lib/research-references-doc";
 import { formatWorkerData, type WorkerData } from "./dynamic-data-form";
+import { pausePointsFor } from "./pause-points";
 import {
   MODE_NAMES,
   matchDepartment,
@@ -296,6 +297,32 @@ export const LOADER_TEXT = {
     `These variables or years are not in the dataset. Leave their cells empty in any data table and write [DATA NOT PROVIDED — COO TO REVIEW] where a result needs them. ${lines.join(" ")}`,
   secondaryDataCitation:
     "Name the data source under every table and figure built from this dataset (for example: Source: World Bank, World Development Indicators, 2026; or Source: Central Bank of Nigeria, 2026). These data sources are not works in the reference list.",
+  /**
+   * A chapter written before its data pause (Modes 2 and 4 Chapter 3; Mode 3 Chapters 2 and 3): the
+   * client has not sent the data yet, so the counts, dates and specifics only they can supply must be
+   * left as placeholders that the specialist substitutes with the real values after the pause. The
+   * quality gate treats these four placeholders as review placeholders (ST16), so a report that reaches
+   * QA with any of them still in place fails until they are filled in.
+   */
+  countsBeforePause: (mode: number, chapter: number) => {
+    const request =
+      mode === 2 ? "questionnaire results"
+      : mode === 4 ? "laboratory results"
+      : mode === 3 && chapter === 2 ? "build specification"
+      : "test results";
+    return `The client has not yet supplied the ${request} for this study. The pipeline pauses at the end of this chapter and asks the client for them; the specialist verifies the files and Chapter ${chapter === 2 ? "Three" : "Four"} onwards uses the real values. Do not invent any figure the client has not yet supplied. Where this chapter would state a count, a date, a sampling frame size, a response rate, a measurement or any other specific value that only the client's data supplies, write a placeholder in square brackets in this exact format:
+- [N_DISTRIBUTED] for the number of questionnaires, forms or samples distributed
+- [N_RETURNED] for the number returned or recovered
+- [N_USABLE] for the number analysable after cleaning
+- [RESPONSE_RATE] for the percentage returned
+- [POPULATION_SIZE] for the population frame this study samples from
+- [SAMPLE_SIZE] for the sample size actually achieved
+- [FIELDWORK_PERIOD] for the dates the fieldwork ran
+- [SPECIFIC VALUE TO BE SUPPLIED] for any other single value the client's data will give
+Write the surrounding sentence so that the placeholder reads naturally where the value would go ("A total of [N_DISTRIBUTED] questionnaires were distributed, of which [N_RETURNED] were retrieved, giving a response rate of [RESPONSE_RATE]."). The method the chapter describes, the instrument, the sampling design, the analytical technique and any figure the client has already supplied elsewhere are all still stated in full.`;
+  },
+  countsBeforePauseNoData:
+    "The client's data has not been received. Do not invent counts, response rates or measurements: use the placeholders listed above wherever the value the client will supply would go.",
 } as const;
 
 /** D5: the dataset part of a Mode 5 Chapter 4 or 5 prompt. */
@@ -843,6 +870,14 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (combinedResults && chapter === 5) notes.push(LOADER_TEXT.combinedResultsCh5);
   if (section === "LAW_NON_DOCTRINAL" && chapter === 4) notes.push(LOADER_TEXT.lawNonDoctrinalCh4);
   if (section === "LAW_NON_DOCTRINAL" && chapter === 5) notes.push(LOADER_TEXT.lawNonDoctrinalCh5);
+  // A data pause that follows this chapter (Modes 2 and 4 Chapter 3; Mode 3 Chapters 2 and 3) supplies
+  // the counts, dates and specifics only the client knows. Without this rule the model invents them
+  // (the D9 test on a Mode 2 report saw "362 sent, 329 usable" written into Chapter 3 before any data
+  // existed). The client's own data reaches Chapter 4 onwards, and Chapter 3 must be re-generated (or
+  // its placeholders substituted by the specialist) once the real numbers are in.
+  if (pausePointsFor(input.mode).some((p) => p === chapter) && !input.workerData?.length) {
+    notes.push(LOADER_TEXT.countsBeforePause(input.mode, chapter));
+  }
   // Q1/Q2: five chapters at most. Wherever the loaded text plans a sixth chapter, the note overrides it.
   if (parts.some((p) => SIX_CHAPTERS.test(p.text))) notes.push(LOADER_TEXT.fiveChapters);
   if (notes.length) {

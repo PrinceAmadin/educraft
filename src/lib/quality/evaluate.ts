@@ -37,9 +37,13 @@ export async function prepareReport(args: {
   const { buffer, report } = await packReport(input);
   const parts = await readDocxParts(buffer);
   const formatting = runFormattingChecks(parts, { input, report, profile: profileFor(input), knownCommon: args.knownCommon });
-  const match = matchCitations({ chapters: input.chapters, references: args.references, mode: input.mode, knownCommon: args.knownCommon, primarySources: args.primarySources });
-  const paragraphs = proseParagraphs(input.chapters);
   const template: "A" | "B" = templateFor(input.section);
+  // Every Template B report uses a note-style placement (MODE_B or MODE_C); Template A uses in-text
+  // (Author, Year), except Chicago notes-bibliography which the intake sets to MODE_C. The gate reads
+  // it from the assembled report to stay in step with what the assembler actually produced.
+  const noteStyle = template === "B" || (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C");
+  const match = matchCitations({ chapters: input.chapters, references: args.references, mode: input.mode, knownCommon: args.knownCommon, primarySources: args.primarySources, noteStyle });
+  const paragraphs = proseParagraphs(input.chapters);
   return { input, buffer, report, parts, formatting, match, paragraphs, scan: scanVoice(paragraphs), template };
 }
 

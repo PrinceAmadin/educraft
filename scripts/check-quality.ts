@@ -315,6 +315,13 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
   await st("ST14: a table never referred to fails", "ST14", withChapter(4, (t) => t.replace("Table 4.1 shows that 58% of the respondents were women.", "Most respondents were women.")));
   await st("ST15: an equation with no symbol definitions fails", "ST15", withChapter(3, (t) => t.replace(/where n is the sample size[^\n]*/, "The sample was then drawn from each market register.")));
   await st("ST16: a review placeholder left in fails", "ST16", withChapter(4, (t) => t.replace("Trust in agents had a mean of 3.18.", "Trust in agents had a mean of [DATA NOT PROVIDED — COO TO REVIEW].")));
+  // FIX 2 (D9 follow-up): the count placeholders Chapter 3 writes before the client sends the data
+  // must also fail ST16 if they reach QA still in place.
+  await st(
+    "ST16: [N_DISTRIBUTED] and [N_USABLE] left in Chapter Three fail",
+    "ST16",
+    withChapter(3, (t) => t.replace("All 200 copies were returned and usable.", "All [N_DISTRIBUTED] copies were distributed and [N_USABLE] were usable, giving a response rate of [RESPONSE_RATE].")),
+  );
   {
     const chs = withChapter(4, (t) => t.replace("[H2] 4.4 Reliability Test Results", "[FIGURE PLACEHOLDER: bar chart of adoption]\nFigure 4.1: Adoption by market (Researcher, 2026)\n\n[H2] 4.4 Reliability Test Results").replace("Adoption had a mean of 3.62", "Figure 4.1 shows adoption by market. Adoption had a mean of 3.62"));
     const { prepared: p2 } = await prepare(chs);

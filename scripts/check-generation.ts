@@ -44,6 +44,14 @@ import {
   type PlanSection,
 } from "../src/lib/generation/chapter-plan";
 import { eventForSnapshot, formatSse, isStalled, snapshotKey, type SnapshotLike } from "../src/lib/generation/generation-events";
+import {
+  STRUCTURAL_EMPTY_CHARS,
+  STRUCTURAL_EMPTY_OUTPUT_TOKENS,
+  STRUCTURAL_EMPTY_SILENT_RETRIES,
+  isStructuralEmpty,
+} from "../src/lib/generation/generate-chapter";
+import type { ClaudeUsage } from "../src/lib/anthropic-stream";
+import type { ClaudeStreamResult } from "../src/lib/anthropic";
 
 let passed = 0;
 const failures: string[] = [];
@@ -315,6 +323,32 @@ check("answer: a real part passes", nonAnswerReason(realPart, { firstHeading: "2
 check("answer: a short note fails", /fewer than the 400/.test(nonAnswerReason("I will now write sections 2.1 and 2.2 as instructed.", { firstHeading: "2.1", targetWords: 1600 }) ?? ""));
 check("answer: a long reply without the first heading fails", /the heading 2.1/.test(nonAnswerReason("word ".repeat(500), { firstHeading: "2.1", targetWords: 1600 }) ?? ""));
 check("answer: small parts still need 50 words", /fewer than the 50/.test(nonAnswerReason("[H2] 1.8 Definition of Terms\n\nShort.", { firstHeading: "1.8", targetWords: 100 }) ?? ""));
+
+// FIX 1: a reply the model spent on thinking with no text (about 1 in 8 part calls in the D9 live test)
+// is asked again inline, at most twice, without counting against the four-in-a-row failure cap. The
+// classifier below reads output_tokens + body length; a reply above BOTH lines is not "structurally
+// empty" and the normal failure path runs.
+const usage = (outputTokens: number): ClaudeUsage => ({ inputTokens: 0, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, webSearchRequests: 0 });
+const streamResult = (text: string, outputTokens: number): ClaudeStreamResult => ({ text, toolCalls: [], stopReason: "end_turn", model: "claude-sonnet-5", usage: usage(outputTokens), attempts: 1 });
+check("empty reply: 0 tokens, 0 chars is structurally empty", isStructuralEmpty(streamResult("", 0)));
+check("empty reply: thinking-only (17 output tokens, 0 chars) is structurally empty", isStructuralEmpty(streamResult("", 17)));
+check(
+  "empty reply: 40 tokens with a short apology is structurally empty",
+  isStructuralEmpty(streamResult("I cannot continue.", 40)) && "I cannot continue.".length < STRUCTURAL_EMPTY_CHARS,
+);
+check(
+  "empty reply: a real 2,500-word part is not structurally empty",
+  !isStructuralEmpty(streamResult("word ".repeat(2500), 4000)),
+);
+check(
+  "empty reply: a 150-char reply with high output tokens is not structurally empty",
+  !isStructuralEmpty(streamResult("word ".repeat(30), 200)),
+);
+check(
+  "empty reply: 49 output tokens but 300 chars is still structurally empty (either line trips it)",
+  isStructuralEmpty(streamResult("word ".repeat(60), STRUCTURAL_EMPTY_OUTPUT_TOKENS - 1)),
+);
+check("empty reply: silent retry cap is 2", STRUCTURAL_EMPTY_SILENT_RETRIES === 2);
 check("headings: a number inside a sentence does not count", missingHeadings("See section 1.3 below.", ["1.3"]).join() === "1.3");
 check("words: counted", countWords("Mobile money's growth, in 2024, was 3.5 times — faster.") === 9, countWords("Mobile money's growth, in 2024, was 3.5 times — faster."));
 check("words: empty", countWords("") === 0 && countWords(null) === 0);

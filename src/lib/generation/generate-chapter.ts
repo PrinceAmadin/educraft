@@ -67,6 +67,21 @@ const OUTLINE_MAX_TOKENS = 16_000;
 /** Save the streaming part this often (characters, or seconds when text is slow). */
 const DRAFT_SAVE_CHARS = 6000;
 const DRAFT_SAVE_MS = 8000;
+/**
+ * A reply is "structurally empty" when it has fewer output tokens than this,
+ * or when its body text is shorter than STRUCTURAL_EMPTY_CHARS. In the D9 test
+ * about one in eight part calls came back this way (the model spent tokens on
+ * thinking with no text). Such a reply is asked again, at most twice, without
+ * counting against the four-in-a-row failure cap.
+ */
+export const STRUCTURAL_EMPTY_OUTPUT_TOKENS = 50;
+export const STRUCTURAL_EMPTY_CHARS = 100;
+export const STRUCTURAL_EMPTY_SILENT_RETRIES = 2;
+
+export function isStructuralEmpty(result: ClaudeStreamResult): boolean {
+  const chars = (result.text ?? "").trim().length;
+  return (result.usage.outputTokens ?? 0) < STRUCTURAL_EMPTY_OUTPUT_TOKENS || chars < STRUCTURAL_EMPTY_CHARS;
+}
 
 export const ACTIVE_STATUSES: GenerationStatus[] = ["PENDING", "OUTLINING", "WRITING"];
 
@@ -473,24 +488,48 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
       });
   };
 
+  // A "structural empty" reply is one where the model spent its output tokens on
+  // thinking, on a very short refusal-like note, or on nothing at all. In the D9
+  // live test about one part call in eight came back this way. Its cost is spent
+  // (Anthropic already billed the call, which addTotals wrote down), but there is
+  // no chapter text to keep. We ask again, up to STRUCTURAL_EMPTY_SILENT_RETRIES
+  // times, without counting the empty call against the four-in-a-row failure cap
+  // that makes a chapter FAILED. Each retry checks the slice deadline first, so
+  // a run out of time hands over cleanly instead of looping.
   let result: ClaudeStreamResult;
-  try {
-    result = await callClaude(cp, {
-      user,
-      toolChoice: { type: "none" },
-      maxTokens: partMaxTokens(part.targetWords, cp.failedSteps),
-      deadline: ctx.deadline,
-      onText: (delta) => {
-        draft += delta;
-        if (!saving && (draft.length - savedChars >= DRAFT_SAVE_CHARS || Date.now() - savedAt >= DRAFT_SAVE_MS)) saveDraft();
-      },
-      usage: { projectId: cp.projectId, subsystem: GENERATION_SUBSYSTEM, step: `part_${k + 1}`, chapterNumber: chapter },
-    });
-  } finally {
-    if (saving) await saving;
+  let silentRetries = 0;
+  for (;;) {
+    // A retry starts a new save chain, so each attempt's draft is what actually reached us.
+    draft = "";
+    savedChars = 0;
+    savedAt = Date.now();
+    try {
+      result = await callClaude(cp, {
+        user,
+        toolChoice: { type: "none" },
+        maxTokens: partMaxTokens(part.targetWords, cp.failedSteps),
+        deadline: ctx.deadline,
+        onText: (delta) => {
+          draft += delta;
+          if (!saving && (draft.length - savedChars >= DRAFT_SAVE_CHARS || Date.now() - savedAt >= DRAFT_SAVE_MS)) saveDraft();
+        },
+        usage: { projectId: cp.projectId, subsystem: GENERATION_SUBSYSTEM, step: `part_${k + 1}${silentRetries ? `_r${silentRetries}` : ""}`, chapterNumber: chapter },
+      });
+    } finally {
+      if (saving) await saving;
+    }
+
+    if (result.stopReason === "refusal") throw new GenerationError(`Claude declined to write part ${k + 1}.`, true);
+    if (result.stopReason === "max_tokens") break; // handled below
+
+    if (!isStructuralEmpty(result) || silentRetries >= STRUCTURAL_EMPTY_SILENT_RETRIES) break;
+    silentRetries++;
+    console.warn(
+      `[generation] chapter ${chapter} part ${k + 1}: structural empty reply (${result.usage.outputTokens} output tokens, ${result.text.length} chars). Silent retry ${silentRetries} of ${STRUCTURAL_EMPTY_SILENT_RETRIES}; not counted against the failure cap.`,
+    );
+    yieldIfNoTime(ctx, stepEstimateMs({ kind: "part", targetWords: part.targetWords }));
   }
 
-  if (result.stopReason === "refusal") throw new GenerationError(`Claude declined to write part ${k + 1}.`, true);
   if (result.stopReason === "max_tokens") throw new GenerationError(`Part ${k + 1} was cut off at the length limit.`);
   const { body, report } = splitAgentReport(result.text);
   const text = cleanPartText(body, chapter, { first: k === 0 });
@@ -499,7 +538,8 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
     // Keep what came back for inspection; it is never appended to the chapter.
     await db.generationCheckpoint.updateMany({ where: { id: cp.id, status: "WRITING", partCursor: k }, data: { draftText: result.text } }).catch(() => {});
     const opening = result.text.replace(/\s+/g, " ").trim().slice(0, 160);
-    throw new GenerationError(`Part ${k + 1} was not written: ${problem} (stop reason ${result.stopReason ?? "none"}; reply began "${opening}").`);
+    const carriedOn = silentRetries > 0 ? ` after ${silentRetries} silent retr${silentRetries === 1 ? "y" : "ies"}` : "";
+    throw new GenerationError(`Part ${k + 1} was not written${carriedOn}: ${problem} (stop reason ${result.stopReason ?? "none"}; reply began "${opening}").`);
   }
   const words = countWords(text);
 

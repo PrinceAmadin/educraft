@@ -77,6 +77,13 @@ export interface CitationMatch {
   uncited: GateReference[];
   /** Distinct verified references cited. */
   cited: GateReference[];
+  /**
+   * The citation placement the chapters use. A note-style placement (MODE_A, MODE_B, MODE_C) writes
+   * the reference marker in the body ("^3") and lists the notes at the chapter end; there is no
+   * (Author, Year) to match, so the Davis/Yamane warning does not apply and ST13's Ch1/Ch2 rule uses
+   * the endnote list instead of the matched-citation count.
+   */
+  noteStyle: boolean;
 }
 
 export function matchCitations(input: {
@@ -85,6 +92,8 @@ export function matchCitations(input: {
   mode: number | null;
   knownCommon: (author: string, year: string) => { work: string } | null;
   primarySources?: PrimarySourceRef[];
+  /** Set for a note-style placement (MODE_A, MODE_B, MODE_C). Davis/Yamane WARN is then skipped. */
+  noteStyle?: boolean;
 }): CitationMatch {
   const uses = citationUses(input.chapters);
   const matched: CitationMatch["matched"] = [];
@@ -103,7 +112,10 @@ export function matchCitations(input: {
     const key = nameKey(use.author);
     if (key.length >= 3 && sourceText.some((t) => t.includes(key))) continue;
     const known = input.knownCommon(use.author, use.year);
-    if (known) knownCommon.push({ use, work: known.work });
+    // Note-style citations do not carry author-date markers, so a stray (Author, Year) in a note-style
+    // report is treated the same as any other unmatched citation: fail. The Davis/Yamane WARN, which
+    // only ever applies to author-date reports, is skipped.
+    if (known && !input.noteStyle) knownCommon.push({ use, work: known.work });
     else unmatched.push(use);
   }
   return {
@@ -113,6 +125,7 @@ export function matchCitations(input: {
     knownCommon,
     uncited: input.references.filter((r) => !citedIds.has(r.id)),
     cited: input.references.filter((r) => citedIds.has(r.id)),
+    noteStyle: Boolean(input.noteStyle),
   };
 }
 

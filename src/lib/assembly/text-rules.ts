@@ -16,6 +16,12 @@ export interface Seg {
   italics?: boolean;
   /** Set as a subscript (a symbol written "f_m" in the prose). */
   sub?: boolean;
+  /**
+   * Set as a superscript. Note-style citations (MODE_B document endnotes, MODE_C page footnotes and
+   * MODE_A chapter endnotes) put a number in the body ("...the market for cassava.^3") and list the
+   * notes at the chapter's end; the assembly renders each such number as a real Word superscript.
+   */
+  sup?: boolean;
 }
 
 /**
@@ -103,7 +109,37 @@ export function inlineSegments(text: string, opts: { inTable?: boolean } = {}): 
   }
   if (last < s.length) segs.push({ text: s.slice(last) });
   const cleaned = opts.inTable ? segs : segs.map((g) => ({ ...g, text: g.text.replace(/\*/g, "") }));
-  return subscriptSymbols(italiciseEtAl(cleaned));
+  return superscriptNotes(subscriptSymbols(italiciseEtAl(cleaned)));
+}
+
+/**
+ * Note-style citation markers in prose: "^3", "^{12}", "^[3]" or a "[3]" that trails a word
+ * ("...adoption trends.[3]") become a real Word superscript. Real square-bracketed placeholders
+ * like [DATA NOT PROVIDED …] are left alone: the marker is only matched when it is a number that
+ * is not part of a larger square-bracketed placeholder token. Numbers alone in the flow of prose
+ * ("in the last 5 years") are left alone: the caret is what marks the citation.
+ */
+export function superscriptNotes(segs: Seg[]): Seg[] {
+  const pattern = /(?:\^\{(\d{1,3})\})|(?:\^\[(\d{1,3})\])|(?:\^(\d{1,3}))|(?:(?<=[\p{L}.,;:!?)"'’”])\[(\d{1,3})\](?![\p{L}\d]))/gu;
+  const out: Seg[] = [];
+  for (const seg of segs) {
+    if (seg.sub || seg.sup || (!seg.text.includes("^") && !seg.text.includes("["))) {
+      out.push(seg);
+      continue;
+    }
+    let last = 0;
+    for (const m of seg.text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      const digits = m[1] ?? m[2] ?? m[3] ?? m[4];
+      if (!digits) continue;
+      if (at > last) out.push({ ...seg, text: seg.text.slice(last, at) });
+      out.push({ ...seg, text: digits, sup: true, italics: false });
+      last = at + m[0].length;
+    }
+    if (last === 0) out.push(seg);
+    else if (last < seg.text.length) out.push({ ...seg, text: seg.text.slice(last) });
+  }
+  return out.filter((s) => s.text);
 }
 
 // ─── P2: dashes ──────────────────────────────────────────────────────────────
@@ -291,7 +327,7 @@ export function splitEquationNumber(line: string): { text: string; number: strin
 
 // ─── Placeholders ────────────────────────────────────────────────────────────
 
-const PLACEHOLDER = /\[(?:DATA NOT PROVIDED[^\]]*|OBJECTIVE NOT MET[^\]]*|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|FIGURE PLACEHOLDER:[^\]]*|[A-Z][A-Z' ]{2,} TO BE SUPPLIED)\]|p\. \[page\]/g;
+const PLACEHOLDER = /\[(?:DATA NOT PROVIDED[^\]]*|OBJECTIVE NOT MET[^\]]*|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|FIGURE PLACEHOLDER:[^\]]*|[A-Z][A-Z' ]{2,} TO BE SUPPLIED|N_DISTRIBUTED|N_RETURNED|N_USABLE|RESPONSE_RATE|POPULATION_SIZE|SAMPLE_SIZE|FIELDWORK_PERIOD)\]|p\. \[page\]/g;
 
 export function findPlaceholders(text: string): string[] {
   return [...text.matchAll(PLACEHOLDER)].map((m) => (m[0].startsWith("[FIGURE PLACEHOLDER") ? "[FIGURE PLACEHOLDER]" : m[0]));

@@ -304,7 +304,13 @@ interface Ctx {
 }
 
 function textRun(seg: Seg, extra: { bold?: boolean } = {}): TextRun {
-  return new TextRun({ text: seg.text, ...(seg.italics ? { italics: true } : {}), ...(seg.sub ? { subScript: true } : {}), ...extra });
+  return new TextRun({
+    text: seg.text,
+    ...(seg.italics ? { italics: true } : {}),
+    ...(seg.sub ? { subScript: true } : {}),
+    ...(seg.sup ? { superScript: true } : {}),
+    ...extra,
+  });
 }
 
 /** Runs for a piece of generated text: *italics*, et al. italic, P2 dashes (prose only). */

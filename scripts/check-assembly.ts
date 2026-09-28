@@ -52,6 +52,14 @@ eq("two stars in a table cell", segs("0.001**", { inTable: true }), "0.001**");
 const subs = (t: string) => inlineSegments(t).map((s) => (s.sub ? `<sub>${s.text}</sub>` : s.text)).join("");
 eq("prose symbols get real subscripts", subs("where f_m is the mean and f_c the characteristic strength, η_{charge} the efficiency"), "where f<sub>m</sub> is the mean and f<sub>c</sub> the characteristic strength, η<sub>charge</sub> the efficiency");
 eq("…but not snake_case words or file names", subs("see mix_design_v2 and table_1.csv"), "see mix_design_v2 and table_1.csv");
+const supMark = (t: string) => inlineSegments(t).map((s) => (s.sup ? `<sup>${s.text}</sup>` : s.text)).join("");
+eq("^N in prose becomes a superscript (Fix 3)", supMark("...the market for cassava.^3 Traders now record"), "...the market for cassava.<sup>3</sup> Traders now record");
+eq("^{N} braces are stripped", supMark("the same trend.^{12}"), "the same trend.<sup>12</sup>");
+eq("^[N] brackets are stripped", supMark("adoption rose.^[3]"), "adoption rose.<sup>3</sup>");
+eq("a trailing [N] after a word is a note marker", supMark("cassava traders[3] now record"), "cassava traders<sup>3</sup> now record");
+eq("years and page numbers are not superscripted on their own", supMark("in the last 5 years"), "in the last 5 years");
+eq("a real placeholder is left alone", supMark("[DATA NOT PROVIDED — COO TO REVIEW]"), "[DATA NOT PROVIDED — COO TO REVIEW]");
+eq("[N] at the start of a line is not a note marker (no preceding word)", supMark("[3] is a stray label"), "[3] is a stray label");
 
 eq("P2 spaced em dash", fixSentenceDashes("adoption rose — especially among women").text, "adoption rose, especially among women");
 eq("P2 unspaced em dash", fixSentenceDashes("traders—mostly women—use it").text, "traders, mostly women, use it");
@@ -83,6 +91,12 @@ eq("EQ3 references renumbered", renumberEquationRefs("from Equation (3.1) and Eq
 eq("equation number split", splitEquationNumber("n = N / (1 + N(e²)) (3.1)"), { text: "n = N / (1 + N(e²))", number: "3.1" });
 eq("a value is not a number label", splitEquationNumber("x = 3.1"), { text: "x = 3.1", number: null });
 eq("placeholders", findPlaceholders("A [DATA NOT PROVIDED — COO TO REVIEW] b p. [page] [FIGURE PLACEHOLDER: map] [CASE TO BE SUPPLIED]"), ["[DATA NOT PROVIDED — COO TO REVIEW]", "p. [page]", "[FIGURE PLACEHOLDER]", "[CASE TO BE SUPPLIED]"]);
+// FIX 2: the count and date placeholders written into Ch3 before the client sends the data.
+eq(
+  "count-before-pause placeholders are all caught",
+  findPlaceholders("A total of [N_DISTRIBUTED] were sent, [N_RETURNED] returned, [N_USABLE] usable, giving [RESPONSE_RATE]. Frame: [POPULATION_SIZE]; achieved [SAMPLE_SIZE]; between [FIELDWORK_PERIOD]."),
+  ["[N_DISTRIBUTED]", "[N_RETURNED]", "[N_USABLE]", "[RESPONSE_RATE]", "[POPULATION_SIZE]", "[SAMPLE_SIZE]", "[FIELDWORK_PERIOD]"],
+);
 
 const cites = citationsIn("As Adeyemi and Bello (2019) note, fees fell (Okafor et al., 2020; Central Bank of Nigeria, 2022). Musa (2021, p. [page]) agrees (see Eze, 2018a, 2019). Between 2000–2023 (N = 384) nothing.");
 eq(
