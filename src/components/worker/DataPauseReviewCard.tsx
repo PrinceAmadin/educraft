@@ -4,7 +4,9 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { LuCircleCheck, LuCirclePause, LuFileText, LuLoaderCircle, LuRefreshCw, LuSend, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { COUNT_VALUE_TEXT } from "@/lib/generation/count-placeholders";
 import { DataFilesPicker } from "@/components/files/DataFilesPicker";
 import { DataFormFields } from "@/components/forms/DataFormFields";
 import type { UploadedRef } from "@/lib/files/upload-client";
@@ -44,9 +46,12 @@ export function DataPauseReviewCard({
   const [problems, setProblems] = React.useState<string[]>([]);
   const [asking, setAsking] = React.useState(false);
   const [note, setNote] = React.useState("");
+  const [values, setValues] = React.useState<Record<string, string>>(() => prefilled(initial));
 
   const active = view.status === "OPEN" || view.status === "SUBMITTED";
   const submitted = view.status === "SUBMITTED";
+  const slots = view.valueSlots ?? [];
+  const valuesMissing = slots.filter((s) => !values[s.key]?.trim()).length;
 
   async function act(body: Record<string, unknown>, label: string) {
     setBusy(label);
@@ -62,6 +67,8 @@ export function DataPauseReviewCard({
       if (next) {
         setView(next);
         setAnswers(next.answers ?? {});
+        // Keep what the specialist typed; slots the view now pre-fills (e.g. after saving answers) fill the gaps.
+        setValues((v) => ({ ...prefilled(next), ...Object.fromEntries(Object.entries(v).filter(([, x]) => x.trim())) }));
         setTicked((t) => new Set([...t].filter((id) => next.files.some((f) => f.id === id)).concat(newTicks(view, next))));
       }
       router.refresh();
@@ -196,6 +203,33 @@ export function DataPauseReviewCard({
         </div>
       ) : null}
 
+      {submitted && slots.length ? (
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <p className="meta-label">{COUNT_VALUE_TEXT.heading(slots.flatMap((s) => s.chapters))}</p>
+            <p className="max-w-3xl text-sm text-muted-foreground">{COUNT_VALUE_TEXT.explain([...new Set(slots.flatMap((s) => s.chapters))])}</p>
+          </div>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            {slots.map((s) => (
+              <div key={s.key} className="space-y-1.5">
+                <label htmlFor={`value-${view.id}-${s.key}`} className="block text-sm font-medium text-foreground">
+                  {s.label}
+                  {s.occurrences > 1 ? <span className="font-normal text-muted-foreground"> · {s.occurrences} places</span> : null}
+                </label>
+                <Input
+                  id={`value-${view.id}-${s.key}`}
+                  value={values[s.key] ?? ""}
+                  maxLength={200}
+                  disabled={busy !== null}
+                  onChange={(e) => setValues((v) => ({ ...v, [s.key]: e.target.value }))}
+                />
+                <p className="text-xs leading-relaxed text-muted-foreground">{s.context}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {active && !view.preparing ? (
         <div className="space-y-3">
           <p className="meta-label">Add your own files (for example the analysis you ran)</p>
@@ -256,13 +290,22 @@ export function DataPauseReviewCard({
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" disabled={busy !== null || uploading} onClick={() => void act({ action: "verify", pauseId: view.id, chapterFileIds: [...ticked] }, "verify")}>
+            <Button
+              type="button"
+              disabled={busy !== null || uploading || valuesMissing > 0}
+              onClick={() => void act({ action: "verify", pauseId: view.id, chapterFileIds: [...ticked], values: Object.fromEntries(slots.map((s) => [s.key, (values[s.key] ?? "").trim()])) }, "verify")}
+            >
               <LuCircleCheck aria-hidden />
               {busy === "verify" ? "Verifying…" : "Mark as verified"}
             </Button>
             <Button type="button" variant="outline" disabled={busy !== null} onClick={() => setAsking(true)}>
               Request more files
             </Button>
+            {valuesMissing > 0 ? (
+              <p className="w-full text-xs text-muted-foreground">
+                {valuesMissing === 1 ? "One value above is" : `${valuesMissing} values above are`} still empty.
+              </p>
+            ) : null}
           </div>
         )
       ) : null}
@@ -287,6 +330,10 @@ export function DataPauseReviewCard({
       ) : null}
     </section>
   );
+}
+
+function prefilled(v: PauseReviewView): Record<string, string> {
+  return Object.fromEntries((v.valueSlots ?? []).map((s) => [s.key, s.prefill]));
 }
 
 /** Every PDF and image starts ticked; verifying says which to leave out if they don't fit. */

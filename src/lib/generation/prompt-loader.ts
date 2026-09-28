@@ -300,7 +300,7 @@ export const LOADER_TEXT = {
   /**
    * A chapter written before its data pause (Modes 2 and 4 Chapter 3; Mode 3 Chapters 2 and 3): the
    * client has not sent the data yet, so the counts, dates and specifics only they can supply must be
-   * left as placeholders that the specialist substitutes with the real values after the pause. The
+   * left as placeholders that the specialist fills in when verifying the pause (count-placeholders.ts). The
    * quality gate treats these four placeholders as review placeholders (ST16), so a report that reaches
    * QA with any of them still in place fails until they are filled in.
    */
@@ -873,8 +873,8 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   // A data pause that follows this chapter (Modes 2 and 4 Chapter 3; Mode 3 Chapters 2 and 3) supplies
   // the counts, dates and specifics only the client knows. Without this rule the model invents them
   // (the D9 test on a Mode 2 report saw "362 sent, 329 usable" written into Chapter 3 before any data
-  // existed). The client's own data reaches Chapter 4 onwards, and Chapter 3 must be re-generated (or
-  // its placeholders substituted by the specialist) once the real numbers are in.
+  // existed). The client's own data reaches Chapter 4 onwards; the specialist fills these placeholders in
+  // when verifying the pause (verifyDataPause), which writes the values into this chapter's text.
   if (pausePointsFor(input.mode).some((p) => p === chapter) && !input.workerData?.length) {
     notes.push(LOADER_TEXT.countsBeforePause(input.mode, chapter));
   }

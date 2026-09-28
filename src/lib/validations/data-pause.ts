@@ -16,7 +16,13 @@ export const clientDataUploadSchema = z.object({ pauseId, files, answers });
 const specialistActions = [
   z.object({ action: z.literal("add_files"), pauseId, files }),
   z.object({ action: z.literal("save_answers"), pauseId, answers }),
-  z.object({ action: z.literal("verify"), pauseId, chapterFileIds: z.array(z.string().min(8).max(40)).max(40).default([]) }),
+  z.object({
+    action: z.literal("verify"),
+    pauseId,
+    chapterFileIds: z.array(z.string().min(8).max(40)).max(40).default([]),
+    /** The values the chapters before the pause left blank for the client's data, by slot key. */
+    values: z.record(z.string().max(40), z.string().max(200)).default({}),
+  }),
   z.object({ action: z.literal("request_more"), pauseId, note: z.string().trim().max(1000).optional().or(z.literal("")) }),
 ] as const;
 

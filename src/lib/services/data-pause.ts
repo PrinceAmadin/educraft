@@ -47,6 +47,7 @@ import {
   type WorkerData,
 } from "@/lib/generation/dynamic-data-form";
 import { dataInputChecklist } from "@/lib/generation/prompt-loader";
+import { COUNT_VALUE_TEXT, fillValueSlots, findValueSlots, prefillValues, type ChapterText, type ValueSlot } from "@/lib/generation/count-placeholders";
 import { pausedDaysBetween, shiftedDeadlines } from "@/lib/pause-clock";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { getApprovedBrief } from "@/lib/research/source-stage-actions";
@@ -326,14 +327,28 @@ export interface PauseReviewView {
   pausedDays: number | null;
   chapterFileIds: string[];
   files: PauseFileView[];
+  /** The blanks the chapters before this pause left for the client's data; filled in when it is verified. */
+  valueSlots: ValueSlot[];
 }
 
 function formOf(p: { formStatus: string; formSpec: unknown }): DataFormSpec | null {
   return p.formStatus === "READY" ? readFormSpec(p.formSpec) : null;
 }
 
-function reviewFrom(p: ReviewRow, routeBase: string): PauseReviewView {
+/** The finished chapters a pause follows (the ones that may hold blanks for its data). */
+async function chaptersUpTo(projectDbId: string, afterChapter: number): Promise<ChapterText[]> {
+  const rows = await db.generationCheckpoint.findMany({
+    where: { projectId: projectDbId, status: "COMPLETED", chapterNumber: { lte: afterChapter } },
+    orderBy: { chapterNumber: "asc" },
+    select: { chapterNumber: true, fullOutput: true },
+  });
+  return rows.map((r) => ({ number: r.chapterNumber, text: r.fullOutput ?? "" }));
+}
+
+function reviewFrom(p: ReviewRow, routeBase: string, chapters: ChapterText[] = []): PauseReviewView {
   const form = formOf(p);
+  const active = p.status === "OPEN" || p.status === "SUBMITTED";
+  const slots = active ? prefillValues(findValueSlots(chapters), form?.fields ?? [], (p.answers ?? {}) as Record<string, unknown>) : [];
   return {
     id: p.id,
     afterChapter: p.afterChapter,
@@ -364,6 +379,7 @@ function reviewFrom(p: ReviewRow, routeBase: string): PauseReviewView {
       href: fileHref({ id: f.id, fileUrl: f.fileUrl, storage: f.storage }, routeBase) ?? "",
       createdAt: f.createdAt.toISOString(),
     })),
+    valueSlots: slots,
   };
 }
 
@@ -376,14 +392,17 @@ export async function getWorkerPauseView(workerId: string, idOrCode: string): Pr
     orderBy: { afterChapter: "asc" },
     select: REVIEW_SELECT,
   });
-  return pause ? reviewFrom(pause, `/api/worker/projects/${project.projectId}`) : null;
+  if (!pause) return null;
+  return reviewFrom(pause, `/api/worker/projects/${project.projectId}`, await chaptersUpTo(project.id, pause.afterChapter));
 }
 
 /** Every pause of a project, for the founder and the COO. */
 export async function getAdminPauses(idOrCode: string): Promise<PauseReviewView[]> {
   const project = await projectFor(idOrCode);
   const pauses = await db.pipelinePause.findMany({ where: { projectId: project.id }, orderBy: { afterChapter: "asc" }, select: REVIEW_SELECT });
-  return pauses.map((p) => reviewFrom(p, `/api/admin/projects/${project.projectId}`));
+  const activeAfter = pauses.filter((p) => p.status === "OPEN" || p.status === "SUBMITTED").map((p) => p.afterChapter);
+  const chapters = activeAfter.length ? await chaptersUpTo(project.id, Math.max(...activeAfter)) : [];
+  return pauses.map((p) => reviewFrom(p, `/api/admin/projects/${project.projectId}`, chapters.filter((c) => c.number <= p.afterChapter)));
 }
 
 // ─── Files sent at a pause ──────────────────────────────────────────────────
@@ -569,10 +588,25 @@ async function releaseClock(tx: Tx, projectDbId: string, clockPausedAt: Date | n
 /**
  * The specialist has checked everything: the pause is RESUMED, the ticked PDFs
  * and images are the ones the chapters get (they must fit one chapter request),
- * and the client's delivery date moves on by the days paused.
+ * the values the chapters before it left blank are written in, and the client's
+ * delivery date moves on by the days paused.
  */
-export async function verifyDataPause(actor: PauseActor, projectDbId: string, pauseId: string, chapterFileIds: string[]): Promise<{ pausedDays: number }> {
+export async function verifyDataPause(
+  actor: PauseActor,
+  projectDbId: string,
+  pauseId: string,
+  chapterFileIds: string[],
+  values: Record<string, string> = {},
+): Promise<{ pausedDays: number; valuesWritten: number }> {
   const { pause } = await activePause(projectDbId, pauseId, ["SUBMITTED"]);
+  const before = await chaptersUpTo(projectDbId, pause.afterChapter);
+  const slots = findValueSlots(before);
+  const filled = fillValueSlots(before, values);
+  if (filled.missing.length) {
+    const labels = slots.filter((s) => filled.missing.includes(s.key)).map((s) => COUNT_VALUE_TEXT.missingOne(s.label));
+    throw new DataPauseError(COUNT_VALUE_TEXT.missing(slots.flatMap((s) => s.chapters)), 400, [COUNT_VALUE_TEXT.missing(slots.flatMap((s) => s.chapters)), ...labels]);
+  }
+  const changed = filled.chapters.filter((c) => c.changed);
   const ticked = [...new Set(chapterFileIds)];
   const candidates: (AttachmentCandidate & { id: string })[] = [];
   for (const id of ticked) {
@@ -598,6 +632,15 @@ export async function verifyDataPause(actor: PauseActor, projectDbId: string, pa
         data: { status: "RESUMED", resumedAt: now, resumedById: actor.userId, chapterFileIds: candidates.map((c) => c.id) },
       });
       if (moved.count === 0) throw new DataPauseError("This pause has moved on. Refresh the page.");
+      // Compare-and-set on the text the values were worked out from, so a chapter re-generated meanwhile is never overwritten.
+      for (const ch of changed) {
+        const old = before.find((b) => b.number === ch.number)!.text;
+        const wrote = await tx.generationCheckpoint.updateMany({
+          where: { projectId: projectDbId, chapterNumber: ch.number, status: "COMPLETED", fullOutput: old },
+          data: { fullOutput: ch.text, partialOutput: ch.text },
+        });
+        if (wrote.count === 0) throw new DataPauseError(COUNT_VALUE_TEXT.changed(ch.number));
+      }
       const days = await releaseClock(tx, projectDbId, pause.clockPausedAt, now);
       await tx.pipelinePause.update({ where: { id: pause.id }, data: { pausedDays: days } });
       await recordUpdate(tx, {
@@ -618,7 +661,7 @@ export async function verifyDataPause(actor: PauseActor, projectDbId: string, pa
     type: "info",
     link: `/admin/projects/${pause.project.projectId}?tab=report`,
   }).catch(() => {});
-  return { pausedDays };
+  return { pausedDays, valuesWritten: slots.length };
 }
 
 /** Back to the client for more files, with the specialist's note on their banner. The date stays frozen. */

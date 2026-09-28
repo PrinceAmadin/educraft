@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const b = body.data;
     if (b.action === "add_files") await addSpecialistFiles(actor, project.id, b.pauseId, b.files);
     else if (b.action === "save_answers") await saveAnswers(project.id, b.pauseId, b.answers);
-    else if (b.action === "verify") await verifyDataPause(actor, project.id, b.pauseId, b.chapterFileIds);
+    else if (b.action === "verify") await verifyDataPause(actor, project.id, b.pauseId, b.chapterFileIds, b.values);
     else await requestMoreFiles(project.id, b.pauseId, b.note || null);
     // D9: verified data is what the report's run was waiting for; its next chapter starts when a slot is free.
     if (b.action === "verify") await nudge(project.id);

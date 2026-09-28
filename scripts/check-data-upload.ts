@@ -14,6 +14,8 @@ import { checkChapterAttachments, MAX_ATTACHED_BYTES, MAX_SUBMITTED_FILES, order
 import { pausedDaysBetween, shiftedDeadlines } from "../src/lib/pause-clock";
 import { allowedTransitions, DATA_PAUSE_OVERLAP_MESSAGE, type TransitionCandidate } from "../src/lib/pipeline";
 import { clientDataUploadSchema, pauseActionSchema, workerPauseActionSchema } from "../src/lib/validations/data-pause";
+import { cleanValue, COUNT_VALUE_TEXT, fillValueSlots, findValueSlots, prefillValues } from "../src/lib/generation/count-placeholders";
+import { LOADER_TEXT } from "../src/lib/generation/prompt-loader";
 
 let passed = 0;
 const failures: string[] = [];
@@ -139,6 +141,61 @@ const BANNED = [/\bAI\b/, /\b(claude|anthropic)\b/i, /\bautomat/i, /\bQA\b/, /\b
 const clientText = [...Object.values(DATA_PAUSE_CLIENT_TEXT), ...Object.values(DATA_PAUSE_TEXT)];
 for (const line of clientText) check(`client wording is clean: "${line.slice(0, 40)}…"`, !BANNED.some((re) => re.test(line)), line);
 check("the notification says what the spec says", DATA_PAUSE_CLIENT_TEXT.requestTitle === "EduCraft needs your data files" && DATA_PAUSE_CLIENT_TEXT.requestBody.startsWith("Your specialist has reached a point in your report"));
+
+// ─── D11: the values a chapter before the pause left blank, filled in at Verify ───
+{
+  const ch3 = [
+    "[H1] CHAPTER THREE",
+    "[H2] 3.4 Sample and Sampling Technique",
+    "A total of [N_DISTRIBUTED] questionnaires were distributed, of which [N_RETURNED] were retrieved, giving a response rate of [RESPONSE_RATE].",
+    "The study population is [POPULATION_SIZE] registered traders; fieldwork ran [FIELDWORK_PERIOD].",
+    "Of those retrieved, [N_RETURNED] were screened and [N_USABLE] were usable. The instrument had [SPECIFIC VALUE TO BE SUPPLIED] items and a pilot of [SPECIFIC VALUE TO BE SUPPLIED] traders.",
+  ].join("\n");
+  const ch2 = "[H2] 2.1 Review\nNo blanks here, and [DATA NOT PROVIDED — COO TO REVIEW] is not a count blank.";
+  const slots = findValueSlots([{ number: 3, text: ch3 }, { number: 2, text: ch2 }]);
+  const keys = slots.map((s) => s.key);
+  check("every loader placeholder is found", ["N_DISTRIBUTED", "N_RETURNED", "RESPONSE_RATE", "POPULATION_SIZE", "FIELDWORK_PERIOD", "N_USABLE"].every((k) => keys.includes(k)), keys);
+  check("a named blank written twice is one slot with two places", slots.find((s) => s.key === "N_RETURNED")?.occurrences === 2);
+  check("each [SPECIFIC VALUE TO BE SUPPLIED] is its own slot", keys.filter((k) => k.startsWith("SPECIFIC:3:")).length === 2, keys);
+  check("other placeholders are not value slots", !keys.some((k) => /DATA NOT PROVIDED/.test(k)));
+  check("the context shows where the value goes", slots.find((s) => s.key === "N_DISTRIBUTED")?.context.includes("A total of ____ questionnaires") === true, slots.find((s) => s.key === "N_DISTRIBUTED")?.context);
+  check("every named slot has a plain label", slots.every((s) => s.label.length > 8 && !/[A-Z]_[A-Z]/.test(s.label)));
+
+  const all = { N_DISTRIBUTED: "362", N_RETURNED: "341", RESPONSE_RATE: "94.2%", POPULATION_SIZE: "3,200", FIELDWORK_PERIOD: "4 March to 26 April 2024", N_USABLE: "329", "SPECIFIC:3:1": "28", "SPECIFIC:3:2": "30" };
+  const filled = fillValueSlots([{ number: 3, text: ch3 }], all);
+  const text = filled.chapters[0].text;
+  check("filled: no count blank is left", filled.missing.length === 0 && !/\[(N_|RESPONSE_RATE|POPULATION_SIZE|SAMPLE_SIZE|FIELDWORK_PERIOD|SPECIFIC VALUE)/.test(text), text);
+  check("filled: the values land in the sentences", text.includes("A total of 362 questionnaires were distributed, of which 341 were retrieved, giving a response rate of 94.2%.") && text.includes("had 28 items and a pilot of 30 traders"));
+  check("filled: both places of a named blank get its value", (text.match(/341/g) ?? []).length === 2);
+  check("filled: the chapter is marked changed", filled.chapters[0].changed);
+  const partial = fillValueSlots([{ number: 3, text: ch3 }], { N_DISTRIBUTED: "362", N_RETURNED: "  " });
+  check("a blank or whitespace value counts as missing", partial.missing.includes("N_RETURNED") && partial.missing.includes("RESPONSE_RATE"), partial.missing);
+  check("a value with brackets can never make a placeholder", cleanValue("[N_USABLE] 12") === "N_USABLE 12" && cleanValue("a\nb") === "a b" && cleanValue("x".repeat(300)).length === 200);
+  check("a chapter with nothing to fill is unchanged", fillValueSlots([{ number: 2, text: ch2 }], {}).chapters[0].changed === false && findValueSlots([{ number: 2, text: ch2 }]).length === 0);
+
+  const fields = [
+    { key: "questionnaires_distributed", label: "How many questionnaires did you distribute?", type: "number" },
+    { key: "returned", label: "How many were returned?", type: "number" },
+    { key: "population", label: "Population of the study (registered traders)", type: "number" },
+    { key: "fieldwork", label: "Fieldwork period", type: "text" },
+    { key: "software", label: "Which software did you use?", type: "text" },
+  ];
+  const pre = prefillValues(slots, fields, { questionnaires_distributed: 362, returned: "341", population: "3200", fieldwork: "March to April 2024", software: "SPSS 26" });
+  const val = (k: string) => pre.find((s) => s.key === k)?.prefill;
+  check("pre-filled from the answers that plainly ask for them", val("N_DISTRIBUTED") === "362" && val("N_RETURNED") === "341" && val("POPULATION_SIZE") === "3200" && val("FIELDWORK_PERIOD") === "March to April 2024", pre.map((s) => [s.key, s.prefill]));
+  check("the response rate is worked out from the two counts", val("RESPONSE_RATE") === "94.2%", val("RESPONSE_RATE"));
+  check("nothing is guessed where no question asks", val("N_USABLE") === "" && val("SPECIFIC:3:1") === "");
+  const wordy = prefillValues(slots, [{ key: "n", label: "Questionnaires distributed", type: "text" }], { n: "about three hundred" });
+  check("a count is only pre-filled from a number", wordy.find((s) => s.key === "N_DISTRIBUTED")?.prefill === "");
+
+  check("the verify action carries the values", workerPauseActionSchema.safeParse({ action: "verify", pauseId: "pause_12345678", values: { N_DISTRIBUTED: "362" } }).success);
+  const noValues = workerPauseActionSchema.safeParse({ action: "verify", pauseId: "pause_12345678" });
+  check("values default to none (older callers still validate)", noValues.success && noValues.data.action === "verify" && Object.keys(noValues.data.values).length === 0);
+  check("a value over 200 characters is refused", !workerPauseActionSchema.safeParse({ action: "verify", pauseId: "pause_12345678", values: { N_DISTRIBUTED: "x".repeat(201) } }).success);
+  const loaderList = LOADER_TEXT.countsBeforePause(2, 3);
+  check("every placeholder the loader asks for is one the step can fill", ["N_DISTRIBUTED", "N_RETURNED", "N_USABLE", "RESPONSE_RATE", "POPULATION_SIZE", "SAMPLE_SIZE", "FIELDWORK_PERIOD", "SPECIFIC VALUE TO BE SUPPLIED"].every((t) => loaderList.includes(`[${t}]`) && findValueSlots([{ number: 3, text: `[${t}]` }]).length === 1));
+  check("the specialist's wording names the chapter", COUNT_VALUE_TEXT.heading([3]) === "Values Chapter 3 left for the client's data" && COUNT_VALUE_TEXT.explain([2, 3]).startsWith("Chapters 2 and 3 were written"));
+}
 
 if (failures.length) {
   console.error(`check:dataupload — ${failures.length} failed, ${passed} passed`);

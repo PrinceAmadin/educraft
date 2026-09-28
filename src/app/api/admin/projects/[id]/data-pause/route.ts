@@ -63,7 +63,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       await reopenDataPause(b.pauseId);
     } else if (b.action === "add_files") await addSpecialistFiles(actor, project.id, b.pauseId, b.files);
     else if (b.action === "save_answers") await saveAnswers(project.id, b.pauseId, b.answers);
-    else if (b.action === "verify") await verifyDataPause(actor, project.id, b.pauseId, b.chapterFileIds);
+    else if (b.action === "verify") await verifyDataPause(actor, project.id, b.pauseId, b.chapterFileIds, b.values);
     else await requestMoreFiles(project.id, b.pauseId, b.note || null);
     // D9: a verified, cancelled, reopened or redrafted request is what the report's run was waiting for.
     if (b.action === "verify" || b.action === "cancel" || b.action === "reopen" || b.action === "open" || b.action === "regenerate_form") await nudge(project.id);
