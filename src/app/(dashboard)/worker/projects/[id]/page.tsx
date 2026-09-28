@@ -17,6 +17,8 @@ import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard"
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
 import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
+import { PreliminaryPagesCard } from "@/components/generation/PreliminaryPagesCard";
+import { getPreliminaryPagesView } from "@/lib/services/preliminary-pages";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
@@ -76,6 +78,12 @@ export default async function WorkerAssignmentPage({
     // A specialist sees where the report's run stands, without the founder's and the COO's buttons (D9).
     generationDashboardFor(project.id, "worker"),
   ]);
+  // D7b: the preliminary pages the report carries, read-only for the specialist (no staff names, no QA-copy note).
+  const prelimView = dashboard ? await getPreliminaryPagesView(project.id).catch(() => null) : null;
+  const prelims =
+    prelimView?.applies && prelimView.pages
+      ? { ...prelimView, pages: { ...prelimView.pages, editedBy: null }, qaCopyOlder: null }
+      : null;
   const renderedAt = new Date().toISOString();
   const pauseCard = pause ? (
     // The file count is in the key: files added from the D6 banner remount the card with the new list.
@@ -250,6 +258,7 @@ export default async function WorkerAssignmentPage({
                         downloadUrl={`${routeBase}/documents/docx`}
                       />
                       <QualityGatePanel key={dashboard.run?.gateRanAt ?? "not-run"} endpoint={`${routeBase}/quality`} canRegenerate={false} />
+                      {prelims ? <PreliminaryPagesCard initial={prelims} readOnly /> : null}
                       {pauseCard}
                       {secondaryCard}
                     </div>

@@ -42,6 +42,29 @@ export function proseParagraphs(chapters: { number: number; text: string }[]): P
   return out;
 }
 
+/** D7b: the preliminary pages belong to no chapter; their prose is numbered under chapter 0. */
+export const PRELIM_CHAPTER = 0;
+
+/**
+ * D7b: the Claude-written acknowledgement and abstract as prose, one list per
+ * page (so the phrase scan reads each on its own), sections named as the
+ * voice check words them ("… in the abstract").
+ */
+export function prelimProse(pages: { acknowledgement: string; abstract: string } | null | undefined): ProseParagraph[][] {
+  if (!pages) return [];
+  const sections: [string, string][] = [
+    ["the acknowledgement", pages.acknowledgement],
+    ["the abstract", pages.abstract],
+  ];
+  return sections.map(([section, body]) =>
+    body
+      .split(/\n\s*\n+/)
+      .map(plainText)
+      .filter(Boolean)
+      .map((text, i) => ({ chapter: PRELIM_CHAPTER, index: i + 1, section, text, firstInSection: i === 0 })),
+  );
+}
+
 /** Words a full stop does not end a sentence after. */
 const ABBREVIATION = /(?:\bet\.?\s+al|\be\.g|\bi\.e|\bpp?|\bvs|\bDr|\bMr|\bMrs|\bMs|\bProf|\bNo|\bFig|\bEqs?|\bVol|\beds?|\bSt|\bJr|\bSr|\bLtd|\bInc|\bCo|\bviz|\bcf|\bapprox|\bca|(?:^|[\s(])\p{Lu})\.$/u;
 

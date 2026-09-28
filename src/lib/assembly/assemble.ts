@@ -1,11 +1,10 @@
 /**
  * Phase D7: document assembly. A report project's finished chapters, its
- * preliminary pages (from the intake; the Claude-written acknowledgement,
- * abstract and abbreviations are D7b placeholders) and the works it cites,
- * as one Word file that follows the 71 rules in
- * prompts/shared/formatting_rules.md. Built on demand, never stored: the
- * specialist fills the placeholders and uploads the finished file through the
- * Documents tab.
+ * preliminary pages (from the intake, plus the acknowledgement, abstract and
+ * list of abbreviations the D10 agent writes, placeholders until it has) and
+ * the works it cites, as one Word file that follows the 71 rules in
+ * prompts/shared/formatting_rules.md. Built on demand; the quality gate stores
+ * the copy it sends to QA.
  *
  * Layout (PN1-PN4): three sections.
  *   1. Cover: no page number shown.
@@ -102,8 +101,8 @@ export interface AssemblyInput {
   /** Full reports get the preliminary pages; a chapter-based order is just its chapters. */
   includePrelims: boolean;
   /**
-   * D10: the Claude-written preliminary sections filled in after the quality
-   * gate passes. When present, the placeholders for Ack, Abstract and the
+   * D10: the Claude-written preliminary sections, written before the quality
+   * gate scores the report (D7b) and editable by hand. When present, the placeholders for Ack, Abstract and the
    * List of Abbreviations are replaced with the stored content. When null or
    * omitted the assembler keeps the founder's placeholder strings, as before
    * D10 (the fixture inputs in scripts/check-* do not carry it).
@@ -217,6 +216,11 @@ const PAGE_TITLES = {
 
 // ─── Loading ─────────────────────────────────────────────────────────────────
 
+/** A chapter-based order (the chapters picked, or FYP-CH4): just its chapters, no preliminary pages. */
+export function isChapterBasedOrder(serviceCode: string, additionalData: unknown): boolean {
+  return (serviceCode === "FYP-CHAPTERS" && orderedChapters(additionalData).length > 0) || serviceCode === "FYP-CH4";
+}
+
 /** Everything a report needs, read once. 404 for a project that is not a written report; 409 while a chapter is unfinished. */
 export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyInput> {
   const project = await db.project.findUnique({
@@ -243,8 +247,7 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
     throw new AssemblyError("This project is not a written report.", 404, "NOT_A_REPORT");
   }
 
-  const chapterBased =
-    (project.service.serviceCode === "FYP-CHAPTERS" && orderedChapters(project.additionalData).length > 0) || project.service.serviceCode === "FYP-CH4";
+  const chapterBased = isChapterBasedOrder(project.service.serviceCode, project.additionalData);
   const expected = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
 
   const [runs, references, settings, preliminaryRow] = await Promise.all([
@@ -751,6 +754,22 @@ const submissionDate = (d: Date) => {
   const [month, year] = d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "Africa/Lagos" }).split(" ");
   return `${month.toUpperCase()}, ${year}`;
 };
+/**
+ * D7b: the details on the preliminary pages the order did not supply, in the
+ * words the Report tab shows (the same rules preliminaryChildren uses to put a
+ * placeholder in their place). They are edited on the project's Edit intake page.
+ */
+export function prelimIntakeGaps(input: Pick<AssemblyInput, "student" | "supervisor" | "hod" | "dedication">): string[] {
+  const gaps: string[] = [];
+  if (!input.student.matric?.trim()) gaps.push("Matric number");
+  if (!input.supervisor?.trim()) gaps.push("Supervisor's name");
+  if (!input.hod?.trim()) gaps.push("Head of Department's name");
+  const custom = input.dedication.type === "Custom" || (!input.dedication.type && input.dedication.details);
+  const dedicated = custom ? Boolean(input.dedication.details?.trim()) : Boolean(PRELIM_TEXT.dedication[input.dedication.type ?? ""]);
+  if (!dedicated) gaps.push("Dedication");
+  return gaps;
+}
+
 const orPlaceholder = (value: string | null | undefined, placeholder: string, ctx: Ctx) => {
   const v = value?.trim();
   if (v) return v;
@@ -857,22 +876,20 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
 
   // D10: the acknowledgement, abstract and list of abbreviations use the stored
   // agent output when the PreliminaryPages row exists; otherwise the founder's
-  // placeholders remain in the document, exactly as before D10. The placeholders
-  // are still recorded in report.prelimPlaceholders in that fallback case.
+  // placeholders remain in the document, exactly as before D10, and are recorded
+  // in report.prelimPlaceholders. A stored section that came back empty keeps its placeholder too.
   const stored = input.preliminary ?? null;
-  if (!stored) {
-    ctx.report.prelimPlaceholders.push(
-      PRELIM_TEXT.acknowledgementPlaceholder,
-      PRELIM_TEXT.abstractPlaceholder,
-      PRELIM_TEXT.abbreviationsPlaceholder,
-    );
-  }
+  const ackText = stored?.acknowledgement.trim() ?? "";
+  const abstractText = stored?.abstract.trim() ?? "";
+  if (!ackText) ctx.report.prelimPlaceholders.push(PRELIM_TEXT.acknowledgementPlaceholder);
+  if (!abstractText) ctx.report.prelimPlaceholders.push(PRELIM_TEXT.abstractPlaceholder);
+  if (!stored) ctx.report.prelimPlaceholders.push(PRELIM_TEXT.abbreviationsPlaceholder);
 
-  const ackParagraphs = stored
-    ? paragraphsFrom(stored.acknowledgement, ctx)
+  const ackParagraphs = ackText
+    ? paragraphsFrom(ackText, ctx)
     : [new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementPlaceholder)] })];
-  const abstractParagraphs = stored
-    ? paragraphsFrom(stored.abstract, ctx)
+  const abstractParagraphs = abstractText
+    ? paragraphsFrom(abstractText, ctx)
     : [new Paragraph({ children: [plain(PRELIM_TEXT.abstractPlaceholder)] })];
 
   const out: (Paragraph | Table | TableOfContents)[] = [
@@ -899,7 +916,7 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
 
     pageTitle(PAGE_TITLES.acknowledgement),
     ...ackParagraphs,
-    ...(input.acknowledgementNote?.trim() && !stored
+    ...(input.acknowledgementNote?.trim() && !ackText
       ? [new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementFromOrder(input.acknowledgementNote.trim()))] })]
       : []),
 

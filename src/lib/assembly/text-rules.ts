@@ -338,6 +338,15 @@ export function splitEquationNumber(line: string): { text: string; number: strin
 
 const PLACEHOLDER = /\[(?:DATA NOT PROVIDED[^\]]*|OBJECTIVE NOT MET[^\]]*|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|FIGURE PLACEHOLDER:[^\]]*|[A-Z][A-Z' ]{2,} TO BE SUPPLIED|N_DISTRIBUTED|N_RETURNED|N_USABLE|RESPONSE_RATE|POPULATION_SIZE|SAMPLE_SIZE|FIELDWORK_PERIOD)\]|p\. \[page\]/g;
 
+/**
+ * D7b: blanks left in the Claude-written preliminary pages, i.e. any [CAPITALISED] token such as
+ * "[SUPERVISOR_NAME]" (the page writer is given these when the order lacks the detail). Lower-case
+ * brackets ("[sic]") and numbers ("[12]") are not blanks.
+ */
+export function writtenBlanks(...texts: string[]): string[] {
+  return [...new Set(texts.flatMap((t) => t.match(/\[[A-Z][A-Z0-9_' -]{1,78}\]/g) ?? []))];
+}
+
 export function findPlaceholders(text: string): string[] {
   return [...text.matchAll(PLACEHOLDER)].map((m) => (m[0].startsWith("[FIGURE PLACEHOLDER") ? "[FIGURE PLACEHOLDER]" : m[0]));
 }

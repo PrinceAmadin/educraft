@@ -6,7 +6,7 @@
  * missing here, so the two cannot drift apart. Pure.
  */
 
-import { normaliseForMatch, splitSentences, type ProseParagraph } from "./prose";
+import { normaliseForMatch, PRELIM_CHAPTER, splitSentences, type ProseParagraph } from "./prose";
 import { result, shortQuote, type CheckResult, type QualityIssue } from "./types";
 
 export type VoiceRule =
@@ -133,7 +133,7 @@ const CITED = /\((?:[^()]*?\b(?:19|20)\d{2}[a-z]?)[^()]*\)|\b\p{Lu}[\p{L}'’-]+
 const OUTLINE_SECTION = /outline|organi[sz]ation of the|structure of the (?:study|report|project|thesis)|chapter (?:summary|overview)|summary/i;
 const CROSS_REF = /\b(?:(?:sub-?)?section\s+\d+(?:\.\d+)+|chapter\s+(?:one|two|three|four|five|six|[1-6])\b)/gi;
 /** First person, outside quotation marks: we, our, us, my, and "I" before a verb. */
-const FIRST_PERSON = /\b(?:[Ww]e|[Oo]urs?|us|[Mm]y)\b|\bI (?:am|was|have|had|found|find|believe|think|will|would|shall|feel|observed|conducted|used|designed|chose|noticed|argue|propose|recommend|conclude|developed|collected|interviewed)\b/;
+const FIRST_PERSON = /\b(?:[Ww]e|[Oo]urs?|us|[Mm]y)\b|\bI (?:am|was|have|had|found|find|believe|think|will|would|shall|feel|observed|conducted|used|designed|chose|noticed|argue|propose|recommend|conclude|developed|collected|interviewed|wish|thank|acknowledge|appreciate|owe|dedicate)\b/;
 const stripQuotes = (s: string) => s.replace(/“[^”]*”|"[^"]*"/g, " ");
 
 function finding(p: ProseParagraph, quote: string, rule: VoiceRule, severity: "MAJOR" | "MINOR"): VoiceFinding {
@@ -299,14 +299,19 @@ export function voiceCheck(findings: VoiceFinding[], notes: { chapter: number; r
     uniform_rhythm: "Uniform rhythm",
     other: "Voice",
   };
-  const issues: QualityIssue[] = findings.map((f) => ({
-    level: f.severity === "MAJOR" && LITERAL_RULES.has(f.rule) ? "FAIL" : "WARN",
-    message: `${label[f.rule]}${f.section ? ` in ${f.section}` : ""}${f.source === "ai" ? " (voice review)" : ""}.`,
-    chapter: f.chapter,
-    paragraph: f.paragraph,
-    quote: f.quote,
-    fix: f.fix,
-  }));
+  // D7b: a finding in the preliminary pages (chapter 0) is a WARN for the COO, who corrects it by hand:
+  // the page writer is not given the anti-AI rules, and re-generating a chapter cannot fix it.
+  const issues: QualityIssue[] = findings.map((f): QualityIssue => {
+    const prelim = f.chapter === PRELIM_CHAPTER;
+    return {
+      level: !prelim && f.severity === "MAJOR" && LITERAL_RULES.has(f.rule) ? "FAIL" : "WARN",
+      message: `${label[f.rule]}${f.section ? ` in ${f.section}` : ""}${f.source === "ai" ? " (voice review)" : ""}.`,
+      chapter: prelim ? null : f.chapter,
+      paragraph: f.paragraph,
+      quote: f.quote,
+      fix: prelim ? `${f.fix} Correct it by hand on the Preliminary pages card (Report tab).` : f.fix,
+    };
+  });
   for (const n of notes) {
     if (n.readsHuman === false) issues.push({ level: "WARN", message: `Chapter ${n.chapter} may read as machine-written${n.note ? `: ${n.note}` : "."}`, chapter: n.chapter, fix: VOICE_FIX.uniform_rhythm });
   }

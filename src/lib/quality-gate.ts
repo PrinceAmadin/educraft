@@ -17,7 +17,7 @@ import path from "node:path";
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { callClaudeForJson } from "@/lib/anthropic";
-import { AssemblyError, loadAssemblyInput, packReport, reportFileName } from "@/lib/assembly/assemble";
+import { AssemblyError, loadAssemblyInput, reportFileName } from "@/lib/assembly/assemble";
 import { runPreliminaryPagesAgent } from "@/lib/services/preliminary-pages";
 import { nameKey } from "@/lib/assembly/text-rules";
 import { lookupDepartment } from "@/lib/generation/department-map";
@@ -225,6 +225,13 @@ async function runLocked(
     if (error instanceof AssemblyError) throw new QualityGateError(error.message, error.status, error.code, error.details);
     throw error;
   }
+  // D7b: the acknowledgement, abstract and list of abbreviations are written before the report is
+  // scored, so the gate checks them and the copy sent to QA is the copy it scored. Free when nothing
+  // changed or the pages were edited by hand; an agent failure leaves the D7 placeholders and never blocks.
+  if (input.includePrelims) {
+    const pages = await runPreliminaryPagesAgent(project.id);
+    if (pages) input = { ...input, preliminary: { acknowledgement: pages.acknowledgement, abstract: pages.abstract, abbreviations: pages.abbreviations, needsReview: pages.needsReview } };
+  }
   const [settings, brief, refRows, checkpoints, review] = await Promise.all([
     getApprovedModeSettings(project.id).catch(() => null),
     getApprovedBrief(db, project.id).catch(() => null),
@@ -418,24 +425,10 @@ async function runLocked(
 
   let autoSubmitError: string | null = null;
   if (canSubmit) {
-    // D10 — fill the acknowledgement / abstract / list of abbreviations before the version is written,
-    // so the .docx that reaches QA carries them filled in. Never blocks: an agent failure or a
-    // re-assembly failure logs and the version is written with the D7 placeholders instead.
-    let submitBuffer: Uint8Array = prepared.buffer;
-    try {
-      const d10 = await runPreliminaryPagesAgent(project.id);
-      if (d10) {
-        const refreshedInput = await loadAssemblyInput(project.id);
-        const refreshed = await packReport(refreshedInput);
-        submitBuffer = refreshed.buffer;
-      }
-    } catch (error) {
-      console.error(`[quality] ${project.projectId}: D10 preliminary-pages step failed; submitting with placeholders`, error);
-    }
     try {
       await submitGeneratedReport({
         projectDbId: project.id,
-        buffer: submitBuffer,
+        buffer: prepared.buffer,
         fileName: reportFileName(input.title, project.projectId),
         note: `Quality check: ${score.qualityScore} of ${QUALITY_TOTAL} checks passed.`,
         actorUserId: actor.userId,

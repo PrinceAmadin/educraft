@@ -32,6 +32,8 @@ import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard"
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
 import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
+import { PreliminaryPagesCard } from "@/components/generation/PreliminaryPagesCard";
+import { getPreliminaryPagesView } from "@/lib/services/preliminary-pages";
 import { ResearchRerunControl } from "@/components/projects/ResearchRerunControl";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
@@ -68,7 +70,7 @@ export default async function ProjectDetailPage({
   ]);
   if (!project) notFound();
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
-  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary, generation] = await Promise.all([
+  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary, generation, prelims] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
     listDeliverablesForAdmin(project.id),
@@ -82,6 +84,8 @@ export default async function ProjectDetailPage({
     reportProject ? secondaryDataStatus(project.id, project.projectId) : Promise.resolve(null),
     // D6: the live report dashboard (chapters, pause, queue).
     reportProject ? generationDashboardFor(project.id) : Promise.resolve(null),
+    // D7b: the acknowledgement, abstract and abbreviations the page writer adds to a full report.
+    reportProject ? getPreliminaryPagesView(project.id) : Promise.resolve(null),
   ]);
   const adminBase = `/api/admin/projects/${encodeURIComponent(project.projectId)}`;
   const dataToCheck = pauses.some((p) => p.status === "SUBMITTED");
@@ -120,6 +124,14 @@ export default async function ProjectDetailPage({
                 {generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? (
                   // The key is the last quality run: a check the orchestrator ran by itself reloads the panel.
                   <QualityGatePanel key={generation.run?.gateRanAt ?? "not-run"} endpoint={`${adminBase}/quality`} canRegenerate />
+                ) : null}
+                {prelims?.applies && generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? (
+                  <PreliminaryPagesCard
+                    key={`${prelims.pages?.updatedAt ?? "none"}-${generation.run?.gateRanAt ?? "not-run"}`}
+                    initial={prelims}
+                    endpoint={`${adminBase}/generation/preliminary-pages`}
+                    editIntakeHref={`/admin/projects/${encodeURIComponent(project.projectId)}/edit-intake`}
+                  />
                 ) : null}
                 {pauses.map((p) => (
                   <DataPauseReviewCard

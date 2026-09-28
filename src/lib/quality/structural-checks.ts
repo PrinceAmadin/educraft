@@ -16,6 +16,7 @@ import type { CitationMatch } from "./citation-check";
 import { normaliseForMatch, plainText } from "./prose";
 import { forbidsDiscussionInChapterFour, requiredSections, type SectionContext } from "./required-sections";
 import { result, shortQuote, type CheckResult, type QualityIssue, type Severity } from "./types";
+import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS } from "@/lib/generation/preliminary-pages-rules";
 
 export interface StructuralChapter {
   number: number;
@@ -42,6 +43,8 @@ export interface StructuralInput {
     /** Heading 1 texts of the preliminary pages, as assembled. */
     heading1: string[];
     placeholders: string[];
+    /** D7b: the Claude-written pages as scored, or null when they were not written. */
+    written?: { needsReview: boolean; abstractWords: number; blanks: string[] } | null;
   };
   citations: CitationMatch;
   /** ST9's AI result; null when the gate could not run it. */
@@ -142,8 +145,11 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     for (const what of ["DEDICATION", "ACKNOWLEDGEMENT"]) if (!has(what)) issues.push({ level: "FAIL", message: `The ${what.toLowerCase()} page is missing.`, fix: `Add the ${what.toLowerCase()}.` });
     const later = p.placeholders.filter((x) => /ABSTRACT|ACKNOWLEDGEMENT|ABBREVIATIONS/.test(x));
     const fillIn = p.placeholders.filter((x) => !later.includes(x));
-    if (later.length) issues.push({ level: "WARN", message: `Written by the specialist for now: ${later.join(", ")}.`, fix: "Write these pages before delivery." });
-    if (fillIn.length) issues.push({ level: "WARN", message: `Not collected at intake: ${fillIn.join(", ")}.`, fix: "Fill these in from the client before delivery." });
+    const w = p.written ?? null;
+    if (later.length) issues.push({ level: "WARN", message: `Not written: ${later.join(", ")}.`, fix: "Write them again, or type them in, on the Preliminary pages card (Report tab)." });
+    if (w?.needsReview) issues.push({ level: "WARN", message: `The abstract is ${w.abstractWords} words; it should be ${ABSTRACT_MIN_WORDS}–${ABSTRACT_MAX_WORDS}.`, fix: "Shorten or lengthen it on the Preliminary pages card, or write it again." });
+    if (w?.blanks.length) issues.push({ level: "WARN", message: `The acknowledgement or abstract still has blanks: ${w.blanks.join(", ")}.`, fix: "Add the missing details on Edit intake and write the pages again, or fill the blanks in by hand on the Preliminary pages card." });
+    if (fillIn.length) issues.push({ level: "WARN", message: `Not collected at intake: ${fillIn.join(", ")}.`, fix: "Add them on the project's Edit intake page before delivery." });
     push("ST1", issues, { pass: "Cover, title page, declaration, certification, dedication, acknowledgement, abstract and contents are all there.", na: "A chapter-based order has no preliminary pages." }, { na: !p.included });
   }
 

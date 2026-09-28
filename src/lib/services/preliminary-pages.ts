@@ -2,16 +2,17 @@
  * Phase D10: fills the three "Claude-written" placeholders D7 leaves in the
  * assembled report (Acknowledgement, Abstract, List of Abbreviations).
  *
- * Runs by itself on gate PASS (from quality-gate.ts, in waitUntil, before the
- * DeliverableVersion is written), and can be retried at
- *   POST /api/admin/projects/[id]/generation/preliminary-pages
- * by the founder or COO.
+ * Runs by itself before the quality gate scores a full report (D7b, from
+ * quality-gate.ts), so the gate checks the pages and the copy sent to QA carries
+ * them. On the Report tab the founder or the COO reads them, corrects them by
+ * hand (kept by every later automatic run) or writes them again:
+ *   GET | POST | PATCH /api/admin/projects/[id]/generation/preliminary-pages
  *
  * Two Claude calls:
  *   A. record_preliminary_sections → { acknowledgement, abstract }.
  *      Retried once if the abstract falls outside 240–320 words. If still
  *      out on the retry, the closest attempt is stored, needsReview flips to
- *      true (surface on the specialist's Report tab), and delivery is NOT
+ *      true (shown on the Report tab's Preliminary pages card), and delivery is NOT
  *      blocked.
  *   B. expand_abbreviations → [{ token, expansion|null }, …].
  *      The scanner walks the five chapters for capitalised tokens (2–10
@@ -30,14 +31,15 @@ import { db } from "@/lib/db";
 import { countWords } from "@/lib/generation/chapter-plan";
 import { loadPreliminaryPagesPrompts, PreliminaryPagesPromptError, type PromptValues } from "@/lib/generation/preliminary-pages-loader";
 import { parseChapter } from "@/lib/assembly/parse-chapter";
+import { writtenBlanks } from "@/lib/assembly/text-rules";
+import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS, ABSTRACT_TARGET_HI, ABSTRACT_TARGET_LO } from "@/lib/generation/preliminary-pages-rules";
+import { isChapterBasedOrder, prelimIntakeGaps } from "@/lib/assembly/assemble";
+import { expectedChapters } from "@/lib/deliverables";
 
 const TAG = "[preliminary-pages]";
 const SUBSYSTEM = "preliminary_pages";
 
-export const ABSTRACT_MIN_WORDS = 240;
-export const ABSTRACT_MAX_WORDS = 320;
-export const ABSTRACT_TARGET_LO = 260;
-export const ABSTRACT_TARGET_HI = 290;
+export { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS, ABSTRACT_TARGET_HI, ABSTRACT_TARGET_LO };
 export const MAX_ABBREVIATIONS = 40;
 export const ABBREVIATION_MIN_LEN = 2;
 export const ABBREVIATION_MAX_LEN = 10;
@@ -464,11 +466,51 @@ function distanceFromBand(count: number): number {
 }
 
 /**
- * The entry point the gate calls in waitUntil on gate PASS, and the admin
- * route calls when the founder or COO retries. Idempotent when the same
- * project has already been generated at the same promptHash and force is
- * not set. Never throws for a "no chapters yet" case (that means the gate
- * ran on a project that shouldn't reach here — just log and return null).
+ * The chapters and order details the pages are written from, without the
+ * submission date (which moves every month): what "the report changed since
+ * these pages were written" means on the Report tab.
+ */
+export function sourceHashFor(values: PromptValues, tokens: string[]): string {
+  const { submission_month: _month, submission_year: _year, ...rest } = values as Record<string, string>;
+  return crypto.createHash("sha256").update(JSON.stringify({ ...rest, tokens })).digest("hex").slice(0, 16);
+}
+
+/**
+ * Whether an automatic run keeps the stored pages instead of calling Claude:
+ * they exist and either the input is unchanged or someone edited them by hand.
+ * "Write again" (force) always rewrites. Pure.
+ */
+export function keepStoredPages(existing: { promptHash: string | null; editedByHand: boolean } | null, promptHash: string, force = false): boolean {
+  return !force && existing !== null && (existing.editedByHand || existing.promptHash === promptHash);
+}
+
+function storedResult(stored: {
+  acknowledgement: string;
+  abstract: string;
+  abstractWordCount: number;
+  abstractRetries: number;
+  abbreviations: unknown;
+  needsReview: boolean;
+  promptHash: string | null;
+}, fallbackHash: string): PreliminaryPagesResult {
+  return {
+    acknowledgement: stored.acknowledgement,
+    abstract: stored.abstract,
+    abstractWordCount: stored.abstractWordCount,
+    abstractRetries: stored.abstractRetries,
+    abbreviations: Array.isArray(stored.abbreviations) ? (stored.abbreviations as Abbreviation[]) : [],
+    needsReview: stored.needsReview,
+    promptHash: stored.promptHash ?? fallbackHash,
+  };
+}
+
+/**
+ * The entry point the quality gate calls before it scores a full report (D7b),
+ * and the admin route calls for "Write again". Returns the stored row without
+ * calling Claude when the input is unchanged (same promptHash) or when the
+ * founder or the COO edited the pages by hand; `force` rewrites them either
+ * way and clears the hand edit. Never throws: a failure logs and returns null,
+ * and the report keeps the D7 placeholders.
  */
 export async function runPreliminaryPagesAgent(projectDbId: string, opts: { force?: boolean } = {}): Promise<PreliminaryPagesResult | null> {
   try {
@@ -479,45 +521,30 @@ export async function runPreliminaryPagesAgent(projectDbId: string, opts: { forc
     }
     const tokens = topInitialisms(context.chapters).map((t) => t.token);
     const promptHash = promptHashFor(context.values, tokens);
-    const existing = await db.preliminaryPages.findUnique({ where: { projectId: projectDbId }, select: { promptHash: true } });
-    if (!opts.force && existing?.promptHash === promptHash) {
-      console.info(`${TAG} ${projectDbId}: unchanged since last run (hash ${promptHash}); skipping`);
-      // Return the stored row so the caller has something to write back to the assembly.
-      const stored = await db.preliminaryPages.findUnique({ where: { projectId: projectDbId } });
-      if (!stored) return null;
-      return {
-        acknowledgement: stored.acknowledgement,
-        abstract: stored.abstract,
-        abstractWordCount: stored.abstractWordCount,
-        abstractRetries: stored.abstractRetries,
-        abbreviations: Array.isArray(stored.abbreviations) ? (stored.abbreviations as unknown as Abbreviation[]) : [],
-        needsReview: stored.needsReview,
-        promptHash: stored.promptHash ?? promptHash,
-      };
+    const existing = await db.preliminaryPages.findUnique({ where: { projectId: projectDbId } });
+    if (existing && keepStoredPages(existing, promptHash, opts.force)) {
+      console.info(`${TAG} ${projectDbId}: ${existing.editedByHand ? "edited by hand; keeping it" : `unchanged since last run (hash ${promptHash})`}; skipping`);
+      return storedResult(existing, promptHash);
     }
 
     const result = await runPreliminaryPages(context);
+    const written = {
+      acknowledgement: result.acknowledgement,
+      abstract: result.abstract,
+      abstractWordCount: result.abstractWordCount,
+      abstractRetries: result.abstractRetries,
+      abbreviations: result.abbreviations,
+      needsReview: result.needsReview,
+      promptHash: result.promptHash,
+      sourceHash: sourceHashFor(context.values, tokens),
+      editedByHand: false,
+      editedAt: null,
+      editedById: null,
+    };
     await db.preliminaryPages.upsert({
       where: { projectId: projectDbId },
-      create: {
-        projectId: projectDbId,
-        acknowledgement: result.acknowledgement,
-        abstract: result.abstract,
-        abstractWordCount: result.abstractWordCount,
-        abstractRetries: result.abstractRetries,
-        abbreviations: result.abbreviations,
-        needsReview: result.needsReview,
-        promptHash: result.promptHash,
-      },
-      update: {
-        acknowledgement: result.acknowledgement,
-        abstract: result.abstract,
-        abstractWordCount: result.abstractWordCount,
-        abstractRetries: result.abstractRetries,
-        abbreviations: result.abbreviations,
-        needsReview: result.needsReview,
-        promptHash: result.promptHash,
-      },
+      create: { projectId: projectDbId, ...written },
+      update: written,
     });
     console.info(
       `${TAG} ${projectDbId}: stored (abstract ${result.abstractWordCount} words${result.abstractRetries ? `, ${result.abstractRetries} retry` : ""}${result.needsReview ? ", needsReview" : ""}, ${result.abbreviations.length} abbreviations)`,
@@ -527,4 +554,170 @@ export async function runPreliminaryPagesAgent(projectDbId: string, opts: { forc
     console.error(`${TAG} ${projectDbId}: run failed`, error instanceof AnthropicError ? error.message : error);
     return null;
   }
+}
+
+// ── D7b: the Report tab's card ─────────────────────────────────
+
+export class PreliminaryPagesError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(message);
+  }
+}
+
+export interface PreliminaryPagesView {
+  /** A full report: a chapter-based order has no preliminary pages. */
+  applies: boolean;
+  /** Every chapter the order needs is written, so the pages can be written. */
+  chaptersReady: boolean;
+  band: { min: number; max: number };
+  pages: {
+    acknowledgement: string;
+    abstract: string;
+    abstractWords: number;
+    needsReview: boolean;
+    abbreviations: Abbreviation[];
+    generatedAt: string;
+    updatedAt: string;
+    editedByHand: boolean;
+    editedAt: string | null;
+    editedBy: string | null;
+    /** The chapters or the order details changed after the pages were last written by the agent. */
+    changedSince: boolean;
+  } | null;
+  /** Details the order did not supply ("Supervisor's name"), fixed on Edit intake. */
+  intakeGaps: string[];
+  /** [BRACKETED] blanks left in the acknowledgement or abstract. */
+  blanks: string[];
+  /** The copy already in QA was built before the pages last changed (ISO time of that copy), else null. */
+  qaCopyOlder: string | null;
+}
+
+/** Everything the Preliminary pages card shows. Reads only; never calls Claude. */
+export async function getPreliminaryPagesView(projectDbId: string): Promise<PreliminaryPagesView> {
+  const project = await db.project.findUnique({
+    where: { id: projectDbId },
+    select: {
+      matricNumber: true,
+      supervisorName: true,
+      hodName: true,
+      dedicationType: true,
+      dedicationDetails: true,
+      additionalData: true,
+      chapterCount: true,
+      service: { select: { serviceCode: true } },
+    },
+  });
+  if (!project) throw new PreliminaryPagesError("Project not found", 404, "NOT_FOUND");
+  const band = { min: ABSTRACT_MIN_WORDS, max: ABSTRACT_MAX_WORDS };
+  if (isChapterBasedOrder(project.service.serviceCode, project.additionalData)) {
+    return { applies: false, chaptersReady: false, band, pages: null, intakeGaps: [], blanks: [], qaCopyOlder: null };
+  }
+  const expected = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
+  const dedication = (project.dedicationDetails ?? null) as { type?: string | null; details?: string | null } | null;
+  const [done, row, qaCopy] = await Promise.all([
+    db.generationCheckpoint.count({ where: { projectId: projectDbId, chapterNumber: { in: expected }, status: "COMPLETED" } }),
+    db.preliminaryPages.findUnique({ where: { projectId: projectDbId } }),
+    db.deliverableVersion.findFirst({
+      where: { submittedByRole: "SYSTEM", deliverable: { projectId: projectDbId, kind: "FINAL" } },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  const intakeGaps = prelimIntakeGaps({
+    student: { name: "", matric: project.matricNumber },
+    supervisor: project.supervisorName,
+    hod: project.hodName,
+    dedication: { type: project.dedicationType ?? dedication?.type ?? null, details: dedication?.details ?? null },
+  });
+  let pages: PreliminaryPagesView["pages"] = null;
+  if (row) {
+    let changedSince = false;
+    if (row.sourceHash) {
+      const context = await readContext(projectDbId);
+      if (context) changedSince = sourceHashFor(context.values, topInitialisms(context.chapters).map((t) => t.token)) !== row.sourceHash;
+    }
+    const editor = row.editedById
+      ? await db.user.findUnique({ where: { id: row.editedById }, select: { displayName: true, email: true, execProfile: { select: { fullName: true } } } })
+      : null;
+    pages = {
+      acknowledgement: row.acknowledgement,
+      abstract: row.abstract,
+      abstractWords: row.abstractWordCount,
+      needsReview: row.needsReview,
+      abbreviations: Array.isArray(row.abbreviations) ? (row.abbreviations as unknown as Abbreviation[]) : [],
+      generatedAt: row.generatedAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      editedByHand: row.editedByHand,
+      editedAt: row.editedAt?.toISOString() ?? null,
+      editedBy: editor ? (editor.execProfile?.fullName ?? editor.displayName ?? editor.email) : null,
+      changedSince,
+    };
+  }
+  return {
+    applies: true,
+    chaptersReady: expected.length > 0 && done === expected.length,
+    band,
+    pages,
+    intakeGaps,
+    blanks: row ? writtenBlanks(row.acknowledgement, row.abstract) : [],
+    qaCopyOlder: row && qaCopy && qaCopy.createdAt < row.updatedAt ? qaCopy.createdAt.toISOString() : null,
+  };
+}
+
+/**
+ * Abbreviations as the founder or the COO typed them: trimmed, sorted A–Z, a
+ * token listed twice refused. Pure.
+ */
+export function cleanAbbreviations(rows: { token: string; expansion: string }[]): Abbreviation[] {
+  const seen = new Set<string>();
+  const out: Abbreviation[] = [];
+  for (const r of rows) {
+    const token = r.token.trim();
+    const expansion = r.expansion.replace(/\s+/g, " ").trim();
+    if (seen.has(token.toUpperCase())) throw new PreliminaryPagesError(`${token} is listed twice.`, 400, "DUPLICATE_ABBREVIATION");
+    seen.add(token.toUpperCase());
+    out.push({ token, expansion });
+  }
+  return out.sort((a, b) => a.token.localeCompare(b.token));
+}
+
+/**
+ * Saves the founder's or the COO's corrections. The pages must exist (they are
+ * written first) and must not have been rewritten since the card loaded them.
+ * A hand edit counts as the review, so the word-count flag is cleared; the
+ * quality gate and every later automatic run keep the text until "Write again".
+ */
+export async function savePreliminaryPagesByHand(
+  projectDbId: string,
+  actorUserId: string,
+  edit: { acknowledgement: string; abstract: string; abbreviations: { token: string; expansion: string }[]; loadedAt: string },
+): Promise<PreliminaryPagesView> {
+  const abbreviations = cleanAbbreviations(edit.abbreviations);
+  const acknowledgement = edit.acknowledgement.replace(/\r\n/g, "\n").trim();
+  const abstract = edit.abstract.replace(/\r\n/g, "\n").trim();
+  const saved = await db.preliminaryPages.updateMany({
+    where: { projectId: projectDbId, updatedAt: new Date(edit.loadedAt) },
+    data: {
+      acknowledgement,
+      abstract,
+      abstractWordCount: countWords(abstract),
+      abbreviations: abbreviations.map((a) => ({ token: a.token, expansion: a.expansion })),
+      needsReview: false,
+      editedByHand: true,
+      editedAt: new Date(),
+      editedById: actorUserId,
+    },
+  });
+  if (saved.count === 0) {
+    const exists = await db.preliminaryPages.count({ where: { projectId: projectDbId } });
+    throw exists
+      ? new PreliminaryPagesError("These pages were rewritten since you opened them. Reload to see the new text, then make your change again.", 409, "CHANGED_SINCE_LOADED")
+      : new PreliminaryPagesError("The pages have not been written yet. Write them first, then correct them.", 409, "NOT_WRITTEN");
+  }
+  console.info(`${TAG} ${projectDbId}: edited by hand (abstract ${countWords(abstract)} words, ${abbreviations.length} abbreviations)`);
+  return getPreliminaryPagesView(projectDbId);
 }

@@ -17,10 +17,18 @@ import {
   MAX_ABBREVIATIONS,
   INTERNAL_TERMS,
   chapterBodyText,
+  cleanAbbreviations,
   extractChapterInputs,
+  keepStoredPages,
+  PreliminaryPagesError,
+  promptHashFor,
   scanForInitialisms,
+  sourceHashFor,
   topInitialisms,
 } from "../src/lib/services/preliminary-pages";
+import { isChapterBasedOrder, prelimIntakeGaps } from "../src/lib/assembly/assemble";
+import { writtenBlanks } from "../src/lib/assembly/text-rules";
+import { preliminaryPagesEditSchema } from "../src/lib/validations/preliminary-pages";
 import {
   _resetPreliminaryPagesCache,
   KNOWN_TOKENS,
@@ -264,6 +272,62 @@ const SECTION_ORDER = [
 check("Table of Contents is last in the preliminary section", SECTION_ORDER[SECTION_ORDER.length - 1] === "table_of_contents");
 check("Acknowledgement precedes Abstract precedes LOT/LOF", SECTION_ORDER.indexOf("acknowledgement") < SECTION_ORDER.indexOf("abstract") && SECTION_ORDER.indexOf("abstract") < SECTION_ORDER.indexOf("list_of_tables"));
 check("List of Abbreviations precedes TOC", SECTION_ORDER.indexOf("list_of_abbreviations") < SECTION_ORDER.indexOf("table_of_contents"));
+
+// ─── D7b: hand edits, the "changed since" hash, blanks and intake gaps ─────
+{
+  const values = {
+    project_id: "EC-QA", student_full_name: "Ada Obi", matric_number: "190404001", department: "Business Administration",
+    faculty: "Management Sciences", university: "University of Lagos", project_title: "Mobile money", supervisor_name: "K. Bello",
+    supervisor_title: "Dr.", hod_name: "T. Adeyemi", hod_title: "Prof.", parent_reference: "my parents", degree_programme: "Bachelor of Science",
+    submission_year: "2026", submission_month: "SEPTEMBER", research_mode: "Mode 2", dedication_note: "", acknowledgment_note: "",
+    extracted_aim: "aim", extracted_objectives: "obj", extracted_findings: "found", extracted_method: "method", extracted_conclusion: "concl",
+  } as unknown as PromptValues;
+  const october = { ...values, submission_month: "OCTOBER" } as PromptValues;
+  check("D7b: sourceHash ignores the submission month", sourceHashFor(values, ["SPSS"]) === sourceHashFor(october, ["SPSS"]));
+  check("D7b: ... while promptHash does not (a new month still rewrites untouched pages)", promptHashFor(values, ["SPSS"]) !== promptHashFor(october, ["SPSS"]));
+  check("D7b: sourceHash moves when the findings change", sourceHashFor(values, ["SPSS"]) !== sourceHashFor({ ...values, extracted_findings: "other" } as PromptValues, ["SPSS"]));
+  check("D7b: sourceHash moves when an abbreviation appears", sourceHashFor(values, ["SPSS"]) !== sourceHashFor(values, ["SPSS", "CBN"]));
+
+  check("D7b: no stored pages -> write", keepStoredPages(null, "h1") === false);
+  check("D7b: same input -> keep, no Claude call", keepStoredPages({ promptHash: "h1", editedByHand: false }, "h1") === true);
+  check("D7b: changed input, untouched -> write again", keepStoredPages({ promptHash: "h0", editedByHand: false }, "h1") === false);
+  check("D7b: changed input, edited by hand -> keep the hand edit", keepStoredPages({ promptHash: "h0", editedByHand: true }, "h1") === true);
+  check("D7b: Write again (force) replaces a hand edit", keepStoredPages({ promptHash: "h1", editedByHand: true }, "h1", true) === false);
+
+  const cleaned = cleanAbbreviations([
+    { token: " SPSS ", expansion: "Statistical  Package for the Social Sciences" },
+    { token: "CBN", expansion: "Central Bank of Nigeria" },
+  ]);
+  check("D7b: hand-typed abbreviations are trimmed and sorted A–Z", JSON.stringify(cleaned) === JSON.stringify([
+    { token: "CBN", expansion: "Central Bank of Nigeria" },
+    { token: "SPSS", expansion: "Statistical Package for the Social Sciences" },
+  ]), cleaned);
+  let dup: unknown = null;
+  try {
+    cleanAbbreviations([{ token: "SPSS", expansion: "a" }, { token: "spss", expansion: "b" }]);
+  } catch (error) {
+    dup = error;
+  }
+  check("D7b: an abbreviation typed twice is refused (400)", dup instanceof PreliminaryPagesError && dup.status === 400 && /listed twice/.test(dup.message));
+
+  const edit = preliminaryPagesEditSchema.safeParse({ acknowledgement: " ", abstract: "x", abbreviations: [], loadedAt: new Date().toISOString() });
+  check("D7b: an empty acknowledgement is refused", !edit.success);
+  check("D7b: a save must say when the pages were loaded", !preliminaryPagesEditSchema.safeParse({ acknowledgement: "a", abstract: "b", abbreviations: [] }).success);
+  check("D7b: a well-formed save passes", preliminaryPagesEditSchema.safeParse({ acknowledgement: "a", abstract: "b", abbreviations: [{ token: "CBN", expansion: "Central Bank of Nigeria" }], loadedAt: new Date().toISOString() }).success);
+
+  check("D7b: blanks are the [CAPITALISED] tokens", JSON.stringify(writtenBlanks("Thanks to Dr. [SUPERVISOR_NAME] and [HOD_NAME].", "As [SUPERVISOR_NAME] said [sic] in [12].")) === JSON.stringify(["[SUPERVISOR_NAME]", "[HOD_NAME]"]));
+
+  const full = { student: { name: "Ada", matric: "190404001" }, supervisor: "Dr. K. Bello", hod: "Prof. T. Adeyemi", dedication: { type: "God", details: null } };
+  check("D7b: a complete order has no intake gaps", prelimIntakeGaps(full).length === 0);
+  check("D7b: missing matric, supervisor and HOD are named", JSON.stringify(prelimIntakeGaps({ ...full, student: { name: "Ada", matric: null }, supervisor: null, hod: " " })) === JSON.stringify(["Matric number", "Supervisor's name", "Head of Department's name"]));
+  check("D7b: a custom dedication with no text is a gap", prelimIntakeGaps({ ...full, dedication: { type: "Custom", details: "" } }).includes("Dedication"));
+  check("D7b: no dedication chosen is a gap", prelimIntakeGaps({ ...full, dedication: { type: null, details: null } }).includes("Dedication"));
+  check("D7b: a custom dedication with text is not a gap", !prelimIntakeGaps({ ...full, dedication: { type: "Custom", details: "To my mother" } }).includes("Dedication"));
+
+  check("D7b: a chapter pick is chapter-based (no preliminary pages)", isChapterBasedOrder("FYP-CHAPTERS", { chapters: [1, 2] }));
+  check("D7b: FYP-CH4 is chapter-based", isChapterBasedOrder("FYP-CH4", null));
+  check("D7b: a full report is not", !isChapterBasedOrder("FYP-FULL", null));
+}
 
   if (failures.length > 0) {
     console.error(`${failures.length} check(s) failed:`);

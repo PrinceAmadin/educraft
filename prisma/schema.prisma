@@ -2496,6 +2496,14 @@ model PreliminaryPages {
   /// The prompt hash the last run was built from. A re-run with the same
   /// hash returns the stored row without calling Claude again.
   promptHash        String?
+  /// D7b: the chapters and order details the last automatic write read, without
+  /// the submission date, so the card can say when they changed after it.
+  sourceHash        String?
+  /// D7b: the founder or the COO corrected the text by hand. An automatic run
+  /// then keeps it; only "Write again" (force) replaces it.
+  editedByHand      Boolean  @default(false)
+  editedAt          DateTime?
+  editedById        String?
   generatedAt       DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

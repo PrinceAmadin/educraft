@@ -9,7 +9,9 @@ import { packReport, profileFor, type AssemblyInput, type AssemblyReport } from 
 import type { SectionKey } from "@/lib/generation/department-map";
 import { matchCitations, referenceCheck, type CitationMatch, type GateReference, type PrimarySourceRef, type SupportResult } from "./citation-check";
 import { readDoc, readDocxParts, runFormattingChecks, type DocxParts } from "./formatting-checks";
-import { proseParagraphs, type ProseParagraph } from "./prose";
+import { prelimProse, proseParagraphs, type ProseParagraph } from "./prose";
+import { writtenBlanks } from "@/lib/assembly/text-rules";
+import { countWords } from "@/lib/generation/chapter-plan";
 import { scoreQuality, type QualityScore } from "./score";
 import { runStructuralChecks, type TraceabilityResult } from "./structural-checks";
 import type { CheckResult, QualityIssue } from "./types";
@@ -44,7 +46,9 @@ export async function prepareReport(args: {
   const noteStyle = template === "B" || (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C");
   const match = matchCitations({ chapters: input.chapters, references: args.references, mode: input.mode, knownCommon: args.knownCommon, primarySources: args.primarySources, noteStyle, placement: input.citationPlacement });
   const paragraphs = proseParagraphs(input.chapters);
-  return { input, buffer, report, parts, formatting, match, paragraphs, scan: scanVoice(paragraphs), template };
+  // D7b: the phrase scan also reads the acknowledgement and the abstract (the AI voice review stays per chapter).
+  const prelimScan = input.includePrelims ? prelimProse(input.preliminary).flatMap((page) => scanVoice(page).filter((f) => f.rule !== "thin")) : [];
+  return { input, buffer, report, parts, formatting, match, paragraphs, scan: [...scanVoice(paragraphs), ...prelimScan], template };
 }
 
 /** Template B (thematic chapters): Humanities and doctrinal Law. */
@@ -98,6 +102,14 @@ export function finishReport(
       hasTitlePage: doc.outside.some((p) => p.text.trim() === "BY") && doc.outside.some((p) => /^A PROJECT SUBMITTED/.test(p.text.trim())),
       heading1: doc.heading1,
       placeholders: report.prelimPlaceholders,
+      written:
+        input.includePrelims && input.preliminary
+          ? {
+              needsReview: input.preliminary.needsReview,
+              abstractWords: countWords(input.preliminary.abstract),
+              blanks: writtenBlanks(input.preliminary.acknowledgement, input.preliminary.abstract),
+            }
+          : null,
     },
     citations: match,
     traceability: ai.traceability,

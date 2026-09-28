@@ -41,6 +41,68 @@ function check(label: string, ok: boolean, detail = "") {
 }
 const eq = (label: string, got: unknown, want: unknown) => check(label, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 
+// ─── D7b: the Claude-written preliminary pages, as the gate scores them ─────
+
+const ABSTRACT_SENTENCES = [
+  "The study examined mobile money adoption among market traders in Lagos State.",
+  "It set out to measure how perceived usefulness, ease of use and transaction cost shaped the use of mobile money for daily sales.",
+  "A structured questionnaire was given to traders in four markets, and the returned copies were analysed with multiple regression.",
+  "Perceived usefulness raised adoption, ease of use raised it by a smaller margin, and transaction cost lowered it.",
+  "Traders who kept written sales records used mobile money more often than those who did not.",
+  "The study concludes that fees and network failures, not a lack of interest, hold traders back.",
+  "It recommends lower transfer charges for small payments and agent points inside each market.",
+];
+/** About 260 words of plain third-person abstract (the sentences repeated, cut at a full stop). */
+const GOOD_ABSTRACT = [0, 1, 2]
+  .map(() => ABSTRACT_SENTENCES.join(" "))
+  .join("\n\n")
+  .split(" ")
+  .slice(0, 262)
+  .join(" ")
+  .replace(/[^.]*$/, "");
+const GOOD_ACK = [
+  "The researcher wishes to express gratitude to Dr. K. Bello for the patient guidance and careful reading of every chapter.",
+  "Special appreciation goes to the parents of the researcher, whose support sustained the work through every stage of the programme.",
+].join("\n\n");
+const pagesWith = (over: Partial<NonNullable<AssemblyInput["preliminary"]>> = {}): Partial<AssemblyInput> => ({
+  preliminary: { acknowledgement: GOOD_ACK, abstract: GOOD_ABSTRACT, abbreviations: [{ token: "SPSS", expansion: "Statistical Package for the Social Sciences" }], needsReview: false, ...over },
+});
+const OPENER = "In today’s rapidly evolving world, traders face new ways to pay.";
+
+async function checkWrittenPrelims() {
+  const written = await prepare(fixtureChapters(), pagesWith());
+  const ok = finish(written.prepared, written.chapters);
+  check("D7b: written pages -> ST1 PASS", statusOf(ok.checks, "ST1") === "PASS", JSON.stringify(byId(ok.checks, "ST1").issues));
+  check("D7b: written pages -> still 89 of 89", ok.score.qualityScore === 89 && ok.score.passed, String(ok.score.qualityScore));
+  check("D7b: plain pages give the voice check nothing to say", !byId(ok.checks, "VOICE").issues.some((i) => i.chapter == null), JSON.stringify(byId(ok.checks, "VOICE").issues.filter((i) => i.chapter == null)));
+  check("D7b: the scored copy carries the abstract", written.prepared.parts.document.includes("mobile money adoption among market traders"));
+  eq("D7b: no prelim placeholder recorded once written", written.prepared.report.prelimPlaceholders, []);
+
+  const short = finish((await prepare(fixtureChapters(), pagesWith({ abstract: ABSTRACT_SENTENCES.join(" "), needsReview: true }))).prepared, written.chapters);
+  check("D7b: abstract flagged for review -> ST1 WARN with its word count", statusOf(short.checks, "ST1") === "WARN" && byId(short.checks, "ST1").issues.some((i) => /^The abstract is \d+ words; it should be 240–320\./.test(i.message)), JSON.stringify(byId(short.checks, "ST1").issues));
+
+  const blank = finish((await prepare(fixtureChapters(), pagesWith({ acknowledgement: GOOD_ACK.replace("Dr. K. Bello", "Dr. [SUPERVISOR_NAME]") }))).prepared, written.chapters);
+  check("D7b: a [BLANK] in the acknowledgement -> ST1 WARN naming it", byId(blank.checks, "ST1").issues.some((i) => i.message.includes("[SUPERVISOR_NAME]")), JSON.stringify(byId(blank.checks, "ST1").issues));
+
+  const empty = await prepare(fixtureChapters(), pagesWith({ acknowledgement: "  " }));
+  check("D7b: an empty stored acknowledgement keeps its placeholder", empty.prepared.report.prelimPlaceholders.includes("[ACKNOWLEDGEMENT TO BE SUPPLIED]") && empty.prepared.parts.document.includes("[ACKNOWLEDGEMENT TO BE SUPPLIED]"));
+  check("D7b: ... and ST1 says it is not written", byId(finish(empty.prepared, empty.chapters).checks, "ST1").issues.some((i) => /^Not written: \[ACKNOWLEDGEMENT/.test(i.message)));
+
+  const opener = await prepare(fixtureChapters(), pagesWith({ abstract: OPENER + " " + GOOD_ABSTRACT }));
+  const openerRun = finish(opener.prepared, opener.chapters);
+  const prelimVoice = byId(openerRun.checks, "VOICE").issues.filter((i) => i.chapter == null);
+  check("D7b: a banned opener in the abstract is found", prelimVoice.some((i) => /in the abstract/.test(i.message)), JSON.stringify(prelimVoice));
+  check("D7b: ... as a WARN for the COO, not a failure", prelimVoice.length > 0 && prelimVoice.every((i) => i.level === "WARN") && statusOf(openerRun.checks, "VOICE") !== "FAIL");
+  check("D7b: ... whose fix points at the Preliminary pages card", prelimVoice.length > 0 && prelimVoice.every((i) => /Preliminary pages card/.test(i.fix ?? "")));
+
+  const firstPerson = await prepare(fixtureChapters(), pagesWith({ acknowledgement: "I wish to thank Dr. K. Bello for the guidance given throughout the work on this project and for reading every chapter." }));
+  const fpIssues = byId(finish(firstPerson.prepared, firstPerson.chapters).checks, "VOICE").issues;
+  check("D7b: first person in the acknowledgement is found", fpIssues.some((i) => i.chapter == null && /First person in the acknowledgement/.test(i.message)), JSON.stringify(fpIssues.filter((i) => i.chapter == null)));
+
+  const chapterBased = finish((await prepare(fixtureChapters(), { ...pagesWith({ abstract: OPENER + " " + GOOD_ABSTRACT }), includePrelims: false })).prepared, written.chapters);
+  check("D7b: a chapter-based order scans no preliminary pages", !byId(chapterBased.checks, "VOICE").issues.some((i) => i.chapter == null));
+}
+
 // ─── The fixture report and a pure run of the gate ───────────────────────────
 
 function inputFor(chapters: FixtureChapter[], over: Partial<AssemblyInput> = {}): AssemblyInput {
@@ -128,7 +190,9 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
   check("FIX 2: the known citations cost no point", clean.score.referenceScore === 1);
   check("reference summary names the relevance split", /CORE/.test(byId(clean.checks, "REF").summary), byId(clean.checks, "REF").summary);
   check("36 verified references cited (ST12)", prepared.match.cited.length === 36, String(prepared.match.cited.length));
-  check("abstract/acknowledgement placeholders are WARN until D7b (ST1)", statusOf(clean.checks, "ST1") === "WARN");
+  check("D7b: pages not written -> ST1 WARN naming them", statusOf(clean.checks, "ST1") === "WARN" && byId(clean.checks, "ST1").issues.some((i) => /^Not written: .*ABSTRACT/.test(i.message)), JSON.stringify(byId(clean.checks, "ST1").issues));
+  check("D7b: no \"written by the specialist\" wording left in ST1", !byId(clean.checks, "ST1").issues.some((i) => /specialist/i.test(i.message)));
+  await checkWrittenPrelims();
   check("title page carries the degree (FIX 1, via the gate's build)", /BACHELOR OF SCIENCE \(B\.Sc\)/.test(prepared.parts.document));
 
   // ── Layer 1: one XML change, one failure ─────────────────────────────────
