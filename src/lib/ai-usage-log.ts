@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { rollUpAiExpense } from "@/lib/services/expenses";
 import { costUsd, usdToNairaRate } from "@/lib/ai-pricing";
@@ -61,6 +62,18 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
       select: { createdAt: true },
     });
     await rollUpAiExpense({ day: log.createdAt, subsystem: rec.subsystem, projectId: rec.projectId ?? null });
+    // D10: fires at most once per calendar month per threshold; a read-only check when the threshold is
+    // not set, so the call is cheap. Sent in waitUntil so the Claude call it describes never waits on Gmail.
+    waitUntil(
+      (async () => {
+        try {
+          const { checkMonthlyThreshold } = await import("@/lib/services/ai-usage-alerts");
+          await checkMonthlyThreshold();
+        } catch (error) {
+          console.error("[ai-usage] threshold check threw", error);
+        }
+      })(),
+    );
   } catch (error) {
     console.error("[ai-usage] failed to log call", error);
   }

@@ -17,7 +17,8 @@ import path from "node:path";
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { callClaudeForJson } from "@/lib/anthropic";
-import { AssemblyError, loadAssemblyInput, reportFileName } from "@/lib/assembly/assemble";
+import { AssemblyError, loadAssemblyInput, packReport, reportFileName } from "@/lib/assembly/assemble";
+import { runPreliminaryPagesAgent } from "@/lib/services/preliminary-pages";
 import { nameKey } from "@/lib/assembly/text-rules";
 import { lookupDepartment } from "@/lib/generation/department-map";
 import { approvedChapterInput } from "@/lib/generation/approved-inputs";
@@ -417,10 +418,24 @@ async function runLocked(
 
   let autoSubmitError: string | null = null;
   if (canSubmit) {
+    // D10 — fill the acknowledgement / abstract / list of abbreviations before the version is written,
+    // so the .docx that reaches QA carries them filled in. Never blocks: an agent failure or a
+    // re-assembly failure logs and the version is written with the D7 placeholders instead.
+    let submitBuffer: Uint8Array = prepared.buffer;
+    try {
+      const d10 = await runPreliminaryPagesAgent(project.id);
+      if (d10) {
+        const refreshedInput = await loadAssemblyInput(project.id);
+        const refreshed = await packReport(refreshedInput);
+        submitBuffer = refreshed.buffer;
+      }
+    } catch (error) {
+      console.error(`[quality] ${project.projectId}: D10 preliminary-pages step failed; submitting with placeholders`, error);
+    }
     try {
       await submitGeneratedReport({
         projectDbId: project.id,
-        buffer: prepared.buffer,
+        buffer: submitBuffer,
         fileName: reportFileName(input.title, project.projectId),
         note: `Quality check: ${score.qualityScore} of ${QUALITY_TOTAL} checks passed.`,
         actorUserId: actor.userId,

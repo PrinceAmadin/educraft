@@ -344,3 +344,184 @@ export async function setCreditBalance(balanceNaira: number) {
     }),
   ]);
 }
+
+// ── Phase D10: token-usage dashboard panels ──────────────────
+// The founder asked for four new views once real reports start running:
+// a per-project cost table (a list, not a search box), a per-subsystem
+// summary grouped by the six known subsystems (research_pipeline,
+// source_stage, chapter_generation, quality_gate, data_pause,
+// secondary_data — plus preliminary_pages from D10 itself), a monthly
+// summary card (total, daily burn, projected month-end, days remaining)
+// and a threshold that emails him once a month when spend crosses it.
+// The threshold and its last-sent month key live on the existing Setting
+// model — no separate SystemConfig.
+
+/** The six known subsystems plus D10's preliminary_pages. Anything unknown groups under "other". */
+export const KNOWN_SUBSYSTEMS = [
+  "research_pipeline",
+  "source_stage",
+  "chapter_generation",
+  "quality_gate",
+  "data_pause",
+  "secondary_data",
+  "preliminary_pages",
+] as const;
+export type KnownSubsystem = (typeof KNOWN_SUBSYSTEMS)[number] | "other";
+
+function classifySubsystem(raw: string): KnownSubsystem {
+  return (KNOWN_SUBSYSTEMS as readonly string[]).includes(raw) ? (raw as KnownSubsystem) : "other";
+}
+
+/** The 1st of the calling month in the server's time zone (Africa/Lagos on Vercel; UTC nowhere in Nigeria matters here). */
+function monthStart(now = new Date()): Date {
+  const d = new Date(now);
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+/** The 1st of the next month; used as the exclusive upper bound of the current month's window. */
+function nextMonthStart(now = new Date()): Date {
+  const d = monthStart(now);
+  d.setMonth(d.getMonth() + 1);
+  return d;
+}
+/** "2026-09" — one row per calendar month, matches the ai.monthlyAlertLastSentMonth key format. */
+export function monthKey(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** ₦ spent this month, ₦/day so far (against days elapsed), projected month-end (₦/day × days in month), days left, and the threshold if set. */
+export interface MonthlySummary {
+  monthKey: string;
+  monthlyTotal: number;
+  dailyBurn: number;
+  projectedMonthEnd: number;
+  daysElapsed: number;
+  daysRemaining: number;
+  daysInMonth: number;
+  thresholdNaira: number | null;
+}
+
+export async function getMonthlySummary(now = new Date()): Promise<MonthlySummary> {
+  const from = monthStart(now);
+  const to = nextMonthStart(now);
+  const daysInMonth = Math.round((to.getTime() - from.getTime()) / 86_400_000);
+  const daysElapsed = Math.max(1, Math.min(daysInMonth, Math.ceil((now.getTime() - from.getTime()) / 86_400_000)));
+  const daysRemaining = Math.max(0, daysInMonth - daysElapsed);
+  const [agg, thresholdRow] = await Promise.all([
+    db.aiUsageLog.aggregate({ where: { createdAt: { gte: from, lt: to } }, _sum: { costNaira: true } }),
+    db.setting.findUnique({ where: { key: MONTHLY_THRESHOLD_KEY }, select: { value: true } }),
+  ]);
+  const monthlyTotal = round(agg._sum.costNaira ?? 0);
+  const dailyBurn = round(monthlyTotal / daysElapsed);
+  const projectedMonthEnd = round(dailyBurn * daysInMonth);
+  const stored = Number(thresholdRow?.value);
+  const thresholdNaira = Number.isFinite(stored) && stored > 0 ? Math.round(stored) : null;
+  return { monthKey: monthKey(now), monthlyTotal, dailyBurn, projectedMonthEnd, daysElapsed, daysRemaining, daysInMonth, thresholdNaira };
+}
+
+/** One row per project with a Claude call in the window, sorted by ₦ descending. */
+export interface PerProjectCost {
+  code: string;
+  title: string;
+  mode: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  costNaira: number;
+  completedAt: string | null;
+}
+
+export async function getPerProjectCosts(period: UsagePeriod = "month"): Promise<PerProjectCost[]> {
+  const rows = await logsSince(periodStart(period));
+  const byId = new Map<string, { input: number; output: number; cost: number }>();
+  for (const r of rows) {
+    if (!r.projectId) continue;
+    const b = byId.get(r.projectId) ?? { input: 0, output: 0, cost: 0 };
+    b.input += r.inputTokens;
+    b.output += r.outputTokens;
+    b.cost += r.costNaira;
+    byId.set(r.projectId, b);
+  }
+  const ids = [...byId.keys()];
+  if (ids.length === 0) return [];
+  const [projects, modes] = await Promise.all([
+    db.project.findMany({ where: { id: { in: ids } }, select: { id: true, projectId: true, projectTitle: true, deliveryDate: true } }),
+    db.researchMode.findMany({ where: { projectId: { in: ids } }, select: { projectId: true, modeNumber: true } }),
+  ]);
+  const modeByProject = new Map(modes.map((m) => [m.projectId, m.modeNumber]));
+  const meta = new Map(projects.map((p) => [p.id, p]));
+  return ids
+    .map((id) => {
+      const b = byId.get(id)!;
+      const p = meta.get(id);
+      return {
+        code: p?.projectId ?? id,
+        title: p?.projectTitle ?? "",
+        mode: modeByProject.get(id) ?? null,
+        inputTokens: b.input,
+        outputTokens: b.output,
+        costNaira: round(b.cost),
+        completedAt: p?.deliveryDate ? p.deliveryDate.toISOString() : null,
+      };
+    })
+    .sort((a, b) => b.costNaira - a.costNaira);
+}
+
+/** ₦ and tokens grouped by subsystem for the month. Unknown values roll into "other". */
+export interface SubsystemCost {
+  subsystem: KnownSubsystem;
+  tokens: number;
+  costNaira: number;
+  calls: number;
+}
+
+export async function getSubsystemBreakdown(period: UsagePeriod = "month"): Promise<SubsystemCost[]> {
+  const rows = await logsSince(periodStart(period));
+  const groups = new Map<KnownSubsystem, { tokens: number; cost: number; calls: number }>();
+  for (const r of rows) {
+    const key = classifySubsystem(r.subsystem);
+    const g = groups.get(key) ?? { tokens: 0, cost: 0, calls: 0 };
+    g.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWriteTokens;
+    g.cost += r.costNaira;
+    g.calls += 1;
+    groups.set(key, g);
+  }
+  // Every known subsystem is present in the response even when it has no calls this month, so the UI is stable.
+  const out: SubsystemCost[] = [];
+  for (const sub of KNOWN_SUBSYSTEMS) {
+    const g = groups.get(sub) ?? { tokens: 0, cost: 0, calls: 0 };
+    out.push({ subsystem: sub, tokens: g.tokens, costNaira: round(g.cost), calls: g.calls });
+  }
+  const other = groups.get("other");
+  if (other && other.calls > 0) out.push({ subsystem: "other", tokens: other.tokens, costNaira: round(other.cost), calls: other.calls });
+  return out.sort((a, b) => b.costNaira - a.costNaira);
+}
+
+// ── Threshold storage ────────────────────────────────────────
+// Two Setting keys, so the founder can change the threshold without a redeploy and
+// the alert fires at most once per calendar month per threshold.
+
+export const MONTHLY_THRESHOLD_KEY = "ai.monthlyAlertThresholdNaira";
+export const MONTHLY_THRESHOLD_LAST_SENT_KEY = "ai.monthlyAlertLastSentMonth";
+
+/** Reads the stored threshold, or null when it has never been set. */
+export async function getMonthlyThreshold(): Promise<number | null> {
+  const row = await db.setting.findUnique({ where: { key: MONTHLY_THRESHOLD_KEY }, select: { value: true } });
+  const n = Number(row?.value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+/**
+ * Sets the threshold and clears the "already sent this month" key so the new value
+ * can fire once this month too. A missing or non-positive value clears the threshold.
+ */
+export async function setMonthlyThreshold(thresholdNaira: number | null): Promise<number | null> {
+  const value = thresholdNaira && thresholdNaira > 0 ? Math.round(thresholdNaira) : null;
+  await db.$transaction([
+    value === null
+      ? db.setting.deleteMany({ where: { key: MONTHLY_THRESHOLD_KEY } })
+      : db.setting.upsert({ where: { key: MONTHLY_THRESHOLD_KEY }, update: { value: String(value) }, create: { key: MONTHLY_THRESHOLD_KEY, value: String(value) } }),
+    db.setting.deleteMany({ where: { key: MONTHLY_THRESHOLD_LAST_SENT_KEY } }),
+  ]);
+  return value;
+}

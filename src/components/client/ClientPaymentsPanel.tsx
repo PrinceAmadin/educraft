@@ -1,4 +1,4 @@
-import { LuCircleCheck, LuDownload, LuHourglass, LuMessageCircle, LuReceipt, LuWallet } from "react-icons/lu";
+import { LuCircleCheck, LuDownload, LuFileText, LuHourglass, LuMessageCircle, LuReceipt, LuWallet } from "react-icons/lu";
 import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { ClientPayButton } from "@/components/client/ClientPayButton";
 import type { ClientPaymentRow, ClientProjectView } from "@/lib/services/client-portal";
@@ -124,6 +124,22 @@ export function ClientPaymentsPanel({
                   >
                     <LuReceipt className="size-4" aria-hidden />
                     Receipt
+                    <LuDownload className="size-3.5" aria-hidden />
+                    <span className="sr-only"> for {p.receiptNo}</span>
+                  </a>
+                ) : p.status === "Pending" && preview ? (
+                  <span className="inline-flex min-h-11 items-center gap-2 px-3 text-sm text-muted-foreground">
+                    <LuFileText className="size-4" aria-hidden />
+                    Invoice
+                  </span>
+                ) : p.status === "Pending" ? (
+                  <a
+                    href={`/api/client/projects/${encodeURIComponent(project.code)}/payments/${p.id}/invoice`}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium text-primary transition-colors hover:bg-zone"
+                    data-invoice-link
+                  >
+                    <LuFileText className="size-4" aria-hidden />
+                    Invoice
                     <LuDownload className="size-3.5" aria-hidden />
                     <span className="sr-only"> for {p.receiptNo}</span>
                   </a>

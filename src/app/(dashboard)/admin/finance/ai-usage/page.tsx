@@ -8,6 +8,9 @@ import { AiBalanceCard, AiProjectSearch, AiSpendChart, AiWorkersTable } from "@/
 import {
   USAGE_PERIODS,
   getCreditBalance,
+  getMonthlySummary,
+  getPerProjectCosts,
+  getSubsystemBreakdown,
   getUsageAnomalies,
   getUsageBySubsystem,
   getUsageByWorker,
@@ -15,6 +18,7 @@ import {
   parsePeriod,
 } from "@/lib/services/ai-usage";
 import { cn, formatNaira } from "@/lib/utils";
+import { AlertThresholdForm, MonthlySummaryCard, PerProjectCostTable, PerSubsystemBreakdown } from "./token-panels";
 
 export const metadata: Metadata = { title: "AI usage" };
 export const dynamic = "force-dynamic";
@@ -24,14 +28,18 @@ const num = (n: number) => new Intl.NumberFormat("en-NG").format(n);
 
 export default async function AiUsagePage({ searchParams }: { searchParams: { period?: string } }) {
   const period = parsePeriod(searchParams.period);
-  const [session, balance, summary, subsystems, workers, anomalies] = await Promise.all([
+  const [session, balance, summary, subsystems, workers, anomalies, monthly, subsystemBreakdown, perProject] = await Promise.all([
     auth(),
     getCreditBalance(),
     getUsageSummary(period),
     getUsageBySubsystem(period),
     getUsageByWorker(period),
     getUsageAnomalies(period),
+    getMonthlySummary(),
+    getSubsystemBreakdown("month"),
+    getPerProjectCosts("month"),
   ]);
+  const canEditThreshold = session?.user?.role === "SUPER_ADMIN";
 
   return (
     <div className="space-y-12">
@@ -46,6 +54,12 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
       />
 
       <AiBalanceCard balance={balance} canEdit={session?.user?.role === "SUPER_ADMIN"} />
+
+      {/* D10: monthly summary + threshold sit at the top so the founder sees where the month is heading first. */}
+      <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+        <MonthlySummaryCard summary={monthly} />
+        <AlertThresholdForm initial={monthly.thresholdNaira} canEdit={canEditThreshold} />
+      </div>
 
       {summary.calls === 0 ? (
         <p className="rounded-2xl bg-zone px-5 py-6 text-sm text-muted-foreground">
@@ -112,6 +126,12 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
         </h2>
         <AiProjectSearch />
       </section>
+
+      {/* D10: coarser than the "cost by step" bar chart above — grouped by the six known subsystems. */}
+      <PerSubsystemBreakdown rows={subsystemBreakdown} />
+
+      {/* D10: a full list, not a search box. Sorted by cost, hides the tail behind "See all". */}
+      <PerProjectCostTable rows={perProject} />
 
       <section aria-labelledby="anomaly-heading">
         <h2 id="anomaly-heading" className="text-[15px] font-semibold text-foreground">

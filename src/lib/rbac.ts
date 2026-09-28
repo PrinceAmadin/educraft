@@ -117,6 +117,9 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/finance/settings", roles: ["SUPER_ADMIN"], readOnly: ["CO_CEO_CFO"] },
   { prefix: "/api/admin/finance", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/ai-usage", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
+  // D10: the token-usage dashboard's API — same audience as ai-usage. The set-alert
+  // sub-route is guarded by requireSuperAdmin() in the handler on top of this table.
+  { prefix: "/api/admin/token-usage", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/ambassadors", roles: ["SUPER_ADMIN", "HOG"] },
   { prefix: "/api/admin/roster", roles: ["SUPER_ADMIN", "HOG"] },
   { prefix: "/api/admin/projects", roles: ["SUPER_ADMIN", "COO"] },

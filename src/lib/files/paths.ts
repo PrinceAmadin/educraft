@@ -46,16 +46,32 @@ export interface StoredPath {
 
 /**
  * Any path in the private store, including "source" files the server writes
- * itself (Supreme Court judgment PDFs, D3b). Never accepted from an upload.
+ * itself (Supreme Court judgment PDFs, D3b) and "receipt" PDFs generated on
+ * payment Verify (D10). Never accepted from an upload.
  */
 export function parseStoredPath(pathname: string): StoredPath | null {
   const parts = pathname.split("/");
   if (parts.length !== 5 || parts[0] !== "projects") return null;
   const [, projectDbId, purpose, targetId, name] = parts;
   if (!ID.test(projectDbId) || !TARGET.test(targetId) || !NAME.test(name)) return null;
-  if (purpose !== "deliverable" && purpose !== "message" && purpose !== "data" && purpose !== "source") return null;
+  if (
+    purpose !== "deliverable" &&
+    purpose !== "message" &&
+    purpose !== "data" &&
+    purpose !== "source" &&
+    purpose !== "receipt"
+  ) return null;
   return { projectDbId, purpose, targetId, name };
 }
 
 /** Message attachments are uploaded before the message exists, so their target is the thread. */
 export const MESSAGE_TARGET = "thread";
+
+/**
+ * D10: a receipt lands at projects/{projectDbId}/receipt/{paymentDbId}/{random}.pdf.
+ * paymentDbId is the target, so `deleteStoredFile` on a refunded payment removes it cleanly,
+ * and `random` (24 hex chars) is fresh on every write in case a re-verify replaces one.
+ */
+export function buildReceiptPath(input: { projectDbId: string; paymentDbId: string; random: string }): string {
+  return buildPrivatePath({ projectDbId: input.projectDbId, purpose: "receipt", targetId: input.paymentDbId, random: input.random, ext: "pdf" });
+}

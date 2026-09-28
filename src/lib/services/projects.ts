@@ -1,4 +1,5 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
+import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
 import { getCommissionRates } from "@/lib/services/settings";
@@ -840,6 +841,8 @@ export async function verifyPayment(
 
   const paymentId = await nextId("PAYMENT");
   const legLabel = leg === "downpayment" ? "downpayment" : "balance";
+  // D10: captured inside the transaction, read after commit for storeReceipt.
+  let confirmedRowId: string | null = null;
 
   await db.$transaction(
     async (tx) => {
@@ -947,9 +950,27 @@ export async function verifyPayment(
         body: `Your ${legLabel} of ${formatNaira(amount)} is confirmed.`,
         dedupeKey: `payment:${payment.id}`,
       });
+      confirmedRowId = payment.id;
     },
     { timeout: 60_000, maxWait: 10_000 }
   );
+
+  // D10: after the confirm transaction commits, render and store the receipt PDF
+  // so the client's Payments tab can serve a stable audit-trail artefact instead
+  // of re-rendering every time. Never blocks the response, never throws.
+  const receiptTargetId = confirmedRowId;
+  if (receiptTargetId) {
+    waitUntil(
+      (async () => {
+        try {
+          const { storeReceipt } = await import("@/lib/services/billing");
+          await storeReceipt(receiptTargetId);
+        } catch (error) {
+          console.error("[verifyPayment] receipt store threw", error);
+        }
+      })(),
+    );
+  }
 
   await notifyClient(project.id, {
     title: "Payment received",

@@ -100,6 +100,19 @@ export interface AssemblyInput {
   references: DocReference[];
   /** Full reports get the preliminary pages; a chapter-based order is just its chapters. */
   includePrelims: boolean;
+  /**
+   * D10: the Claude-written preliminary sections filled in after the quality
+   * gate passes. When present, the placeholders for Ack, Abstract and the
+   * List of Abbreviations are replaced with the stored content. When null or
+   * omitted the assembler keeps the founder's placeholder strings, as before
+   * D10 (the fixture inputs in scripts/check-* do not carry it).
+   */
+  preliminary?: {
+    acknowledgement: string;
+    abstract: string;
+    abbreviations: { token: string; expansion: string }[];
+    needsReview: boolean;
+  } | null;
 }
 
 export interface ChapterReport {
@@ -172,6 +185,8 @@ export const PRELIM_TEXT = {
   acknowledgementFromOrder: (note: string) => `[FROM THE ORDER: ${note}]`,
   abstractPlaceholder: "[ABSTRACT TO BE SUPPLIED]",
   abbreviationsPlaceholder: "[LIST OF ABBREVIATIONS TO BE SUPPLIED]",
+  /** D10: shown when the scanner found no candidate initialisms. */
+  noAbbreviations: "This report contains no abbreviations that require expansion.",
   supervisorPlaceholder: "[SUPERVISOR TO BE SUPPLIED]",
   hodPlaceholder: "[HEAD OF DEPARTMENT TO BE SUPPLIED]",
   matricPlaceholder: "[MATRIC NUMBER TO BE SUPPLIED]",
@@ -229,7 +244,7 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
     (project.service.serviceCode === "FYP-CHAPTERS" && orderedChapters(project.additionalData).length > 0) || project.service.serviceCode === "FYP-CH4";
   const expected = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
 
-  const [runs, references, settings] = await Promise.all([
+  const [runs, references, settings, preliminaryRow] = await Promise.all([
     db.generationCheckpoint.findMany({
       where: { projectId: project.id, chapterNumber: { in: expected } },
       select: { chapterNumber: true, status: true, fullOutput: true },
@@ -240,6 +255,11 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
       select: { title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true },
     }),
     getApprovedModeSettings(project.id).catch(() => null),
+    // D10: the Claude-written prelim sections (fills the three placeholders when present).
+    db.preliminaryPages.findUnique({
+      where: { projectId: project.id },
+      select: { acknowledgement: true, abstract: true, abbreviations: true, needsReview: true },
+    }),
   ]);
   const done = new Map(runs.filter((r) => r.status === "COMPLETED" && r.fullOutput).map((r) => [r.chapterNumber, r.fullOutput as string]));
   const missing = expected.filter((n) => !done.has(n));
@@ -290,6 +310,16 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
     chapters: expected.map((n) => ({ number: n, text: done.get(n)! })),
     references,
     includePrelims: !chapterBased,
+    preliminary: preliminaryRow
+      ? {
+          acknowledgement: preliminaryRow.acknowledgement,
+          abstract: preliminaryRow.abstract,
+          abbreviations: Array.isArray(preliminaryRow.abbreviations)
+            ? (preliminaryRow.abbreviations as unknown as { token: string; expansion: string }[])
+            : [],
+          needsReview: preliminaryRow.needsReview,
+        }
+      : null,
   };
 }
 
@@ -797,7 +827,26 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
     input.dedication.type === "Custom" || (!input.dedication.type && input.dedication.details)
       ? orPlaceholder(input.dedication.details, PRELIM_TEXT.dedicationPlaceholder, ctx)
       : (PRELIM_TEXT.dedication[input.dedication.type ?? ""] ?? orPlaceholder(null, PRELIM_TEXT.dedicationPlaceholder, ctx));
-  ctx.report.prelimPlaceholders.push(PRELIM_TEXT.acknowledgementPlaceholder, PRELIM_TEXT.abstractPlaceholder, PRELIM_TEXT.abbreviationsPlaceholder);
+
+  // D10: the acknowledgement, abstract and list of abbreviations use the stored
+  // agent output when the PreliminaryPages row exists; otherwise the founder's
+  // placeholders remain in the document, exactly as before D10. The placeholders
+  // are still recorded in report.prelimPlaceholders in that fallback case.
+  const stored = input.preliminary ?? null;
+  if (!stored) {
+    ctx.report.prelimPlaceholders.push(
+      PRELIM_TEXT.acknowledgementPlaceholder,
+      PRELIM_TEXT.abstractPlaceholder,
+      PRELIM_TEXT.abbreviationsPlaceholder,
+    );
+  }
+
+  const ackParagraphs = stored
+    ? paragraphsFrom(stored.acknowledgement, ctx)
+    : [new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementPlaceholder)] })];
+  const abstractParagraphs = stored
+    ? paragraphsFrom(stored.abstract, ctx)
+    : [new Paragraph({ children: [plain(PRELIM_TEXT.abstractPlaceholder)] })];
 
   const out: (Paragraph | Table | TableOfContents)[] = [
     ...titlePage(input, degree, matric, supervisor),
@@ -822,11 +871,13 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
     new Paragraph({ children: runsFor(dedicationText, ctx) }),
 
     pageTitle(PAGE_TITLES.acknowledgement),
-    new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementPlaceholder)] }),
-    ...(input.acknowledgementNote?.trim() ? [new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementFromOrder(input.acknowledgementNote.trim()))] })] : []),
+    ...ackParagraphs,
+    ...(input.acknowledgementNote?.trim() && !stored
+      ? [new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementFromOrder(input.acknowledgementNote.trim()))] })]
+      : []),
 
     pageTitle(PAGE_TITLES.abstract),
-    new Paragraph({ children: [plain(PRELIM_TEXT.abstractPlaceholder)] }),
+    ...abstractParagraphs,
   ];
   // LT1/LF1: a list exists when the report has any table or figure.
   if (counts.tables > 0) {
@@ -835,14 +886,53 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
   if (counts.figures > 0) {
     out.push(pageTitle(PAGE_TITLES.figures), new TableOfContents(PAGE_TITLES.figures, { hyperlink: true, hideTabAndPageNumbersInWebView: true, stylesWithLevels: [new StyleLevel(STYLE.figureCaption.name, 1)] }));
   }
+  out.push(pageTitle(PAGE_TITLES.abbreviations));
+  if (stored && stored.abbreviations.length > 0) {
+    out.push(abbreviationsTable(stored.abbreviations));
+  } else if (stored && stored.abbreviations.length === 0) {
+    // D10: the scanner found nothing worth listing (or Claude expanded none confidently).
+    out.push(new Paragraph({ children: [plain(PRELIM_TEXT.noAbbreviations)] }));
+  } else {
+    out.push(new Paragraph({ children: [plain(PRELIM_TEXT.abbreviationsPlaceholder)] }));
+  }
   out.push(
-    pageTitle(PAGE_TITLES.abbreviations),
-    new Paragraph({ children: [plain(PRELIM_TEXT.abbreviationsPlaceholder)] }),
     // The template puts the Table of Contents last. TOC1-TOC5: a real field over Heading 1-3, no dotted leaders.
     pageTitle(PAGE_TITLES.contents),
     new TableOfContents(PAGE_TITLES.contents, { headingStyleRange: "1-3", hyperlink: true, hideTabAndPageNumbersInWebView: true, useAppliedParagraphOutlineLevel: true }),
   );
   return out;
+}
+
+/** D10: prose paragraphs from a Claude-written body. Preserves blank-line breaks. */
+function paragraphsFrom(body: string, ctx: Ctx): Paragraph[] {
+  const parts = body.split(/\n\s*\n+/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return [new Paragraph({ children: [plain("")] })];
+  return parts.map((p) => new Paragraph({ children: runsFor(p, ctx, { prose: true }) }));
+}
+
+/** D10: two-column list of abbreviations, alphabetical, no header row (matches the founder's template). */
+function abbreviationsTable(rows: { token: string; expansion: string }[]): Table {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: {
+      top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideHorizontal: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      insideVertical: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+    },
+    rows: rows.map(
+      (r) =>
+        new TableRow({
+          cantSplit: true,
+          children: [
+            new TableCell({ width: { size: 25, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [plain(r.token, { bold: true })] })] }),
+            new TableCell({ width: { size: 75, type: WidthType.PERCENTAGE }, children: [new Paragraph({ children: [plain(r.expansion)] })] }),
+          ],
+        }),
+    ),
+  });
 }
 
 // ─── The document ────────────────────────────────────────────────────────────

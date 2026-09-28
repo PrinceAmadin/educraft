@@ -582,6 +582,7 @@ model Project {
   brief                 ProjectBrief?
   sources               ProjectSource[]
   pauses                PipelinePause[]
+  preliminaryPages      PreliminaryPages?
 
   @@index([status])
   @@index([clientId])
@@ -1005,6 +1006,13 @@ model Payment {
   notes         String?
   date          DateTime         @default(now())
   createdAt     DateTime         @default(now())
+
+  /// D10: private-blob path for the receipt PDF rendered on Verify (client
+  /// Payments tab downloads this instead of re-rendering). Null for payments
+  /// verified before D10, or when Blob write fails: the on-demand renderer
+  /// is the fallback in both cases.
+  receiptBlobPath  String?
+  receiptStoredAt  DateTime?
 
   bucketAllocation BucketAllocationLog?
   payoutRecords    PayoutRecord[]
@@ -2463,4 +2471,33 @@ model PipelinePause {
 
   @@unique([projectId, afterChapter])
   @@index([status])
+}
+
+// ─── PHASE D10: PRELIMINARY PAGES ─────────────────────────
+// The Claude-written prelim sections (Acknowledgement, Abstract, List of
+// Abbreviations) that D7 currently renders as placeholders. Filled in after
+// the quality gate passes, before the DeliverableVersion write, so the
+// document that reaches QA already carries them (D10).
+model PreliminaryPages {
+  id                String   @id @default(cuid())
+  projectId         String   @unique
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  acknowledgement   String   @db.Text
+  abstract          String   @db.Text
+  /// 240–320 is the target band; abstractRetries counts word-count misses.
+  abstractWordCount Int
+  abstractRetries   Int      @default(0)
+  /// [{ token: "SPSS", expansion: "Statistical Package for the Social Sciences" }, ...] sorted A–Z.
+  abbreviations     Json
+  /// True when the abstract still misses the band after one automatic retry:
+  /// the closest attempt is stored and the specialist reviews it on the
+  /// Report tab. Never blocks delivery.
+  needsReview       Boolean  @default(false)
+  /// The prompt hash the last run was built from. A re-run with the same
+  /// hash returns the stored row without calling Claude again.
+  promptHash        String?
+  generatedAt       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([needsReview])
 }

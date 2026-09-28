@@ -380,6 +380,51 @@ export interface ReceiptData {
   remaining: number;
 }
 
+/**
+ * D10: the same shape as ReceiptData but for a pending payment (an invoice).
+ * The client Payments tab shows a "Download invoice" link on Pending rows and
+ * this feeds it. Uses the payment's own paymentId (EC-PAY-XXXXX) as the invoice
+ * number: one row per pending leg, so no separate Invoice model is needed.
+ */
+export async function getInvoiceData(scope: ClientScope, code: string, paymentDbId: string): Promise<ReceiptData | null> {
+  const project = await db.project.findFirst({
+    where: { projectId: readCode(code), clientId: { in: scope.clientIds } },
+    select: {
+      id: true,
+      projectId: true,
+      projectTitle: true,
+      price: true,
+      service: { select: { serviceName: true } },
+      client: { select: { fullName: true, clientId: true } },
+      payments: {
+        where: { direction: "INFLOW", type: { in: ["CLIENT_DOWNPAYMENT", "CLIENT_BALANCE"] } },
+        orderBy: { date: "asc" },
+        select: { id: true, paymentId: true, type: true, amount: true, paymentMethod: true, reference: true, date: true, status: true },
+      },
+    },
+  });
+  if (!project) return null;
+  const payment = project.payments.find((p) => p.id === paymentDbId);
+  if (!payment || (payment.status !== "Pending" && payment.status !== "Failed" && payment.status !== "Rejected")) return null;
+  const paidToDate = project.payments.filter((p) => p.status === "Confirmed").reduce((sum, p) => sum + p.amount, 0);
+  return {
+    receiptNo: payment.paymentId,
+    date: payment.date,
+    amount: payment.amount,
+    leg: payment.type === "CLIENT_BALANCE" ? "balance" : "downpayment",
+    method: payment.paymentMethod,
+    reference: payment.reference,
+    clientName: project.client.fullName,
+    clientId: project.client.clientId,
+    projectCode: project.projectId,
+    projectTitle: project.projectTitle?.trim() || project.service.serviceName,
+    serviceName: project.service.serviceName,
+    price: project.price,
+    paidToDate,
+    remaining: Math.max(0, project.price - paidToDate),
+  };
+}
+
 /** A confirmed payment on one of this client's projects, ready to print. */
 export async function getReceiptData(scope: ClientScope, code: string, paymentDbId: string): Promise<ReceiptData | null> {
   const project = await db.project.findFirst({

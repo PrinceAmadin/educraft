@@ -30,6 +30,9 @@ const nextConfig = {
       "/api/admin/projects/[id]/generation/start": ["./prompts/**/*"],
       "/api/admin/projects/[id]/generation/continue": ["./prompts/**/*"],
       "/api/admin/projects/[id]/data-pause": ["./prompts/**/*"],
+      // D10: the preliminary-pages agent is fired inline from the two quality-run routes
+      // above (already traced) and from a founder/COO-only retry route.
+      "/api/admin/projects/[id]/generation/preliminary-pages": ["./prompts/**/*"],
     },
   },
   images: {
