@@ -15,6 +15,8 @@ import {
   ABSTRACT_TARGET_HI,
   ABSTRACT_TARGET_LO,
   MAX_ABBREVIATIONS,
+  INTERNAL_TERMS,
+  chapterBodyText,
   extractChapterInputs,
   scanForInitialisms,
   topInitialisms,
@@ -105,6 +107,35 @@ check("initialism length range 2–10", ABBREVIATION_MIN_LEN === 2 && ABBREVIATI
   const chapters = [{ number: 1, text: "BBB AAA CCC AAA BBB CCC" }];
   const top = topInitialisms(chapters);
   check("ties resolve alphabetically", top.map((t) => t.token).join(",") === "AAA,BBB,CCC", top);
+}
+
+// ─── D11: internal terms, heading words and markup never become abbreviations ───
+{
+  check("the internal terms are exactly COO, CFO, CEO, MD, QA, HQ", [...INTERNAL_TERMS].sort().join(",") === "CEO,CFO,COO,HQ,MD,QA");
+  const tokens = scanForInitialisms("The COO, the CFO and the CEO met the MD; QA ran at HQ with SPSS.");
+  check("internal terms never survive the scan", !["COO", "CFO", "CEO", "MD", "QA", "HQ"].some((t) => tokens.includes(t)) && tokens.includes("SPSS"), tokens);
+
+  const ch = [
+    "[H1] CHAPTER FOUR",
+    "[H1] DATA ANALYSIS AND DISCUSSION",
+    "[H2] 4.1 Results from the SPSS Output",
+    "[H3] 4.1.1 Trust in NGO Agents",
+    "The analysis in SPSS showed a strong effect of mobile money on sales.",
+    "Minimum values were not supplied [DATA NOT PROVIDED — COO TO REVIEW] for this study.",
+    "[EQ] n = N / (1 + N(e)^2) | 4.1 [/EQ]",
+    "Table 4.1: Scores reported by the CBN",
+    "| Measure | NBS value |",
+    "|---|---|",
+    "| Mean | 3.62 |",
+  ].join("\n");
+  const body = chapterBodyText(ch, 4);
+  check("heading text is left out of the body", !/ANALYSIS AND DISCUSSION|Trust in NGO Agents|CHAPTER FOUR/.test(body), body);
+  check("square-bracketed markup is left out of the body", !/COO TO REVIEW|DATA NOT PROVIDED|\[EQ\]/.test(body), body);
+  const top = topInitialisms([{ number: 4, text: ch }]).map((t) => t.token);
+  check("a word only in headings is not an abbreviation", !top.includes("NGO") && !top.includes("DATA") && !top.includes("ANALYSIS") && !top.includes("CHAPTER"), top);
+  check("an abbreviation in a heading and the body is kept", top.includes("SPSS"), top);
+  check("placeholder words and markup never become abbreviations", !top.includes("COO") && !top.includes("PROVIDED") && !top.includes("REVIEW") && !top.includes("EQ"), top);
+  check("tables and captions still count as body text", top.includes("CBN") && top.includes("NBS"), top);
 }
 
 // ─── extractChapterInputs — heuristic parsing of a hand-shaped report ──────

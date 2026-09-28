@@ -29,6 +29,7 @@ import { callClaudeForJson, AnthropicError } from "@/lib/anthropic";
 import { db } from "@/lib/db";
 import { countWords } from "@/lib/generation/chapter-plan";
 import { loadPreliminaryPagesPrompts, PreliminaryPagesPromptError, type PromptValues } from "@/lib/generation/preliminary-pages-loader";
+import { parseChapter } from "@/lib/assembly/parse-chapter";
 
 const TAG = "[preliminary-pages]";
 const SUBSYSTEM = "preliminary_pages";
@@ -53,6 +54,9 @@ const ROMAN_NUMERALS = new Set(["I", "II", "III", "IV", "V", "VI", "VII", "VIII"
  * common headings) and don't belong in the report's Abbreviations page.
  */
 const FIXED_ACADEMIC = new Set(["APA", "MLA", "IEEE", "NALT", "NMCN", "CH", "PDF", "URL", "HTML"]);
+
+/** EduCraft's own roles and terms: never offered for a client's List of Abbreviations (founder, D11). */
+export const INTERNAL_TERMS = new Set(["COO", "CFO", "CEO", "MD", "QA", "HQ"]);
 
 /**
  * D10 result. The chapter texts and the founder's prompt already exist; this
@@ -100,6 +104,7 @@ export function scanForInitialisms(text: string): string[] {
     if (token.length < ABBREVIATION_MIN_LEN || token.length > ABBREVIATION_MAX_LEN) continue;
     if (ROMAN_NUMERALS.has(token)) continue;
     if (FIXED_ACADEMIC.has(token)) continue;
+    if (INTERNAL_TERMS.has(token)) continue;
     if (!/[A-Z]/.test(token)) continue; // pure numbers can't be initialisms
     found.push(token);
   }
@@ -107,13 +112,32 @@ export function scanForInitialisms(text: string): string[] {
 }
 
 /**
- * Scans every chapter, counts occurrences of each token across the whole
- * report, and returns the MAX_ABBREVIATIONS most-frequent (sorted by frequency
- * descending; ties broken alphabetically).
+ * A chapter's text as it reads outside its headings: the paragraphs, lists,
+ * tables, captions and notes the assembly sets as body text, with the chapter
+ * title and every Heading 1–3 left out (an all-caps word only there is a
+ * heading word, not an abbreviation), and with square-bracketed markup removed
+ * ([EQ], note markers, [DATA NOT PROVIDED — COO TO REVIEW] and the like).
+ */
+export function chapterBodyText(text: string, chapter: number): string {
+  const parts: string[] = [];
+  for (const b of parseChapter(text, chapter).blocks) {
+    if (b.kind === "paragraph") parts.push(b.text);
+    else if (b.kind === "list") parts.push(...b.items.map((i) => i.text));
+    else if (b.kind === "table") parts.push(b.caption ?? "", ...b.header, ...b.rows.flat(), b.source ?? "");
+    else if (b.kind === "figure") parts.push(b.caption ?? "", b.source ?? "");
+    else if (b.kind === "endnotes") parts.push(...b.lines);
+  }
+  return parts.join("\n").replace(/\[[^\]\n]*\]/g, " ");
+}
+
+/**
+ * Scans every chapter's body text, counts occurrences of each token across the
+ * whole report, and returns the MAX_ABBREVIATIONS most-frequent (sorted by
+ * frequency descending; ties broken alphabetically).
  */
 export function topInitialisms(chapters: { number: number; text: string }[]): { token: string; count: number }[] {
   const counts = new Map<string, number>();
-  for (const c of chapters) for (const token of scanForInitialisms(c.text)) counts.set(token, (counts.get(token) ?? 0) + 1);
+  for (const c of chapters) for (const token of scanForInitialisms(chapterBodyText(c.text, c.number))) counts.set(token, (counts.get(token) ?? 0) + 1);
   return [...counts.entries()]
     .map(([token, count]) => ({ token, count }))
     .sort((a, b) => b.count - a.count || a.token.localeCompare(b.token))
