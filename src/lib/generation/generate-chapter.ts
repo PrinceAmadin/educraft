@@ -58,6 +58,7 @@ import {
   splitAgentReport,
   stepEstimateMs,
   unitHeadingNumber,
+  writesEndnotes,
   type ChapterPlan,
 } from "./chapter-plan";
 
@@ -467,7 +468,8 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
   const headingNumbers = partUnits(plan, part).map((u) => unitHeadingNumber(plan, u));
 
   const wordsBefore = plan.parts.slice(0, k).reduce((n, p) => n + (p.words ?? 0), 0);
-  const user = partUserBlocks({ briefText: cp.briefText, plan, partialOutput: cp.partialOutput, chapter, partIndex: k, attachments: await dataAttachments(cp) });
+  const notes = writesEndnotes((cp.promptMeta as { citationPlacement?: unknown } | null)?.citationPlacement);
+  const user = partUserBlocks({ briefText: cp.briefText, plan, partialOutput: cp.partialOutput, chapter, partIndex: k, attachments: await dataAttachments(cp), notes });
 
   // Live progress: the streaming text is saved every few thousand characters, one write at a time.
   let draft = "";

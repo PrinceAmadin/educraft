@@ -248,6 +248,13 @@ async function main() {
   expect("History Chapter 5 is the conclusion", hist5.blocksUsed.filter((b) => b.startsWith("ch5:T") || b.startsWith("ch5:H")), ["ch5:TEMPLATE_B_CONCLUSION", "ch5:HUMANITIES"]);
   expect("History: MODE B endnotes (B3)", hist5.citationPlacement, "MODE_B");
   has("MODE B block carries the entry formats", hist5.text, "Entry format — first appearance");
+  // D11 Fix 1: note markers as ^3 and one [ENDNOTES] block per part; the assembly joins them (MODE B) or shows a chapter's together (MODE A).
+  has("MODE B: markers written as ^3, never ¹ (D11)", hist5.text, LOADER_TEXT.noteMarkers);
+  has("MODE B: each part lists its notes; the assembly joins them into one list (D11)", hist5.text, LOADER_TEXT.endnotesDocument);
+  expect("MODE B: no chapter-endnotes wording", hist5.text.includes(LOADER_TEXT.endnotesChapter), false);
+  expect("MODE C (page footnotes) is untouched by the endnote notes", [law.text.includes(LOADER_TEXT.noteMarkers), law.text.includes(LOADER_TEXT.endnotesDocument), law.text.includes(LOADER_TEXT.endnotesChapter)], [false, false, false]);
+  expect("in-text reports get no endnote notes", eng3.text.includes(LOADER_TEXT.noteMarkers), false);
+  expect("the endnote wording tells the model the notes are joined, not collected at the document end", /collected at the document end/.test(LOADER_TEXT.endnotesDocument) && /replaces/.test(LOADER_TEXT.endnotesDocument), true);
   has("a thematic conclusion keeps the closing cardinal rules", hist5.text, "[OBJECTIVE NOT MET — COO TO REVIEW]");
   has("…and the recommendation standards", hist5.text, "RECOMMENDATION QUALITY STANDARDS");
   expect("no thematic-argument Chapter 5 block is loaded", hist5.blocksUsed.some((b) => b.includes("TEMPLATE_B_THEMATIC_CH5")), false);

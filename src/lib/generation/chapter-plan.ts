@@ -13,6 +13,7 @@
  */
 import { z } from "zod";
 import type { ChapterNumber } from "./prompt-loader";
+import { ENDNOTES_START, endnoteEntry } from "@/lib/assembly/parse-chapter";
 
 export const REPORT_CHAPTERS = 5;
 /** Double-spaced Times New Roman 12pt, 1-inch margins. */
@@ -147,7 +148,10 @@ export const GENERATION_TEXT = {
       "Call the tool and write nothing else.",
     ].join("\n"),
   /** `stopAt` is "section 1.3" or, when a long section is split across parts, "sub-section 2.4.2". */
-  partInstruction: (p: { chapter: number; part: number; parts: number; lines: string[]; firstHeading: string; stopAt: string; continuing: boolean; last: boolean }) =>
+  /** Endnote styles (MODE_A / MODE_B): each part ends with the notes its markers use. */
+  partNotes: (continuing: boolean) =>
+    `End this part with an [ENDNOTES] line, then one line per note whose marker (^1, ^2 …) appears in this part, written as 3. Full note text${continuing ? ", numbered on from the notes in the parts above" : ", numbered from 1"}. Put it after this part's last section and before any [AGENT REPORT].`,
+  partInstruction: (p: { chapter: number; part: number; parts: number; lines: string[]; firstHeading: string; stopAt: string; continuing: boolean; last: boolean; notes?: boolean }) =>
     [
       `WRITE PART ${p.part} OF ${p.parts}`,
       `Write these sections of Chapter ${p.chapter}, complete and in order:`,
@@ -158,6 +162,7 @@ export const GENERATION_TEXT = {
       p.last
         ? `This is the last part of the chapter. Stop when ${p.stopAt} is complete, then add the [AGENT REPORT] if the chapter instructions ask for an end-of-chapter report.`
         : `Stop when ${p.stopAt} is complete. Do not begin anything later in the plan, and do not add a closing summary or transition that the plan does not have.`,
+      ...(p.notes ? [GENERATION_TEXT.partNotes(p.continuing)] : []),
       REPLY_WITH_TEXT,
       "Follow every instruction above, and the output format in the brief.",
     ].join("\n"),
@@ -364,7 +369,12 @@ export function planText(plan: ChapterPlan): string {
   return [GENERATION_TEXT.planIntro, ...lines, `Total: about ${plan.targetWords.toLocaleString("en-US")} words.`].join("\n");
 }
 
-export function partInstruction(plan: ChapterPlan, index: number, chapter: number): string {
+/** A placement whose chapters cite in [ENDNOTES] blocks (the part instruction asks for one per part). */
+export function writesEndnotes(placement: unknown): boolean {
+  return placement === "MODE_A" || placement === "MODE_B";
+}
+
+export function partInstruction(plan: ChapterPlan, index: number, chapter: number, opts: { notes?: boolean } = {}): string {
   const part = plan.parts[index];
   const units = partUnits(plan, part);
   const lines = units.map((u) => {
@@ -399,6 +409,7 @@ export function partInstruction(plan: ChapterPlan, index: number, chapter: numbe
     stopAt,
     continuing: index > 0,
     last: index === plan.parts.length - 1,
+    notes: opts.notes,
   });
 }
 
@@ -469,6 +480,8 @@ export function partUserBlocks(p: {
   chapter: number;
   partIndex: number;
   attachments?: AttachmentBlock[];
+  /** The chapter cites in endnotes (MODE_A / MODE_B): the part ends with its [ENDNOTES] block. */
+  notes?: boolean;
 }): UserBlock[] {
   const written = p.plan.parts.slice(0, p.partIndex);
   const texts = p.partialOutput ? (splitParts(p.partialOutput, written.map((w) => w.chars ?? 0)) ?? [p.partialOutput]) : [];
@@ -483,7 +496,7 @@ export function partUserBlocks(p: {
         ...(i === texts.length - 1 ? { cache_control: CACHED } : {}),
       }),
     ),
-    { type: "text", text: partInstruction(p.plan, p.partIndex, p.chapter) },
+    { type: "text", text: partInstruction(p.plan, p.partIndex, p.chapter, { notes: p.notes }) },
   ];
 }
 
@@ -509,8 +522,18 @@ export const AGENT_REPORT_MARKER = "[AGENT REPORT]";
 export function splitAgentReport(text: string): { body: string; report: string | null } {
   const at = text.search(/(^|\n)\s*\[AGENT REPORT\]/);
   if (at === -1) return { body: text, report: null };
-  const report = text.slice(at).replace(/^\s*\[AGENT REPORT\]\s*/, "").trim();
-  return { body: text.slice(0, at), report: report || null };
+  let body = text.slice(0, at);
+  let report = text.slice(at).replace(/^\s*\[AGENT REPORT\]\s*/, "").trim();
+  // Notes written after the report belong to the chapter: move the [ENDNOTES] block back into the body.
+  const lines = report.split("\n");
+  const start = lines.findIndex((l) => ENDNOTES_START.test(l));
+  if (start !== -1) {
+    let end = start + 1;
+    while (end < lines.length && (!lines[end].trim() || endnoteEntry(lines[end]))) end++;
+    body = `${body.trimEnd()}\n\n${lines.slice(start, end).join("\n").trim()}\n`;
+    report = [...lines.slice(0, start), ...lines.slice(end)].join("\n").trim();
+  }
+  return { body, report: report || null };
 }
 
 /**

@@ -41,6 +41,7 @@ import {
   splitParts,
   stepEstimateMs,
   unitHeadingNumber,
+  writesEndnotes,
   type PlanSection,
 } from "../src/lib/generation/chapter-plan";
 import { eventForSnapshot, formatSse, isStalled, snapshotKey, type SnapshotLike } from "../src/lib/generation/generation-events";
@@ -403,6 +404,23 @@ check("stall: a live lease is not stalled", !isStalled(snap({ lockedUntil: new D
 check("stall: recent progress is not stalled", !isStalled(snap({ lastStepAt: new Date(now - 10_000) }), now));
 check("stall: finished and failed runs are never stalled", !isStalled(snap({ status: "COMPLETED" }), now) && !isStalled(snap({ status: "FAILED" }), now));
 check("stall: a pending run nobody picked up is stalled", isStalled(snap({ status: "PENDING", lastStepAt: null }), now));
+
+// ─── D11 Fix 1: endnote styles write one [ENDNOTES] block per part ─────────
+{
+  const noted0 = partInstruction(plan, 0, 1, { notes: true });
+  const noted1 = partInstruction(plan, 1, 1, { notes: true });
+  check("notes: an endnote chapter's part ends with its [ENDNOTES] block", noted0.includes("End this part with an [ENDNOTES] line") && noted0.includes("numbered from 1"));
+  check("notes: a later part numbers on from the parts above", noted1.includes("numbered on from the notes in the parts above"));
+  check("notes: the block goes before any [AGENT REPORT]", noted0.includes("before any [AGENT REPORT]"));
+  check("notes: an in-text chapter's part says nothing about notes", !partInstruction(plan, 0, 1).includes("[ENDNOTES]"));
+  check("notes: the instruction still ends with the reply rule", noted0.trim().endsWith(partInstruction(plan, 0, 1).trim().split("\n").at(-1)!));
+  check("notes: MODE_A and MODE_B write endnotes, MODE_C and in-text do not", writesEndnotes("MODE_A") && writesEndnotes("MODE_B") && !writesEndnotes("MODE_C") && !writesEndnotes("NOT_APPLICABLE") && !writesEndnotes(undefined));
+  const moved = splitAgentReport("[H2] 4.3 Theme\n\nText.^1\n\n[AGENT REPORT]\nCHAPTER FOUR COMPLETE: yes\n[ENDNOTES]\n1. Okafor, A. (2015). Title. *J*.\nFLAGS: none");
+  check("notes written after the report are moved back into the chapter", moved.body.includes("[ENDNOTES]\n1. Okafor, A. (2015)") && !(moved.report ?? "").includes("[ENDNOTES]") && (moved.report ?? "").includes("FLAGS: none"), moved);
+  const blocks = partUserBlocks({ briefText: "B", plan, partialOutput: null, chapter: 1, partIndex: 0, notes: true });
+  const last = blocks.at(-1);
+  check("notes: partUserBlocks passes the notes rule into the instruction", last?.type === "text" && last.text.includes("[ENDNOTES]"));
+}
 
 // ─── Report ─────────────────────────────────────────────────────────────────
 if (failures.length) {

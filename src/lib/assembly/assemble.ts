@@ -55,6 +55,7 @@ import { STYLE_LABEL } from "@/lib/generation/referencing";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { formattedReferences, type DocReference, type ReferencingStyle as ListStyle } from "@/lib/research-references-doc";
 import { parseChapter, type Block } from "./parse-chapter";
+import { analyseChapterNotes, collectEndnotes, resolveNotes, type CollectedEndnotes } from "./endnotes";
 import { parseEquation, type MathNode } from "./equation-omml";
 import {
   chapterWord,
@@ -210,6 +211,8 @@ const PAGE_TITLES = {
   abbreviations: "LIST OF ABBREVIATIONS",
   references: "REFERENCES",
   endnotes: "Endnotes",
+  /** MODE_B: the one list of notes for the whole report, just before the References. */
+  documentEndnotes: "ENDNOTES",
 } as const;
 
 // ─── Loading ─────────────────────────────────────────────────────────────────
@@ -331,6 +334,8 @@ interface Ctx {
   properNouns: Set<string>;
   mode: number | null;
   thematic: AssemblyInput["thematicTitles"];
+  /** The approved citation placement (MODE_A gathers a chapter's note blocks into one list at its end). */
+  placement: string | null;
 }
 
 function textRun(seg: Seg, extra: { bold?: boolean } = {}): TextRun {
@@ -605,6 +610,8 @@ function chapterContent(chapter: { number: number; text: string }, first: boolea
   let equationNo = 0;
   let tableNo = 0;
   let figureNo = 0;
+  // MODE_A: a chapter written in parts carries one [ENDNOTES] block per part; they are shown as one list at its end.
+  const chapterNotes: string[] = [];
   // Word joins two tables that touch into one: keep a paragraph between any two (a blank line, 2.0 like the rest).
   const push = (...items: (Paragraph | Table)[]) => {
     for (const item of items) {
@@ -658,12 +665,28 @@ function chapterContent(chapter: { number: number; text: string }, first: boolea
         push(...figureBlock(block, chapter.number, figureNo, ctx, chapterReport));
         break;
       case "endnotes":
+        if (ctx.placement === "MODE_A") {
+          chapterNotes.push(...block.lines);
+          break;
+        }
         push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [plain(PAGE_TITLES.endnotes, { bold: true })] }));
         for (const line of block.lines) push(new Paragraph({ children: runsFor(line, ctx) }));
         break;
     }
   }
+  if (chapterNotes.length) {
+    push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [plain(PAGE_TITLES.endnotes, { bold: true })] }));
+    for (const line of chapterNotes) push(new Paragraph({ indent: { left: 360, hanging: 360 }, children: runsFor(line, ctx) }));
+  }
   return out;
+}
+
+/** MODE_B: the report's one numbered list of notes, on its own page before the References. */
+function endnotesPages(notes: CollectedEndnotes["notes"], ctx: Ctx): Paragraph[] {
+  return [
+    new Paragraph({ heading: HeadingLevel.HEADING_1, pageBreakBefore: true, children: [plain(PAGE_TITLES.documentEndnotes, { bold: true })] }),
+    ...notes.map((n) => new Paragraph({ indent: { left: 360, hanging: 360 }, children: [plain(`${n.number}. `), ...runsFor(n.text, ctx)] })),
+  ];
 }
 
 // ─── References (R1-R6) ──────────────────────────────────────────────────────
@@ -690,14 +713,18 @@ function listStyleFor(key: string): { style: ListStyle; note: string | null } {
   }
 }
 
-function referencesPages(input: AssemblyInput, ctx: Ctx): Paragraph[] {
+function referencesPages(input: AssemblyInput, ctx: Ctx, citedInNotes: ReadonlySet<DocReference> = new Set()): Paragraph[] {
   const { style, note } = listStyleFor(input.referencingStyle);
   if (note) ctx.report.notes.push(note);
   const numbered = style === "IEEE";
   // Founder's call (D7): only works cited in the chapters. A numbered style (IEEE) cites by number, so its list is kept whole.
-  const { cited, uncited, unmatched } = numbered
+  // Note-style chapters (MODE_A/B) cite in their notes rather than as (Author, Year): those works count as cited too.
+  const inText = numbered
     ? { cited: input.references, uncited: [] as DocReference[], unmatched: [] as string[] }
     : citedReferences(input.references, input.chapters.map((c) => c.text));
+  const cited = citedInNotes.size ? input.references.filter((r) => inText.cited.includes(r) || citedInNotes.has(r)) : inText.cited;
+  const uncited = input.references.filter((r) => !cited.includes(r));
+  const unmatched = inText.unmatched;
   if (numbered) ctx.report.notes.push("IEEE numbers references in the order they are first cited; this list holds every verified reference alphabetically, so renumber it to match the chapters.");
   const entries = formattedReferences(cited, style);
   ctx.report.references = {
@@ -960,12 +987,37 @@ export function buildReportDocument(input: AssemblyInput): { doc: Document; repo
     properNouns: properNounsFrom(input.chapters.map((c) => c.text)),
     mode: input.mode,
     thematic: input.thematicTitles,
+    placement: input.citationPlacement,
   };
-  if (input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C") {
-    report.notes.push("This referencing style cites in footnotes or endnotes. The chapters carry the note numbers, but the note text is not produced yet, so the specialist adds the notes.");
+  if (input.citationPlacement === "MODE_C") {
+    report.notes.push("This referencing style cites in footnotes. The chapters carry the note numbers, but the footnote text is not produced yet, so the specialist adds the notes.");
   }
 
-  const body = [...input.chapters.flatMap((c, i) => chapterContent(c, i === 0, ctx)), ...referencesPages(input, ctx)];
+  // MODE_B: every chapter's note blocks become one numbered list at the end of the document (endnotes.ts).
+  const endnotes = input.citationPlacement === "MODE_B" ? collectEndnotes(input.chapters) : null;
+  if (endnotes) {
+    if (endnotes.dangling.length) report.notes.push(`${endnotes.dangling.length} note marker(s) had no note and were taken out: ${endnotes.dangling.slice(0, 8).join("; ")}.`);
+    if (endnotes.unused.length) report.notes.push(`${endnotes.unused.length} note(s) had no marker in the text and were left out: ${endnotes.unused.slice(0, 8).join("; ")}.`);
+    if (endnotes.merged) report.notes.push(`${endnotes.merged} note(s) repeated word for word in another chapter or part were joined into one.`);
+  }
+  const citedInNotes = new Set<DocReference>();
+  if (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B") {
+    let naming = 0;
+    for (const ch of input.chapters) {
+      for (const [, refs] of resolveNotes(analyseChapterNotes(ch.text), input.references)) {
+        if (refs === "comment") continue;
+        if (refs.length === 0) naming++;
+        refs.forEach((r) => citedInNotes.add(r));
+      }
+    }
+    if (naming) report.notes.push(`${naming} note(s) name a work that is not on the verified reference list.`);
+  }
+  const bodyChapters = endnotes ? endnotes.chapters : input.chapters;
+  const body = [
+    ...bodyChapters.flatMap((c, i) => chapterContent(c, i === 0, ctx)),
+    ...(endnotes?.notes.length ? endnotesPages(endnotes.notes, ctx) : []),
+    ...referencesPages(input, ctx, citedInNotes),
+  ];
   const counts = { tables: report.chapters.reduce((n, c) => n + c.tables, 0), figures: report.chapters.reduce((n, c) => n + c.figures, 0) };
 
   const page = (format: (typeof NumberFormat)[keyof typeof NumberFormat], start?: number) => ({

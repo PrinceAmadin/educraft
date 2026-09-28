@@ -10,11 +10,11 @@
  *   Table 4.1: caption, pipe rows (| a | b |, |---|), Source: line; or [TABLE] caption | rows [/TABLE]
  *   [FIGURE PLACEHOLDER: ...] + Figure 3.1: caption; or [FIG] ... | caption [/FIG]
  *   [EQ] equation | 3.1 [/EQ], [Equation 3.1: ...], or an equation alone on its line
- *   [ENDNOTES] numbered notes (citation Mode A)
+ *   [ENDNOTES] numbered notes (citation Modes A and B; one block per part, each ending at its first non-entry line)
  *   [AGENT REPORT] (split off at generation; dropped here if it ever arrives)
  */
 
-import { splitEquationNumber } from "./text-rules";
+import { splitEquationNumber, superscriptNumber } from "./text-rules";
 
 export type Block =
   | { kind: "heading"; level: 2 | 3; text: string; tooDeep?: boolean }
@@ -41,6 +41,20 @@ const SOURCE_LINE = /^\(?\**\s*Sources?\s*:\s*(.+?)\**\)?\s*$/i;
 const FIGURE_PLACEHOLDER = /\[FIGURE PLACEHOLDER:[^\]]*\]/i;
 const LIST_LINE = /^\s*(?:((?:[ivxlc]{1,6}|\d{1,2}|[a-z])[.)])|([•▪◦\-–*]))\s+(.+)$/i;
 const NUMBERED_HEADING = /^\**\s*(\d+(?:\.\d+){1,4})\.?\s+(\S.*?)\s*\**:?$/;
+
+/** An [ENDNOTES] block's opening line; anything after the tag on the same line is its first entry. */
+export const ENDNOTES_START = /^\s*\[ENDNOTES\]\s*(.*)$/i;
+/** One endnote entry: "3. Full note" or "3) Full note". */
+export const ENDNOTE_ENTRY = /^\s*\**\s*(\d{1,3})[.)]\s+(\S.*)$/;
+/** One endnote entry written with a superscript number, "³ Full note" (the prompt files' own example). */
+export const ENDNOTE_ENTRY_SUPERSCRIPT = /^\s*([⁰¹²³⁴⁵⁶⁷⁸⁹]{1,3})\s+(\S.*)$/;
+/** The entry's number and text, or null when the line is not an endnote entry. */
+export function endnoteEntry(line: string): { number: number; text: string } | null {
+  const m = ENDNOTE_ENTRY.exec(line);
+  if (m) return { number: Number(m[1]), text: m[2].trim() };
+  const s = ENDNOTE_ENTRY_SUPERSCRIPT.exec(line);
+  return s ? { number: superscriptNumber(s[1]), text: s[2].trim() } : null;
+}
 
 function stripEmphasis(s: string): string {
   return s.replace(/^\s*[#*\s]+/, "").replace(/[*\s]+$/, "").trim();
@@ -225,15 +239,18 @@ export function parseChapter(raw: string, chapter: number | null = null): Parsed
       continue;
     }
 
-    if (/^\[ENDNOTES\]/i.test(trimmed)) {
+    const notesStart = ENDNOTES_START.exec(trimmed);
+    if (notesStart) {
       flush();
       flushCaptions();
       endnotes = [];
       blocks.push({ kind: "endnotes", lines: endnotes });
-      const rest = trimmed.replace(/^\[ENDNOTES\]\s*/i, "");
-      if (rest) endnotes.push(rest);
+      if (notesStart[1]) endnotes.push(notesStart[1].trim());
       continue;
     }
+    // A block of notes ends at its first line that is not a numbered entry: a chapter written in
+    // parts carries one block per part, and the next part's text must not be read as notes.
+    if (endnotes && !endnoteEntry(trimmed)) endnotes = null;
 
     const marker = HEADING_MARKER.exec(trimmed);
     const unmarked = !marker && para.length === 0 && isUnmarkedHeading(trimmed, chapter);

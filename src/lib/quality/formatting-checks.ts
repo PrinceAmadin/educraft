@@ -827,7 +827,13 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
   push("TOC1", mainToc && headingParas.length ? [] : [fail("TOC1", mainToc ? "There are no headings for the Table of Contents to collect." : "There is no Table of Contents.")], { pass: "The Table of Contents is present; Word fills it when the fields update.", na: tocNaText }, tocNa);
   {
     // Every chapter heading the chapters contain must be a Heading 1–3 paragraph, so the field lists exactly the headings.
-    const expected = ctx.input.chapters.reduce((n, ch) => n + parseChapter(ch.text, ch.number).blocks.filter((b) => b.kind === "heading" || b.kind === "endnotes").length, 0);
+    // Note blocks: MODE_B's become the one ENDNOTES section (a Heading 1), MODE_A's one "Endnotes" heading per chapter.
+    const placement = ctx.input.citationPlacement;
+    const expected = ctx.input.chapters.reduce((n, ch) => {
+      const blocks = parseChapter(ch.text, ch.number).blocks;
+      const noteBlocks = blocks.filter((b) => b.kind === "endnotes").length;
+      return n + blocks.filter((b) => b.kind === "heading").length + (placement === "MODE_B" ? 0 : placement === "MODE_A" ? Math.min(1, noteBlocks) : noteBlocks);
+    }, 0);
     const found = doc.outside.filter((p) => p.body && (p.style === "Heading2" || p.style === "Heading3")).length;
     push("TOC2", found >= expected ? [] : [fail("TOC2", `${expected - found} section heading(s) are not heading-styled and will be missing from the Contents.`)], { pass: "Every chapter, section and sub-section heading is heading-styled, so the Contents lists exactly them.", na: tocNaText }, tocNa);
   }

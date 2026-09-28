@@ -42,7 +42,7 @@ export async function prepareReport(args: {
   // (Author, Year), except Chicago notes-bibliography which the intake sets to MODE_C. The gate reads
   // it from the assembled report to stay in step with what the assembler actually produced.
   const noteStyle = template === "B" || (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C");
-  const match = matchCitations({ chapters: input.chapters, references: args.references, mode: input.mode, knownCommon: args.knownCommon, primarySources: args.primarySources, noteStyle });
+  const match = matchCitations({ chapters: input.chapters, references: args.references, mode: input.mode, knownCommon: args.knownCommon, primarySources: args.primarySources, noteStyle, placement: input.citationPlacement });
   const paragraphs = proseParagraphs(input.chapters);
   return { input, buffer, report, parts, formatting, match, paragraphs, scan: scanVoice(paragraphs), template };
 }

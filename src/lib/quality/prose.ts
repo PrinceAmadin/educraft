@@ -48,7 +48,8 @@ const ABBREVIATION = /(?:\bet\.?\s+al|\be\.g|\bi\.e|\bpp?|\bvs|\bDr|\bMr|\bMrs|\
 export function splitSentences(text: string): string[] {
   const out: string[] = [];
   let start = 0;
-  for (const m of text.matchAll(/[.!?]["”’)\]]*\s+(?=["“‘(\[]?[\p{Lu}\d])/gu)) {
+  // A note marker straight after the full stop (".^3", ".[3]", ".³") still ends the sentence.
+  for (const m of text.matchAll(/[.!?]["”’)\]]*(?:\^\{\d{1,3}\}|\^\[\d{1,3}\]|\^\d{1,3}|\[\d{1,3}\]|[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,3})?\s+(?=["“‘(\[]?[\p{Lu}\d])/gu)) {
     const end = (m.index ?? 0) + m[0].trimEnd().length;
     const candidate = text.slice(start, end);
     if (ABBREVIATION.test(candidate.replace(/["”’)\]]+$/, ""))) continue;

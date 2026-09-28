@@ -27,6 +27,9 @@ import {
 import { linearText, parseEquation } from "../src/lib/assembly/equation-omml";
 import { detectEquationLine, parseChapter, parsePipeTable } from "../src/lib/assembly/parse-chapter";
 import { packReport, reportFileName, type AssemblyInput } from "../src/lib/assembly/assemble";
+import { analyseChapterNotes, collectEndnotes, entryFor, resolveNotes } from "../src/lib/assembly/endnotes";
+import { referencesForNote, superscriptNotes } from "../src/lib/assembly/text-rules";
+import { E_EXTRA, E_OBJECTIVES, E_REFERENCES, E_THEMATIC, E_TITLE, endnotesChapters } from "./fixtures/endnotes-fixture";
 
 let passed = 0;
 const failures: string[] = [];
@@ -415,12 +418,112 @@ async function checkReport(engineering: boolean, outDir: string | null) {
 eq("file name from the title", reportFileName('Mobile: Money / "Adoption"?', "EC-1"), "Mobile Money Adoption.docx");
 eq("file name falls back to the code", reportFileName("  ", "EC-00012"), "EC-00012.docx");
 
+// ─── D11 Fix 1: endnotes (MODE_A per chapter, MODE_B one list for the report) ───
+async function checkEndnotes(outDir: string | null) {
+  // Markers resolve against the block after them, even when a part restarts at 1.
+  const two = "[H2] 1.1 A\n\nFirst claim.^1 Second claim.^2\n\n[ENDNOTES]\n1. Alpha, A. (2015). One. *J*.\n2. Beta, B. (2016). Two. *J*.\n\n[H2] 1.2 B\n\nThird claim.^1 A cm² plot and R^2 of 0.4 and R² too. Fourth³ claim.\n\n[ENDNOTES]\n1. Gamma, C. (2017). Three. *J*.\n³ Delta, D. (2018). Four. *J*.\n";
+  const a = analyseChapterNotes(two);
+  eq("notes: four markers (cm², R^2 and R² are not markers)", a.markers.map((m) => m.local), [1, 2, 1, 3]);
+  eq("notes: each marker tied to the block after it", a.markers.map((m) => m.block), [0, 0, 1, 1]);
+  eq("notes: a restarted part resolves to its own block", entryFor(a, a.markers[2])?.text, "Gamma, C. (2017). Three. *J*.");
+  eq("notes: an entry written ³ Text is read as note 3", entryFor(a, a.markers[3])?.text, "Delta, D. (2018). Four. *J*.");
+  const dangling = analyseChapterNotes("Claim.^5\n\n[ENDNOTES]\n1. Alpha, A. (2015). One.\n\nLater claim.^2\n");
+  eq("notes: a marker with no entry, and one with no block after it, are both unresolved", dangling.markers.map((m) => Boolean(entryFor(dangling, m))), [false, false]);
+  // The parser: a block ends at its first line that is not an entry.
+  const parsed = parseChapter("[H2] 1.1 A\n\nText.^1\n\n[ENDNOTES]\n1. Alpha, A. (2015). One.\nThe next part's first paragraph, which must stay a paragraph.\n\n[ENDNOTES]\n2. Beta, B. (2016). Two.", 1);
+  eq("parser: two note blocks, each only its entries", parsed.blocks.filter((b) => b.kind === "endnotes").map((b) => (b.kind === "endnotes" ? b.lines.length : 0)), [1, 1]);
+  check("parser: the line after a block is a paragraph again", parsed.blocks.some((b) => b.kind === "paragraph" && b.text.startsWith("The next part's first paragraph")));
+  // Joining (MODE_B).
+  const joined = collectEndnotes([
+    { number: 1, text: "Claim.^1 Claim.^2\n\n[ENDNOTES]\n1. Alpha, A. (2015). One. *J*.\n2. Beta, B. (2016). Two. *J*.\n3. Unused, U. (2019). Never cited." },
+    { number: 2, text: "Claim.^1 Claim.^2 Claim.^3 Claim.^4\n\n[ENDNOTES]\n1. Beta, B. (2016). Two. *J*.\n2. Gamma, C. (2017). Three. *J*.\n3. Ibid.\n4. Alpha, *One*." },
+    { number: 3, text: "Claim.^1 Claim.^2\n\n[ENDNOTES]\n1. Beta, B. (2016). Two. *J*.\n2. Ibid." },
+  ]);
+  eq("join: numbered by first appearance, identical notes joined, Ibid and the short form kept", joined.notes.map((n) => `${n.number}. ${n.text}`), ["1. Alpha, A. (2015). One. *J*.", "2. Beta, B. (2016). Two. *J*.", "3. Gamma, C. (2017). Three. *J*.", "4. Ibid.", "5. Alpha, *One*."]);
+  eq("join: chapters' markers rewritten to the joined numbers", joined.chapters.map((c) => c.text.match(/\^\d+/g)), [["^1", "^2"], ["^2", "^3", "^4", "^5"], ["^2", "^2"]]);
+  check("join: an Ibid whose work was joined into an earlier note reuses that note's number", joined.chapters[2].text === "Claim.^2 Claim.^2");
+  check("join: the [ENDNOTES] blocks are taken out", joined.chapters.every((c) => !c.text.includes("[ENDNOTES]")));
+  eq("join: repeats joined, the unused note reported", [joined.merged, joined.unused, joined.dangling], [2, ["Chapter 1, note 3"], []]);
+  // Superscript characters render as true superscripts; R² keeps its look.
+  eq("sup: ¹² becomes a superscript 12", superscriptNotes([{ text: "market.¹² Next" }]).map((s) => [s.text, Boolean(s.sup)]), [["market.", false], ["12", true], [" Next", false]]);
+  eq("sup: R² is R with a superscript 2", superscriptNotes([{ text: "R² = 0.4" }]).map((s) => [s.text, Boolean(s.sup)]), [["R", false], ["2", true], [" = 0.4", false]]);
+  // Matching a note to the verified list.
+  const adebanjo = E_EXTRA[0];
+  const iwuchukwu = E_EXTRA[8];
+  eq("match: the first author wins over a shared co-author (Okonjo on every cultural work)", referencesForNote(E_REFERENCES, `Adebanjo, A., & Okonjo, T. (2016). ${adebanjo.title}.`).map((r) => r.id), [adebanjo.id]);
+  check("match: both works share the co-author and the year", adebanjo.year === iwuchukwu.year && iwuchukwu.authors.includes("Okonjo"));
+  eq("match: a short form (no year) by surname and a title word", referencesForNote(E_REFERENCES, "Adebanjo, *Cash, credit and custom*.").map((r) => r.id), [adebanjo.id]);
+  const notes = analyseChapterNotes("A.^1 B.^2 C.^3\n\n[ENDNOTES]\n1. Adebanjo, A., & Okonjo, T. (2016). Cash, credit and custom in the Yoruba market.\n2. Ibid., 12.\n3. On this point see the discussion above.");
+  const resolved = [...resolveNotes(notes, E_REFERENCES).values()].map((v) => (v === "comment" ? v : v.map((r) => r.id)));
+  eq("resolve: a note, its Ibid. and a note of comment", resolved, [[adebanjo.id], [adebanjo.id], "comment"]);
+
+  // MODE_A: a chapter's part blocks shown as one list at its end.
+  const aInput = endnotesInput({ citationPlacement: "MODE_A", section: "BUSINESS", mode: 2 });
+  const aXml = await documentXml(aInput);
+  const aHeadings = (aXml.match(/<w:pStyle w:val="Heading2"\/>(?:(?!<\/w:p>).)*?Endnotes/g) ?? []).length;
+  eq("MODE A: one Endnotes heading per chapter, not one per part", aHeadings, 5);
+  check("MODE A: no document ENDNOTES section", !/<w:t[^>]*>ENDNOTES<\/w:t>/.test(aXml));
+
+  // MODE_B: the whole fixture report.
+  const input = endnotesInput({});
+  const { buffer, report } = await packReport(input);
+  if (outDir) writeFileSync(join(outDir, "endnotes-mode-b.docx"), buffer);
+  const xml = await (await JSZip.loadAsync(buffer)).file("word/document.xml")!.async("string");
+  const text = xml.replace(/<\/w:p>/g, "\n").replace(/<[^>]+>/g, "");
+  const joinedFixture = collectEndnotes(input.chapters);
+  const sups = [...xml.matchAll(/<w:vertAlign w:val="superscript"\/>(?:(?!<\/w:r>).)*?<w:t[^>]*>(\d+)<\/w:t>/g)].map((m) => Number(m[1]));
+  eq("MODE B fixture: 41 notes, 4 identical notes joined, none dangling or unused", [joinedFixture.notes.length, joinedFixture.merged, joinedFixture.dangling.length, joinedFixture.unused.length], [41, 4, 0, 0]);
+  eq("MODE B fixture: every marker a true superscript", sups.length, joinedFixture.markers);
+  const first: number[] = [];
+  for (const n of sups) if (!first.includes(n)) first.push(n);
+  check("MODE B fixture: numbered 1–41 in order of first appearance", first.length === 41 && first.every((n, i) => n === i + 1));
+  const h1 = [...xml.matchAll(/<w:pStyle w:val="Heading1"\/>(?:(?!<\/w:p>).)*/g)].map((m) => m[0].replace(/<[^>]+>/g, "").trim());
+  eq("MODE B fixture: ENDNOTES (Heading 1) straight before REFERENCES, once", [h1.filter((h) => h === "ENDNOTES").length, h1.indexOf("REFERENCES") - h1.indexOf("ENDNOTES")], [1, 1]);
+  check("MODE B fixture: no [ENDNOTES] tag, ^N or superscript character left", !/\[ENDNOTES\]|\^\d|[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(text));
+  const listed = text.slice(text.lastIndexOf("ENDNOTES") + 8, text.lastIndexOf("REFERENCES")).split("\n").filter((l) => /^\d+\. /.test(l.trim()));
+  check("MODE B fixture: the ENDNOTES section lists 1–41", listed.length === 41 && listed.every((l, i) => l.trim().startsWith(`${i + 1}. `)));
+  eq("MODE B fixture: the References hold the 39 works the notes cite", report.references.listed, 39);
+  check("MODE B fixture: the assembly no longer says the notes are not produced", !report.notes.some((n) => /not produced yet/.test(n)));
+  check("MODE B fixture: objectives and thematic titles unchanged", E_OBJECTIVES.every((o) => text.includes(o)) && text.includes(E_THEMATIC.chapter3.toUpperCase()));
+}
+
+function endnotesInput(over: Partial<AssemblyInput>): AssemblyInput {
+  return {
+    projectCode: "EC-QA-CHECK-EN",
+    title: E_TITLE,
+    student: { name: "Ada Obi", matric: "190404001" },
+    university: "University of Lagos",
+    faculty: "Arts",
+    department: "Cultural Studies",
+    supervisor: "Dr. K. Bello",
+    hod: "Prof. T. Adeyemi",
+    submission: new Date("2026-10-15T12:00:00Z"),
+    dedication: { type: "God", details: null },
+    acknowledgementNote: null,
+    mode: 1,
+    section: "HUMANITIES",
+    referencingStyle: "APA_7TH",
+    citationPlacement: "MODE_B",
+    thematicTitles: E_THEMATIC,
+    chapters: endnotesChapters(),
+    references: E_REFERENCES,
+    includePrelims: true,
+    ...over,
+  };
+}
+
+async function documentXml(input: AssemblyInput): Promise<string> {
+  const { buffer } = await packReport(input);
+  return (await JSZip.loadAsync(buffer)).file("word/document.xml")!.async("string");
+}
+
 (async () => {
   const outIdx = process.argv.indexOf("--out");
   const outDir = outIdx !== -1 ? process.argv[outIdx + 1] : null;
   if (outDir) mkdirSync(outDir, { recursive: true });
   await checkReport(false, outDir);
   await checkReport(true, outDir);
+  await checkEndnotes(outDir);
   if (failures.length) {
     console.error(`check:assembly — ${failures.length} failed, ${passed} passed:`);
     for (const f of failures) console.error(`  ✗ ${f}`);

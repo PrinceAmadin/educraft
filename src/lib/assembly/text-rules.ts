@@ -119,18 +119,27 @@ export function inlineSegments(text: string, opts: { inTable?: boolean } = {}): 
  * is not part of a larger square-bracketed placeholder token. Numbers alone in the flow of prose
  * ("in the last 5 years") are left alone: the caret is what marks the citation.
  */
+const SUPERSCRIPT_DIGIT: Record<string, string> = { "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4", "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9" };
+
+/** "¹²" -> 12. */
+export function superscriptNumber(s: string): number {
+  return Number([...s].map((c) => SUPERSCRIPT_DIGIT[c] ?? "").join(""));
+}
+
 export function superscriptNotes(segs: Seg[]): Seg[] {
-  const pattern = /(?:\^\{(\d{1,3})\})|(?:\^\[(\d{1,3})\])|(?:\^(\d{1,3}))|(?:(?<=[\p{L}.,;:!?)"'’”])\[(\d{1,3})\](?![\p{L}\d]))/gu;
+  // Superscript characters (¹, ², ³) become a real Word superscript too: a model sometimes writes a note
+  // number that way, and "R²" set as R with a superscript 2 looks exactly the same.
+  const pattern = /(?:\^\{(\d{1,3})\})|(?:\^\[(\d{1,3})\])|(?:\^(\d{1,3}))|(?:(?<=[\p{L}.,;:!?)"'’”])\[(\d{1,3})\](?![\p{L}\d]))|([⁰¹²³⁴⁵⁶⁷⁸⁹]+)/gu;
   const out: Seg[] = [];
   for (const seg of segs) {
-    if (seg.sub || seg.sup || (!seg.text.includes("^") && !seg.text.includes("["))) {
+    if (seg.sub || seg.sup || (!seg.text.includes("^") && !seg.text.includes("[") && !/[⁰¹²³⁴⁵⁶⁷⁸⁹]/.test(seg.text))) {
       out.push(seg);
       continue;
     }
     let last = 0;
     for (const m of seg.text.matchAll(pattern)) {
       const at = m.index ?? 0;
-      const digits = m[1] ?? m[2] ?? m[3] ?? m[4];
+      const digits = m[1] ?? m[2] ?? m[3] ?? m[4] ?? (m[5] ? String(superscriptNumber(m[5])) : undefined);
       if (!digits) continue;
       if (at > last) out.push({ ...seg, text: seg.text.slice(last, at) });
       out.push({ ...seg, text: digits, sup: true, italics: false });
@@ -434,6 +443,47 @@ export function referencesForCitation<T extends CitableReference>(refs: T[], c: 
   const year = c.year === "n.d." ? null : Number(c.year.slice(0, 4));
   const key = nameKey(c.author);
   return refs.filter((r) => (r.year ?? null) === year && authorMatches(key, firstFamily(r)));
+}
+
+const TITLE_STOP = new Set(["about", "across", "after", "among", "analysis", "between", "effect", "effects", "evidence", "from", "impact", "into", "nigeria", "nigerian", "study", "their", "these", "through", "towards", "under", "using", "which", "within", "without"]);
+
+/** "Ibid." / "Ibid., 45.": the same work as the note before it. */
+export const IBID = /^\s*\**\s*ibid\b/i;
+
+/** A note that names a work (a year, a DOI or a link), not a note of comment. */
+export function noteCitesAWork(note: string): boolean {
+  return /\b(?:1[5-9]|20)\d{2}\b|\bdoi\b|10\.\d{4,}\/|https?:\/\//i.test(note);
+}
+
+/**
+ * The verified references a note names: a listed author's surname with the
+ * year; failing that (a Chicago short form, "Okafor, Cash, 12"), a surname with
+ * a distinctive word of the title; failing that, the title's opening words.
+ * "Ibid." is resolved by the caller, which knows the note before it.
+ */
+export function referencesForNote<T extends CitableReference & { title?: string | null }>(refs: T[], note: string): T[] {
+  const plain = note.replace(/\*/g, "");
+  const words = new Set(plain.split(/[^\p{L}\d'’-]+/u).map(nameKey).filter((w) => w.length >= 2));
+  const years = new Set([...plain.matchAll(/\b((?:1[5-9]|20)\d{2})[a-z]?\b/g)].map((m) => Number(m[1])));
+  const surnames = (r: T) => (r.authors ?? "").split(";").map((a) => nameKey(a.split(",")[0] ?? "")).filter((s) => s.length >= 2);
+  const titleWords = (r: T) => (r.title ?? "").split(/[^\p{L}\d]+/u).map(nameKey).filter((w) => w.length >= 5 && !TITLE_STOP.has(w));
+  const inYear = (r: T) => r.year !== null && years.has(r.year);
+  const hasTitleWord = (r: T) => titleWords(r).some((w) => words.has(w));
+  // A note leads with the first author: match on that first, so a co-author shared by several works
+  // (the same second author on a series of papers) does not pull the others in.
+  const first = refs.filter((r) => words.has(surnames(r)[0] ?? ""));
+  const any = refs.filter((r) => surnames(r).some((s) => words.has(s)));
+  for (const pool of [first, any]) {
+    const byYear = pool.filter(inYear);
+    if (byYear.length) return byYear;
+    const byTitleWord = pool.filter(hasTitleWord);
+    if (byTitleWord.length) return byTitleWord;
+  }
+  const noteKey = nameKey(plain);
+  return refs.filter((r) => {
+    const opening = nameKey((r.title ?? "").split(/\s+/).slice(0, 5).join(" "));
+    return opening.length >= 15 && noteKey.includes(opening);
+  });
 }
 
 export function citedReferences<T extends CitableReference>(refs: T[], chapterTexts: string[]): { cited: T[]; uncited: T[]; unmatched: string[] } {

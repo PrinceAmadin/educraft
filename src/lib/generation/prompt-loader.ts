@@ -243,6 +243,15 @@ export const LOADER_TEXT = {
   styleInText: (style: string) => `Use ${style} for every in-text citation and every reference entry.`,
   styleNotes: (style: string) =>
     `Cite with superscript note numbers as set out in the CITATION MODE BLOCK, and format every note and every bibliography entry in ${style}.`,
+  /** MODE_A and MODE_B: how a note marker is written (the assembly turns ^3 into a true Word superscript). */
+  noteMarkers:
+    "Write every note marker in the text as a caret and the note's number, straight after the full stop, comma or word it belongs to, with no space: ...the market for cassava.^3 Never write a superscript character such as ¹ or ², a number in brackets such as [3], or a footnote symbol; the assembly sets each ^3 as a true superscript. This replaces the superscript characters in the CITATION MODE BLOCK's examples.",
+  /** MODE_B: each part lists its own notes; the assembly joins them into the one document list. */
+  endnotesDocument:
+    "Number this chapter's notes from 1, in the order their markers appear. The notes are written chapter by chapter: each part of the chapter you are asked to write ends with an [ENDNOTES] line followed by one line per note whose marker appears in that part, written as 3. Full note text. Give a work's full citation in its first note in this chapter and the short form in later notes on it. The assembly joins every chapter's notes into the one numbered Endnotes list at the end of the document, numbering them continuously and joining identical notes, so write no Endnotes section of your own. This replaces the CITATION MODE BLOCK's line that the notes are collected at the document end.",
+  /** MODE_A: each part lists its own notes; the assembly shows a chapter's notes together at its end. */
+  endnotesChapter:
+    "Number this chapter's notes from 1, in the order their markers appear. Each part of the chapter you are asked to write ends with an [ENDNOTES] line followed by one line per note whose marker appears in that part, written as 3. Full note text; the assembly shows the chapter's notes together at its end.",
   styleOverridesApa: (style: string) =>
     `Where the referencing rules above give APA 7th Edition formats or treat APA as the default, use ${style} instead. Their rules on real, relevant and correctly used sources still apply.`,
   /** Q6 — no direct quotations anywhere; page pinpoints are left for the worker. */
@@ -877,6 +886,11 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   // when verifying the pause (verifyDataPause), which writes the values into this chapter's text.
   if (pausePointsFor(input.mode).some((p) => p === chapter) && !input.workerData?.length) {
     notes.push(LOADER_TEXT.countsBeforePause(input.mode, chapter));
+  }
+  // Endnote styles: the prompt files show note numbers as ¹ and defer MODE B's notes to "the document end",
+  // which no chapter writes (D11). Each part now lists its own notes; the assembly numbers and joins them.
+  if (placement === "MODE_A" || placement === "MODE_B") {
+    notes.push(LOADER_TEXT.noteMarkers, placement === "MODE_B" ? LOADER_TEXT.endnotesDocument : LOADER_TEXT.endnotesChapter);
   }
   // Q1/Q2: five chapters at most. Wherever the loaded text plans a sixth chapter, the note overrides it.
   if (parts.some((p) => SIX_CHAPTERS.test(p.text))) notes.push(LOADER_TEXT.fiveChapters);

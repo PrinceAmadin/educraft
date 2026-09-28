@@ -31,6 +31,7 @@ import { proseParagraphs, splitSentences } from "../src/lib/quality/prose";
 import { parseStoredPath } from "../src/lib/files/paths";
 import { generatedReportPath } from "../src/lib/services/deliverables";
 import { FIXTURE_OBJECTIVES, FIXTURE_REFERENCES, FIXTURE_TITLE, fixtureChapters, type FixtureChapter } from "./fixtures/quality-fixture";
+import { E_OBJECTIVES, E_REFERENCES, E_THEMATIC, E_TITLE, endnotesChapters } from "./fixtures/endnotes-fixture";
 
 let passed = 0;
 const failures: string[] = [];
@@ -408,6 +409,51 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
     check("re-generation: the brief ends with the failure block", /QUALITY CHECK FAILURES IN THE PREVIOUS VERSION OF THIS CHAPTER\nThe previous version of Chapter 2 failed these checks\. Write the chapter so that none of them happens again:\n- \[/.test(brief) && brief.trim().endsWith(lines[lines.length - 1]));
     check("re-generation: a brief without failures has no block", !/QUALITY CHECK FAILURES/.test(buildChapterBrief({ chapter: 2, projectTitle: FIXTURE_TITLE, university: "U", department: "D", template: "A", objectives: FIXTURE_OBJECTIVES })));
     eq("re-generation: the first run's research questions are read back from its brief", briefStatements(brief, "Research questions:"), ["What is the effect?"]);
+  }
+
+  // ── D11 Fix 1: a Mode 1 report cited in endnotes (MODE_B) ────────────────
+  {
+    const enInput = (chapters: { number: number; text: string }[], over: Partial<AssemblyInput> = {}): AssemblyInput => ({
+      ...inputFor([], {}),
+      title: E_TITLE,
+      faculty: "Arts",
+      department: "Cultural Studies",
+      mode: 1,
+      section: "HUMANITIES",
+      citationPlacement: "MODE_B",
+      thematicTitles: E_THEMATIC,
+      chapters,
+      references: E_REFERENCES,
+      ...over,
+    });
+    const enTrace: TraceabilityResult = { objectives: E_OBJECTIVES.map((_, i) => ({ index: i + 1, reported: true, reportQuote: "x", reportQuoteFound: true, verdict: "ACHIEVED", verdictQuote: "y", verdictQuoteFound: true })) };
+    const run = async (chapters: { number: number; text: string }[], over: Partial<AssemblyInput> = {}) => {
+      const p = await prepareReport({ input: enInput(chapters, over), references: E_REFERENCES, knownCommon: knownCommonCitation });
+      return { p, r: finishReport(p, { ...NO_AI, traceability: enTrace }, { objectives: E_OBJECTIVES, pureScience: false, supervisorToc: false, plans: new Map() }) };
+    };
+    const base = endnotesChapters();
+    const { p: enPrep, r: en } = await run(base);
+    eq("endnotes: the clean Mode 1 report fails nothing", failed(en.checks), []);
+    check("endnotes: 89 of 89, passed", en.score.qualityScore === 89 && en.score.passed, `${en.score.qualityScore}`);
+    check("endnotes: ST12 counts the 41 distinct notes", /41 distinct endnotes/.test(byId(en.checks, "ST12").summary ?? ""), byId(en.checks, "ST12").summary);
+    eq("endnotes: every note is matched to a verified work (39 cited, 0 unmatched)", [enPrep.match.cited.length, enPrep.match.unmatched.length], [39, 0]);
+    check("endnotes: the notes give the support check its pairs", enPrep.match.matched.filter((m) => m.use.raw.startsWith("(note")).length === 45);
+    check("endnotes: no false thin-paragraph warning from markers after full stops", !byId(en.checks, "VOICE").issues.some((i) => /one or two sentences/.test(i.message)));
+    eq("endnotes: splitSentences ends a sentence at a marker after the full stop", splitSentences("One claim.^1 Two claims.[2] Three.³ Four."), ["One claim.^1", "Two claims.[2]", "Three.³", "Four."]);
+
+    const edit = (n: number, f: (t: string) => string) => base.map((c) => (c.number === n ? { ...c, text: f(c.text) } : c));
+    const dangling = await run(edit(1, (t) => replaceOnce(t, "preferring the certainty of notes in the hand.^5", "preferring the certainty of notes in the hand.^5 Cash also settles debts on the spot.^9")));
+    eq("endnotes: a Chapter One marker with no note fails only ST13", failed(dangling.r.checks), ["ST13"]);
+    check("endnotes: ST13 names the note", byId(dangling.r.checks, "ST13").issues.some((i) => /note 9/.test(i.message)));
+    const noBlocks = await run(edit(2, (t) => t.replace(/\n\[ENDNOTES\][\s\S]*?(?=\n\[H2\]|$)/g, "")));
+    eq("endnotes: a review with markers but no notes fails ST12 and ST13", failed(noBlocks.r.checks), ["ST12", "ST13"]);
+    const invented = await run(edit(4, (t) => replaceOnce(t, /\n2\. [^\n]+/, "\n2. Zzyzx, Q. (2019). An invented study of market trust. *Nowhere Journal*.")));
+    eq("endnotes: a note naming a work on no list fails the reference check", failed(invented.r.checks), ["REF"]);
+    // Chapter Five cites Chapter Four's first work again; take that work out of Chapter Four and it is new in Chapter Five.
+    const fresh = await run(edit(4, (t) => replaceOnce(t, /\n1\. [^\n]+/, "\n1. Zzyzx, Q. (2019). An invented study of market trust. *Nowhere Journal*.")));
+    check("endnotes: a work first cited in Chapter Five fails ST13 (no new sources in the conclusion)", byId(fresh.r.checks, "ST13").issues.some((i) => /Chapter Five cites a source the earlier chapters never used/.test(i.message)));
+    const modeC = await run(base, { citationPlacement: "MODE_C" });
+    check("endnotes: MODE C (page footnotes) keeps its own checks", !/distinct endnotes/.test(byId(modeC.r.checks, "ST12").summary ?? ""));
   }
 
   if (failures.length) {

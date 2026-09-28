@@ -6,6 +6,8 @@
  */
 
 import { parseChapter, type Block } from "@/lib/assembly/parse-chapter";
+import { analyseChapterNotes, distinctNoteCount, entryFor } from "@/lib/assembly/endnotes";
+import { citesInEndnotes } from "./citation-check";
 import { findPlaceholders } from "@/lib/assembly/text-rules";
 import { hypothesesOf, researchQuestionsOf } from "@/lib/generation/chapter-one-statements";
 import { countWords, missingHeadings } from "@/lib/generation/chapter-plan";
@@ -329,7 +331,12 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     const min = input.chapterBased ? REFERENCE_MINIMUM.chapterBased : REFERENCE_MINIMUM.full;
     let n: number;
     let howCounted: string;
-    if (input.citations.noteStyle) {
+    const placement = input.citations.placement;
+    if (citesInEndnotes(placement)) {
+      // Endnote styles: the distinct notes the chapters carry (MODE_B: the joined list, identical notes counted once).
+      n = distinctNoteCount(chapters, placement);
+      howCounted = "distinct endnotes";
+    } else if (input.citations.noteStyle) {
       n = chapters.reduce((total, c) => {
         const block = c.blocks.find((b): b is Extract<Block, { kind: "endnotes" }> => b.kind === "endnotes");
         return total + (block?.lines.filter((line) => /^\s*\**\s*\d{1,3}[.)]\s+\S/.test(line)).length ?? 0);
@@ -360,7 +367,24 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   {
     const issues: QualityIssue[] = [];
     const refsIn = (n: number) => new Set(input.citations.matched.filter((m) => m.use.chapter === n).flatMap((m) => m.refs.map((r) => r.id)));
-    if (input.citations.noteStyle) {
+    if (citesInEndnotes(input.citations.placement)) {
+      // Endnote styles: every part ends with an [ENDNOTES] block, and each marker must have its note in the
+      // block after it (endnotes.ts, the rule the assembly numbers them by).
+      for (const n of [1, 2]) {
+        const c = byNumber.get(n);
+        if (!c) continue;
+        const notes = analyseChapterNotes(c.text);
+        const dangling = notes.markers.filter((m) => !entryFor(notes, m));
+        if (notes.markers.length === 0 && notes.entries.length === 0) {
+          issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} carries no note references or endnotes, so it cites nothing.`, chapter: n, fix: "Add note markers (^1, ^2 …) where sources are used, and end each part with an [ENDNOTES] list." });
+        } else if (notes.markers.length > 0 && notes.entries.length === 0) {
+          issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} has ${notes.markers.length} note reference${notes.markers.length === 1 ? "" : "s"} in the text but no [ENDNOTES] list.`, chapter: n, fix: "End each part with an [ENDNOTES] block, one entry per marker." });
+        } else if (dangling.length) {
+          const which = [...new Set(dangling.map((m) => m.local))].slice(0, 8).join(", ");
+          issues.push({ level: "FAIL", message: `Chapter ${WORDS[n]} has ${dangling.length} note reference${dangling.length === 1 ? "" : "s"} with no entry in the [ENDNOTES] list after ${dangling.length === 1 ? "it" : "them"} (note ${which}).`, chapter: n, fix: "Add the missing entries to the [ENDNOTES] block that follows the markers, or drop the markers." });
+        }
+      }
+    } else if (input.citations.noteStyle) {
       const noteMarkerCount = (c: Parsed): number => {
         // ^3, ^{12}, ^[3] and a trailing "[3]" after a word or punctuation: the same set the assembly
         // renders as superscripts.

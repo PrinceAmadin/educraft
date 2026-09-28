@@ -9,6 +9,7 @@
  */
 
 import { parseChapter } from "@/lib/assembly/parse-chapter";
+import { analyseChapterNotes, entryFor, resolveNotes, type NoteEntry } from "@/lib/assembly/endnotes";
 import { citationsIn, nameKey, referencesForCitation, type CitableReference } from "@/lib/assembly/text-rules";
 import { plainText, splitSentences } from "./prose";
 import { result, shortQuote, type CheckResult, type QualityIssue } from "./types";
@@ -84,6 +85,13 @@ export interface CitationMatch {
    * the endnote list instead of the matched-citation count.
    */
   noteStyle: boolean;
+  /** The approved placement. MODE_A and MODE_B cite through [ENDNOTES] notes, which are matched too. */
+  placement: string | null;
+}
+
+/** MODE_A / MODE_B: the chapters' notes are read as citations (endnotes.ts). */
+export function citesInEndnotes(placement: string | null | undefined): placement is "MODE_A" | "MODE_B" {
+  return placement === "MODE_A" || placement === "MODE_B";
 }
 
 export function matchCitations(input: {
@@ -94,6 +102,7 @@ export function matchCitations(input: {
   primarySources?: PrimarySourceRef[];
   /** Set for a note-style placement (MODE_A, MODE_B, MODE_C). Davis/Yamane WARN is then skipped. */
   noteStyle?: boolean;
+  placement?: string | null;
 }): CitationMatch {
   const uses = citationUses(input.chapters);
   const matched: CitationMatch["matched"] = [];
@@ -118,6 +127,33 @@ export function matchCitations(input: {
     if (known && !input.noteStyle) knownCommon.push({ use, work: known.work });
     else unmatched.push(use);
   }
+  // Endnote styles: each marker is a citation of the note it points to. The sentence around the marker is
+  // what the note's work must support; a note naming a work that is on no list fails like any citation.
+  if (citesInEndnotes(input.placement)) {
+    for (const ch of input.chapters) {
+      const notes = analyseChapterNotes(ch.text);
+      const resolved = resolveNotes(notes, input.references);
+      const failed = new Set<NoteEntry>();
+      for (const m of notes.markers) {
+        const entry = entryFor(notes, m);
+        const refs = entry ? resolved.get(entry) : undefined;
+        if (!entry || !refs || refs === "comment") continue; // no note (ST13's concern) or a note of comment
+        const use: CitationUse = { chapter: ch.number, paragraph: null, sentence: m.sentence, author: `note ${m.local}`, year: "", raw: `(note ${m.local}: ${shortQuote(entry.text, 90)})` };
+        uses.push(use);
+        if (refs.length) {
+          refs.forEach((r) => citedIds.add(r.id));
+          matched.push({ use, refs });
+          continue;
+        }
+        const key = nameKey(entry.text);
+        if (sourceText.some((t) => t.length >= 12 && key.includes(t.slice(0, 40)))) continue; // an approved case or archive
+        if (!failed.has(entry)) {
+          failed.add(entry);
+          unmatched.push(use);
+        }
+      }
+    }
+  }
   return {
     uses,
     matched,
@@ -126,6 +162,7 @@ export function matchCitations(input: {
     uncited: input.references.filter((r) => !citedIds.has(r.id)),
     cited: input.references.filter((r) => citedIds.has(r.id)),
     noteStyle: Boolean(input.noteStyle),
+    placement: input.placement ?? null,
   };
 }
 
