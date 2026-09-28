@@ -301,6 +301,10 @@ async function checkReport(engineering: boolean, outDir: string | null) {
   const titleStart = coverEnd - 1;
   const titleLines = allParas.slice(titleStart, allParas.indexOf("DECLARATION"));
   check(`${label} title page: BY, statement in capitals, supervisor, date`, titleLines[1] === "BY" && titleLines.some((t) => t.startsWith("A PROJECT SUBMITTED TO THE DEPARTMENT OF")) && titleLines.includes("SUPERVISED BY: DR. K. BELLO") && titleLines[titleLines.length - 1] === "OCTOBER, 2026", titleLines.join(" / "));
+  const wantDegree = engineering ? "THE DEGREE OF BACHELOR OF ENGINEERING (B.Eng)" : "THE DEGREE OF BACHELOR OF SCIENCE (B.Sc)";
+  check(`${label} title page names the degree (FIX 1)`, titleLines.some((t) => t.endsWith(`FOR THE AWARD OF ${wantDegree}`)), titleLines.join(" / "));
+  check(`${label} certification names the degree`, allParas.some((t) => t.includes(`suitable for the award of the degree of ${engineering ? "Bachelor of Engineering (B.Eng)" : "Bachelor of Science (B.Sc)"}.`)));
+  check(`${label} no degree placeholder anywhere`, !allParas.some((t) => t.includes("DEGREE TO BE SUPPLIED")));
   check(`${label} certification: supervisor, HOD and External Examiner blocks`, allParas.filter((t) => t.startsWith("____________________________")).length === 4 && allParas.some((t) => t.startsWith("External Examiner")) && allParas.includes("Project Supervisor") && allParas.includes("Head of Department"));
   const dateRows = paragraphs(doc).filter((p) => /<w:t[^>]*>Date<\/w:t>/.test(p));
   check(`${label} "Date" centred under the date line (4 rows)`, dateRows.length === 4 && dateRows.every((p) => /<w:tab w:val="center" w:pos="7346"\/>/.test(p)), `${dateRows.length} rows`);

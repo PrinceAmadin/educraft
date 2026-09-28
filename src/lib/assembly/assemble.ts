@@ -50,7 +50,7 @@ import { readSubmittedContact } from "@/lib/submitted-contact";
 import { orderedChapters, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { isReportTemplate } from "@/lib/generation/generation-state";
 import { chapterTitle } from "@/lib/generation/progress-events";
-import { lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
+import { CERTIFICATE_AWARDS, degreeName, getDegreeFromDepartment, lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
 import { STYLE_LABEL } from "@/lib/generation/referencing";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { formattedReferences, type DocReference, type ReferencingStyle as ListStyle } from "@/lib/research-references-doc";
@@ -138,21 +138,30 @@ export class AssemblyError extends Error {
 // ─── Wording (for the founder's review) ──────────────────────────────────────
 
 /**
+ * "the degree of Bachelor of Science (B.Sc)", or "the Registered Nurse (RN) certificate"
+ * for a school of nursing. `upper` capitalises everything but the abbreviation.
+ */
+function awardPhrase(degree: string, upper = false): string {
+  const name = upper ? degreeName(degree).toUpperCase() : degreeName(degree);
+  if (CERTIFICATE_AWARDS.has(degree)) return upper ? `THE ${name} (${degree}) CERTIFICATE` : `the ${name} (${degree}) certificate`;
+  return upper ? `THE DEGREE OF ${name} (${degree})` : `the degree of ${name} (${degree})`;
+}
+
+/**
  * Every sentence the assembly writes itself, laid out as the founder's template
  * (prompts/preliminary-pages/PRELIMINARY PAGE TEMPLATE.docx). Placeholders are in
  * [SQUARE BRACKETS] for the specialist.
  */
 export const PRELIM_TEXT = {
-  /** Title page, in bold capitals under the student's name. */
+  /** Title page, in bold capitals under the student's name; `degree` is getDegreeFromDepartment's abbreviation (its case is kept). */
   submission: (dept: string, faculty: string, university: string, degree: string) =>
-    `A project submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, in partial fulfilment of the requirements for the award of the degree of ${degree}`.toUpperCase(),
+    `${`A project submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, in partial fulfilment of the requirements for the award of`.toUpperCase()} ${awardPhrase(degree, true)}`,
   by: "BY",
   supervisedBy: (name: string) => `SUPERVISED BY: ${name.toUpperCase()}`,
-  degreePlaceholder: "[DEGREE TO BE SUPPLIED]",
   declaration: (title: string, dept: string, faculty: string, university: string, supervisor: string) =>
     `I hereby declare that this project titled, "${title}", submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, is an original work carried out by me under the supervision of ${supervisor}. The work has not been submitted wholly or in part for the award of any degree in this or any other institution.`,
   certification: (title: string, student: string, matric: string, dept: string, faculty: string, university: string, degree: string) =>
-    `This is to certify that this project titled, "${title}", was carried out by ${student} (${matric}), of the Department of ${dept}, Faculty of ${faculty}, ${university}, under my supervision, and has been found suitable for the award of the degree of ${degree}.`,
+    `This is to certify that this project titled, "${title}", was carried out by ${student} (${matric}), of the Department of ${dept}, Faculty of ${faculty}, ${university}, under my supervision, and has been found suitable for the award of ${awardPhrase(degree)}.`,
   dedication: {
     God: "This project is dedicated to the Almighty God, the source of my wisdom, strength and understanding.",
     Family: "This project is dedicated to my family, whose unwavering support, encouragement and sacrifices made this achievement possible.",
@@ -773,7 +782,7 @@ function signatureBlock(name: string, role: string | null): Paragraph[] {
 }
 
 function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: number; figures: number }): (Paragraph | Table | TableOfContents)[] {
-  const degree = orPlaceholder(null, PRELIM_TEXT.degreePlaceholder, ctx);
+  const degree = getDegreeFromDepartment(input.department, { faculty: input.faculty, institution: input.university });
   const matric = orPlaceholder(input.student.matric, PRELIM_TEXT.matricPlaceholder, ctx);
   const supervisor = orPlaceholder(input.supervisor, PRELIM_TEXT.supervisorPlaceholder, ctx);
   const hod = orPlaceholder(input.hod, PRELIM_TEXT.hodPlaceholder, ctx);

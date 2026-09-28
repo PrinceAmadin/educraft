@@ -47,6 +47,8 @@ export interface ClaudeToolCallInput<T> {
   maxTokens?: number;
   /** Where this call belongs, so its tokens and cost land in the AI usage log. */
   usage?: AiUsageContext;
+  /** Cache the system prompt (a long rule text sent unchanged to several calls in a row, e.g. the quality gate's voice review). */
+  cacheSystem?: boolean;
 }
 
 export async function callClaudeForJson<T>({
@@ -57,6 +59,7 @@ export async function callClaudeForJson<T>({
   inputSchema,
   maxTokens = 4096,
   usage,
+  cacheSystem = false,
 }: ClaudeToolCallInput<T>): Promise<T> {
   const startedAt = Date.now();
   const res = await fetch(ANTHROPIC_BASE_URL, {
@@ -69,7 +72,7 @@ export async function callClaudeForJson<T>({
     body: JSON.stringify({
       model: MODEL,
       max_tokens: maxTokens,
-      system,
+      system: cacheSystem ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system,
       messages: [{ role: "user", content: user }],
       tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema }],
       tool_choice: { type: "tool", name: toolName },

@@ -110,11 +110,27 @@ export default async function QaReviewPage({ params }: { params: { id: string } 
             <h2 className="text-sm font-semibold text-foreground">Automated quality gates</h2>
             {gatesRan && review ? (
               <ul className="mt-2 space-y-1 text-[13px]">
-                <Gate label="Formatting check (Layer 3)" value={review.formattingScore != null ? `${review.formattingScore}%` : null} />
-                <Gate label="Structural check (Layer 1)" value={review.structuralPass == null ? null : review.structuralPass ? "Pass" : "Fail"} />
-                <Gate label="Reference verification (Tier 2)" value={review.referenceVerPass == null ? null : review.referenceVerPass ? "Pass" : "Fail"} />
-                <Gate label="Voice check (Layer 2a)" value={review.voiceCheckPass == null ? null : review.voiceCheckPass ? "Pass" : "Fail"} />
+                {review.qualityScore != null ? (
+                  <Gate label="Quality check" value={`${review.qualityScore} of ${review.qualityTotal ?? 89}${review.qualityPassed ? ", passed" : ", not passed"}`} />
+                ) : null}
+                <Gate
+                  label="Formatting (Layer 1)"
+                  value={review.formattingScore != null ? `${review.formattingScore} of 71 (${Math.round((review.formattingScore / 71) * 1000) / 10}%)` : null}
+                />
+                <Gate
+                  label="Structure (Layer 3)"
+                  value={review.structuralScore != null ? `${review.structuralScore} of 16` : review.structuralPass == null ? null : review.structuralPass ? "Pass" : "Fail"}
+                />
+                <Gate label="References (Layer 2b)" value={review.referenceVerPass == null ? null : review.referenceVerPass ? "Pass" : "Fail"} />
+                <Gate label="Voice (Layer 2a)" value={review.voiceCheckPass == null ? null : review.voiceCheckPass ? "Pass" : "Fail"} />
                 {review.tier3Triggered ? <li className="text-gold">Tier 3 reference check was triggered for this project.</li> : null}
+                {review.qualityScore != null ? (
+                  <li>
+                    <Link href={`/admin/projects/${project.projectId}?tab=report`} className="text-xs font-medium text-primary hover:underline">
+                      Full quality report →
+                    </Link>
+                  </li>
+                ) : null}
               </ul>
             ) : (
               <p className="mt-2 text-[13px] text-muted-foreground">

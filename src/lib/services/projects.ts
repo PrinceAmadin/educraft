@@ -30,6 +30,7 @@ import {
 import { notifyFinance, notifyOperations, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { stageByKey } from "@/lib/operations/pipeline-stages";
 import { roundsSoFar } from "@/lib/operations/corrections";
+import { recallState } from "@/lib/quality/recall";
 import { completeOpenRound, openCorrectionRound } from "@/lib/services/operations/supervisor-corrections";
 import { reopenQaReviewOnResubmit } from "@/lib/services/operations/qa-reviews";
 import { onProjectDelivered } from "@/lib/services/operations/ambassador-hooks";
@@ -268,6 +269,8 @@ const detailInclude = {
   },
   // For the correction-limit guard and the data-pause guard (see toCandidate).
   _count: { select: { correctionRounds: true, pauses: { where: { status: { in: ["OPEN", "SUBMITTED"] } } } } },
+  // For the recall guard (D8 quality gate).
+  qaReview: { select: { autoSubmittedAt: true, recallWindowExpiresAt: true, recalledAt: true } },
 } satisfies Prisma.ProjectInclude;
 
 export type ProjectDetail = Prisma.ProjectGetPayload<{ include: typeof detailInclude }>;
@@ -394,6 +397,7 @@ export async function transitionProject(
         where: { kind: "FINAL", archivedAt: null },
         select: { versions: { select: { releaseNo: true } } },
       },
+      qaReview: { select: { autoSubmittedAt: true, recallWindowExpiresAt: true, recalledAt: true } },
     },
   });
 
@@ -422,6 +426,8 @@ export async function transitionProject(
     correctionRounds: roundsSoFar(project._count.correctionRounds, project.supervisorCorrectionCount),
     // A data pause keeps its own clock: no second "waiting for client" pause on top.
     activeDataPause: project._count.pauses > 0,
+    // D8: a report the quality gate sent to QA may be recalled for 30 minutes, until a reviewer starts.
+    recallOpen: project.qaReview ? recallState({ status: project.status, ...project.qaReview }) === "OPEN" : false,
   };
 
   const rule = allowedTransitions(candidate).find((r) => r.to === to);
@@ -485,6 +491,7 @@ export async function transitionProject(
   }
 
   const feed = statusFeedEntry(project.status, to);
+  const recalled = project.status === "SUBMITTED" && to === "IN_PROGRESS";
 
   await db.$transaction(
     async (tx) => {
@@ -533,6 +540,19 @@ export async function transitionProject(
           body: feed.body,
           dedupeKey: `status:${log.id}`,
         });
+      }
+      // D8 recall: the report the quality gate submitted comes back out of the queue.
+      if (recalled) {
+        await tx.deliverableVersion.updateMany({
+          where: { status: "SUBMITTED", deliverable: { projectId: project.id, kind: "FINAL" } },
+          data: { status: "RETURNED", reviewNote: note?.trim() || "Recalled from QA by the specialist.", reviewedById: changedById, reviewedAt: now },
+        });
+        const earlier = await tx.deliverableVersion.count({ where: { status: "RETURNED", reviewNote: { not: null }, deliverable: { projectId: project.id, kind: "FINAL" }, NOT: { reviewedAt: now } } });
+        await tx.projectDeliverable.updateMany({
+          where: { projectId: project.id, kind: "FINAL", status: "IN_REVIEW" },
+          data: { status: earlier > 0 ? "CHANGES_REQUESTED" : "NOT_STARTED" },
+        });
+        await tx.qaReview.update({ where: { projectId: project.id }, data: { recalledAt: now, recalledById: changedById } });
       }
       // A revision sends the uploaded complete document back to the worker with the note.
       if (to === "REVISION_NEEDED") {

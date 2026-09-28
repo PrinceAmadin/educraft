@@ -1,5 +1,6 @@
 import type { ProjectStatus } from "@prisma/client";
 import { CORRECTION_LIMIT_MESSAGE, MAX_CORRECTION_ROUNDS, roundsSoFar } from "@/lib/operations/corrections";
+import { RECALL_WINDOW_MINUTES, recallState } from "@/lib/quality/recall";
 
 /**
  * The project pipeline state machine — pure, no database. Both the API
@@ -51,7 +52,15 @@ export interface TransitionCandidate {
    * same days twice).
    */
   activeDataPause?: boolean;
+  /**
+   * D8: the quality gate sent this report to QA on its own less than 30 minutes
+   * ago and no reviewer has started: the specialist (or the founder/COO) may
+   * still recall it.
+   */
+  recallOpen?: boolean;
 }
+
+export const RECALL_CLOSED_MESSAGE = `Only a report the quality check sent to QA can be recalled, within ${RECALL_WINDOW_MINUTES} minutes and before a reviewer starts.`;
 
 export const MAX_REVISIONS = 3;
 export const DATA_PAUSE_OVERLAP_MESSAGE = "The report is already paused for the client's data files. Use that request, or cancel it first.";
@@ -111,7 +120,11 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
     },
   ],
   AWAITING_CLIENT_INPUT: [{ to: "IN_PROGRESS", action: "Resume work" }],
-  SUBMITTED: [{ to: "IN_QA_REVIEW", action: "Move to QA" }],
+  SUBMITTED: [
+    { to: "IN_QA_REVIEW", action: "Move to QA" },
+    // D8: the recall button on the quality panel; the guard is the 30-minute window.
+    { to: "IN_PROGRESS", action: "Recall from QA", external: true, guard: (p) => (p.recallOpen ? null : RECALL_CLOSED_MESSAGE) },
+  ],
   IN_QA_REVIEW: [
     {
       to: "APPROVED",
@@ -204,6 +217,8 @@ export function toCandidate(project: {
   supervisorCorrectionCount?: number;
   /** `pauses` = data pauses OPEN or SUBMITTED (select it with that filter). */
   _count?: { correctionRounds?: number; pauses?: number };
+  /** D8: the quality gate's auto-submission, for the recall guard. */
+  qaReview?: { autoSubmittedAt: Date | null; recallWindowExpiresAt: Date | null; recalledAt: Date | null } | null;
 }): TransitionCandidate {
   const hasRequirementDetail =
     Boolean(project.specialInstructions?.trim()) ||
@@ -226,6 +241,7 @@ export function toCandidate(project: {
     finalAwaitingRelease: finalAwaitingRelease(project.deliverables ?? []),
     correctionRounds: roundsSoFar(project._count?.correctionRounds ?? 0, project.supervisorCorrectionCount ?? 0),
     activeDataPause: (project._count?.pauses ?? 0) > 0,
+    recallOpen: project.qaReview ? recallState({ status: project.status, ...project.qaReview }) === "OPEN" : false,
   };
 }
 

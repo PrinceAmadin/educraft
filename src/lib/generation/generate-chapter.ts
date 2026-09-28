@@ -129,6 +129,8 @@ export interface StartChapterInput {
   options?: GenerationOptions;
   /** Replace an existing run of this chapter (finished, failed or stopped). Refused while one is running. */
   replace?: boolean;
+  /** D8: the quality gate's failures in the chapter's previous version, frozen into the new brief. */
+  qualityFailures?: string[];
 }
 
 /**
@@ -163,6 +165,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
     hypotheses: earlier.hypotheses,
     specialInstructions: input.prompt.project.specialInstructions,
     supervisorToc: input.prompt.project.supervisorToc,
+    qualityFailures: input.qualityFailures,
   });
   const promptMeta = {
     department: assembled.department,

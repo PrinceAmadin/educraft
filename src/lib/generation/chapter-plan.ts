@@ -130,6 +130,9 @@ export const GENERATION_TEXT = {
     "Do not write the report's References list: it is assembled from the verified references. Where the citation instructions require footnotes or endnotes, follow them.",
   ].join("\n"),
   replyWithText: REPLY_WITH_TEXT,
+  /** D8: a chapter re-generated after the quality gate carries the previous version's failures at the end of its brief. */
+  qualityFailuresHeading: "QUALITY CHECK FAILURES IN THE PREVIOUS VERSION OF THIS CHAPTER",
+  qualityFailuresIntro: (chapter: number) => `The previous version of Chapter ${chapter} failed these checks. Write the chapter so that none of them happens again:`,
   planIntro: "CHAPTER PLAN (from the planning step; write to it)",
   writtenSoFar: (chapter: number) => `CHAPTER ${chapter} TEXT WRITTEN SO FAR`,
   outlineInstruction: (chapter: number) =>
@@ -174,6 +177,8 @@ export interface BriefInput {
   hypotheses?: string[];
   specialInstructions?: string | null;
   supervisorToc?: string | null;
+  /** D8: the previous version's quality failures, one line each (a re-generation only). */
+  qualityFailures?: string[];
 }
 
 const numbered = (items: string[]) => items.map((item, i) => `${i + 1}. ${item.trim()}`).join("\n");
@@ -199,6 +204,8 @@ export function buildChapterBrief(b: BriefInput): string {
   lines.push("", "Supervisor's table of contents:", b.supervisorToc?.trim() || GENERATION_TEXT.noToc);
   lines.push("", "Special instructions from the client:", b.specialInstructions?.trim() || GENERATION_TEXT.noInstructions);
   lines.push("", GENERATION_TEXT.outputFormat);
+  const failures = (b.qualityFailures ?? []).map((f) => f.trim()).filter(Boolean);
+  if (failures.length) lines.push("", GENERATION_TEXT.qualityFailuresHeading, GENERATION_TEXT.qualityFailuresIntro(b.chapter), ...failures.map((f) => `- ${f}`));
   return lines.join("\n");
 }
 

@@ -1,15 +1,79 @@
+import crypto from "node:crypto";
 import { Prisma, type DeliverableAccess, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
 import { deliverableTemplate, orderedChapters } from "@/lib/deliverables";
 import { deliverableGate, type Gate } from "@/lib/files/policy";
 import { checkUploadedFile, type UploadedFileInput } from "@/lib/files/register";
+import { buildPrivatePath } from "@/lib/files/paths";
+import { putPrivateFile } from "@/lib/files/storage";
 import { siteUrl } from "@/lib/site-url";
 import { documentReadyMessage, toWaNumber, waLink } from "@/lib/whatsapp";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyClient, clientProjectPath } from "@/lib/services/client-notify";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { deliverIfFinalReleased, transitionProject } from "@/lib/services/projects";
+
+/** A stored file becomes the deliverable's next version (older unreviewed ones are superseded); the deliverable goes IN_REVIEW. */
+async function recordVersion(input: {
+  projectDbId: string;
+  deliverableId: string;
+  file: { fileName: string; url: string; size: number; contentType: string; pathname: string };
+  submittedById: string;
+  /** WORKER or ADMIN; SYSTEM for the quality gate's own submission (D8), with the person who ran the gate. */
+  submittedByRole: "WORKER" | "ADMIN" | "SYSTEM";
+  note: string | null;
+}): Promise<{ versionId: string; fileId: string }> {
+  return db
+    .$transaction(
+      async (tx) => {
+        // One at a time per deliverable while the version number is chosen.
+        await tx.$queryRaw`SELECT id FROM ${sqlTable("ProjectDeliverable")} WHERE id = ${input.deliverableId} FOR UPDATE`;
+        const last = await tx.deliverableVersion.aggregate({ where: { deliverableId: input.deliverableId }, _max: { version: true } });
+        const file = await tx.projectFile.create({
+          data: {
+            projectId: input.projectDbId,
+            fileName: input.file.fileName,
+            fileUrl: input.file.url,
+            fileSize: input.file.size,
+            fileType: input.file.contentType,
+            category: "from_worker",
+            uploadedBy: input.submittedById,
+            uploaderRole: input.submittedByRole,
+            storage: "PRIVATE_BLOB",
+            blobPathname: input.file.pathname,
+            deliverableId: input.deliverableId,
+          },
+          select: { id: true },
+        });
+        // An upload that was never reviewed is replaced by the newer one.
+        await tx.deliverableVersion.updateMany({
+          where: { deliverableId: input.deliverableId, status: "SUBMITTED" },
+          data: { status: "SUPERSEDED" },
+        });
+        const version = await tx.deliverableVersion.create({
+          data: {
+            deliverableId: input.deliverableId,
+            version: (last._max.version ?? 0) + 1,
+            fileId: file.id,
+            submittedById: input.submittedById,
+            submittedByRole: input.submittedByRole,
+            workerNote: input.note,
+          },
+          select: { id: true },
+        });
+        await tx.projectDeliverable.update({ where: { id: input.deliverableId }, data: { status: "IN_REVIEW" } });
+        return { versionId: version.id, fileId: file.id };
+      },
+      { timeout: 15_000, maxWait: 10_000 }
+    )
+    .catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new DeliverableError("That upload was already submitted.", 409);
+      }
+      throw error;
+    });
+}
 
 /**
  * Chapters and documents: the worker uploads a version, an admin releases it
@@ -255,52 +319,13 @@ export async function submitVersion(input: {
   });
   const note = input.note?.trim() || null;
 
-  const versionId = await db.$transaction(
-    async (tx) => {
-      // One at a time per deliverable while the version number is chosen.
-      await tx.$queryRaw`SELECT id FROM ${sqlTable("ProjectDeliverable")} WHERE id = ${deliverable.id} FOR UPDATE`;
-      const last = await tx.deliverableVersion.aggregate({ where: { deliverableId: deliverable.id }, _max: { version: true } });
-      const file = await tx.projectFile.create({
-        data: {
-          projectId: project.id,
-          fileName: checked.fileName,
-          fileUrl: checked.url,
-          fileSize: checked.size,
-          fileType: checked.contentType,
-          category: "from_worker",
-          uploadedBy: input.userId,
-          uploaderRole: "WORKER",
-          storage: "PRIVATE_BLOB",
-          blobPathname: checked.pathname,
-          deliverableId: deliverable.id,
-        },
-        select: { id: true },
-      });
-      // An upload that was never reviewed is replaced by the newer one.
-      await tx.deliverableVersion.updateMany({
-        where: { deliverableId: deliverable.id, status: "SUBMITTED" },
-        data: { status: "SUPERSEDED" },
-      });
-      const version = await tx.deliverableVersion.create({
-        data: {
-          deliverableId: deliverable.id,
-          version: (last._max.version ?? 0) + 1,
-          fileId: file.id,
-          submittedById: input.userId,
-          submittedByRole: "WORKER",
-          workerNote: note,
-        },
-        select: { id: true },
-      });
-      await tx.projectDeliverable.update({ where: { id: deliverable.id }, data: { status: "IN_REVIEW" } });
-      return version.id;
-    },
-    { timeout: 15_000, maxWait: 10_000 }
-  ).catch((error: unknown) => {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new DeliverableError("That upload was already submitted.", 409);
-    }
-    throw error;
+  const { versionId } = await recordVersion({
+    projectDbId: project.id,
+    deliverableId: deliverable.id,
+    file: { fileName: checked.fileName, url: checked.url, size: checked.size, contentType: checked.contentType, pathname: checked.pathname },
+    submittedById: input.userId,
+    submittedByRole: "WORKER",
+    note,
   });
 
   // The complete document is the one the quality check reviews.
@@ -317,6 +342,52 @@ export async function submitVersion(input: {
     });
   }
   return { versionId, movedToQa };
+}
+
+/** Where the gate stores the assembled report: a deliverable path with a 12-byte random name, like an upload's. */
+export function generatedReportPath(projectDbId: string, deliverableId: string): string {
+  return buildPrivatePath({ projectDbId, purpose: "deliverable", targetId: deliverableId, random: crypto.randomBytes(12).toString("hex"), ext: "docx" });
+}
+
+/**
+ * D8: the quality gate passed, so the assembled report goes to QA on its own as
+ * the complete document's next version (stored in the private Blob store, like
+ * any upload) and the project moves to SUBMITTED. The QA reviewer downloads
+ * exactly the file that was checked.
+ */
+export async function submitGeneratedReport(input: {
+  projectDbId: string;
+  buffer: Uint8Array;
+  fileName: string;
+  note: string;
+  /** Whoever ran the gate (recorded on the version); the move itself is the system's. */
+  actorUserId: string;
+}): Promise<{ versionId: string; fileId: string }> {
+  const project = await db.project.findUnique({ where: { id: input.projectDbId }, select: { id: true, projectId: true, status: true } });
+  if (!project) throw new DeliverableError("Project not found", 404);
+  if (!FINAL_TO_QA_STATUSES.includes(project.status)) throw new DeliverableError(whySubmitClosed("FINAL", project.status), 409);
+  // Deliverables are made when a page first lists them; the gate may be the first to need the complete document.
+  await ensureDeliverables(project.id);
+  const deliverable = await db.projectDeliverable.findFirst({
+    where: { projectId: project.id, kind: "FINAL", archivedAt: null },
+    orderBy: { sortOrder: "asc" },
+    select: { id: true },
+  });
+  if (!deliverable) throw new DeliverableError("This project has no complete-document deliverable to submit.", 409);
+
+  const pathname = generatedReportPath(project.id, deliverable.id);
+  const contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const { url } = await putPrivateFile(pathname, input.buffer, contentType);
+  const recorded = await recordVersion({
+    projectDbId: project.id,
+    deliverableId: deliverable.id,
+    file: { fileName: input.fileName, url, size: input.buffer.byteLength, contentType, pathname },
+    submittedById: input.actorUserId,
+    submittedByRole: "SYSTEM",
+    note: input.note,
+  });
+  await transitionProject(project.id, "SUBMITTED", { changedById: null, note: input.note });
+  return recorded;
 }
 
 // ── Admin: review ────────────────────────────────────────────

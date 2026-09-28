@@ -2174,11 +2174,35 @@ model QaReview {
   startedAt    DateTime?
   completedAt  DateTime?
 
-  // Automated gate results (from the report production system, when it runs)
+  // Automated gate results (Phase D8 quality gate, src/lib/quality-gate.ts)
+  /// Layer 1 formatting checks passed, of 71.
   formattingScore  Float?
   structuralPass   Boolean?
   referenceVerPass Boolean?
   voiceCheckPass   Boolean?
+  /// Checks passed of `qualityTotal` (89); passed = 85 or more with no CRITICAL failure.
+  qualityScore     Int?
+  qualityTotal     Int?
+  qualityPassed    Boolean?
+  /// Layer 3 structural checks passed, of 16.
+  structuralScore  Int?
+  /// Layer 2b reference check passed (1) or not (0).
+  referenceScore   Int?
+  /// Layer 2a voice check passed (1) or not (0).
+  voiceScore       Int?
+  /// The failed checks' lines: [{ id, layer, severity, chapter, message, locations, fix }].
+  failuresJson     Json?
+  /// Every check's result, warnings, notes, the per-chapter AI cache, cost and the last runs' history.
+  qualityReport    Json?
+  qualityRunAt     DateTime?
+  qualityRunById   String?
+  /// Held while a run is in progress, so two runs never overlap.
+  qualityRunLockedUntil DateTime?
+  /// When the gate sent the report to QA on its own; the specialist may recall it until recallWindowExpiresAt.
+  autoSubmittedAt       DateTime?
+  recallWindowExpiresAt DateTime?
+  recalledAt            DateTime?
+  recalledById          String?
 
   // Tier 3 reference data (if triggered)
   tier3Triggered Boolean @default(false)

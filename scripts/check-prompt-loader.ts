@@ -10,8 +10,11 @@ import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS, deliverableTemplate } from 
 import { intakeSubmitSchema } from "../src/lib/validations/intake";
 import { intakeEditSchema } from "../src/lib/validations/intake-edit";
 import {
+  DEGREE_NAMES,
   DEPARTMENTS,
   defaultReferencingStyle,
+  degreeName,
+  getDegreeFromDepartment,
   lookupDepartment,
   matchDepartment,
   resolveSection,
@@ -388,6 +391,57 @@ async function main() {
   expect("Computer Engineering switched to COMPUTER_SCIENCE (A6)", resolveSection(find("Computer Engineering"), 3, "COMPUTER_SCIENCE"), "COMPUTER_SCIENCE");
   expect("Civil Engineering in Mode 4 keeps ENGINEERING (A7)", resolveSection(find("Civil Engineering"), 4), "ENGINEERING");
   expect("default styles (B2)", [defaultReferencingStyle(find("Law")), defaultReferencingStyle(find("Nursing")), defaultReferencingStyle(find("History")), defaultReferencingStyle(find("Marketing"))], ["NALT", "NMCN", "CHICAGO_NOTES_BIBLIOGRAPHY", "APA_7TH"]);
+
+  // ── The degree on the title page (getDegreeFromDepartment) ─────────────────────────────
+  const noDegree = DEPARTMENTS.filter((d) => !d.degree || !DEGREE_NAMES[d.degree]).map((d) => d.name);
+  expect(`every one of the ${DEPARTMENTS.length} Table A entries has a named degree`, noDegree, []);
+  const degrees: [string, string][] = [
+    ["Computer Science", "B.Sc"],
+    ["Computer Engineering", "B.Eng"],
+    ["Mechanical Engineering", "B.Eng"],
+    ["Prosthetics and Orthotics", "B.Tech"],
+    ["Accounting", "B.Sc"],
+    ["Banking and Finance", "B.Sc"],
+    ["Economics", "B.Sc"],
+    ["Law", "LL.B"],
+    ["Islamic Law", "LL.B"],
+    ["Medicine and Surgery", "MBBS"],
+    ["MBBS", "MBBS"],
+    ["Medical Laboratory Science", "BMLS"],
+    ["Dentistry", "BDS"],
+    ["Veterinary Medicine", "DVM"],
+    ["Optometry", "OD"],
+    ["Microbiology", "B.Sc"],
+    ["Architecture", "B.Arch"],
+    ["Pharmacy", "B.Pharm"],
+    ["Nursing", "B.NSc"],
+    ["Midwifery", "B.NSc"],
+    ["Education", "B.Ed"],
+    ["Guidance and Counselling", "B.Ed"],
+    ["B.Ed Mathematics", "B.Ed"],
+    ["Library and Information Science", "BLIS"],
+    ["Agriculture", "B.Agric"],
+    ["Crop Science", "B.Agric"],
+    ["Agricultural Economics", "B.Agric"],
+    ["Agricultural Extension", "B.Agric"],
+    ["Food Science and Technology", "B.Sc"],
+    ["English and Literary Studies", "B.A"],
+    ["History", "B.A"],
+    ["International Relations", "B.Sc"],
+    ["Mass Communication", "B.Sc"],
+    ["Physics", "B.Sc"],
+    ["Engineering", "B.Eng"],
+    ["Arts", "B.A"],
+  ];
+  for (const [dept, want] of degrees) expect(`degree: ${dept}`, getDegreeFromDepartment(dept), want);
+  expect("degree: Nursing at a school of nursing is the RN", getDegreeFromDepartment("Nursing", { institution: "School of Nursing, LUTH" }), "RN");
+  expect("degree: Midwifery at a school of midwifery is the RM", getDegreeFromDepartment("Midwifery", { faculty: "School of Midwifery" }), "RM");
+  expect("degree: Nursing in a university faculty stays B.NSc", getDegreeFromDepartment("Nursing", { faculty: "Clinical Sciences", institution: "University of Lagos" }), "B.NSc");
+  expect("degree: an unknown department in a Faculty of Engineering", getDegreeFromDepartment("Underwater Acoustics", { faculty: "Faculty of Engineering" }), "B.Eng");
+  expect("degree: an unknown department in a Faculty of Arts", getDegreeFromDepartment("Creative Writing Studio", { faculty: "Arts" }), "B.A");
+  expect("degree: an unknown department with no faculty", getDegreeFromDepartment("dsafdsgfdg"), "B.Sc");
+  expect("degree: nothing typed", getDegreeFromDepartment(null), "B.Sc");
+  expect("degree names", [degreeName("B.Sc"), degreeName("LL.B"), degreeName("MBBS")], ["Bachelor of Science", "Bachelor of Laws", "Bachelor of Medicine, Bachelor of Surgery"]);
 
   // ── Refusals: nothing incomplete or contradictory reaches Claude ───────────────────────
   await refuses("a group label is refused", () => loadChapterPrompt(input({ department: "Engineering" })), /not a department/);

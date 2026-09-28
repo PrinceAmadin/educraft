@@ -329,6 +329,11 @@ export interface ProjectOps {
     structuralPass: boolean | null;
     referenceVerPass: boolean | null;
     voiceCheckPass: boolean | null;
+    /** D8 quality gate: checks passed of qualityTotal (89), and the structural count of 16. */
+    qualityScore: number | null;
+    qualityTotal: number | null;
+    qualityPassed: boolean | null;
+    structuralScore: number | null;
   } | null;
   parent: { id: string; projectId: string; projectTitle: string | null; status: ProjectStatus } | null;
   children: { id: string; projectId: string; projectTitle: string | null; status: ProjectStatus }[];
@@ -388,6 +393,10 @@ export async function getProjectOps(projectDbId: string, now: Date = new Date())
           structuralPass: q.structuralPass,
           referenceVerPass: q.referenceVerPass,
           voiceCheckPass: q.voiceCheckPass,
+          qualityScore: q.qualityScore,
+          qualityTotal: q.qualityTotal,
+          qualityPassed: q.qualityPassed,
+          structuralScore: q.structuralScore,
         }
       : null,
     parent: project.parentProject,

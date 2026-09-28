@@ -393,14 +393,19 @@ function authorMatches(citedKey: string, family: string): boolean {
  * and every citation that matches no reference, so QA can catch a citation to
  * a work that is not on the verified list.
  */
+/** The references a citation names: same year, first author's surname (D7's rule, shared with the quality gate). */
+export function referencesForCitation<T extends CitableReference>(refs: T[], c: Pick<Citation, "author" | "year">): T[] {
+  const year = c.year === "n.d." ? null : Number(c.year.slice(0, 4));
+  const key = nameKey(c.author);
+  return refs.filter((r) => (r.year ?? null) === year && authorMatches(key, firstFamily(r)));
+}
+
 export function citedReferences<T extends CitableReference>(refs: T[], chapterTexts: string[]): { cited: T[]; uncited: T[]; unmatched: string[] } {
   const citations = chapterTexts.flatMap(citationsIn);
   const citedSet = new Set<T>();
   const unmatched = new Set<string>();
   for (const c of citations) {
-    const year = c.year === "n.d." ? null : Number(c.year.slice(0, 4));
-    const key = nameKey(c.author);
-    const hit = refs.filter((r) => (r.year ?? null) === year && authorMatches(key, firstFamily(r)));
+    const hit = referencesForCitation(refs, c);
     if (hit.length) hit.forEach((r) => citedSet.add(r));
     else unmatched.add(`${c.author}, ${c.year}`);
   }

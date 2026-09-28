@@ -12,6 +12,19 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
 
   reactStrictMode: true,
+
+  /**
+   * The prompt library is read from disk at run time (src/lib/generation/prompt-loader.ts,
+   * the quality gate's voice rules). Routes that start a chapter or run the gate
+   * need prompts/ in their function bundle, or Vercel's file tracing leaves it out.
+   */
+  experimental: {
+    outputFileTracingIncludes: {
+      "/api/admin/projects/[id]/quality/run": ["./prompts/**/*"],
+      "/api/worker/projects/[id]/quality/run": ["./prompts/**/*"],
+      "/api/admin/projects/[id]/quality/regenerate": ["./prompts/**/*"],
+    },
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**.amazonaws.com" },

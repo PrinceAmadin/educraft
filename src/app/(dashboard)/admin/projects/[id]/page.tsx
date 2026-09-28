@@ -31,6 +31,7 @@ import { getAdminPauses } from "@/lib/services/data-pause";
 import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard";
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
+import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
 
@@ -113,6 +114,7 @@ export default async function ProjectDetailPage({
                     downloadUrl={`${adminBase}/documents/docx`}
                   />
                 ) : null}
+                {generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? <QualityGatePanel endpoint={`${adminBase}/quality`} canRegenerate /> : null}
                 {pauses.map((p) => (
                   <DataPauseReviewCard
                     key={`${p.id}-${p.status}-${p.round}-${p.files.length}`}

@@ -16,6 +16,7 @@ import { getWorkerPauseView } from "@/lib/services/data-pause";
 import { SecondaryDataCard } from "@/components/projects/mode/SecondaryDataCard";
 import { secondaryDataStatus } from "@/lib/services/secondary-data";
 import { GenerationDashboard } from "@/components/generation/GenerationDashboard";
+import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
@@ -247,6 +248,7 @@ export default async function WorkerAssignmentPage({
                         actionEndpoint={`${routeBase}/data-pause`}
                         downloadUrl={`${routeBase}/documents/docx`}
                       />
+                      <QualityGatePanel endpoint={`${routeBase}/quality`} canRegenerate={false} />
                       {pauseCard}
                       {secondaryCard}
                     </div>

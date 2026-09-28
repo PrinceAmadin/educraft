@@ -84,21 +84,25 @@ export type DepartmentEntry = {
   pureScience?: boolean;
   /** Group labels ("Engineering", "Social Sciences") and junk values: never routed. */
   group?: boolean;
+  /** The undergraduate degree the department awards, abbreviated as a title page prints it (getDegreeFromDepartment). */
+  degree: string;
 };
 
-const ENGINEERING = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "ENGINEERING", defaultMode: 3 });
-const COMPUTING = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "COMPUTER_SCIENCE", defaultMode: 3 });
-const MEDICAL = (name: string, defaultMode: 2 | 4, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "MEDICAL_SCIENCE", defaultMode });
-const PURE_SCIENCE = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "MEDICAL_SCIENCE", defaultMode: 4, pureScience: true, modeSections: { 2: "BUSINESS" } });
-const EDUCATION = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "EDUCATION", defaultMode: 2 });
-const BUSINESS = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "BUSINESS", defaultMode: 2, ...extra });
-const SOCIAL = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "BUSINESS", defaultMode: 2, socialScience: true });
-const ECONOMICS = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "ECONOMICS", defaultMode: 5, ...extra });
-const AGRICULTURE = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "AGRICULTURE", defaultMode: 4 });
-const HUMANITIES = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "HUMANITIES", defaultMode: 1, ...extra });
-const LAW = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "LAW", defaultMode: 1 });
-const COO_PICKS = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: null, defaultMode: null, ...extra });
-const GROUP = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: null, defaultMode: null, group: true });
+const ENGINEERING = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "ENGINEERING", defaultMode: 3, degree: "B.Eng", ...extra });
+const COMPUTING = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "COMPUTER_SCIENCE", defaultMode: 3, degree: "B.Sc" });
+const MEDICAL = (name: string, defaultMode: 2 | 4, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "MEDICAL_SCIENCE", defaultMode, degree: "B.Sc", ...extra });
+const PURE_SCIENCE = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "MEDICAL_SCIENCE", defaultMode: 4, pureScience: true, modeSections: { 2: "BUSINESS" }, degree: "B.Sc" });
+const EDUCATION = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "EDUCATION", defaultMode: 2, degree: "B.Ed", ...extra });
+const BUSINESS = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "BUSINESS", defaultMode: 2, degree: "B.Sc", ...extra });
+const SOCIAL = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "BUSINESS", defaultMode: 2, socialScience: true, degree: "B.Sc" });
+const ECONOMICS = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "ECONOMICS", defaultMode: 5, degree: "B.Sc", ...extra });
+const AGRICULTURE = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "AGRICULTURE", defaultMode: 4, degree: "B.Agric", ...extra });
+/** Arts departments award the B.A; the social-science ones filed here award the B.Sc. */
+const HUMANITIES = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: "HUMANITIES", defaultMode: 1, degree: extra.socialScience ? "B.Sc" : "B.A", ...extra });
+const LAW = (name: string, aliases: string[] = []): DepartmentEntry => ({ name, aliases, section: "LAW", defaultMode: 1, degree: "LL.B" });
+const COO_PICKS = (name: string, aliases: string[] = [], extra: Partial<DepartmentEntry> = {}): DepartmentEntry => ({ name, aliases, section: null, defaultMode: null, degree: "B.Sc", ...extra });
+/** A group label's degree is its faculty's where the label names one. */
+const GROUP = (name: string, aliases: string[] = [], degree = "B.Sc"): DepartmentEntry => ({ name, aliases, section: null, defaultMode: null, group: true, degree });
 
 export const DEPARTMENTS: readonly DepartmentEntry[] = [
   // ENGINEERING — Mode 3. Civil and Materials projects are often lab tests: the COO picks Mode 4 per project (A7).
@@ -121,7 +125,7 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   ENGINEERING("Polymer and Textile Engineering", ["Polymer Engineering", "Textile Engineering"]),
   ENGINEERING("Systems Engineering"),
   ENGINEERING("Food Engineering", ["Food Science and Engineering"]),
-  ENGINEERING("Prosthetics and Orthotics"),
+  ENGINEERING("Prosthetics and Orthotics", [], { degree: "B.Tech" }), // FUTO awards the B.Tech
   ENGINEERING("Automotive Engineering"),
   ENGINEERING("Wood Products Engineering"),
 
@@ -136,15 +140,15 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   COMPUTING("Artificial Intelligence", ["Artificial Intelligence and Robotics"]),
 
   // MEDICAL_SCIENCE — Mode 4, Results and Discussion kept separate (Chapter Four results only, discussion in Chapter Five).
-  MEDICAL("Medicine and Surgery", 4, ["Medicine", "MBBS"]),
-  MEDICAL("Medical Laboratory Science", 4, ["MLS", "Medical Laboratory Science (MLS)", "Medical Lab Science", "Medical Laboratory Sciences", "Haematology", "Haematology and Blood Transfusion Science", "Chemical Pathology", "Medical Microbiology", "Medical Microbiology and Parasitology"]),
+  MEDICAL("Medicine and Surgery", 4, ["Medicine", "MBBS"], { degree: "MBBS" }),
+  MEDICAL("Medical Laboratory Science", 4, ["MLS", "Medical Laboratory Science (MLS)", "Medical Lab Science", "Medical Laboratory Sciences", "Haematology", "Haematology and Blood Transfusion Science", "Chemical Pathology", "Medical Microbiology", "Medical Microbiology and Parasitology"], { degree: "BMLS" }),
   MEDICAL("Microbiology", 4, ["Applied Microbiology", "Industrial Microbiology", "Microbio"]),
   MEDICAL("Biochemistry", 4, ["Medical Biochemistry", "Biochem"]),
-  MEDICAL("Pharmacy", 4, ["Pharmaceutical Sciences", "B.Pharm"]),
+  MEDICAL("Pharmacy", 4, ["Pharmaceutical Sciences", "B.Pharm"], { degree: "B.Pharm" }),
   MEDICAL("Pharmacology", 4, ["Pharmacology and Toxicology", "Pharmacology and Therapeutics"]),
   MEDICAL("Physiology", 4, ["Human Physiology"]),
   MEDICAL("Anatomy", 4, ["Human Anatomy"]),
-  MEDICAL("Veterinary Medicine", 4, ["DVM"]),
+  MEDICAL("Veterinary Medicine", 4, ["DVM"], { degree: "DVM" }),
   MEDICAL("Nutrition and Dietetics", 4, ["Human Nutrition", "Human Nutrition and Dietetics", "Nutrition"]),
   MEDICAL("Radiography and Radiation Science", 4, ["Radiography", "Medical Radiography"]),
   MEDICAL("Biotechnology", 4, ["Genetics and Biotechnology", "Genetics"]),
@@ -164,13 +168,13 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   MEDICAL("Public Health", 2, ["Community Health"]),
   MEDICAL("Environmental Health Science", 2, ["Environmental Health"]),
   MEDICAL("Physiotherapy", 2, ["Medical Rehabilitation"]),
-  MEDICAL("Optometry", 2, ["Optometry and Vision Science"]),
-  MEDICAL("Dentistry", 2, ["Dental Surgery", "BDS", "Dental Sciences", "Dental Technology", "Dental Therapy"]),
+  MEDICAL("Optometry", 2, ["Optometry and Vision Science"], { degree: "OD" }),
+  MEDICAL("Dentistry", 2, ["Dental Surgery", "BDS", "Dental Sciences", "Dental Technology", "Dental Therapy"], { degree: "BDS" }),
   MEDICAL("Health Information Management", 2, ["Health Records", "Medical Records", "Health Information Technology"]),
 
   // NURSING — Mode 2.
-  { name: "Nursing", aliases: ["Nursing Science", "Public Health Nursing", "Community Health Nursing"], section: "NURSING", defaultMode: 2 },
-  { name: "Midwifery", aliases: ["Nursing and Midwifery"], section: "NURSING", defaultMode: 2 },
+  { name: "Nursing", aliases: ["Nursing Science", "Public Health Nursing", "Community Health Nursing"], section: "NURSING", defaultMode: 2, degree: "B.NSc" },
+  { name: "Midwifery", aliases: ["Nursing and Midwifery"], section: "NURSING", defaultMode: 2, degree: "B.NSc" },
 
   // EDUCATION — Mode 2 (a theoretical Mode 1 project takes the Humanities thematic chain).
   EDUCATION("Education"),
@@ -179,14 +183,14 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   EDUCATION("Curriculum Studies", ["Curriculum", "Curriculum and Instruction"]),
   EDUCATION("Guidance and Counselling", ["Counselling Psychology", "Educational Psychology", "Educational Psychology and Counselling"]),
   EDUCATION("Educational Management", ["Educational Administration", "Educational Administration and Planning", "Educational Management and Planning"]),
-  { name: "Educational Technology", section: "EDUCATION", defaultMode: 2, modeSections: { 3: "COMPUTER_SCIENCE" } },
+  { name: "Educational Technology", section: "EDUCATION", defaultMode: 2, modeSections: { 3: "COMPUTER_SCIENCE" }, degree: "B.Ed" },
   EDUCATION("Health Education", ["Human Kinetics and Health Education", "Physical and Health Education", "Human Kinetics"]),
   EDUCATION("Business Education", ["Business Teacher Education", "Office and Information Management Education"]),
   EDUCATION("Technical and Vocational Education", ["Vocational and Technical Education", "Technical Education", "Vocational Education", "Industrial Technical Education"]),
   EDUCATION("Educational Foundations", ["Foundations of Education", "Philosophy of Education", "Sociology of Education"]),
   EDUCATION("Special Education", ["Special Needs Education"]),
   EDUCATION("Early Childhood Education", ["Early Childhood and Primary Education", "Primary Education", "Primary Education Studies"]),
-  EDUCATION("Library and Information Science", ["Library Science", "Library and Information Studies"]),
+  EDUCATION("Library and Information Science", ["Library Science", "Library and Information Studies"], { degree: "BLIS" }),
   EDUCATION("Social Studies", ["Social Studies Education"]),
   // Reached by the Education-token rule in lookupDepartment ("Economics Education", "B.Ed Mathematics", "Music Education").
   EDUCATION("Education (combined with a teaching subject)"),
@@ -221,13 +225,13 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   BUSINESS("Quantity Surveying"),
   BUSINESS("Urban and Regional Planning", ["Town Planning", "Urban Planning"]),
   BUSINESS("Building Technology", ["Building", "Building Science", "Building Construction"], { modeSections: { 4: "ENGINEERING" } }),
-  BUSINESS("Agricultural Extension", ["Agricultural Extension and Rural Development", "Agricultural Extension and Rural Sociology"], { modeSections: { 4: "AGRICULTURE" } }),
+  BUSINESS("Agricultural Extension", ["Agricultural Extension and Rural Development", "Agricultural Extension and Rural Sociology"], { modeSections: { 4: "AGRICULTURE" }, degree: "B.Agric" }),
 
   // ECONOMICS — Mode 5. A4: the COO may move a finance project to Mode 2 (BUSINESS) for primary data. Accounting is locked (A3).
   ECONOMICS("Economics", ["Economics and Development Studies", "Econs"]),
   ECONOMICS("Development Economics"),
   ECONOMICS("Development Studies", [], { socialScience: true }),
-  ECONOMICS("Agricultural Economics", ["Agricultural Economics and Extension", "Agricultural Economics and Farm Management", "Agricultural and Resource Economics", "Agribusiness", "Agric Economics", "Agric Econs"], { modeSections: { 4: "AGRICULTURE" } }),
+  ECONOMICS("Agricultural Economics", ["Agricultural Economics and Extension", "Agricultural Economics and Farm Management", "Agricultural and Resource Economics", "Agribusiness", "Agric Economics", "Agric Econs"], { modeSections: { 4: "AGRICULTURE" }, degree: "B.Agric" }),
   ECONOMICS("Statistics", ["Applied Statistics", "Industrial Statistics"]),
   ECONOMICS("Demography and Social Statistics", ["Demography", "Population Studies"], { socialScience: true }),
   ECONOMICS("Accounting", ["Accountancy", "Accounting and Finance"], { lockedMode: true }),
@@ -243,9 +247,9 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   AGRICULTURE("Crop Science", ["Crop Production", "Crop Protection", "Crop Science and Horticulture", "Horticulture", "Plant Science and Crop Production", "Plant Breeding", "Plant Breeding and Seed Technology"]),
   AGRICULTURE("Animal Science", ["Animal Production", "Animal Production and Health", "Animal Husbandry", "Animal Breeding and Genetics"]),
   AGRICULTURE("Soil Science", ["Soil Science and Land Resources Management"]),
-  AGRICULTURE("Fisheries and Aquaculture", ["Fisheries", "Aquaculture and Fisheries Management"]),
-  AGRICULTURE("Forestry and Wildlife", ["Forestry", "Forestry and Wildlife Management", "Wildlife Management"]),
-  AGRICULTURE("Food Science and Technology", ["Food Science", "Food Technology", "Food Science and Nutrition"]),
+  AGRICULTURE("Fisheries and Aquaculture", ["Fisheries", "Aquaculture and Fisheries Management"], { degree: "B.Sc" }),
+  AGRICULTURE("Forestry and Wildlife", ["Forestry", "Forestry and Wildlife Management", "Wildlife Management"], { degree: "B.Sc" }),
+  AGRICULTURE("Food Science and Technology", ["Food Science", "Food Technology", "Food Science and Nutrition"], { degree: "B.Sc" }),
 
   // HUMANITIES — Mode 1 (Template B).
   HUMANITIES("English and Literary Studies", ["English", "English Language", "English Language and Literature", "Literature in English", "English Literature", "Literature", "English Studies"]),
@@ -283,18 +287,18 @@ export const DEPARTMENTS: readonly DepartmentEntry[] = [
   COO_PICKS("Mathematics", ["Industrial Mathematics", "Applied Mathematics", "Pure and Applied Mathematics", "Mathematical Sciences"], { pureScience: true }),
   COO_PICKS("Geology", ["Applied Geology", "Geology and Mining", "Earth Sciences"], { pureScience: true }),
   COO_PICKS("Geography", ["Geography and Environmental Management", "Geography and Regional Planning"], { socialScience: true }),
-  COO_PICKS("Architecture", ["Architectural Technology"]),
+  COO_PICKS("Architecture", ["Architectural Technology"], { degree: "B.Arch" }),
   COO_PICKS("Surveying and Geoinformatics", ["Surveying", "Geoinformatics", "Surveying and Geo-informatics"]),
   COO_PICKS("Meteorology", ["Meteorology and Climate Science", "Atmospheric Science", "Climate Science"]),
   COO_PICKS("Home Economics", ["Home Science", "Home Science and Management", "Home Economics and Hotel Management", "Clothing and Textiles"]),
   COO_PICKS("Water Resources Management and Agrometeorology", ["Agrometeorology"]),
 
   // Not departments: the COO records the real department before anything is generated.
-  GROUP("Engineering (branch not stated)", ["Engineering", "Engineering (all branches)"]),
+  GROUP("Engineering (branch not stated)", ["Engineering", "Engineering (all branches)"], "B.Eng"),
   GROUP("Medical or health sciences (branch not stated)", ["Medical", "Medical Science", "Medical Sciences", "Medical Sci", "Medical/Lab Science", "Medical/Lab Sciences", "Medical/Lab Sci", "Medicine and Health", "Basic Medical Sciences", "Health Sciences"]),
   GROUP("Management Sciences (department not stated)", ["Management Sciences", "Business/Accounting"]),
   GROUP("Social Sciences (department not stated)", ["Social Sciences", "Social Science"]),
-  GROUP("Arts or Humanities (department not stated)", ["Arts", "Humanities", "Arts and Humanities"]),
+  GROUP("Arts or Humanities (department not stated)", ["Arts", "Humanities", "Arts and Humanities"], "B.A"),
   GROUP("Sciences (department not stated)", ["Science", "Sciences", "Natural Sciences", "Physical Sciences", "Life Sciences", "Pure and Applied Sciences"]),
   GROUP("Environmental Sciences (department not stated)", ["Environmental Science", "Environmental Sciences", "Environmental Management"]),
   GROUP("Media Studies (empirical or not stated)", ["Media Studies", "Media"]), // Mass Communication (survey) or non-empirical media studies: the COO decides
@@ -367,6 +371,70 @@ export function matchDepartment(raw: string | null | undefined): { entry: Depart
 
 export function lookupDepartment(raw: string | null | undefined): DepartmentEntry | null {
   return matchDepartment(raw)?.entry ?? null;
+}
+
+// ─── The degree on the title page ───────────────────────────────────────────
+
+/** Full names of the degrees Table A awards, for "the degree of Bachelor of Science (B.Sc)". */
+export const DEGREE_NAMES: Record<string, string> = {
+  "B.Sc": "Bachelor of Science",
+  "B.Eng": "Bachelor of Engineering",
+  "B.Tech": "Bachelor of Technology",
+  "B.A": "Bachelor of Arts",
+  "B.Ed": "Bachelor of Education",
+  "B.Agric": "Bachelor of Agriculture",
+  "B.Arch": "Bachelor of Architecture",
+  "B.Pharm": "Bachelor of Pharmacy",
+  "B.NSc": "Bachelor of Nursing Science",
+  BMLS: "Bachelor of Medical Laboratory Science",
+  BLIS: "Bachelor of Library and Information Science",
+  BDS: "Bachelor of Dental Surgery",
+  MBBS: "Bachelor of Medicine, Bachelor of Surgery",
+  DVM: "Doctor of Veterinary Medicine",
+  OD: "Doctor of Optometry",
+  "LL.B": "Bachelor of Laws",
+  RN: "Registered Nurse",
+  RM: "Registered Midwife",
+};
+
+/** Schools of nursing and midwifery award the RN / RM certificate, not a degree. */
+export const CERTIFICATE_AWARDS = new Set(["RN", "RM"]);
+
+/** The degree a department or faculty name clearly indicates, or null. */
+function degreeFromText(text: string | null | undefined): string | null {
+  const t = text ?? "";
+  if (/engineering/i.test(t)) return "B.Eng";
+  if (/education/i.test(t)) return "B.Ed";
+  if (/\blaws?\b/i.test(t)) return "LL.B";
+  if (/agric/i.test(t)) return "B.Agric";
+  if (/pharmac/i.test(t)) return "B.Pharm";
+  if (/nursing/i.test(t)) return "B.NSc";
+  if (/\barts?\b|humanities/i.test(t)) return "B.A";
+  return null;
+}
+
+/**
+ * The undergraduate degree for a department, abbreviated (B.Sc, B.Eng, LL.B,
+ * MBBS…). A Table A department gives its own; a nursing or midwifery project
+ * from a school or college of nursing gives the RN (RM) certificate; anything
+ * else is judged by the department's then the faculty's name, else B.Sc.
+ */
+export function getDegreeFromDepartment(
+  department: string | null | undefined,
+  context: { faculty?: string | null; institution?: string | null } = {},
+): string {
+  const entry = lookupDepartment(department);
+  if (entry?.section === "NURSING") {
+    const where = `${context.faculty ?? ""} ${context.institution ?? ""}`;
+    if (/\b(school|college)s? of (nursing|midwifery)\b/i.test(where)) return /midwi/i.test(entry.name) ? "RM" : "RN";
+  }
+  if (entry && !entry.group) return entry.degree;
+  return degreeFromText(department) ?? degreeFromText(context.faculty) ?? entry?.degree ?? "B.Sc";
+}
+
+/** "Bachelor of Science" for "B.Sc" (the abbreviation itself when the name is unknown). */
+export function degreeName(abbreviation: string): string {
+  return DEGREE_NAMES[abbreviation] ?? abbreviation;
 }
 
 export class DepartmentRoutingError extends Error {}

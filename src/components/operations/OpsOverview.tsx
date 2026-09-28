@@ -243,10 +243,16 @@ export function OpsOverview({
           <h3 className="meta-label">Quality gate history</h3>
           {ops.qaReview && (ops.qaReview.formattingScore != null || ops.qaReview.structuralPass != null || ops.qaReview.referenceVerPass != null || ops.qaReview.voiceCheckPass != null) ? (
             <ul className="mt-1 space-y-0.5 text-[13px]">
-              <Gate label="Formatting check (Layer 3)" value={ops.qaReview.formattingScore != null ? `${ops.qaReview.formattingScore}%` : null} />
-              <Gate label="Structural check (Layer 1)" value={ops.qaReview.structuralPass == null ? null : ops.qaReview.structuralPass ? "Pass" : "Fail"} />
-              <Gate label="Reference verification (Tier 2)" value={ops.qaReview.referenceVerPass == null ? null : ops.qaReview.referenceVerPass ? "Pass" : "Fail"} />
-              <Gate label="Voice check (Layer 2a)" value={ops.qaReview.voiceCheckPass == null ? null : ops.qaReview.voiceCheckPass ? "Pass" : "Fail"} />
+              {ops.qaReview.qualityScore != null ? (
+                <Gate label="Quality check" value={`${ops.qaReview.qualityScore} of ${ops.qaReview.qualityTotal ?? 89}${ops.qaReview.qualityPassed ? ", passed" : ", not passed"}`} />
+              ) : null}
+              <Gate label="Formatting (Layer 1)" value={ops.qaReview.formattingScore != null ? `${ops.qaReview.formattingScore} of 71` : null} />
+              <Gate
+                label="Structure (Layer 3)"
+                value={ops.qaReview.structuralScore != null ? `${ops.qaReview.structuralScore} of 16` : ops.qaReview.structuralPass == null ? null : ops.qaReview.structuralPass ? "Pass" : "Fail"}
+              />
+              <Gate label="References (Layer 2b)" value={ops.qaReview.referenceVerPass == null ? null : ops.qaReview.referenceVerPass ? "Pass" : "Fail"} />
+              <Gate label="Voice (Layer 2a)" value={ops.qaReview.voiceCheckPass == null ? null : ops.qaReview.voiceCheckPass ? "Pass" : "Fail"} />
             </ul>
           ) : (
             <p className="mt-1 text-sm text-muted-foreground">{["SUBMITTED", "IN_QA_REVIEW", "APPROVED", "BALANCE_VERIFIED", "DELIVERED", "COMPLETED"].includes(project.status) ? "Automated gates not run on this project" : "Empty — not yet submitted"}</p>
