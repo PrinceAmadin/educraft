@@ -28,6 +28,7 @@ export const COUNT_VALUE_TEXT = {
     FIELDWORK_PERIOD: "Fieldwork period (dates)",
   } satisfies Record<NamedCountPlaceholder, string>,
   specificLabel: (chapter: number, n: number) => `Other value ${n} in Chapter ${chapter}`,
+  tableRow: (row: string) => `Table row: ${row}`,
   missing: (chapters: number[]) => `Fill in every value ${chapterList(chapters)} left for the client's data before verifying.`,
   missingOne: (label: string) => `Missing: ${label}.`,
   changed: (chapter: number) => `Chapter ${chapter} changed while you were checking. Refresh the page.`,
@@ -57,6 +58,8 @@ export interface ValueSlot {
   occurrences: number;
   /** The sentence around its first place, with the blank shown as ____. */
   context: string;
+  /** When its first place is a table cell: that column's header (also the label of an unnamed blank) and the row's first cell. */
+  table: { column: string; row: string } | null;
   /** From the client's answers; empty when no question plainly asks for it. */
   prefill: string;
 }
@@ -77,11 +80,54 @@ function contextAt(text: string, index: number, length: number): string {
   return `${from > 0 ? "…" : ""}${before}____${after}${to < line.length ? "…" : ""}`.trim();
 }
 
+const PIPE_ROW = /^\s*\|.*\|\s*$/;
+const ALIGN_ROW = /^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+function cellsOf(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  return s.split("|").map((c) => c.replace(/\*\*/g, "").replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim());
+}
+
+/** The column header and row label of a blank that sits in a markdown table cell, or null. */
+function tableCellAt(lines: string[], lineNo: number, column: number): { column: string; row: string } | null {
+  const line = lines[lineNo];
+  if (!PIPE_ROW.test(line)) return null;
+  let first = lineNo;
+  while (first > 0 && PIPE_ROW.test(lines[first - 1])) first--;
+  let headerLine = first;
+  while (headerLine < lineNo && ALIGN_ROW.test(lines[headerLine])) headerLine++;
+  if (headerLine === lineNo) return null; // the blank is in the header row itself
+  const before = line.slice(0, column);
+  const cell = (before.match(/\|/g) ?? []).length - (line.trimStart().startsWith("|") ? 1 : 0);
+  const header = cellsOf(lines[headerLine])[cell] ?? "";
+  if (!header) return null;
+  return { column: header, row: cellsOf(line)[0] ?? "" };
+}
+
 /** Every blank the chapters left, named ones merged across chapters, in the order they first appear. */
 export function findValueSlots(chapters: ChapterText[]): ValueSlot[] {
   const slots = new Map<string, ValueSlot>();
   for (const ch of [...chapters].sort((a, b) => a.number - b.number)) {
     let specific = 0;
+    const lines = ch.text.split("\n");
+    const starts: number[] = [];
+    let offset = 0;
+    for (const l of lines) {
+      starts.push(offset);
+      offset += l.length + 1;
+    }
+    const lineOf = (index: number) => {
+      let lo = 0;
+      let hi = starts.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (starts[mid] <= index) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    };
     for (const m of ch.text.matchAll(TOKEN_RE)) {
       const token = m[1];
       const named = token !== SPECIFIC_VALUE_TOKEN;
@@ -92,13 +138,18 @@ export function findValueSlots(chapters: ChapterText[]): ValueSlot[] {
         if (!slot.chapters.includes(ch.number)) slot.chapters.push(ch.number);
         continue;
       }
+      const at = m.index ?? 0;
+      const lineNo = lineOf(at);
+      const table = tableCellAt(lines, lineNo, at - starts[lineNo]);
       slots.set(key, {
         key,
         token,
-        label: named ? COUNT_VALUE_TEXT.labels[token as NamedCountPlaceholder] : COUNT_VALUE_TEXT.specificLabel(ch.number, specific),
+        // A named blank keeps its meaning; an unnamed one in a table is named by its column.
+        label: named ? COUNT_VALUE_TEXT.labels[token as NamedCountPlaceholder] : (table?.column ?? COUNT_VALUE_TEXT.specificLabel(ch.number, specific)),
         chapters: [ch.number],
         occurrences: 1,
-        context: contextAt(ch.text, m.index ?? 0, m[0].length),
+        context: contextAt(ch.text, at, m[0].length),
+        table,
         prefill: "",
       });
     }
@@ -152,11 +203,17 @@ const FIELD_RULES: { slot: NamedCountPlaceholder; test: RegExp; numeric: boolean
 ];
 
 function asNumber(value: string): number | null {
-  const n = Number(value.replace(/[,%]/g, ""));
+  const clean = value.replace(/[,%]/g, "").trim();
+  if (!clean) return null; // Number("") is 0, which would make a missing count look like a real one
+  const n = Number(clean);
   return Number.isFinite(n) ? n : null;
 }
 
-/** Fills each named slot whose meaning a question plainly asks for; the response rate is worked out when both counts are known. */
+/**
+ * Fills each named slot whose meaning a question plainly asks for. The response
+ * rate is worked out as usable ÷ distributed × 100, the chapter prompts' own
+ * formula ("Y were returned and found usable, representing a Z% response rate").
+ */
 export function prefillValues(slots: ValueSlot[], fields: FieldLike[], answers: Record<string, unknown>): ValueSlot[] {
   const found = new Map<NamedCountPlaceholder, string>();
   for (const rule of FIELD_RULES) {
@@ -174,8 +231,8 @@ export function prefillValues(slots: ValueSlot[], fields: FieldLike[], answers: 
   }
   if (!found.has("RESPONSE_RATE")) {
     const sent = asNumber(found.get("N_DISTRIBUTED") ?? "");
-    const back = asNumber(found.get("N_RETURNED") ?? "");
-    if (sent && back !== null && back <= sent) found.set("RESPONSE_RATE", `${((back / sent) * 100).toFixed(1)}%`);
+    const usable = asNumber(found.get("N_USABLE") ?? "");
+    if (sent && usable !== null && usable <= sent) found.set("RESPONSE_RATE", `${((usable / sent) * 100).toFixed(1)}%`);
   }
   return slots.map((s) => ({ ...s, prefill: s.prefill || (found.get(s.key as NamedCountPlaceholder) ?? "") }));
 }

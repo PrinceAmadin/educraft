@@ -314,12 +314,12 @@ export const LOADER_TEXT = {
 - [N_DISTRIBUTED] for the number of questionnaires, forms or samples distributed
 - [N_RETURNED] for the number returned or recovered
 - [N_USABLE] for the number analysable after cleaning
-- [RESPONSE_RATE] for the percentage returned
+- [RESPONSE_RATE] for the response rate: the number usable as a percentage of the number distributed
 - [POPULATION_SIZE] for the population frame this study samples from
 - [SAMPLE_SIZE] for the sample size actually achieved
 - [FIELDWORK_PERIOD] for the dates the fieldwork ran
 - [SPECIFIC VALUE TO BE SUPPLIED] for any other single value the client's data will give
-Write the surrounding sentence so that the placeholder reads naturally where the value would go ("A total of [N_DISTRIBUTED] questionnaires were distributed, of which [N_RETURNED] were retrieved, giving a response rate of [RESPONSE_RATE]."). The method the chapter describes, the instrument, the sampling design, the analytical technique and any figure the client has already supplied elsewhere are all still stated in full.`;
+Write the surrounding sentence so that the placeholder reads naturally where the value would go ("A total of [N_DISTRIBUTED] questionnaires were distributed, of which [N_RETURNED] were retrieved and [N_USABLE] were found usable, giving a response rate of [RESPONSE_RATE]."). The method the chapter describes, the instrument, the sampling design, the analytical technique and any figure the client has already supplied elsewhere are all still stated in full.`;
   },
   countsBeforePauseNoData:
     "The client's data has not been received. Do not invent counts, response rates or measurements: use the placeholders listed above wherever the value the client will supply would go.",

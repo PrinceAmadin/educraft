@@ -216,6 +216,7 @@ export function DataPauseReviewCard({
                   {s.label}
                   {s.occurrences > 1 ? <span className="font-normal text-muted-foreground"> · {s.occurrences} places</span> : null}
                 </label>
+                {s.table ? <p className="text-xs text-muted-foreground">{COUNT_VALUE_TEXT.tableRow(s.table.row)}</p> : null}
                 <Input
                   id={`value-${view.id}-${s.key}`}
                   value={values[s.key] ?? ""}

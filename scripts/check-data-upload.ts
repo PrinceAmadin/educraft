@@ -183,8 +183,28 @@ check("the notification says what the spec says", DATA_PAUSE_CLIENT_TEXT.request
   const pre = prefillValues(slots, fields, { questionnaires_distributed: 362, returned: "341", population: "3200", fieldwork: "March to April 2024", software: "SPSS 26" });
   const val = (k: string) => pre.find((s) => s.key === k)?.prefill;
   check("pre-filled from the answers that plainly ask for them", val("N_DISTRIBUTED") === "362" && val("N_RETURNED") === "341" && val("POPULATION_SIZE") === "3200" && val("FIELDWORK_PERIOD") === "March to April 2024", pre.map((s) => [s.key, s.prefill]));
-  check("the response rate is worked out from the two counts", val("RESPONSE_RATE") === "94.2%", val("RESPONSE_RATE"));
+  check("no response rate is worked out without the usable count", val("RESPONSE_RATE") === "", val("RESPONSE_RATE"));
   check("nothing is guessed where no question asks", val("N_USABLE") === "" && val("SPECIFIC:3:1") === "");
+  const withUsable = prefillValues(slots, [...fields, { key: "n_usable", label: "How many questionnaires were usable for analysis?", type: "number" }], { questionnaires_distributed: 362, returned: "341", n_usable: 329 });
+  check("the response rate is usable ÷ distributed × 100 (the chapter prompts' formula)", withUsable.find((s) => s.key === "RESPONSE_RATE")?.prefill === "90.9%", withUsable.find((s) => s.key === "RESPONSE_RATE")?.prefill);
+  check("the loader states the same response-rate formula", /\[RESPONSE_RATE\] for the response rate: the number usable as a percentage of the number distributed/.test(LOADER_TEXT.countsBeforePause(2, 3)));
+
+  const tableChapter = [
+    "Table 3.1: Proportionate allocation of sample size across market strata",
+    "| Market Stratum | Population Size (N_h) | **Sample Allocation (n_h)** |",
+    "|---|---|---|",
+    "| Balogun / Mile 12 | [SPECIFIC VALUE TO BE SUPPLIED] | [SPECIFIC VALUE TO BE SUPPLIED] |",
+    "| Computer Village | [SPECIFIC VALUE TO BE SUPPLIED] | [N_USABLE] |",
+    "The instrument had [SPECIFIC VALUE TO BE SUPPLIED] items.",
+  ].join("\n");
+  const ts = findValueSlots([{ number: 3, text: tableChapter }]);
+  const slot = (k: string) => ts.find((s) => s.key === k);
+  check("a table cell's blank is labelled by its column", slot("SPECIFIC:3:1")?.label === "Population Size (N_h)" && slot("SPECIFIC:3:2")?.label === "Sample Allocation (n_h)", ts.map((s) => [s.key, s.label]));
+  check("a table cell's blank knows its row", slot("SPECIFIC:3:1")?.table?.row === "Balogun / Mile 12" && slot("SPECIFIC:3:3")?.table?.row === "Computer Village" && slot("SPECIFIC:3:3")?.label === "Population Size (N_h)");
+  check("a named blank in a table keeps its meaning and gains its column", slot("N_USABLE")?.label === COUNT_VALUE_TEXT.labels.N_USABLE && slot("N_USABLE")?.table?.column === "Sample Allocation (n_h)");
+  check("a blank outside a table has no table and a numbered label", slot("SPECIFIC:3:4")?.table === null && slot("SPECIFIC:3:4")?.label === "Other value 4 in Chapter 3");
+  const tf = fillValueSlots([{ number: 3, text: tableChapter }], { "SPECIFIC:3:1": "1,610", "SPECIFIC:3:2": "166", "SPECIFIC:3:3": "440", N_USABLE: "44", "SPECIFIC:3:4": "28" });
+  check("table cells are filled in their own places", tf.missing.length === 0 && tf.chapters[0].text.includes("| Balogun / Mile 12 | 1,610 | 166 |") && tf.chapters[0].text.includes("| Computer Village | 440 | 44 |") && tf.chapters[0].text.includes("had 28 items"), tf.chapters[0].text);
   const wordy = prefillValues(slots, [{ key: "n", label: "Questionnaires distributed", type: "text" }], { n: "about three hundred" });
   check("a count is only pre-filled from a number", wordy.find((s) => s.key === "N_DISTRIBUTED")?.prefill === "");
 
