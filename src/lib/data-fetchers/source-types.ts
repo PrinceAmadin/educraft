@@ -26,7 +26,15 @@ export interface CbnSource {
   label: string;
 }
 
-export type SeriesSource = WbSource | CbnSource;
+/** International Monetary Fund, World Economic Outlook (DataMapper API; annual). */
+export interface ImfSource {
+  source: "IMF";
+  indicator: string;
+  /** Raw IMF values are multiplied by this to reach the catalogue entry's raw unit (NGDPD is in US$ billions: 1e9). */
+  multiplier?: number;
+}
+
+export type SeriesSource = WbSource | CbnSource | ImfSource;
 
 export type SourceName = SeriesSource["source"];
 

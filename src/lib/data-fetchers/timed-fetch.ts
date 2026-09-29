@@ -9,7 +9,7 @@
 export const FETCH_TIMEOUT_MS = 8_000;
 export const USER_AGENT = "EduCraftHQ/1.0 (academic research data; educraft611@gmail.com)";
 
-export type DataSourceName = "World Bank" | "CBN" | "FX";
+export type DataSourceName = "World Bank" | "CBN" | "FX" | "IMF";
 
 export interface RequestLogEntry {
   source: DataSourceName;

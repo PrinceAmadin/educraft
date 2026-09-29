@@ -41,19 +41,21 @@ export interface CatalogueIndicator {
 }
 
 const WB = (code: string): SeriesSource => ({ source: "WB", code });
+const IMF = (indicator: string, multiplier?: number): SeriesSource => ({ source: "IMF", indicator, ...(multiplier ? { multiplier } : {}) });
 
 const ALL: Domain[] = [...DOMAINS];
 const MACRO: Domain[] = ["MACRO_FINANCE"];
 
 export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   // ── Output ──
-  { key: "gdp_current_usd", name: "Gross domestic product (current US$)", unit: "US$ billion", scale: 1e9, decimals: 2, hint: "nominal GDP in US dollars", domains: ALL, sources: [WB("NY.GDP.MKTP.CD")] },
+  { key: "gdp_current_usd", name: "Gross domestic product (current US$)", unit: "US$ billion", scale: 1e9, decimals: 2, hint: "nominal GDP in US dollars", domains: ALL, sources: [WB("NY.GDP.MKTP.CD"), IMF("NGDPD", 1e9)] },
   { key: "gdp_constant_usd", name: "Gross domestic product (constant 2015 US$)", unit: "US$ billion (2015 prices)", scale: 1e9, decimals: 2, hint: "real GDP in US dollars", domains: ALL, sources: [WB("NY.GDP.MKTP.KD")] },
   { key: "gdp_current_naira", name: "Gross domestic product (current naira)", unit: "₦ billion", scale: 1e9, decimals: 2, hint: "nominal GDP in naira, GDP at current market prices", domains: ALL, sources: [WB("NY.GDP.MKTP.CN")] },
   { key: "gdp_constant_naira", name: "Gross domestic product (constant naira prices)", unit: "₦ billion (constant prices)", scale: 1e9, decimals: 2, hint: "real GDP in naira, RGDP at constant (basic) prices", domains: ALL, sources: [WB("NY.GDP.MKTP.KN")] },
-  { key: "gdp_growth", name: "GDP growth (annual %)", unit: "%", scale: 1, decimals: 2, hint: "economic growth rate, real GDP growth", domains: ALL, sources: [WB("NY.GDP.MKTP.KD.ZG")] },
-  { key: "gdp_per_capita_usd", name: "GDP per capita (current US$)", unit: "US$", scale: 1, decimals: 2, hint: "income per head, nominal", domains: ALL, sources: [WB("NY.GDP.PCAP.CD")] },
+  { key: "gdp_growth", name: "GDP growth (annual %)", unit: "%", scale: 1, decimals: 2, hint: "economic growth rate, real GDP growth", domains: ALL, sources: [WB("NY.GDP.MKTP.KD.ZG"), IMF("NGDP_RPCH")] },
+  { key: "gdp_per_capita_usd", name: "GDP per capita (current US$)", unit: "US$", scale: 1, decimals: 2, hint: "income per head, nominal", domains: ALL, sources: [WB("NY.GDP.PCAP.CD"), IMF("NGDPDPC")] },
   { key: "gdp_per_capita_constant_usd", name: "GDP per capita (constant 2015 US$)", unit: "US$ (2015 prices)", scale: 1, decimals: 2, hint: "real income per head, living standard proxy", domains: ALL, sources: [WB("NY.GDP.PCAP.KD")] },
+  { key: "gdp_per_capita_ppp", name: "GDP per capita, PPP (current international $)", unit: "international $", scale: 1, decimals: 2, hint: "income per head at purchasing power parity", domains: ["MACRO_FINANCE", "HEALTH"], sources: [IMF("PPPPC")] },
 
   // ── Prices ──
   {
@@ -64,8 +66,9 @@ export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
     decimals: 2,
     hint: "headline inflation rate, CPI inflation",
     domains: ALL,
-    sources: [WB("FP.CPI.TOTL.ZG"), { source: "CBN", endpoint: "GetAllInflationRates", field: "allItemsAverage", annual: "december", label: "headline inflation, all items, 12-month average change, December" }],
+    sources: [WB("FP.CPI.TOTL.ZG"), { source: "CBN", endpoint: "GetAllInflationRates", field: "allItemsAverage", annual: "december", label: "headline inflation, all items, 12-month average change, December" }, IMF("PCPIPCH")],
   },
+  { key: "inflation_end_of_period", name: "Inflation, end of period consumer prices (annual %)", unit: "%", scale: 1, decimals: 2, hint: "December-on-December inflation, end-of-year inflation", domains: MACRO, sources: [IMF("PCPIEPCH")] },
   {
     key: "food_inflation",
     name: "Food inflation (12-month average change, %)",
@@ -141,18 +144,22 @@ export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   { key: "market_cap_gdp", name: "Market capitalisation of listed domestic companies (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "stock market capitalisation", domains: MACRO, sources: [WB("CM.MKT.LCAP.GD.ZS")] },
   { key: "reserves_usd", name: "Total reserves including gold (current US$)", unit: "US$ billion", scale: 1e9, decimals: 2, hint: "external reserves, foreign reserves", domains: MACRO, sources: [WB("FI.RES.TOTL.CD")] },
 
+  // ── Public finance ──
+  { key: "government_debt_gdp", name: "General government gross debt (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "public debt, government debt to GDP ratio", domains: MACRO, sources: [IMF("GGXWDG_NGDP")] },
+  { key: "fiscal_balance_gdp", name: "General government net lending/borrowing (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "fiscal balance, budget deficit or surplus", domains: MACRO, sources: [IMF("GGXCNL_NGDP")] },
+
   // ── External sector ──
   { key: "fdi_usd", name: "Foreign direct investment, net inflows (current US$)", unit: "US$ billion", scale: 1e9, decimals: 3, hint: "FDI inflows in dollars", domains: MACRO, sources: [WB("BX.KLT.DINV.CD.WD")] },
   { key: "fdi_gdp", name: "Foreign direct investment, net inflows (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "FDI as a share of GDP", domains: MACRO, sources: [WB("BX.KLT.DINV.WD.GD.ZS")] },
   { key: "remittances_usd", name: "Personal remittances received (current US$)", unit: "US$ billion", scale: 1e9, decimals: 2, hint: "diaspora remittances", domains: MACRO, sources: [WB("BX.TRF.PWKR.CD.DT")] },
-  { key: "current_account_gdp", name: "Current account balance (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "balance of payments current account", domains: MACRO, sources: [WB("BN.CAB.XOKA.GD.ZS")] },
+  { key: "current_account_gdp", name: "Current account balance (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "balance of payments current account", domains: MACRO, sources: [WB("BN.CAB.XOKA.GD.ZS"), IMF("BCA_NGDPD")] },
   { key: "oil_rents_gdp", name: "Oil rents (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "oil revenue proxy, oil sector", domains: ["MACRO_FINANCE", "SCIENCE_ENV_AG"], sources: [WB("NY.GDP.PETR.RT.ZS")] },
 
   // ── Structure, labour, society ──
   { key: "agriculture_gdp", name: "Agriculture, forestry and fishing, value added (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "agricultural output share", domains: ["MACRO_FINANCE", "SCIENCE_ENV_AG"], sources: [WB("NV.AGR.TOTL.ZS")] },
   { key: "manufacturing_gdp", name: "Manufacturing, value added (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "manufacturing output share, industrialisation", domains: ["MACRO_FINANCE", "SCIENCE_ENV_AG"], sources: [WB("NV.IND.MANF.ZS")] },
   { key: "unemployment", name: "Unemployment, total (% of labour force, modelled ILO estimate)", unit: "%", scale: 1, decimals: 2, hint: "unemployment rate", domains: ALL, sources: [WB("SL.UEM.TOTL.ZS")] },
-  { key: "population", name: "Population, total", unit: "million", scale: 1e6, decimals: 2, hint: "population size", domains: ALL, sources: [WB("SP.POP.TOTL")] },
+  { key: "population", name: "Population, total", unit: "million", scale: 1e6, decimals: 2, hint: "population size", domains: ALL, sources: [WB("SP.POP.TOTL"), IMF("LP", 1e6)] },
   { key: "electricity_access", name: "Access to electricity (% of population)", unit: "%", scale: 1, decimals: 2, hint: "electricity access, energy access", domains: ["MACRO_FINANCE", "SCIENCE_ENV_AG", "TECH_CYBER"], sources: [WB("EG.ELC.ACCS.ZS")] },
   { key: "health_expenditure_gdp", name: "Current health expenditure (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "health spending", domains: ["MACRO_FINANCE", "HEALTH"], sources: [WB("SH.XPD.CHEX.GD.ZS")] },
   { key: "education_expenditure_gdp", name: "Government expenditure on education (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "education spending (World Bank has 2012 onwards only)", domains: MACRO, sources: [WB("SE.XPD.TOTL.GD.ZS")] },

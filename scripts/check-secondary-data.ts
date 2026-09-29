@@ -8,12 +8,13 @@
  *
  *   npm run check:secondary
  */
-import { CATALOGUE_KEYS, INDICATOR_CATALOGUE, catalogueKeysForDomains, indicatorFor, indicatorsForDomains } from "../src/lib/data-fetchers/indicator-catalogue";
+import { CATALOGUE_KEYS, INDICATOR_CATALOGUE, catalogueKeysForDomains, indicatorFor, indicatorsForDomains, sourceNamesForDomains } from "../src/lib/data-fetchers/indicator-catalogue";
 import { DEPARTMENT_DOMAINS, DOMAINS, domainsForEntry, routeDepartment, routingKey } from "../src/lib/data-fetchers/domain-map";
 import { DEPARTMENTS } from "../src/lib/generation/department-map";
 import { SOURCE_NAMES, SOURCE_REGISTRY, seriesCacheKey, sourceCode } from "../src/lib/data-fetchers/source-registry";
 import { parseWorldBank, worldBankUrl, WORLD_BANK_CONCURRENCY } from "../src/lib/data-fetchers/sources/world-bank";
 import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/sources/cbn";
+import { imfUrl, parseImf } from "../src/lib/data-fetchers/sources/imf";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, isPermanentMissing, MISSING_CODE_LABELS, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
 import { catalogueForPrompt, lastCompleteYear, modelSpecTool, MODEL_SPEC_TEXT, relevantSections, statedPeriods, validateSpec, ModelSpecError, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
@@ -74,6 +75,13 @@ function cbnMoneyMarket() {
   return rows;
 }
 
+/** The live IMF shape: every country, Nigeria among them, running to 2031. */
+function imfAnswer(indicator: string, value: (year: number) => number) {
+  const nga: Record<string, number> = {};
+  for (let y = 1991; y <= 2031; y++) nga[y] = value(y);
+  return { values: { [indicator]: { SDN: { 2000: 8.4 }, NGA: nga, GHA: { 2000: 3.7 } } }, api: { version: "1", "output-method": "json" } };
+}
+
 type Route = (url: string, signal: AbortSignal) => Promise<{ status: number; body: string }>;
 function fakeFetch(route: Route, seen: string[] = []): FetchLike {
   return async (url, init) => {
@@ -105,7 +113,7 @@ async function main() {
   check("every entry has a source, a positive scale and 0–4 decimals", INDICATOR_CATALOGUE.every((i) => i.sources.length > 0 && i.scale > 0 && i.decimals >= 0 && i.decimals <= 4));
   check("World Bank codes look like WDI codes", INDICATOR_CATALOGUE.every((i) => i.sources.every((s) => s.source !== "WB" || /^[A-Z]{2}(\.[A-Z0-9]+){2,5}$/.test(s.code))));
   check("CBN endpoints are the two verified ones only", INDICATOR_CATALOGUE.every((i) => i.sources.every((s) => s.source !== "CBN" || s.endpoint === "GetAllInflationRates" || s.endpoint === "GetAllMoneyMarketIndicators")));
-  const allCodes = INDICATOR_CATALOGUE.flatMap((i) => i.sources.map((s) => (s.source === "WB" ? s.code : s.endpoint)));
+  const allCodes = INDICATOR_CATALOGUE.flatMap((i) => i.sources.map((s) => (s.source === "WB" ? s.code : s.source === "CBN" ? s.endpoint : sourceCode(s))));
   check("series that were null for Nigeria are not offered", !["NE.TRD.GNFS.ZS", "NE.EXP.GNFS.ZS", "NE.IMP.GNFS.ZS", "NE.GDI.FTOT.ZS", "NE.CON.GOVT.ZS", "GC.TAX.TOTL.GD.ZS", "DT.DOD.DECT.CD"].some((c) => allCodes.includes(c)));
   check("the CBN exchange-rate feed (9.2 s) is not used", !allCodes.includes("GetAllExchangeRates" as never));
   check("the exchange rate comes from the World Bank official rate", indicatorFor("exchange_rate")?.sources[0].source === "WB" && (indicatorFor("exchange_rate")?.sources[0] as { code: string }).code === "PA.NUS.FCRF");
@@ -198,6 +206,15 @@ async function main() {
   const tb = cbnSeries(mm, "treasuryBill", "mean", false, 2000, 2023);
   check("CBN series kept to the period and dated", Object.keys(tb.values).length === 18 && tb.lastUpdated === "data to M8 2026", tb.lastUpdated);
   throws("CBN: an answer with no months is a failure", () => parseCbnMonthly([]), /no months/);
+
+  // ─── IMF (World Economic Outlook, DataMapper) ───────────────────────────────
+  check("IMF URL names the indicator and Nigeria", imfUrl("NGDP_RPCH") === "https://www.imf.org/external/datamapper/api/v1/NGDP_RPCH/NGA");
+  const imf = parseImf(imfAnswer("NGDP_RPCH", (y) => y - 2000), "NGDP_RPCH", 2000, 2023);
+  check("IMF: Nigeria picked from an every-country answer, kept to the period (projections to 2031 dropped)", Object.keys(imf.values).length === 24 && imf.values[2023] === 23 && imf.values[2031] === undefined, Object.keys(imf.values).length);
+  check("IMF: a multiplier turns US$ billions into dollars", parseImf(imfAnswer("NGDPD", () => 487.347), "NGDPD", 2023, 2023, 1e9).values[2023] === 487.347e9);
+  check("IMF: an indicator with no Nigeria row is an empty series, not a failure", Object.keys(parseImf({ values: { LUR: { SDN: { 2020: 1 } } } }, "LUR", 2000, 2023).values).length === 0);
+  throws("IMF: an unknown indicator (a country list, no values) is a failure", () => parseImf({ countries: { ABW: { label: "Aruba" } } }, "NOT_A_CODE", 2000, 2023), /does not publish the indicator NOT_A_CODE/);
+  check("IMF: fallback entries keep the World Bank first", ["gdp_growth", "gdp_current_usd", "gdp_per_capita_usd", "population", "current_account_gdp"].every((k) => indicatorFor(k)!.sources[0].source === "WB" && indicatorFor(k)!.sources.some((s) => s.source === "IMF")));
 
   // ─── The 8-second request ──────────────────────────────────────────────────
   check("the timeout is 8 seconds", FETCH_TIMEOUT_MS === 8_000);
@@ -372,8 +389,14 @@ async function main() {
     const down = fakeFetch(async () => ({ status: 503, body: "down" }));
     // Sources failed (a 503 on World Bank and CBN).
     const failedRun = await fetchSecondaryData(spec([["INF", "inflation"], ["NSE", null]]), { fetchImpl: down, timeoutMs: 400, print: quiet });
-    check("ALL_SOURCES_FAILED: its sources did not answer, both named", code(failedRun, "INF")?.code === "ALL_SOURCES_FAILED" && code(failedRun, "INF")?.sources?.join() === "World Bank,CBN", code(failedRun, "INF"));
-    check("NO_CATALOGUE_MATCH: an unmatched variable names the department's sources", code(failedRun, "NSE")?.code === "NO_CATALOGUE_MATCH" && /None of the sources for this department \(World Bank, CBN\)/.test(failedRun.missing.find((m) => m.symbol === "NSE")!.reason), failedRun.missing);
+    const infSources = indicatorFor("inflation")!.sources.map((x) => SOURCE_REGISTRY[x.source].shortName);
+    check("ALL_SOURCES_FAILED: its sources did not answer, each named in catalogue order", code(failedRun, "INF")?.code === "ALL_SOURCES_FAILED" && code(failedRun, "INF")?.sources?.join() === infSources.join(), code(failedRun, "INF"));
+    const econSources = sourceNamesForDomains(["MACRO_FINANCE"]).map((n) => SOURCE_REGISTRY[n].shortName);
+    check(
+      "NO_CATALOGUE_MATCH: an unmatched variable names the department's sources",
+      code(failedRun, "NSE")?.code === "NO_CATALOGUE_MATCH" && failedRun.missing.find((m) => m.symbol === "NSE")!.reason.includes(`None of the sources for this department (${econSources.join(", ")})`) && econSources.includes("CBN"),
+      failedRun.missing
+    );
     check("…both are sentences with no source-specific jargon about the World Bank or CBN only", !failedRun.missing.some((m) => /Not available from the World Bank or the CBN automatically/.test(m.reason)));
     // No automatic source for the department at all.
     const history = await fetchSecondaryData(spec([["X", null], ["Y", null]]), { routing: routeDepartment("History"), fetchImpl: down, print: quiet });
@@ -410,6 +433,13 @@ async function main() {
       print: quiet,
     });
     check("one CBN request serves every variable on that endpoint", seen.length === 1 && seen[0] === "https://www.cbn.gov.ng/api/GetAllMoneyMarketIndicators", seen);
+  }
+  {
+    const imfRoute: Route = async (u) => (u.includes("worldbank") ? { status: 503, body: "down" } : json(imfAnswer(decodeURIComponent(/v1\/([^/]+)\//.exec(u)![1]), (y) => y / 100)));
+    const r = await fetchSecondaryData(spec([["GRW", "gdp_growth"], ["DEBT", "government_debt_gdp"]]), { fetchImpl: fakeFetch(imfRoute), timeoutMs: 400, print: quiet });
+    check("IMF: when the World Bank is down, growth comes whole from the IMF", r.dataset.columns[0].source === "International Monetary Fund, World Economic Outlook" && r.dataset.columns[0].code === "NGDP_RPCH" && Object.keys(r.dataset.columns[0].values).length === 24, r.dataset.columns[0]);
+    check("IMF: the note warns the latest years can be estimates", /IMF estimates/.test(r.dataset.columns[0].sourceNote ?? ""));
+    check("IMF: government debt (null at the World Bank) comes from the IMF", r.dataset.columns[1].code === "GGXWDG_NGDP" && r.missing.length === 0, r.missing);
   }
 
   // ─── Statistics (EViews formulas) ──────────────────────────────────────────

@@ -6,11 +6,13 @@
 import type { SourceModule } from "./source-module";
 import type { SeriesSource, SourceName } from "./source-types";
 import { cbnModule } from "./sources/cbn";
+import { imfModule } from "./sources/imf";
 import { worldBankModule } from "./sources/world-bank";
 
 export const SOURCE_REGISTRY: { readonly [N in SourceName]: SourceModule<N> } = {
   WB: worldBankModule,
   CBN: cbnModule,
+  IMF: imfModule,
 };
 
 export const SOURCE_NAMES = Object.keys(SOURCE_REGISTRY) as SourceName[];
