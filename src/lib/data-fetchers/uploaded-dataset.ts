@@ -7,9 +7,9 @@
  * The file is "Year" then one column per symbol in the model (any order,
  * letter case ignored), one row per year inside the model's period. The
  * upload replaces the whole dataset, so the card's template carries every
- * value already fetched: a column the specialist left exactly as fetched keeps
- * its original source; any other column is cited to what the specialist says
- * the data comes from.
+ * value already in it: a column the specialist left exactly as it was keeps
+ * its citation (a fetched series, or an earlier upload); any other column is
+ * cited to what the specialist says the data comes from.
  */
 
 import { parseCsv } from "./csv";

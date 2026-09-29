@@ -71,7 +71,7 @@ export function SecondaryDataCard({ initial, endpoint, uploadEndpoint, filesBase
         <p className="text-sm text-muted-foreground">
           {data
             ? data.origin === "upload"
-              ? `Supplied by hand ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (from ${data.uploadSource}). Chapters 4 and 5 are written from it.`
+              ? `Supplied by hand ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (each variable's source is below). Chapters 4 and 5 are written from it.`
               : `Fetched ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (each variable's source is below). Chapters 4 and 5 are written from it.`
             : "Once Chapter 3 is written, the data for its model is fetched from the sources for this department. Chapters 4 and 5 are written from it."}
         </p>
@@ -207,7 +207,7 @@ function UploadPanel({
         <div id={`${id}-upload`} className="space-y-4">
           <p className="text-sm text-muted-foreground">
             For variables no source publishes. Download the template, fill in the empty cells, save it as CSV (in Excel: Save As, CSV) and upload it with where the data comes from. It replaces the dataset above;
-            columns you leave as fetched keep their source.
+            columns you leave unchanged keep their source.
           </p>
 
           {upload ? (
@@ -344,7 +344,7 @@ function DatasetDetails({ data, filesBase }: { data: SecondaryDataResponse; file
           <LuDownload className="size-4" aria-hidden />
           Download CSV
         </a>
-        <RequestSummary requests={data.requests} />
+        {data.origin === "upload" ? <span className="text-xs text-muted-foreground">Supplied by hand: no source was asked.</span> : <RequestSummary requests={data.requests} />}
       </div>
     </div>
   );
