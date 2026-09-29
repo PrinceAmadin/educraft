@@ -585,10 +585,10 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
               </a>
             </Button>
             {startOverButton}
-            <Button size="sm" disabled title="Coming soon — report generation is a later build phase">
-              Proceed to Write Report
-            </Button>
           </div>
+          <p className="text-sm text-muted">
+            Your research is done. The report is written from the admin side — EduCraft will take it from here.
+          </p>
 
           {showRefs ? (
             <div className="space-y-4 border-t border-border pt-3">
