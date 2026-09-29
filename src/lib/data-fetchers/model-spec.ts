@@ -6,12 +6,16 @@
  * or marks it unmatched; everything after that is checked in code here:
  * symbols must be in the chapter, the stated period is read by regex as well,
  * years are kept to complete ones.
+ *
+ * Claude is shown, and may pick, only the catalogue entries of the project's
+ * department domains (domain-map.ts): the tool's enum is built per call.
  */
 
 import { callClaudeForJson } from "@/lib/anthropic";
 import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { listFrom } from "@/lib/research/source-policy";
-import { CATALOGUE_KEYS, INDICATOR_CATALOGUE } from "./indicator-catalogue";
+import { domainList, type Domain } from "./domain-map";
+import { CATALOGUE_KEYS, indicatorsForDomains } from "./indicator-catalogue";
 
 export const EARLIEST_YEAR = 1960;
 const MAX_VARIABLES = 12;
@@ -42,9 +46,9 @@ export class ModelSpecError extends Error {}
 
 /** Wording sent to Claude, for the founder to review. */
 export const MODEL_SPEC_TEXT = {
-  system:
-    "You read the methodology chapter of a Nigerian final year economics (secondary data) project and record its econometric model exactly as the chapter states it. You never add a variable, change a symbol or guess a period the chapter does not state.",
-  instruction: (catalogue: string) =>
+  system: (department: string | null) =>
+    `You read the methodology chapter of a Nigerian final year secondary data project${department ? ` in ${department}` : ""} and record its quantitative model exactly as the chapter states it. You never add a variable, change a symbol or guess a period the chapter does not state.`,
+  instruction: (catalogue: string, domains: readonly Domain[]) =>
     [
       "Record the model this Chapter Three specifies, using the record_model_spec tool.",
       "- dependent: the one dependent (explained) variable. independents: every explanatory variable in the model equation, in the order the equation gives them. Leave out the constant, the coefficients and the error term.",
@@ -54,13 +58,16 @@ export const MODEL_SPEC_TEXT = {
       "- periodStart and periodEnd: the first and last year of the data period the chapter states. frequency: as stated (annual, quarterly or monthly), or \"not stated\".",
       "- equation: the model equation as written. technique: the estimation technique named (OLS, ARDL, VAR, VECM, GMM, ...). sourcesNamed: every data source the chapter names.",
       "",
-      "The entries (key: what it measures):",
-      catalogue,
+      ...(catalogue
+        ? [`The entries are the series EduCraft can fetch automatically for this department (${domainList(domains)}), key: what it measures:`, catalogue]
+        : ["No series can be fetched automatically for this department: set every catalogueKey to \"none\"."]),
     ].join("\n"),
 } as const;
 
-export function catalogueForPrompt(): string {
-  return INDICATOR_CATALOGUE.map((i) => `${i.key}: ${i.name}, ${i.unit} (${i.hint})`).join("\n");
+export function catalogueForPrompt(domains: readonly Domain[]): string {
+  return indicatorsForDomains(domains)
+    .map((i) => `${i.key}: ${i.name}, ${i.unit} (${i.hint})`)
+    .join("\n");
 }
 
 // ─── Pure pieces ─────────────────────────────────────────────────────────────
@@ -144,9 +151,10 @@ export interface RawSpec {
 /**
  * Pure: turns Claude's answer into a checked spec. Throws ModelSpecError when
  * the chapter gives no usable model (no dependent variable, no explanatory
- * variable, or no period).
+ * variable, or no period). A catalogue key outside `offeredKeys` (the
+ * department's entries) is treated as unmatched.
  */
-export function validateSpec(raw: RawSpec, chapter: string, now: Date): ModelSpec {
+export function validateSpec(raw: RawSpec, chapter: string, now: Date, offeredKeys: readonly string[] = CATALOGUE_KEYS): ModelSpec {
   const notes: string[] = [];
   const dependentRaw = (typeof raw.dependent === "string" ? safeJson(raw.dependent) : raw.dependent) as RawVariable | null;
   const independentsRaw = listFrom(raw.independents, "independents") as RawVariable[];
@@ -167,7 +175,7 @@ export function validateSpec(raw: RawSpec, chapter: string, now: Date): ModelSpe
       notes.push(`${symbol}${name ? ` (${name})` : ""} is not in Chapter 3, so it was left out.`);
       return;
     }
-    const key = typeof v.catalogueKey === "string" && CATALOGUE_KEYS.includes(v.catalogueKey) ? v.catalogueKey : null;
+    const key = typeof v.catalogueKey === "string" && offeredKeys.includes(v.catalogueKey) ? v.catalogueKey : null;
     seen.add(symbol.toLowerCase());
     variables.push({ symbol, name: name || symbol, measure: cleanText(v.measure, 200), role, catalogueKey: key });
   };
@@ -200,7 +208,7 @@ export function validateSpec(raw: RawSpec, chapter: string, now: Date): ModelSpe
   const frequencyRaw = cleanText(raw.frequency, 20).toLowerCase();
   const frequency: SpecFrequency = frequencyRaw === "annual" || frequencyRaw === "quarterly" || frequencyRaw === "monthly" ? frequencyRaw : "not stated";
   if (frequency === "quarterly" || frequency === "monthly") {
-    notes.push(`Chapter 3 states ${frequency} data, but the dataset is annual (the World Bank publishes yearly figures). The specialist converts it, or the COO corrects Chapter 3.`);
+    notes.push(`Chapter 3 states ${frequency} data, but the dataset is annual (the automatic sources publish yearly figures). The specialist converts it, or the COO corrects Chapter 3.`);
   }
 
   return {
@@ -224,49 +232,62 @@ function safeJson(s: string): unknown {
 
 // ─── The Claude call ─────────────────────────────────────────────────────────
 
-const VARIABLE_SCHEMA = {
-  type: "object",
-  properties: {
-    symbol: { type: "string" },
-    name: { type: "string" },
-    measure: { type: "string" },
-    catalogueKey: { type: "string", enum: [...CATALOGUE_KEYS, "none"] },
-  },
-  required: ["symbol", "name", "measure", "catalogueKey"],
-} as const;
-
-export const MODEL_SPEC_TOOL = {
-  name: "record_model_spec",
-  description: "Record the econometric model Chapter Three specifies: its variables (each matched to a catalogue entry or none), equation, data period, frequency, technique and named sources.",
-  inputSchema: {
+/** The record_model_spec tool, whose catalogueKey enum is exactly the offered keys plus "none". */
+export function modelSpecTool(offeredKeys: readonly string[]) {
+  const variable = {
     type: "object",
     properties: {
-      dependent: VARIABLE_SCHEMA,
-      independents: { type: "array", items: VARIABLE_SCHEMA, maxItems: MAX_VARIABLES + 4 },
-      equation: { type: "string" },
-      periodStart: { type: "integer" },
-      periodEnd: { type: "integer" },
-      frequency: { type: "string", enum: ["annual", "quarterly", "monthly", "not stated"] },
-      technique: { type: "string" },
-      sourcesNamed: { type: "array", items: { type: "string" } },
+      symbol: { type: "string" },
+      name: { type: "string" },
+      measure: { type: "string" },
+      catalogueKey: { type: "string", enum: [...offeredKeys, "none"] },
     },
-    required: ["dependent", "independents", "equation", "periodStart", "periodEnd", "frequency", "technique", "sourcesNamed"],
-  },
-} as const;
+    required: ["symbol", "name", "measure", "catalogueKey"],
+  };
+  return {
+    name: "record_model_spec",
+    description: "Record the model Chapter Three specifies: its variables (each matched to a catalogue entry or none), equation, data period, frequency, technique and named sources.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dependent: variable,
+        independents: { type: "array", items: variable, maxItems: MAX_VARIABLES + 4 },
+        equation: { type: "string" },
+        periodStart: { type: "integer" },
+        periodEnd: { type: "integer" },
+        frequency: { type: "string", enum: ["annual", "quarterly", "monthly", "not stated"] },
+        technique: { type: "string" },
+        sourcesNamed: { type: "array", items: { type: "string" } },
+      },
+      required: ["dependent", "independents", "equation", "periodStart", "periodEnd", "frequency", "technique", "sourcesNamed"],
+    },
+  };
+}
+
+export interface ExtractModelSpecOptions {
+  /** The project's department domains: only their catalogue entries are offered. */
+  domains: readonly Domain[];
+  /** The department as the COO confirmed it (named in the system prompt). */
+  department: string | null;
+  usage?: AiUsageContext;
+  now?: Date;
+}
 
 /** One Claude call (about ₦15–40), then the checks above. */
-export async function extractModelSpec(chapterThree: string, opts: { usage?: AiUsageContext; now?: Date } = {}): Promise<ModelSpec> {
+export async function extractModelSpec(chapterThree: string, opts: ExtractModelSpecOptions): Promise<ModelSpec> {
   const text = chapterThree.trim();
   if (text.length < 200) throw new ModelSpecError("Chapter 3 is too short to read a model from.");
   const excerpt = relevantSections(text);
+  const offeredKeys = indicatorsForDomains(opts.domains).map((i) => i.key);
+  const tool = modelSpecTool(offeredKeys);
   const raw = await callClaudeForJson<RawSpec>({
-    system: MODEL_SPEC_TEXT.system,
-    user: `${MODEL_SPEC_TEXT.instruction(catalogueForPrompt())}\n\n═══ CHAPTER THREE (the data and model sections) ═══\n\n${excerpt}`,
-    toolName: MODEL_SPEC_TOOL.name,
-    toolDescription: MODEL_SPEC_TOOL.description,
-    inputSchema: MODEL_SPEC_TOOL.inputSchema as unknown as Record<string, unknown>,
+    system: MODEL_SPEC_TEXT.system(opts.department),
+    user: `${MODEL_SPEC_TEXT.instruction(catalogueForPrompt(opts.domains), opts.domains)}\n\n═══ CHAPTER THREE (the data and model sections) ═══\n\n${excerpt}`,
+    toolName: tool.name,
+    toolDescription: tool.description,
+    inputSchema: tool.inputSchema as unknown as Record<string, unknown>,
     maxTokens: 4096,
     usage: opts.usage,
   });
-  return validateSpec(raw, text, opts.now ?? new Date());
+  return validateSpec(raw, text, opts.now ?? new Date(), offeredKeys);
 }

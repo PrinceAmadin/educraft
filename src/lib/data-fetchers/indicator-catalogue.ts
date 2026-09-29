@@ -22,7 +22,7 @@
  */
 
 import { DOMAINS, type Domain } from "./domain-map";
-import type { SeriesSource } from "./source-types";
+import type { SeriesSource, SourceName } from "./source-types";
 
 export interface CatalogueIndicator {
   key: string;
@@ -171,4 +171,11 @@ export function indicatorsForDomains(domains: readonly Domain[]): CatalogueIndic
 
 export function catalogueKeysForDomains(domains: readonly Domain[]): string[] {
   return indicatorsForDomains(domains).map((i) => i.key);
+}
+
+/** The sources a project whose department reaches these domains can be fetched from, in first-use order. */
+export function sourceNamesForDomains(domains: readonly Domain[]): SourceName[] {
+  const names: SourceName[] = [];
+  for (const i of indicatorsForDomains(domains)) for (const s of i.sources) if (!names.includes(s.source)) names.push(s.source);
+  return names;
 }

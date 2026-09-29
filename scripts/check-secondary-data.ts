@@ -16,7 +16,7 @@ import { parseWorldBank, worldBankUrl, WORLD_BANK_CONCURRENCY } from "../src/lib
 import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/sources/cbn";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
-import { lastCompleteYear, relevantSections, statedPeriods, validateSpec, ModelSpecError, MODEL_SPEC_TOOL, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
+import { catalogueForPrompt, lastCompleteYear, modelSpecTool, MODEL_SPEC_TEXT, relevantSections, statedPeriods, validateSpec, ModelSpecError, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
 import { fetchSecondaryData, type CachedSeries, type SeriesCache } from "../src/lib/data-fetchers/secondary-data-fetcher";
 import { contentTypeFor } from "../src/lib/files/policy";
 import { buildPrivatePath, parsePrivatePath, parseStoredPath } from "../src/lib/files/paths";
@@ -113,7 +113,25 @@ async function main() {
   check("inflation: World Bank first, then the CBN", inf.sources[0].source === "WB" && inf.sources[1]?.source === "CBN");
   check("the MPR treats 0.00 as not in use", (indicatorFor("monetary_policy_rate")!.sources[0] as { zeroIsMissing?: boolean }).zeroIsMissing === true);
   check("cache keys name the exact series", seriesCacheKey(inf.sources[0]) === "secondary_data_cache:WB:FP.CPI.TOTL.ZG" && seriesCacheKey(inf.sources[1]) === "secondary_data_cache:CBN:GetAllInflationRates:allItemsAverage:december");
-  check("the model tool offers exactly the catalogue keys plus none", JSON.stringify(MODEL_SPEC_TOOL.inputSchema.properties.dependent.properties.catalogueKey.enum) === JSON.stringify([...CATALOGUE_KEYS, "none"]));
+  {
+    // The model reader offers Claude the department's entries only.
+    const enumFor = (dept: string) => {
+      const keys = catalogueKeysForDomains(routeDepartment(dept).domains);
+      const tool = modelSpecTool(keys);
+      return { keys, dep: tool.inputSchema.properties.dependent.properties.catalogueKey.enum, ind: tool.inputSchema.properties.independents.items.properties.catalogueKey.enum };
+    };
+    const econ = enumFor("Economics");
+    check("the tool's enum is exactly the offered keys plus none (dependent and independents)", JSON.stringify(econ.dep) === JSON.stringify([...econ.keys, "none"]) && JSON.stringify(econ.ind) === JSON.stringify(econ.dep));
+    check("Economics is offered every economics entry", ["exchange_rate", "monetary_policy_rate", "treasury_bill_rate", "fdi_usd"].every((k) => econ.keys.includes(k)));
+    const nursing = enumFor("Nursing");
+    check("Nursing is not offered money-market rates", !nursing.keys.includes("monetary_policy_rate") && !nursing.keys.includes("treasury_bill_rate") && !nursing.keys.includes("exchange_rate"), nursing.keys);
+    check("…but keeps health spending and the macro controls", nursing.keys.includes("health_expenditure_gdp") && nursing.keys.includes("gdp_per_capita_usd"));
+    const history = enumFor("History");
+    check("a department with no automatic source is offered none only", history.keys.length === 0 && JSON.stringify(history.dep) === JSON.stringify(["none"]));
+    check("the prompt says so, rather than listing entries", catalogueForPrompt([]) === "" && /set every catalogueKey to "none"/.test(MODEL_SPEC_TEXT.instruction("", [])));
+    check("the prompt names the department's domains above the list", /for this department \(health\)/.test(MODEL_SPEC_TEXT.instruction(catalogueForPrompt(["HEALTH"]), ["HEALTH"])));
+    check("the system prompt names the department", /secondary data project in Nursing /.test(MODEL_SPEC_TEXT.system("Nursing")) && !/ in /.test(MODEL_SPEC_TEXT.system(null).split("project")[0]));
+  }
 
   // ─── The source registry ───────────────────────────────────────────────────
   check("every registered module carries its own name", SOURCE_NAMES.every((n) => SOURCE_REGISTRY[n].name === n), SOURCE_NAMES);
@@ -431,6 +449,13 @@ async function main() {
   check("spec: GDP dependent, INF and EXR independent (log prefix removed)", good.variables.map((v) => `${v.symbol}:${v.role}:${v.catalogueKey}`).join() === "GDP:dependent:gdp_current_usd,INF:independent:inflation,EXR:independent:exchange_rate,UNR:independent:null", good.variables);
   check("spec: a duplicate and an invented variable are noted", good.notes.some((n) => /INF was listed twice/.test(n)) && good.notes.some((n) => /FDI .* is not in Chapter 3/.test(n)), good.notes);
   check("spec: an unknown catalogue key becomes unmatched", good.variables.find((v) => v.symbol === "UNR")?.catalogueKey === null);
+  const healthOnly = validateSpec(
+    { dependent: { symbol: "GDP", catalogueKey: "gdp_current_usd" }, independents: [{ symbol: "INF", catalogueKey: "inflation" }, { symbol: "EXR", catalogueKey: "exchange_rate" }], periodStart: 2000, periodEnd: 2023 },
+    CH3,
+    now,
+    catalogueKeysForDomains(["HEALTH"])
+  );
+  check("spec: a real catalogue key the department is not offered becomes unmatched", healthOnly.variables.find((v) => v.symbol === "EXR")?.catalogueKey === null && healthOnly.variables.find((v) => v.symbol === "INF")?.catalogueKey === "inflation", healthOnly.variables);
   check("spec: period and technique kept", good.period.start === 2000 && good.period.end === 2023 && good.technique === "ARDL" && good.sourcesNamed.length === 2);
   const fixed = validateSpec({ dependent: { symbol: "GDP", catalogueKey: "gdp_current_usd" }, independents: JSON.stringify({ independents: [{ symbol: "INF", catalogueKey: "inflation" }] }), periodStart: 2001, periodEnd: 2022, frequency: "quarterly" }, CH3.replace("1981 to 2016", "earlier years"), now);
   check("spec: a list sent as a JSON string is unwrapped", fixed.variables.length === 2);

@@ -17,6 +17,7 @@
  * Setting rows), so the check script can run this with fake sources.
  */
 
+import type { DomainRouting } from "./domain-map";
 import { indicatorFor, type CatalogueIndicator } from "./indicator-catalogue";
 import { roundTo, type Dataset, type DatasetColumn, type MissingItem, missingYears, yearRanges } from "./dataset-csv";
 import type { ModelSpec } from "./model-spec";
@@ -47,6 +48,8 @@ export interface SeriesCache {
 }
 
 export interface FetchSecondaryOptions {
+  /** The department's sources (the reasons for a missing variable name them). Economics when not given. */
+  routing?: DomainRouting;
   cache?: SeriesCache;
   fetchImpl?: FetchLike;
   timeoutMs?: number;

@@ -33,8 +33,11 @@ import {
   type Dataset,
   type MissingItem,
 } from "@/lib/data-fetchers/dataset-csv";
+import { routeDepartment, routingKey, type Domain, type DomainRouting } from "@/lib/data-fetchers/domain-map";
+import { catalogueKeysForDomains, sourceNamesForDomains } from "@/lib/data-fetchers/indicator-catalogue";
 import { extractModelSpec, ModelSpecError, type ModelSpec } from "@/lib/data-fetchers/model-spec";
 import { fetchSecondaryData, type CachedSeries, type SeriesCache } from "@/lib/data-fetchers/secondary-data-fetcher";
+import { SOURCE_REGISTRY } from "@/lib/data-fetchers/source-registry";
 import type { RequestLogEntry } from "@/lib/data-fetchers/timed-fetch";
 import { lockProjectRow } from "@/lib/generation/generation-state";
 import type { PromptSecondaryData } from "@/lib/generation/prompt-loader";
@@ -109,6 +112,26 @@ export interface StoredSecondaryData {
   stats: ColumnStats[];
   correlation: CorrelationMatrix;
   requests: RequestLogEntry[];
+  /** The department's sources when it was fetched (absent on datasets fetched before 29 Sept 2026). */
+  routing?: StoredRouting;
+}
+
+export interface StoredRouting extends DomainRouting {
+  offeredKeysHash: string;
+}
+
+/** What the card shows about where this project's data can come from. */
+export interface RoutingView {
+  department: string | null;
+  basis: string;
+  domains: Domain[];
+  /** The sources the department's catalogue entries name, as the notes cite them. */
+  sources: string[];
+}
+
+export function routingView(department: string | null): RoutingView {
+  const r = routeDepartment(department);
+  return { department: r.department, basis: r.basis, domains: r.domains, sources: sourceNamesForDomains(r.domains).map((n) => SOURCE_REGISTRY[n].label) };
 }
 
 // ─── The fallback copies (Setting rows) ──────────────────────────────────────
@@ -206,6 +229,7 @@ export function secondaryDataResponse(projectCode: string, latest: LatestSeconda
     requests: d.requests,
     costNaira: Math.round(d.specCostNaira * 100) / 100,
     specReused: d.specReused,
+    routingBasis: d.routing?.basis ?? null,
   };
 }
 
@@ -217,16 +241,19 @@ export interface SecondaryDataStatus {
   mode: number | null;
   chapterThreeReady: boolean;
   chapterFourStarted: boolean;
+  /** Where this department's data can come from (null until a mode is approved). */
+  routing: RoutingView | null;
   latest: SecondaryDataResponse | null;
 }
 
 export async function secondaryDataStatus(projectDbId: string, projectCode: string): Promise<SecondaryDataStatus> {
   const [mode, checkpoints, latest] = await Promise.all([
-    db.researchMode.findUnique({ where: { projectId: projectDbId }, select: { modeNumber: true, isLocked: true } }),
+    db.researchMode.findUnique({ where: { projectId: projectDbId }, select: { modeNumber: true, isLocked: true, department: true } }),
     db.generationCheckpoint.findMany({ where: { projectId: projectDbId, chapterNumber: { in: [3, 4] } }, select: { chapterNumber: true, status: true } }),
     latestSecondaryData(projectDbId),
   ]);
   return {
+    routing: mode?.isLocked ? routingView(mode.department) : null,
     eligible: Boolean(mode?.isLocked && mode.modeNumber === 5),
     mode: mode?.isLocked ? mode.modeNumber : null,
     chapterThreeReady: checkpoints.some((c) => c.chapterNumber === 3 && c.status === "COMPLETED"),
@@ -247,18 +274,62 @@ async function costSince(projectDbId: string, since: Date): Promise<number> {
 
 const CHAPTER_FOUR_STARTED = "Chapter 4 has been started from this data, so the data can no longer change.";
 
-export async function runSecondaryDataFetch(projectDbId: string, actor: { userId: string; role: "WORKER" | "ADMIN" }): Promise<LatestSecondaryData & { projectCode: string }> {
+// ─── The model reading (kept per project, so a failed fetch or an upload never reads Chapter 3 twice) ──
+
+/** The last reading of a project's model, in a Setting row (not a ProjectFile: a file means "the dataset exists" to the orchestrator). */
+interface SavedModelReading {
+  chapterThreeHash: string;
+  /** Which catalogue entries Claude was offered (the department's domains and the catalogue at the time). */
+  offeredKeysHash: string;
+  spec: ModelSpec;
+  costNaira: number;
+  savedAt: string;
+}
+
+const modelReadingKey = (projectDbId: string) => `secondary_data_model:${projectDbId}`;
+
+function offeredKeysHash(routing: DomainRouting): string {
+  return crypto.createHash("sha256").update(`${routingKey(routing.domains)}|${catalogueKeysForDomains(routing.domains).join(",")}`).digest("hex");
+}
+
+async function savedModelReading(projectDbId: string): Promise<SavedModelReading | null> {
+  const row = await db.setting.findUnique({ where: { key: modelReadingKey(projectDbId) }, select: { value: true } });
+  if (!row) return null;
+  try {
+    const v = JSON.parse(row.value) as SavedModelReading;
+    return v && typeof v.chapterThreeHash === "string" && v.spec && Array.isArray(v.spec.variables) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Everything a fetch needs before any source is asked: Mode 5 approved,
+ * Chapter 3 written, Chapter 4 not started, the department's routing, and the
+ * model (read from Chapter 3 with one Claude call, reused while Chapter 3 and
+ * the offered catalogue entries are unchanged).
+ */
+async function prepareModel(projectDbId: string): Promise<{
+  project: { id: string; projectId: string };
+  routing: StoredRouting;
+  chapterThreeHash: string;
+  spec: ModelSpec;
+  specReused: boolean;
+  specCostNaira: number;
+}> {
   const project = await db.project.findUnique({ where: { id: projectDbId }, select: { id: true, projectId: true } });
   if (!project) throw new SecondaryDataError("Project not found", 404);
 
-  let mode: number;
+  let settings: Awaited<ReturnType<typeof getApprovedModeSettings>>;
   try {
-    mode = (await getApprovedModeSettings(project.id)).mode;
+    settings = await getApprovedModeSettings(project.id);
   } catch (error) {
     if (error instanceof ModeNotApprovedError) throw new SecondaryDataError(error.message, 409, "MODE_NOT_APPROVED");
     throw error;
   }
-  if (mode !== 5) throw new SecondaryDataError(`Secondary data is fetched for Mode 5 (secondary data) projects only. This project was approved in Mode ${mode}.`, 409, "NOT_MODE_5");
+  if (settings.mode !== 5) throw new SecondaryDataError(`Secondary data is fetched for Mode 5 (secondary data) projects only. This project was approved in Mode ${settings.mode}.`, 409, "NOT_MODE_5");
+  const route = routeDepartment(settings.department);
+  const routing: StoredRouting = { ...route, offeredKeysHash: offeredKeysHash(route) };
 
   const [chapterThree, chapterFour] = await Promise.all([
     db.generationCheckpoint.findUnique({ where: { projectId_chapterNumber: { projectId: project.id, chapterNumber: 3 } }, select: { status: true, fullOutput: true } }),
@@ -269,27 +340,40 @@ export async function runSecondaryDataFetch(projectDbId: string, actor: { userId
   if (!chapterText) throw new SecondaryDataError("Chapter 3 must be written first: the variables and the period are read from it.", 409, "CHAPTER_3_NOT_READY");
 
   const chapterThreeHash = crypto.createHash("sha256").update(chapterText).digest("hex");
-  const previous = await latestSecondaryData(project.id);
-  let spec: ModelSpec;
-  let specReused = false;
-  let specCostNaira = 0;
-  if (previous && previous.data.chapterThreeHash === chapterThreeHash) {
-    spec = previous.data.spec;
-    specReused = true;
-  } else {
-    const started = new Date(Date.now() - 1_000);
-    try {
-      spec = await extractModelSpec(chapterText, { usage: { projectId: project.id, subsystem: SECONDARY_DATA_SUBSYSTEM, step: "read_model_spec", chapterNumber: 3 } });
-    } catch (error) {
-      if (error instanceof ModelSpecError) throw new SecondaryDataError(`${error.message} The COO checks Chapter 3.`, 409, "NO_MODEL");
-      if (error instanceof AnthropicError) throw new SecondaryDataError("Chapter 3 could not be read just now. Try again in a minute.", 503);
-      throw error;
-    } finally {
-      specCostNaira = await costSince(project.id, started).catch(() => 0);
-    }
+  const saved = await savedModelReading(project.id);
+  if (saved && saved.chapterThreeHash === chapterThreeHash && saved.offeredKeysHash === routing.offeredKeysHash) {
+    return { project, routing, chapterThreeHash, spec: saved.spec, specReused: true, specCostNaira: 0 };
   }
 
-  const result = await fetchSecondaryData(spec, { cache: settingSeriesCache });
+  const started = new Date(Date.now() - 1_000);
+  let spec: ModelSpec;
+  let specCostNaira = 0;
+  try {
+    spec = await extractModelSpec(chapterText, {
+      domains: routing.domains,
+      department: routing.matched ?? routing.department,
+      usage: { projectId: project.id, subsystem: SECONDARY_DATA_SUBSYSTEM, step: "read_model_spec", chapterNumber: 3 },
+    });
+  } catch (error) {
+    if (error instanceof ModelSpecError) throw new SecondaryDataError(`${error.message} The COO checks Chapter 3.`, 409, "NO_MODEL");
+    if (error instanceof AnthropicError) throw new SecondaryDataError("Chapter 3 could not be read just now. Try again in a minute.", 503);
+    throw error;
+  } finally {
+    specCostNaira = await costSince(project.id, started).catch(() => 0);
+  }
+  const reading: SavedModelReading = { chapterThreeHash, offeredKeysHash: routing.offeredKeysHash, spec, costNaira: specCostNaira, savedAt: new Date().toISOString() };
+  const value = JSON.stringify(reading);
+  // Paid for: a failed save only costs a second reading next time.
+  await db.setting.upsert({ where: { key: modelReadingKey(project.id) }, create: { key: modelReadingKey(project.id), value }, update: { value } }).catch((error) => {
+    console.warn(`[secondary-data] ${project.projectId}: the model reading could not be saved`, (error as Error).message);
+  });
+  return { project, routing, chapterThreeHash, spec, specReused: false, specCostNaira };
+}
+
+export async function runSecondaryDataFetch(projectDbId: string, actor: { userId: string; role: "WORKER" | "ADMIN" }): Promise<LatestSecondaryData & { projectCode: string }> {
+  const { project, routing, chapterThreeHash, spec, specReused, specCostNaira } = await prepareModel(projectDbId);
+
+  const result = await fetchSecondaryData(spec, { cache: settingSeriesCache, routing });
   if (!result.dataset.columns.some((c) => c.source)) {
     throw new SecondaryDataError("Nothing could be fetched for this model. See what is missing below; try again later or the specialist supplies the data.", 502, "NOTHING_FETCHED", {
       missing: result.missing,
@@ -313,6 +397,7 @@ export async function runSecondaryDataFetch(projectDbId: string, actor: { userId
     stats: describeDataset(result.dataset),
     correlation: correlationMatrix(result.dataset),
     requests: result.requests,
+    routing,
   };
 
   const bytes = new Uint8Array(Buffer.from(csv, "utf8"));
