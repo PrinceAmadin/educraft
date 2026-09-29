@@ -1453,6 +1453,11 @@ model ProjectBrief {
   /// The COO's copy: Chapter 1 states these word for word once approved.
   objectives           String[]
   objectivesFromClient Boolean           @default(false)
+  /// The ResearchMode.modeNumber the current objectives were drafted under.
+  /// Null until the first successful draft. When ResearchMode.modeNumber later
+  /// differs, objectives are stale and are redrafted automatically (changeMode /
+  /// approveMode reset the brief to DRAFTING_OBJECTIVES + redraftOnly).
+  objectivesModeNumber Int?
   /// [{ index, text, attempts, outcome, queries }]
   points               Json?
   /// Web searches and archive queries spent; never more than 16 (source-policy.ts).

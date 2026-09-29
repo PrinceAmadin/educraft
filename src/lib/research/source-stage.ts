@@ -25,7 +25,7 @@ import { buildPrivatePath } from "@/lib/files/paths";
 import { putPrivateFile } from "@/lib/files/storage";
 import { isReportTemplate } from "@/lib/generation/generation-state";
 import { OBJECTIVES_TEXT, draftObjectives } from "@/lib/generation/objectives-drafter";
-import { classifyMode, isModeNumber, modeTitle } from "@/lib/mode-classifier";
+import { isModeNumber, modeTitle } from "@/lib/mode-classifier";
 import { notifyOperations } from "@/lib/services/notifications";
 import { judgeArchiveResults, planArchivePoints, runArchiveQuery, type ArchiveAttempt, type JudgeInput } from "./archive-fetcher";
 import { planLegalPoints, searchCasesForPoint, type FoundCase, type SourceContext } from "./legal-source-fetcher";
@@ -201,15 +201,19 @@ export async function advanceSourceStage(briefId: string, opts: { deadline: numb
 async function stepDraft(brief: StageBrief): Promise<void> {
   const ctx = sourceContext(brief);
   const p = brief.project;
-  const recommended = classifyMode({
-    department: ctx.department,
-    topic: p.projectTitle,
-    answer: p.intakeModeAnswer,
-    projectType: p.projectType,
-    dataRequirements: p.dataRequirements,
-  }).recommendedMode;
   const savedMode = p.researchMode?.modeNumber;
-  const mode = isModeNumber(savedMode) ? savedMode : recommended;
+  if (!isModeNumber(savedMode)) {
+    // Never draft objectives before the COO has saved a research mode: the
+    // recommendation could still be wrong, and any draft made now would have
+    // to be thrown away (see mighty-wondering-hippo plan, 2026-09-29). Park the
+    // brief back at PENDING; changeMode / approveMode reschedule it.
+    await db.projectBrief.updateMany({
+      where: { id: brief.id, status: "DRAFTING_OBJECTIVES" },
+      data: { status: "PENDING", failedSteps: 0, lastError: null, lockedUntil: null },
+    });
+    return;
+  }
+  const mode = savedMode;
   const references = await db.reference.findMany({
     where: { projectId: brief.projectId, status: "KEPT", classification: "CORE" },
     orderBy: { citedByCount: "desc" },
@@ -220,8 +224,8 @@ async function stepDraft(brief: StageBrief): Promise<void> {
     {
       topic: ctx.topic,
       department: ctx.department,
-      modeLabel: isModeNumber(mode) ? modeTitle(mode) : null,
-      modeHint: isModeNumber(mode) ? OBJECTIVES_TEXT.modeHints[mode] : null,
+      modeLabel: modeTitle(mode),
+      modeHint: OBJECTIVES_TEXT.modeHints[mode],
       specialInstructions: p.specialInstructions,
       departmentOutline: p.departmentOutline,
       referenceTitles: references.map((r) => r.title ?? r.proposedTitle).filter(Boolean),
@@ -235,6 +239,7 @@ async function stepDraft(brief: StageBrief): Promise<void> {
       draftedObjectives: drafted.objectives,
       objectives: drafted.objectives,
       objectivesFromClient: drafted.fromClient,
+      objectivesModeNumber: mode,
       draftedAt: new Date(),
       redraftOnly: false,
       status: next,

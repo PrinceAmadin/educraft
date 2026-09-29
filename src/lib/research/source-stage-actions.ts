@@ -42,13 +42,13 @@ async function projectFor(idOrCode: string) {
 }
 
 /** Inside the transaction, after the row lock: the brief follows the mode card's lock. */
-async function assertBriefEditable(tx: Tx, projectDbId: string): Promise<{ department: string | null }> {
+async function assertBriefEditable(tx: Tx, projectDbId: string): Promise<{ department: string | null; modeNumber: number | null }> {
   if (await hasGenerationStarted(projectDbId, tx)) {
     throw new ModeLockedError("GENERATION_STARTED", "Chapters have been generated, so the objectives and sources can no longer change.");
   }
-  const mode = await tx.researchMode.findUnique({ where: { projectId: projectDbId }, select: { isLocked: true, department: true } });
+  const mode = await tx.researchMode.findUnique({ where: { projectId: projectDbId }, select: { isLocked: true, department: true, modeNumber: true } });
   if (mode?.isLocked) throw new ModeLockedError("APPROVED", "The mode card has been approved. Reopen it before changing the objectives or sources.");
-  return { department: mode?.department ?? null };
+  return { department: mode?.department ?? null, modeNumber: mode?.modeNumber ?? null };
 }
 
 function schedule(briefId: string): Promise<void> {
@@ -85,11 +85,21 @@ export async function briefViewFor(
 export async function kickSourceStage(projectIdOrCode: string, now = Date.now()): Promise<boolean> {
   const b = await db.projectBrief.findFirst({
     where: { project: { OR: [{ id: projectIdOrCode }, { projectId: projectIdOrCode }] } },
-    select: { id: true, status: true, failedSteps: true, lockedUntil: true, updatedAt: true },
+    select: {
+      id: true,
+      status: true,
+      failedSteps: true,
+      lockedUntil: true,
+      updatedAt: true,
+      project: { select: { researchMode: { select: { modeNumber: true } } } },
+    },
   });
   if (!b || !ACTIVE_STAGE_STATUSES.includes(b.status) || b.failedSteps >= MAX_STAGE_FAILURES) return false;
   if (b.lockedUntil && b.lockedUntil.getTime() > now) return false;
   if (b.status !== "PENDING" && now - b.updatedAt.getTime() < STAGE_STALL_MS) return false;
+  // Do not start drafting until the COO has saved a research mode: the objectives
+  // must match the approved mode, so the recommendation is not a safe default.
+  if ((b.status === "PENDING" || b.status === "DRAFTING_OBJECTIVES") && !b.project.researchMode?.modeNumber) return false;
   await schedule(b.id);
   return true;
 }
@@ -107,7 +117,8 @@ export async function startSourceStage(idOrCode: string, actor: Actor): Promise<
   const cleared: string[] = [];
   const briefId = await db.$transaction(async (tx) => {
     await lockProjectRow(tx, project.id);
-    const { department: modeDepartment } = await assertBriefEditable(tx, project.id);
+    const { department: modeDepartment, modeNumber } = await assertBriefEditable(tx, project.id);
+    if (!modeNumber) throw new ModeDecisionError(["Pick a research mode first — the objectives depend on it."]);
     const department = modeDepartment ?? project.client.department ?? null;
     const kind = sourceKindForDepartment(department);
     const b = await tx.projectBrief.findUnique({
@@ -344,6 +355,78 @@ export async function saveBriefChoices(
     total: b.sources.length,
     unsupported: b.sourceKind ? points.filter((p) => !supported.has(p.index)).length : 0,
   };
+}
+
+/**
+ * Pure decision for the mode-change reset: what to do with the brief when the
+ * COO saves a new mode (changeMode / approveMode). Kept pure so check:sources
+ * can cover every case without a database.
+ *
+ *   no-op        the objectives were already drafted for this mode
+ *   drafting     no objectives yet; the brief just needs to move to DRAFTING
+ *   redraft      objectives were drafted for another mode; reset to redraft
+ */
+export type ModeChangeAction = "no-op" | "drafting" | "redraft";
+export function modeChangeAction(
+  currentObjectivesMode: number | null,
+  newMode: number,
+  status: SourceStageStatus,
+): ModeChangeAction {
+  if (currentObjectivesMode === newMode) return "no-op";
+  if (currentObjectivesMode === null && (status === "PENDING" || status === "DRAFTING_OBJECTIVES")) return "drafting";
+  return "redraft";
+}
+
+/**
+ * Called by research-mode.ts inside the changeMode / approveMode transaction
+ * after the new modeNumber has been saved. When the brief's current objectives
+ * were drafted for a different mode, resets the brief to DRAFTING_OBJECTIVES
+ * (redraftOnly, so the source search is not rerun) so stepDraft rewrites them
+ * for the new mode. Returns the briefId to reschedule after commit, or null if
+ * nothing to do.
+ */
+export async function resetBriefForModeChange(
+  tx: Tx,
+  projectDbId: string,
+  newMode: number,
+  actor: Actor,
+): Promise<{ briefId: string; oldMode: number | null } | null> {
+  const b = await tx.projectBrief.findUnique({
+    where: { projectId: projectDbId },
+    select: { id: true, objectivesModeNumber: true, status: true },
+  });
+  if (!b) return null;
+  const action = modeChangeAction(b.objectivesModeNumber, newMode, b.status);
+  if (action === "no-op") return null;
+  if (action === "drafting") {
+    await tx.projectBrief.update({
+      where: { id: b.id },
+      data: { status: "DRAFTING_OBJECTIVES", redraftOnly: false, failedSteps: 0, lastError: null, lockedUntil: null },
+    });
+    return { briefId: b.id, oldMode: null };
+  }
+  await tx.projectBrief.update({
+    where: { id: b.id },
+    data: {
+      status: "DRAFTING_OBJECTIVES",
+      redraftOnly: true,
+      failedSteps: 0,
+      lastError: null,
+      lockedUntil: null,
+    },
+  });
+  const from = b.objectivesModeNumber ? `Mode ${b.objectivesModeNumber}` : "no mode";
+  await writeProjectNote(tx, projectDbId, {
+    kind: "MODE",
+    actor,
+    content: `Research mode changed (${from} → Mode ${newMode}) — objectives will redraft.`,
+  });
+  return { briefId: b.id, oldMode: b.objectivesModeNumber };
+}
+
+/** After commit: start the source stage for a brief that was reset above. */
+export function scheduleAfterModeChange(briefId: string): Promise<void> {
+  return schedule(briefId);
 }
 
 /** The line the approval note carries about the brief. */

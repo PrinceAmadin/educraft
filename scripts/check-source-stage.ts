@@ -33,6 +33,7 @@ import {
 } from "../src/lib/research/source-policy";
 import { readPoints } from "../src/lib/research/source-points";
 import { resumeStatusFor } from "../src/lib/research/source-stage";
+import { modeChangeAction } from "../src/lib/research/source-stage-actions";
 import { briefBlockers, buildBriefView, type BriefCardRow } from "../src/lib/research/source-stage-view";
 
 let failures = 0;
@@ -255,6 +256,18 @@ expect(
 expect("a case line with no citation or year", formatPrimarySource("case", { point: "P", title: "Y v. FRN", court: null, decidedOn: null }), "Y v. FRN. Supports: P");
 expect("an archive line", formatPrimarySource("archive", { point: "Q", title: "Taxation in Nigeria", decidedOn: "1934-1943", holder: "The National Archives, Kew", reference: "CO 583/200/6", recordType: "Primary" }), "Taxation in Nigeria, 1934-1943, The National Archives, Kew, CO 583/200/6 (primary record). Bears on: Q");
 expect("a {TOKEN} in a found title never becomes a placeholder", formatPrimarySource("case", { point: "P", title: "{SUPERVISOR} v. State" }).includes("{SUPERVISOR}"), false);
+
+// ── Mode change reset (mighty-wondering-hippo, 2026-09-29) ──
+// Objectives are keyed to the approved mode; if the COO changes the mode after
+// drafting, the brief resets so stepDraft rewrites them for the new mode. When
+// no objectives have been drafted yet, the brief just moves to DRAFTING.
+expect("no objectives yet, brief still PENDING: mode 5 chosen → drafting", modeChangeAction(null, 5, "PENDING"), "drafting");
+expect("no objectives yet, brief already DRAFTING: mode 5 chosen → drafting", modeChangeAction(null, 5, "DRAFTING_OBJECTIVES"), "drafting");
+expect("objectives already drafted for Mode 3, brief READY: mode 5 → redraft", modeChangeAction(3, 5, "READY"), "redraft");
+expect("objectives already drafted for Mode 3, brief PLANNING: mode 5 → redraft", modeChangeAction(3, 5, "PLANNING_POINTS"), "redraft");
+expect("objectives already drafted for Mode 3, brief SEARCHING: mode 5 → redraft", modeChangeAction(3, 5, "SEARCHING"), "redraft");
+expect("objectives already drafted for Mode 5, mode 5 chosen: no-op", modeChangeAction(5, 5, "READY"), "no-op");
+expect("no objectives, brief READY (a search finished without any): mode 5 → redraft", modeChangeAction(null, 5, "READY"), "redraft");
 
 console.log(`${passes} checks passed, ${failures} failed.`);
 if (failures > 0) process.exit(1);

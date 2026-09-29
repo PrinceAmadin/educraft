@@ -37,7 +37,14 @@ import { ModeDecisionError, ModeLockedError, ModeNotApprovedError, ModeStateErro
 import { writeProjectNote } from "@/lib/services/operations/project-ops";
 import type { Actor } from "@/lib/services/operations/actor";
 import { BRIEF_CARD_SELECT, briefBlockers, buildBriefView, type BriefView } from "@/lib/research/source-stage-view";
-import { briefApprovalNote, saveBriefChoices, sourceStageCost, type BriefChoices } from "@/lib/research/source-stage-actions";
+import {
+  briefApprovalNote,
+  resetBriefForModeChange,
+  saveBriefChoices,
+  scheduleAfterModeChange,
+  sourceStageCost,
+  type BriefChoices,
+} from "@/lib/research/source-stage-actions";
 
 type Tx = Prisma.TransactionClient;
 
@@ -313,6 +320,7 @@ export async function changeMode(idOrCode: string, decision: ModeDecision & Brie
   const mode = decision.modeNumber as ResearchModeNumber;
 
   const project = await loadProject(idOrCode);
+  let pendingBriefId: string | null = null;
   await db.$transaction(async (tx) => {
     await lockProject(tx, project.id);
     const saved = await tx.researchMode.findUnique({ where: { projectId: project.id } });
@@ -323,11 +331,16 @@ export async function changeMode(idOrCode: string, decision: ModeDecision & Brie
       create: { projectId: project.id, ...data },
       update: { ...data, isLocked: false, cooApprovedBy: null, cooApprovedByName: null, cooApprovedAt: null, cooNotes: null },
     });
+    // If the objectives were drafted for a different mode, throw them out
+    // before saveBriefChoices runs — otherwise a stale set would be kept.
+    const reset = await resetBriefForModeChange(tx, project.id, mode, actor);
+    if (reset) pendingBriefId = reset.briefId;
     await saveBriefChoices(tx, project.id, { objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds }, { approving: false, department: data.department });
     const entry = getDepartmentModeDefault(decision.department).entry;
     const section = decision.section ?? defaultSectionFor(entry, mode);
     await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode set (not yet approved): ${describe(decision, section)}.` });
   }, TX_OPTIONS);
+  if (pendingBriefId) await scheduleAfterModeChange(pendingBriefId);
   return cardFor(project.id);
 }
 
@@ -340,10 +353,27 @@ export async function approveMode(idOrCode: string, decision: ModeDecision & Bri
   if (!isReportTemplate(project.service.intakeFormTemplate)) {
     throw new ModeStateError("This service is not a written report, so it has no research mode to approve.");
   }
+  let pendingBriefId: string | null = null;
+  let redraftNeeded = false;
   await db.$transaction(async (tx) => {
     await lockProject(tx, project.id);
     const saved = await tx.researchMode.findUnique({ where: { projectId: project.id } });
     await assertChangeable(tx, project.id, saved);
+    // If the objectives were drafted for a different mode (or none), save the
+    // new mode as a DRAFT, reset the brief and stop here — approval must wait
+    // until the objectives match the mode. The COO approves again once ready.
+    const data = { ...rowData(project, decision, valid.mode), department: valid.department };
+    await tx.researchMode.upsert({
+      where: { projectId: project.id },
+      create: { projectId: project.id, ...data },
+      update: { ...data, isLocked: false, cooApprovedBy: null, cooApprovedByName: null, cooApprovedAt: null, cooNotes: null },
+    });
+    const reset = await resetBriefForModeChange(tx, project.id, valid.mode, actor);
+    if (reset) {
+      pendingBriefId = reset.briefId;
+      redraftNeeded = true;
+      return;
+    }
     // D3b: the objectives and sources are approved with the mode; a brief that is not ready stops the approval.
     const brief = await saveBriefChoices(tx, project.id, { objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds }, { approving: true, department: valid.department });
     const approval = {
@@ -353,12 +383,17 @@ export async function approveMode(idOrCode: string, decision: ModeDecision & Bri
       cooApprovedAt: new Date(),
       cooNotes: decision.notes?.trim() || null,
     };
-    const data = { ...rowData(project, decision, valid.mode), department: valid.department, ...approval };
-    await tx.researchMode.upsert({ where: { projectId: project.id }, create: { projectId: project.id, ...data }, update: data });
+    await tx.researchMode.update({ where: { projectId: project.id }, data: approval });
     const note = decision.notes?.trim() ? ` Note: ${decision.notes.trim()}` : "";
     const briefLine = brief ? briefApprovalNote(brief) : "";
     await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode approved and locked: ${describe(decision, valid.section)}.${briefLine}${note}` });
   }, TX_OPTIONS);
+  if (pendingBriefId) await scheduleAfterModeChange(pendingBriefId);
+  if (redraftNeeded) {
+    throw new ModeStateError(
+      `Objectives are being redrafted for ${modeTitle(valid.mode)}. Approve again once they are ready.`,
+    );
+  }
   return cardFor(project.id);
 }
 
