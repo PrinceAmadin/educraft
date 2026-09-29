@@ -639,7 +639,7 @@ function ReportGenerationFooter({ projectCode, state }: { projectCode: string; s
   if (!state) return null;
   if (state.kind === "in_progress") {
     return (
-      <p className="text-sm text-muted">
+      <p className="text-sm text-muted-foreground">
         Writing Chapter {state.chapterNum} — {state.title} ({state.progressPercent}%). Live progress on the Report tab.
       </p>
     );
@@ -648,12 +648,12 @@ function ReportGenerationFooter({ projectCode, state }: { projectCode: string; s
     return (
       <div className="space-y-1">
         <p className="text-sm font-medium">{state.message}</p>
-        <p className="text-sm text-muted">{state.statusLine} See the Report tab.</p>
+        <p className="text-sm text-muted-foreground">{state.statusLine} See the Report tab.</p>
       </div>
     );
   }
   if (state.kind === "complete") {
-    return <p className="text-sm text-muted">Report complete and submitted for QA review.</p>;
+    return <p className="text-sm text-muted-foreground">Report complete and submitted for QA review.</p>;
   }
   return <ProceedToWriteReport projectCode={projectCode} />;
 }
@@ -693,7 +693,7 @@ function ProceedToWriteReport({ projectCode }: { projectCode: string }) {
 
   return (
     <div className="space-y-2">
-      <p className="text-sm text-muted">Research complete. Click below to begin report generation.</p>
+      <p className="text-sm text-muted-foreground">Research complete. Click below to begin report generation.</p>
       <Button size="sm" disabled={busy} onClick={() => start(false)}>
         {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuBookOpen className="size-4" aria-hidden />}
         Proceed to Write Report
