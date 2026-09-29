@@ -91,7 +91,7 @@ export default async function WorkerAssignmentPage({
     <DataPauseReviewCard key={`${pause.id}-${pause.status}-${pause.round}-${pause.files.length}`} initial={pause} actionEndpoint={`${routeBase}/data-pause`} uploadEndpoint={`${routeBase}/upload`} />
   ) : null;
   const secondaryCard = secondary.eligible ? (
-    <SecondaryDataCard initial={secondary} endpoint={`${routeBase}/generation/fetch-secondary-data`} filesBase={routeBase} />
+    <SecondaryDataCard initial={secondary} endpoint={`${routeBase}/generation/fetch-secondary-data`} uploadEndpoint={`${routeBase}/generation/upload-secondary-data`} filesBase={routeBase} />
   ) : null;
 
   const deliverables = (await listDeliverablesForWorker(project.id)).map((d) => {

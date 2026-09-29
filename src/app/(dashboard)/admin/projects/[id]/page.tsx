@@ -146,6 +146,7 @@ export default async function ProjectDetailPage({
                   <SecondaryDataCard
                     initial={secondary}
                     endpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/generation/fetch-secondary-data`}
+                    uploadEndpoint={`/api/admin/projects/${encodeURIComponent(project.projectId)}/generation/upload-secondary-data`}
                     filesBase={`/api/admin/projects/${encodeURIComponent(project.projectId)}`}
                   />
                 ) : null}

@@ -19,6 +19,7 @@ import { dhsUrl, parseDhs } from "../src/lib/data-fetchers/sources/dhs";
 import { owidUrl, parseOwid } from "../src/lib/data-fetchers/sources/owid";
 import { nasaPowerUrl, parseNasaPower } from "../src/lib/data-fetchers/sources/nasa-power";
 import { parseCsv } from "../src/lib/data-fetchers/csv";
+import { MAX_UPLOAD_CHARS, parseUploadedDataset, UploadedDatasetError, uploadTemplateCsv } from "../src/lib/data-fetchers/uploaded-dataset";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, isPermanentMissing, MISSING_CODE_LABELS, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
 import { catalogueForPrompt, lastCompleteYear, modelSpecTool, MODEL_SPEC_TEXT, relevantSections, statedPeriods, validateSpec, ModelSpecError, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
@@ -497,6 +498,60 @@ async function main() {
     check("IMF: when the World Bank is down, growth comes whole from the IMF", r.dataset.columns[0].source === "International Monetary Fund, World Economic Outlook" && r.dataset.columns[0].code === "NGDP_RPCH" && Object.keys(r.dataset.columns[0].values).length === 24, r.dataset.columns[0]);
     check("IMF: the note warns the latest years can be estimates", /IMF estimates/.test(r.dataset.columns[0].sourceNote ?? ""));
     check("IMF: government debt (null at the World Bank) comes from the IMF", r.dataset.columns[1].code === "GGXWDG_NGDP" && r.missing.length === 0, r.missing);
+  }
+
+  // ─── The specialist's own dataset (the last resort) ───────────────────────
+  {
+    const model = spec([["INCID", null], ["AWARE", null], ["GDP", "gdp_current_usd"]], 2019, 2023);
+    const fetched: Dataset = {
+      start: 2019,
+      end: 2023,
+      frequency: "annual",
+      columns: [
+        { symbol: "INCID", name: "INCID", role: "dependent", catalogueKey: null, unit: null, decimals: 2, source: null, code: null, sourceNote: null, values: {} },
+        { symbol: "AWARE", name: "AWARE", role: "independent", catalogueKey: null, unit: null, decimals: 2, source: null, code: null, sourceNote: null, values: {} },
+        { symbol: "GDP", name: "GDP", role: "independent", catalogueKey: "gdp_current_usd", unit: "US$ billion", decimals: 2, source: "World Bank, World Development Indicators", code: "NY.GDP.MKTP.CD", sourceNote: "last updated 2026-07-13", values: { 2019: 448.12, 2020: 432.2, 2021: 440.83, 2022: 477.39, 2023: 363.85 } },
+      ],
+    };
+    const template = uploadTemplateCsv(model, fetched);
+    check("upload template: Year and the model's symbols, one row per year, fetched values filled in", template.split("\n")[0] === "Year,INCID,AWARE,GDP" && template.split("\n")[1] === "2019,,,448.12" && template.trim().split("\n").length === 6, template);
+    const filled = template
+      .replace("2019,,,", "2019,12,3.5,")
+      .replace("2020,,,", "2020,15,3.9,")
+      .replace("2021,,,", "2021,,4.10,")
+      .replace("2022,,,", "2022,\"1,021\",n/a,")
+      .replace("2023,,,", "2023,30,4.8,");
+    const up = parseUploadedDataset(filled, model, { sourceDescription: "NBS Cybersecurity Survey 2024", previous: fetched });
+    const col = (s: string) => up.dataset.columns.find((c) => c.symbol === s)!;
+    check("upload: values read, a quoted thousands separator understood, n/a and empty cells left empty", JSON.stringify(col("INCID").values) === JSON.stringify({ 2019: 12, 2020: 15, 2022: 1021, 2023: 30 }) && col("AWARE").values[2022] === undefined && col("AWARE").values[2021] === 4.1, col("INCID").values);
+    check("upload: decimals follow the data (4.10 → 2 places)", col("AWARE").decimals === 2 && col("INCID").decimals === 0);
+    check("upload: a column changed by the specialist is cited to what they say", col("INCID").source === "NBS Cybersecurity Survey 2024" && col("INCID").sourceNote === "supplied by the specialist" && col("INCID").code === null);
+    check("upload: a column left exactly as fetched keeps its own source", col("GDP").source === "World Bank, World Development Indicators" && col("GDP").code === "NY.GDP.MKTP.CD");
+    check("upload: gaps are listed as YEARS_MISSING", up.missing.some((m) => m.symbol === "INCID" && m.code === "YEARS_MISSING" && /2021/.test(m.reason)) && up.missing.some((m) => m.symbol === "AWARE" && /2022/.test(m.reason)));
+    check("upload: the CSV it becomes is the model's, in model order", datasetCsv(up.dataset).split("\n")[0] === "Year,INCID,AWARE,GDP");
+    const changedGdp = parseUploadedDataset(filled.replace("448.12", "450.00"), model, { sourceDescription: "CBN Statistical Bulletin 2023", previous: fetched });
+    check("upload: a fetched column edited by hand becomes the specialist's", changedGdp.dataset.columns[2].source === "CBN Statistical Bulletin 2023");
+    check("upload: columns in any order and any letter case", parseUploadedDataset("year,gdp,aware,incid\n2019,1,2,3\n", model, { sourceDescription: "X source" }).dataset.columns.map((c) => c.values[2019]).join() === "3,2,1");
+    const problems = (text: string) => {
+      try {
+        parseUploadedDataset(text, model, { sourceDescription: "X source" });
+        return [];
+      } catch (e) {
+        return e instanceof UploadedDatasetError ? e.problems : [String(e)];
+      }
+    };
+    check("upload refused: a column for a variable that is not in the model, and one that is missing", (() => {
+      const p = problems("Year,INCID,AWARE,FOO\n2019,1,2,3\n");
+      return p.some((x) => /"FOO" is not a variable in Chapter 3's model/.test(x)) && p.some((x) => /no column for GDP/.test(x));
+    })());
+    check("upload refused: the first column is not Year", problems("Date,INCID,AWARE,GDP\n2019,1,2,3\n").some((x) => /first column must be "Year"/.test(x)));
+    check("upload refused: a year outside the period, a year twice, a word for a number", (() => {
+      const p = problems("Year,INCID,AWARE,GDP\n2018,1,2,3\n2019,1,2,3\n2019,1,2,3\n2020,one,2,3\n");
+      return p.some((x) => /2018 is outside the model's period, 2019–2023/.test(x)) && p.some((x) => /2019 appears twice/.test(x)) && p.some((x) => /Row 5 \(2020\), INCID: "one" is not a number/.test(x));
+    })());
+    check("upload refused: a column with no values at all", problems("Year,INCID,AWARE,GDP\n2019,,2,3\n").some((x) => /INCID has no values/.test(x)));
+    check("upload refused: an empty file, a file too large", problems("Year,INCID,AWARE,GDP\n").some((x) => /no data rows/.test(x)) && problems("x".repeat(MAX_UPLOAD_CHARS + 1)).some((x) => /too large/.test(x)));
+    check("upload refused: every problem is reported at once (up to 20)", problems(["Year,INCID,AWARE,GDP", ...Array.from({ length: 30 }, (_, i) => `${1990 + i},1,2,3`)].join("\n")).length === 21);
   }
 
   // ─── Statistics (EViews formulas) ──────────────────────────────────────────

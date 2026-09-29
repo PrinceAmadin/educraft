@@ -39,6 +39,7 @@ import { routeDepartment, routingKey, type Domain, type DomainRouting } from "@/
 import { catalogueKeysForDomains, sourceNamesForDomains } from "@/lib/data-fetchers/indicator-catalogue";
 import { extractModelSpec, ModelSpecError, type ModelSpec } from "@/lib/data-fetchers/model-spec";
 import { fetchSecondaryData, type CachedSeries, type SeriesCache } from "@/lib/data-fetchers/secondary-data-fetcher";
+import { MAX_UPLOAD_CHARS, parseUploadedDataset, UPLOAD_TEXT, UploadedDatasetError, uploadTemplateCsv } from "@/lib/data-fetchers/uploaded-dataset";
 import { SOURCE_REGISTRY } from "@/lib/data-fetchers/source-registry";
 import type { RequestLogEntry } from "@/lib/data-fetchers/timed-fetch";
 import { lockProjectRow } from "@/lib/generation/generation-state";
@@ -55,9 +56,9 @@ const PATH_TARGET = "secondary-data";
 export class SecondaryDataError extends Error {
   constructor(
     message: string,
-    readonly status: 404 | 409 | 502 | 503 = 409,
+    readonly status: 400 | 404 | 409 | 413 | 502 | 503 = 409,
     readonly code?: string,
-    readonly details?: { missing?: MissingItem[]; requests?: RequestLogEntry[] }
+    readonly details?: { missing?: MissingItem[]; requests?: RequestLogEntry[]; problems?: string[] }
   ) {
     super(message);
   }
@@ -133,7 +134,14 @@ export interface StoredSecondaryData {
   requests: RequestLogEntry[];
   /** The department's sources when it was fetched (absent on datasets fetched before 29 Sept 2026). */
   routing?: StoredRouting;
+  /** "upload" when the specialist supplied it (absent = fetched). */
+  origin?: "fetch" | "upload";
+  /** For an upload: where the specialist says the data comes from. */
+  uploadSource?: string;
 }
+
+export const MAX_UPLOAD_SOURCE = 200;
+export const UPLOAD_SOURCE_REQUIRED = "Say where the data comes from (for example: CBN Statistical Bulletin 2023; NBS Labour Force Survey).";
 
 export interface StoredRouting extends DomainRouting {
   offeredKeysHash: string;
@@ -249,6 +257,8 @@ export function secondaryDataResponse(projectCode: string, latest: LatestSeconda
     costNaira: Math.round(d.specCostNaira * 100) / 100,
     specReused: d.specReused,
     routingBasis: d.routing?.basis ?? null,
+    origin: d.origin ?? "fetch",
+    uploadSource: d.uploadSource ?? null,
   };
 }
 
@@ -262,16 +272,32 @@ export interface SecondaryDataStatus {
   chapterFourStarted: boolean;
   /** Where this department's data can come from (null until a mode is approved). */
   routing: RoutingView | null;
+  /**
+   * For supplying the data by hand: the model's variables and period (from the
+   * last reading of Chapter 3) and a CSV with every value already fetched
+   * filled in. Null until Chapter 3 has been read once (a Fetch does that).
+   */
+  upload: { period: { start: number; end: number }; variables: { symbol: string; name: string }[]; templateCsv: string } | null;
   latest: SecondaryDataResponse | null;
 }
 
 export async function secondaryDataStatus(projectDbId: string, projectCode: string): Promise<SecondaryDataStatus> {
-  const [mode, checkpoints, latest] = await Promise.all([
+  const [mode, checkpoints, latest, reading] = await Promise.all([
     db.researchMode.findUnique({ where: { projectId: projectDbId }, select: { modeNumber: true, isLocked: true, department: true } }),
     db.generationCheckpoint.findMany({ where: { projectId: projectDbId, chapterNumber: { in: [3, 4] } }, select: { chapterNumber: true, status: true } }),
     latestSecondaryData(projectDbId),
+    savedModelReading(projectDbId),
   ]);
+  const spec = reading?.spec ?? latest?.data.spec ?? null;
+  const sameModel = latest && (!reading || reading.chapterThreeHash === latest.data.chapterThreeHash);
   return {
+    upload: spec
+      ? {
+          period: spec.period,
+          variables: spec.variables.map((v) => ({ symbol: v.symbol, name: v.name })),
+          templateCsv: uploadTemplateCsv(spec, sameModel ? latest.data.dataset : null),
+        }
+      : null,
     routing: mode?.isLocked ? routingView(mode.department) : null,
     eligible: Boolean(mode?.isLocked && mode.modeNumber === 5),
     mode: mode?.isLocked ? mode.modeNumber : null,
@@ -420,10 +446,68 @@ export async function runSecondaryDataFetch(projectDbId: string, actor: { userId
     routing,
   };
 
-  const bytes = new Uint8Array(Buffer.from(csv, "utf8"));
+  return storeDataset(project, stored, actor, `${project.projectId} secondary data ${result.dataset.start}-${result.dataset.end}.csv`);
+}
+
+/**
+ * The specialist's own dataset, when the sources cannot supply the model's
+ * variables: checked against the model Chapter 3 specifies (the same model
+ * reading a fetch uses), then kept exactly as a fetched one is, replacing it.
+ * Chapters 4 and 5 are written from it; the orchestrator sees "the dataset
+ * exists" the moment it is stored.
+ */
+export async function uploadSecondaryData(
+  projectDbId: string,
+  actor: { userId: string; role: "WORKER" | "ADMIN" },
+  input: { csv: string; source: string }
+): Promise<LatestSecondaryData & { projectCode: string }> {
+  const source = input.source.replace(/\s+/g, " ").trim();
+  if (source.length < 3) throw new SecondaryDataError(UPLOAD_SOURCE_REQUIRED, 400, "SOURCE_REQUIRED");
+  if (source.length > MAX_UPLOAD_SOURCE) throw new SecondaryDataError(`Keep "where the data comes from" under ${MAX_UPLOAD_SOURCE} characters.`, 400, "SOURCE_REQUIRED");
+  if (input.csv.length > MAX_UPLOAD_CHARS) throw new SecondaryDataError(UPLOAD_TEXT.tooLarge, 413, "UPLOAD_INVALID");
+
+  const { project, routing, chapterThreeHash, spec, specReused, specCostNaira } = await prepareModel(projectDbId);
+  const previous = await latestSecondaryData(project.id);
+  let parsed: ReturnType<typeof parseUploadedDataset>;
+  try {
+    parsed = parseUploadedDataset(input.csv, spec, { sourceDescription: source, previous: previous?.data.chapterThreeHash === chapterThreeHash ? previous.data.dataset : null });
+  } catch (error) {
+    if (error instanceof UploadedDatasetError) throw new SecondaryDataError(error.message, 400, "UPLOAD_INVALID", { problems: error.problems });
+    throw error;
+  }
+  const { dataset, missing } = parsed;
+  const stored: StoredSecondaryData = {
+    version: 1,
+    fetchedAt: new Date().toISOString(),
+    fetchedBy: actor,
+    chapterThreeHash,
+    spec,
+    specReused,
+    specCostNaira,
+    dataset,
+    csv: datasetCsv(dataset),
+    notes: [...datasetNotes(dataset), ...spec.notes],
+    missing,
+    stats: describeDataset(dataset),
+    correlation: correlationMatrix(dataset),
+    requests: [],
+    routing,
+    origin: "upload",
+    uploadSource: source,
+  };
+  return storeDataset(project, stored, actor, `${project.projectId} secondary data ${dataset.start}-${dataset.end} (supplied).csv`);
+}
+
+/** Keeps a dataset: the CSV in the private store and its record on a ProjectFile, replacing the previous one, unless Chapter 4 has started. */
+async function storeDataset(
+  project: { id: string; projectId: string },
+  stored: StoredSecondaryData,
+  actor: { userId: string; role: "WORKER" | "ADMIN" },
+  fileName: string
+): Promise<LatestSecondaryData & { projectCode: string }> {
+  const bytes = new Uint8Array(Buffer.from(stored.csv, "utf8"));
   const pathname = buildPrivatePath({ projectDbId: project.id, purpose: "source", targetId: PATH_TARGET, random: crypto.randomBytes(12).toString("hex"), ext: "csv" });
   const { url } = await putPrivateFile(pathname, bytes, "text/csv");
-  const fileName = `${project.projectId} secondary data ${result.dataset.start}-${result.dataset.end}.csv`;
 
   try {
     const file = await db.$transaction(

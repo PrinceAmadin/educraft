@@ -542,7 +542,7 @@ export const ORCHESTRATOR_TEXT = {
     CHAPTER_STALLED: (chapter: number | null) => `${chapterName(chapter)} made no progress for 90 minutes and was stopped. The parts already written are kept.`,
     PAUSE_DRAFT_FAILED: "The data request could not be drafted. Draft it again on the request card below.",
     PAUSE_CANCELLED: (chapter: number | null) => `The data request was cancelled, and ${chapterName(chapter)} cannot be written without the data. Reopen the request to carry on.`,
-    DATA_FETCH_FAILED: "The dataset could not be fetched. Use Fetch data on the card below, then Continue.",
+    DATA_FETCH_FAILED: "The dataset could not be fetched. Fetch it again, or supply it yourself, on the Mode 5 data card below, then Continue.",
     NO_RESEARCH_QUESTIONS: "Chapter One has a research questions or hypotheses section, but none could be read from it. Write Chapter One again, or continue without them.",
     NO_REFERENCES: "The project has no verified references. Run the research first, or start again and confirm a report without sources.",
     MODE_NOT_APPROVED: "The research mode is no longer approved. Approve the mode card, then Continue.",

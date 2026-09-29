@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { LuChartLine, LuDownload, LuLoaderCircle, LuRefreshCw, LuTriangleAlert } from "react-icons/lu";
+import { LuChartLine, LuChevronDown, LuCircleCheck, LuDownload, LuFileSpreadsheet, LuLoaderCircle, LuRefreshCw, LuTriangleAlert, LuUpload } from "react-icons/lu";
+import { Field } from "@/components/forms/Field";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { SecondaryDataResponse, SecondaryDataStatus } from "@/lib/services/secondary-data";
 import { isPermanentMissing, MISSING_CODE_LABELS, type MissingItem } from "@/lib/data-fetchers/dataset-csv";
 import type { RequestLogEntry } from "@/lib/data-fetchers/timed-fetch";
@@ -15,12 +17,19 @@ import { formatDateTime } from "@/lib/utils";
  * fetched, from where, what is missing and why, the CSV, and Fetch again
  * (free until Chapter 4 starts; after that the data is frozen).
  */
-export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: SecondaryDataStatus; endpoint: string; filesBase: string }) {
+export function SecondaryDataCard({ initial, endpoint, uploadEndpoint, filesBase }: { initial: SecondaryDataStatus; endpoint: string; uploadEndpoint: string; filesBase: string }) {
   const [status, setStatus] = React.useState(initial);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState<{ missing?: MissingItem[]; requests?: RequestLogEntry[] } | null>(null);
   const data = status.latest;
+
+  /** The card's state from the server (after a failed fetch the model has been read, so the upload template exists). */
+  async function refreshStatus() {
+    const res = await fetch(endpoint, { cache: "no-store" }).catch(() => null);
+    const body = res?.ok ? ((await res.json().catch(() => null)) as SecondaryDataStatus | null) : null;
+    if (body) setStatus(body);
+  }
 
   async function fetchData() {
     setBusy(true);
@@ -32,9 +41,10 @@ export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: S
       if (!res.ok) {
         setError(body?.error ?? "That didn't work. Try again.");
         if (body?.missing || body?.requests) setFailed({ missing: body.missing, requests: body.requests });
+        await refreshStatus();
         return;
       }
-      setStatus((s) => ({ ...s, latest: body as SecondaryDataResponse }));
+      await refreshStatus();
     } catch {
       setError("Could not reach EduCraft. Check your connection and try again.");
     } finally {
@@ -60,7 +70,9 @@ export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: S
         </h2>
         <p className="text-sm text-muted-foreground">
           {data
-            ? `Fetched ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (each variable's source is below). Chapters 4 and 5 are written from it.`
+            ? data.origin === "upload"
+              ? `Supplied by hand ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (from ${data.uploadSource}). Chapters 4 and 5 are written from it.`
+              : `Fetched ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (each variable's source is below). Chapters 4 and 5 are written from it.`
             : "Once Chapter 3 is written, the data for its model is fetched from the sources for this department. Chapters 4 and 5 are written from it."}
         </p>
         {status.routing ? (
@@ -91,7 +103,183 @@ export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: S
         </Button>
         {busy ? <p className="text-xs text-muted-foreground">This takes a few seconds.</p> : blocked ? <p className="text-xs text-muted-foreground">{blocked}</p> : null}
       </div>
+
+      {!blocked ? (
+        <UploadPanel
+          upload={status.upload}
+          endpoint={uploadEndpoint}
+          // Open by default when the sources could not supply everything.
+          startOpen={Boolean(failed?.missing?.some((m) => isPermanentMissing(m.code)) || data?.missing.some((m) => isPermanentMissing(m.code)) || status.routing?.domains.length === 0)}
+          onUploaded={() => {
+            setError(null);
+            setFailed(null);
+            void refreshStatus();
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * The last resort: the specialist supplies the dataset by hand, for variables
+ * no source publishes. The template is the model's columns with every value
+ * already fetched filled in; the upload replaces the whole dataset.
+ */
+function UploadPanel({
+  upload,
+  endpoint,
+  startOpen,
+  onUploaded,
+}: {
+  upload: SecondaryDataStatus["upload"];
+  endpoint: string;
+  startOpen: boolean;
+  onUploaded: () => void;
+}) {
+  const [open, setOpen] = React.useState(startOpen);
+  const [file, setFile] = React.useState<File | null>(null);
+  const [source, setSource] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [problems, setProblems] = React.useState<string[]>([]);
+  const [done, setDone] = React.useState(false);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  const id = React.useId();
+
+  React.useEffect(() => {
+    if (startOpen) setOpen(true);
+  }, [startOpen]);
+
+  function downloadTemplate() {
+    if (!upload) return;
+    const url = URL.createObjectURL(new Blob([upload.templateCsv], { type: "text/csv" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dataset-template-${upload.period.start}-${upload.period.end}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function send() {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    setProblems([]);
+    setDone(false);
+    try {
+      const csv = await file.text();
+      const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ csv, source }) });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(body?.error ?? "That didn't work. Try again.");
+        setProblems(Array.isArray(body?.problems) ? body.problems : []);
+        return;
+      }
+      setDone(true);
+      setFile(null);
+      if (fileInput.current) fileInput.current.value = "";
+      onUploaded();
+    } catch {
+      setError("Could not reach EduCraft. Check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4 border-t border-border/60 pt-4">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls={`${id}-upload`}
+        className="flex min-h-11 w-full items-center justify-between gap-3 text-left text-sm font-semibold text-foreground"
+      >
+        <span className="flex items-center gap-2">
+          <LuUpload className="size-4 text-primary" aria-hidden />
+          Supply the data yourself
+        </span>
+        <LuChevronDown className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+
+      {open ? (
+        <div id={`${id}-upload`} className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            For variables no source publishes. Download the template, fill in the empty cells, save it as CSV (in Excel: Save As, CSV) and upload it with where the data comes from. It replaces the dataset above;
+            columns you leave as fetched keep their source.
+          </p>
+
+          {upload ? (
+            <>
+              <div className="space-y-1.5">
+                <Button type="button" variant="outline" onClick={downloadTemplate}>
+                  <LuDownload aria-hidden />
+                  Download template
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Year, then {upload.variables.map((v) => v.symbol).join(", ")}, one row per year from {upload.period.start} to {upload.period.end}.
+                </p>
+              </div>
+
+              <Field label="Dataset (CSV)" htmlFor={`${id}-file`} required>
+                <label
+                  className={`flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-input-border bg-input px-4 py-3 text-sm font-medium text-foreground transition-colors hover:border-primary hover:bg-card has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring ${busy ? "pointer-events-none opacity-50" : ""}`}
+                >
+                  <input
+                    ref={fileInput}
+                    id={`${id}-file`}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    disabled={busy}
+                    onChange={(e) => {
+                      setFile(e.target.files?.[0] ?? null);
+                      setDone(false);
+                    }}
+                  />
+                  <LuFileSpreadsheet className="size-4 text-primary" aria-hidden />
+                  <span className="min-w-0 break-all">{file ? file.name : "Choose the CSV file"}</span>
+                </label>
+              </Field>
+
+              <Field label="Where the data comes from" htmlFor={`${id}-source`} hint="Cited under every table of this data, e.g. CBN Statistical Bulletin 2023; NBS Labour Force Survey." required>
+                <Input id={`${id}-source`} value={source} maxLength={200} onChange={(e) => setSource(e.target.value)} placeholder="e.g. CBN Statistical Bulletin 2023" disabled={busy} />
+              </Field>
+
+              {error ? (
+                <div className="space-y-2" role="alert">
+                  <p className="flex items-start gap-2 text-sm text-danger">
+                    <LuTriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                    {error}
+                  </p>
+                  {problems.length > 1 ? (
+                    <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
+                      {problems.map((p) => (
+                        <li key={p}>{p}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              {done ? (
+                <p className="flex items-start gap-2 text-sm text-success" role="status">
+                  <LuCircleCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  Uploaded. If Report writing is waiting for the data, press Continue there.
+                </p>
+              ) : null}
+
+              <Button type="button" onClick={() => void send()} disabled={busy || !file || source.trim().length < 3}>
+                {busy ? <LuLoaderCircle className="animate-spin" aria-hidden /> : <LuUpload aria-hidden />}
+                {busy ? "Uploading…" : "Upload dataset"}
+              </Button>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">Press Fetch data first: it reads the model&apos;s variables and period from Chapter 3, and the file must follow them.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
