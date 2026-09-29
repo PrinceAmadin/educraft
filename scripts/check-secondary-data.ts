@@ -8,13 +8,16 @@
  *
  *   npm run check:secondary
  */
-import { CATALOGUE_KEYS, INDICATOR_CATALOGUE, indicatorFor, seriesCacheKey } from "../src/lib/data-fetchers/indicator-catalogue";
-import { parseWorldBank, worldBankUrl } from "../src/lib/data-fetchers/sources/world-bank";
+import { CATALOGUE_KEYS, INDICATOR_CATALOGUE, catalogueKeysForDomains, indicatorFor, indicatorsForDomains } from "../src/lib/data-fetchers/indicator-catalogue";
+import { DEPARTMENT_DOMAINS, DOMAINS, domainsForEntry, routeDepartment, routingKey } from "../src/lib/data-fetchers/domain-map";
+import { DEPARTMENTS } from "../src/lib/generation/department-map";
+import { SOURCE_NAMES, SOURCE_REGISTRY, seriesCacheKey, sourceCode } from "../src/lib/data-fetchers/source-registry";
+import { parseWorldBank, worldBankUrl, WORLD_BANK_CONCURRENCY } from "../src/lib/data-fetchers/sources/world-bank";
 import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/sources/cbn";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
 import { lastCompleteYear, relevantSections, statedPeriods, validateSpec, ModelSpecError, MODEL_SPEC_TOOL, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
-import { fetchSecondaryData, WORLD_BANK_CONCURRENCY, type CachedSeries, type SeriesCache } from "../src/lib/data-fetchers/secondary-data-fetcher";
+import { fetchSecondaryData, type CachedSeries, type SeriesCache } from "../src/lib/data-fetchers/secondary-data-fetcher";
 import { contentTypeFor } from "../src/lib/files/policy";
 import { buildPrivatePath, parsePrivatePath, parseStoredPath } from "../src/lib/files/paths";
 
@@ -111,6 +114,46 @@ async function main() {
   check("the MPR treats 0.00 as not in use", (indicatorFor("monetary_policy_rate")!.sources[0] as { zeroIsMissing?: boolean }).zeroIsMissing === true);
   check("cache keys name the exact series", seriesCacheKey(inf.sources[0]) === "secondary_data_cache:WB:FP.CPI.TOTL.ZG" && seriesCacheKey(inf.sources[1]) === "secondary_data_cache:CBN:GetAllInflationRates:allItemsAverage:december");
   check("the model tool offers exactly the catalogue keys plus none", JSON.stringify(MODEL_SPEC_TOOL.inputSchema.properties.dependent.properties.catalogueKey.enum) === JSON.stringify([...CATALOGUE_KEYS, "none"]));
+
+  // ─── The source registry ───────────────────────────────────────────────────
+  check("every registered module carries its own name", SOURCE_NAMES.every((n) => SOURCE_REGISTRY[n].name === n), SOURCE_NAMES);
+  check("every source the catalogue names has a module", INDICATOR_CATALOGUE.every((i) => i.sources.every((s) => SOURCE_NAMES.includes(s.source))));
+  check("every module caps its requests and has a retry policy", SOURCE_NAMES.every((n) => SOURCE_REGISTRY[n].concurrency >= 1 && ["none", "transient", "transient-or-empty"].includes(SOURCE_REGISTRY[n].retry)));
+  check("modules sharing a payload through once() never retry (the payload is fetched once per run)", SOURCE_REGISTRY.CBN.retry === "none");
+  check("cache keys are unique per series across the catalogue", (() => {
+    const keys = new Map<string, string>();
+    for (const i of INDICATOR_CATALOGUE) for (const s of i.sources) {
+      const k = seriesCacheKey(s);
+      const code = sourceCode(s);
+      if (keys.has(k) && keys.get(k) !== code) return false;
+      keys.set(k, code);
+    }
+    return true;
+  })());
+
+  // ─── Department → domains ──────────────────────────────────────────────────
+  check("every catalogue entry belongs to at least one known domain", INDICATOR_CATALOGUE.every((i) => i.domains.length > 0 && i.domains.every((d) => (DOMAINS as readonly string[]).includes(d))));
+  check("every domain offers at least one entry", DOMAINS.every((d) => indicatorsForDomains([d]).length > 0), DOMAINS.map((d) => [d, indicatorsForDomains([d]).length]));
+  check("the macro controls are offered to every domain", DOMAINS.every((d) => ["gdp_growth", "gdp_per_capita_usd", "inflation", "unemployment", "population"].every((k) => catalogueKeysForDomains([d]).includes(k))));
+  const unrouted = DEPARTMENTS.filter((e) => domainsForEntry(e) === null).map((e) => e.name);
+  check("every Table A department routes to a domain list (a row with no section has an exception)", unrouted.length === 0, unrouted);
+  const tableNames = new Set(DEPARTMENTS.map((e) => e.name));
+  const orphans = Object.keys(DEPARTMENT_DOMAINS).filter((n) => !tableNames.has(n));
+  check("every routing exception names a real Table A department", orphans.length === 0, orphans);
+  const routes = (dept: string | null) => routeDepartment(dept).domains.join("+");
+  check("Accounting (locked to Mode 5) routes to economics and finance", routes("Accounting") === "MACRO_FINANCE");
+  check("Banking and Finance, and the alias Banking, route to economics and finance", routes("Banking and Finance") === "MACRO_FINANCE" && routes("Banking") === "MACRO_FINANCE");
+  check("Cyber Security (and the alias Cybersecurity) routes to technology", routes("Cyber Security") === "TECH_CYBER" && routes("Cybersecurity") === "TECH_CYBER" && routes("Computer Science") === "TECH_CYBER");
+  check("Nursing and Public Health route to health", routes("Nursing") === "HEALTH" && routes("Public Health") === "HEALTH");
+  check("Agronomy and Civil Engineering route to science, environment and agriculture", routes("Agronomy") === "SCIENCE_ENV_AG" && routes("Civil Engineering") === "SCIENCE_ENV_AG");
+  check("a pure science reaches science first, then health", routes("Chemistry") === "SCIENCE_ENV_AG+HEALTH");
+  check("Agricultural Economics reaches economics and agriculture", routes("Agricultural Economics") === "MACRO_FINANCE+SCIENCE_ENV_AG");
+  check("Education (a Mode 5 report is an economics study) routes to economics", routes("Education") === "MACRO_FINANCE" && routes("Economics Education") === "MACRO_FINANCE");
+  check("History and Law have no automatic source", routes("History") === "" && routes("Law") === "" && /specialist supplies the data/.test(routeDepartment("History").basis));
+  check("a social science filed under Humanities routes to economics", routes("International Relations") === "MACRO_FINANCE");
+  check("an unknown department falls back to economics and says why", routes("Underwater Basket Weaving") === "MACRO_FINANCE" && /not in the department table/.test(routeDepartment("Underwater Basket Weaving").basis));
+  check("no department recorded falls back to economics", routes(null) === "MACRO_FINANCE" && /No department is recorded/.test(routeDepartment(null).basis));
+  check("routing keys ignore order", routingKey(["HEALTH", "MACRO_FINANCE"]) === routingKey(["MACRO_FINANCE", "HEALTH"]) && routingKey([]) === "none");
 
   // ─── World Bank ────────────────────────────────────────────────────────────
   const url = worldBankUrl("NY.GDP.MKTP.CD", 2000, 2023);

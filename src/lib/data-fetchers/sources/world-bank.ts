@@ -9,19 +9,17 @@
  * first. A bad code answers [{message: [{id, key, value}]}]. Annual only.
  */
 
+import type { AnnualSeries } from "../series";
+import type { SourceModule } from "../source-module";
 import { FetchFailure, timedGetJson, type FetchLike, type RequestLogEntry } from "../timed-fetch";
 
 export const WORLD_BANK_BASE = "https://api.worldbank.org/v2/country/NGA/indicator";
 
+/** The World Bank API timed out on 22 of 42 series asked for at once (27 Sept); three at a time answered every one in under a second. */
+export const WORLD_BANK_CONCURRENCY = 3;
+
 export function worldBankUrl(code: string, start: number, end: number): string {
   return `${WORLD_BANK_BASE}/${encodeURIComponent(code)}?format=json&date=${start}:${end}&per_page=100`;
-}
-
-export interface AnnualSeries {
-  /** year -> value (raw, before any display scaling); years with no value are absent. */
-  values: Record<number, number>;
-  /** The source's own "last updated" date, when it gives one. */
-  lastUpdated: string | null;
 }
 
 /** Pure: checks the answer really is Nigeria's series for this code and keeps the years in range. */
@@ -53,3 +51,16 @@ export async function fetchWorldBankSeries(
   const json = await timedGetJson("World Bank", worldBankUrl(code, start, end), log, opts);
   return parseWorldBank(json, code, start, end);
 }
+
+export const worldBankModule: SourceModule<"WB"> = {
+  name: "WB",
+  shortName: "World Bank",
+  label: "World Bank, World Development Indicators",
+  concurrency: WORLD_BANK_CONCURRENCY,
+  // It sometimes hangs on one series (cut at 8 s once in the D5 live test) or answers with no values.
+  retry: "transient-or-empty",
+  fetchSeries: (s, ctx) => fetchWorldBankSeries(s.code, ctx.period.start, ctx.period.end, ctx.log, ctx.http),
+  cacheKey: (s) => `secondary_data_cache:WB:${s.code}`,
+  code: (s) => s.code,
+  note: (_s, series) => (series.lastUpdated ? `last updated ${series.lastUpdated}` : null),
+};

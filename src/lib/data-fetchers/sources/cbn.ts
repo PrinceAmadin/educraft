@@ -13,9 +13,10 @@
  * from the World Bank.
  */
 
+import type { AnnualSeries } from "../series";
+import type { SourceModule } from "../source-module";
+import type { CbnEndpoint } from "../source-types";
 import { FetchFailure, timedGetJson, type FetchLike, type RequestLogEntry } from "../timed-fetch";
-import type { CbnEndpoint } from "../indicator-catalogue";
-import type { AnnualSeries } from "./world-bank";
 
 export const CBN_BASE = "https://www.cbn.gov.ng/api";
 
@@ -99,3 +100,19 @@ export function cbnSeries(months: CbnMonth[], field: string, annual: "december" 
   const period = latest && typeof latest.fields.period === "string" ? latest.fields.period.trim() : null;
   return { values, lastUpdated: period ? `data to ${period}` : null };
 }
+
+export const cbnModule: SourceModule<"CBN"> = {
+  name: "CBN",
+  shortName: "CBN",
+  label: "Central Bank of Nigeria",
+  // Two endpoints, each requested once per run and shared by every rate it carries.
+  concurrency: 6,
+  retry: "none",
+  fetchSeries: async (s, ctx) => {
+    const months = await ctx.once(`CBN:${s.endpoint}`, () => fetchCbnMonths(s.endpoint, ctx.log, ctx.http));
+    return cbnSeries(months, s.field, s.annual, s.zeroIsMissing ?? false, ctx.period.start, ctx.period.end);
+  },
+  cacheKey: (s) => `secondary_data_cache:CBN:${s.endpoint}:${s.field}:${s.annual}`,
+  code: (s) => `${s.endpoint}.${s.field}`,
+  note: (s, series) => [s.label, series.lastUpdated].filter(Boolean).join("; ") || null,
+};
