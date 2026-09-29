@@ -1,4 +1,4 @@
-import type { ReferenceClassification } from "@prisma/client";
+import type { Prisma, ReferenceClassification } from "@prisma/client";
 import { db } from "@/lib/db";
 import { callClaudeForJson, AnthropicError } from "@/lib/anthropic";
 import { resolveOpenAccessPdf } from "@/lib/unpaywall";
@@ -243,29 +243,102 @@ function titleKey(title: string): string {
 }
 
 /**
- * Claude writes the search queries; OpenAlex does the finding. Returns only
+ * Reads the project title like a supervisor would: what is the student
+ * actually building or investigating; what are its parts; what specific
+ * problems does each part have to solve; and what would a naive keyword
+ * search wrongly pull in? Runs once per job (persisted on
+ * `ResearchJob.projectAnalysis`) and is fed into every query-generation and
+ * relevance-classification call, so the whole pipeline judges each paper
+ * against the SYSTEM the student is building, not the words in the title.
+ */
+async function analyseProject(ctx: ProjectContext): Promise<ProjectAnalysis> {
+  const system = `You read a student's project title like a supervisor would — not by the keywords in it, but by what the student is actually building or investigating. You are writing a short analysis that will guide every literature search and every relevance check for this project. The analysis has to be specific to THIS system, not generic to the field.
+
+Produce four things:
+- goal: one sentence naming what the finished project produces or proves. Do not restate the title.
+- components: the specific parts of the system or study the student must build or execute (3–8 words each, 2–5 components). Name the parts of THIS system.
+- subproblems: the specific research problems each component has to solve (5–15 words each, 3–6 subproblems). Think of these as the questions a literature review needs to answer for this project.
+- offTopicGuards: 2–4 phrases that a naive keyword search would pull in but that would NOT support this project, each with a one-line reason. For example: "BERT for IoT security — shares 'BERT' but applies it to a completely different domain." Include the traps you see in the title itself. If the title contains "similarity detection", say plainly whether that means plagiarism detection or something else, and guard against the wrong reading.
+
+Reason like a supervisor about the whole title, then write the four fields concretely.`;
+
+  const user = [
+    `PROJECT TITLE: ${ctx.topic}`,
+    `DEPARTMENT: ${ctx.department}`,
+    ctx.universityName ? `UNIVERSITY: ${ctx.universityName}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  try {
+    const result = await callClaudeForJson<ProjectAnalysis>({
+      system,
+      user,
+      toolName: "record_project_analysis",
+      toolDescription: "Record the goal-first analysis of the project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          goal: { type: "string" },
+          components: { type: "array", items: { type: "string" } },
+          subproblems: { type: "array", items: { type: "string" } },
+          offTopicGuards: { type: "array", items: { type: "string" } },
+        },
+        required: ["goal", "components", "subproblems", "offTopicGuards"],
+      },
+      maxTokens: 1024,
+      usage: { projectId: ctx.id, subsystem: "research_pipeline", step: "analyse_project" },
+    });
+    return {
+      goal: (result.goal ?? "").trim(),
+      components: (result.components ?? []).map((s) => s.trim()).filter(Boolean),
+      subproblems: (result.subproblems ?? []).map((s) => s.trim()).filter(Boolean),
+      offTopicGuards: (result.offTopicGuards ?? []).map((s) => s.trim()).filter(Boolean),
+    };
+  } catch (error) {
+    if (error instanceof AnthropicError) throw new ResearchError(error.message);
+    throw error;
+  }
+}
+
+/** Renders the stored analysis into the user block sent to Claude. */
+function analysisBlock(a: ProjectAnalysis): string {
+  const bullets = (items: string[]) => items.map((x) => `- ${x}`).join("\n");
+  return [
+    "PROJECT ANALYSIS",
+    `Goal: ${a.goal}`,
+    a.components.length ? `Components (the parts this system must build/execute):\n${bullets(a.components)}` : null,
+    a.subproblems.length ? `Subproblems (the specific research problems the literature must speak to):\n${bullets(a.subproblems)}` : null,
+    a.offTopicGuards.length ? `Off-topic guards (traps a keyword search pulls in that must NOT count):\n${bullets(a.offTopicGuards)}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Claude writes the search queries; OpenAlex does the finding. Queries are
+ * targeted at the components and subproblems named in the PROJECT ANALYSIS
+ * (goal-first), not at each keyword in the title in isolation. Returns only
  * queries not already used by this job, each prefixed with
  * FOUNDATIONAL_PREFIX when it's meant to surface older landmark papers.
  */
-async function generateSearchQueries(ctx: ProjectContext, previous: string[], count: number): Promise<string[]> {
-  const system = `You write search queries for an academic database (OpenAlex) to find literature for a student's project report at EduCraft, a Nigerian academic writing service. Each query is run as a keyword search over paper titles and abstracts.
+async function generateSearchQueries(ctx: ProjectContext, analysis: ProjectAnalysis, previous: string[], count: number): Promise<string[]> {
+  const system = `You write search queries for an academic database (OpenAlex) to find literature for a specific student project — read the PROJECT ANALYSIS below carefully and target its components and subproblems, not the general field. Each query is run as a keyword search over paper titles and abstracts.
 
 Write short queries of 3–7 words, the way a researcher types into Google Scholar — no quotes, no boolean operators, no full sentences.
 
-Cover the report's whole scope across different queries:
-- the core topic itself
-- key concepts and definitions the literature review needs
-- methods, techniques, models, or tools the project would use
-- the application domain or industry
-- the local context (country, region, developing economies) where the topic has one
-- relevant standards, frameworks, or regulations
+Every query must target one specific component or subproblem in the analysis. Before you write a query, name in your head which one. Do NOT write queries that only match a shared keyword with the title — the OFF-TOPIC GUARDS in the analysis list the traps to avoid. A query like "similarity detection" is dangerous when the project's subproblem is "semantic similarity of short project titles" and the guards flag plagiarism-detection as a wrong reading; write "short text semantic similarity" or "sentence embedding similarity" instead.
 
-Mark a query "foundational" when it should find older, highly-cited landmark papers (seminal models, original frameworks) rather than recent work — about 1 in 5 queries. Avoid queries so generic they'd match any paper in the field. Never repeat or trivially reword a query listed as already used.`;
+Cover every component and subproblem across the batch. If the project has an application domain, local context (Nigeria, developing economies) or standards, cover those too — but only when the analysis has named them.
+
+Mark a query "foundational" when it should find older, highly-cited landmark papers (seminal models, original frameworks) rather than recent work — about 1 in 5 queries. Never write queries so generic they'd match any paper in the field. Never repeat or trivially reword a query listed as already used.`;
 
   const user = [
-    `PROJECT TOPIC: ${ctx.topic}`,
+    `PROJECT TITLE: ${ctx.topic}`,
     `DEPARTMENT: ${ctx.department}`,
     ctx.universityName ? `UNIVERSITY: ${ctx.universityName}` : null,
+    "",
+    analysisBlock(analysis),
     "",
     `Write ${count} search queries.`,
     previous.length ? `\nALREADY USED (write different angles):\n${previous.map((q) => `- ${q}`).join("\n")}` : null,
@@ -327,21 +400,29 @@ interface ClassificationResult {
 
 async function classifyBatch(
   ctx: ProjectContext,
+  analysis: ProjectAnalysis | null,
   batch: { id: string; title: string | null; year: number | null; abstract: string | null }[]
 ): Promise<ClassificationResult[]> {
-  const system = `You are performing a relevance check on academic references gathered for an EduCraft student project report, BEFORE any writing begins. For each reference, classify how relevant it is to the exact project topic — be strict, since irrelevant references contaminate the literature review and are the single most common cause of supervisor rejection at EduCraft.
+  const system = `You are the Tier 2 relevance gate for an EduCraft student project report, BEFORE any writing begins. Be strict: irrelevant references contaminate the literature review and are the single most common cause of supervisor rejection.
 
-Classifications:
-- CORE: directly about this exact topic/problem — a base paper the report should build on.
-- CLOSELY_RELATED: same general subject area or closely adjacent method/application — clearly useful supporting literature.
-- TANGENTIAL: shares only a broad field or a keyword with the topic — not something this report should cite as a base reference.
-- IRRELEVANT: not meaningfully connected to the topic at all.
+Read the PROJECT ANALYSIS below carefully. It names the goal of THIS project, its components, its subproblems and the off-topic guards. Judge each reference against the analysis, not against the keywords in the title.
+
+For every reference, ask: does this paper address one of the listed components or subproblems, or does it merely share a keyword with the title?
+
+- CORE — directly about the same component or subproblem, using a comparable approach. Would be cited as a base reference by a supervisor.
+- CLOSELY_RELATED — clearly supports one of the components or subproblems as background or method foundation.
+- TANGENTIAL — shares only a broad field or a keyword with the topic; not about the same problem. A paper that applies a shared method (e.g. BERT) to a completely different problem is TANGENTIAL, not CLOSELY_RELATED, unless the analysis explicitly says the project needs that other application.
+- IRRELEVANT — not connected to any component or subproblem, or specifically named by an off-topic guard.
+
+Match each off-topic guard strictly: if a paper matches a guard, it is TANGENTIAL at best and IRRELEVANT if the guard is decisive.
 
 Classify every reference listed, using its exact id.`;
 
   const user = [
-    `PROJECT TOPIC: ${ctx.topic}`,
+    `PROJECT TITLE: ${ctx.topic}`,
     `DEPARTMENT: ${ctx.department}`,
+    "",
+    analysis ? analysisBlock(analysis) : "PROJECT ANALYSIS: (not available — judge the topic directly, be strict about keyword collisions)",
     "",
     "REFERENCES TO CLASSIFY:",
     ...batch.map(
@@ -461,7 +542,54 @@ async function moveTo(job: Job, status: Job["status"]): Promise<AdvanceResult> {
   return { job: next, done: false };
 }
 
+/**
+ * A goal-first read of the project. Written once, at the very top of the
+ * research run, and then reused by every downstream Claude call (query
+ * generation, Tier 2 relevance). Before this existed, both calls reasoned
+ * from the WORDS in the title, so "similarity detection" pulled plagiarism
+ * papers and "BERT" pulled IoT-security-BERT papers; grounding every call in
+ * one shared understanding of what the student is actually building fixes it.
+ */
+export interface ProjectAnalysis {
+  /** One sentence: what the finished project produces or proves. */
+  goal: string;
+  /** The specific parts of the system or study the student must build/execute. */
+  components: string[];
+  /** The specific research problems each component has to solve. */
+  subproblems: string[];
+  /**
+   * Phrases a naive keyword search would pull in that would NOT support the
+   * project, each with a one-line reason. Fed straight into the relevance
+   * classifier so it flags them as TANGENTIAL / IRRELEVANT.
+   */
+  offTopicGuards: string[];
+}
+
+function readAnalysis(job: Job): ProjectAnalysis | null {
+  const raw = job.projectAnalysis;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const a = raw as Record<string, unknown>;
+  const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : []);
+  const goal = typeof a.goal === "string" ? a.goal.trim() : "";
+  if (!goal) return null;
+  return {
+    goal,
+    components: strArr(a.components),
+    subproblems: strArr(a.subproblems),
+    offTopicGuards: strArr(a.offTopicGuards),
+  };
+}
+
 async function advanceFindingCandidates(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
+  // Very top of the run: if we have not yet written the goal-first project
+  // analysis, do it now and reload the row so downstream calls read it.
+  if (readAnalysis(job) === null) {
+    const analysis = await analyseProject(ctx);
+    job = await db.researchJob.update({
+      where: { id: job.id },
+      data: { projectAnalysis: analysis as unknown as Prisma.InputJsonValue },
+    });
+  }
   const fetchedSoFar = await candidatesFetchedThisRound(job.id, job.replacementRound);
 
   let roundTarget: number;
@@ -488,7 +616,12 @@ async function advanceFindingCandidates(job: Job, ctx: ProjectContext): Promise<
   // 2. Out of queries — have Claude write more (bounded).
   if (!job.queriesExhausted && job.searchQueries.length < MAX_TOTAL_QUERIES) {
     const count = job.searchQueries.length === 0 ? INITIAL_QUERY_COUNT : MORE_QUERY_COUNT;
-    const fresh = await generateSearchQueries(ctx, job.searchQueries, count);
+    // Analysis is written on the first entry to this step and stored on the
+    // job, so it's always available by the time we reach query generation.
+    // The fallback protects a job upgraded mid-run (readAnalysis returns null
+    // only if the stored blob is malformed).
+    const analysis = readAnalysis(job) ?? (await analyseProject(ctx));
+    const fresh = await generateSearchQueries(ctx, analysis, job.searchQueries, count);
     const next = await db.researchJob.update({
       where: { id: job.id },
       data: fresh.length > 0 ? { searchQueries: { push: fresh } } : { queriesExhausted: true },
@@ -634,8 +767,13 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
   });
 
   if (pending.length > 0) {
+    // Same stored analysis Query generation used — one shared understanding
+    // of what the project is for. Old jobs (pre-30 Sept 2026) run with a null
+    // analysis; the classifier's prompt handles that path.
+    const analysis = readAnalysis(job);
     const results = await classifyBatch(
       ctx,
+      analysis,
       pending.map((r) => ({ id: r.id, title: r.title, year: r.year, abstract: r.abstract }))
     );
     const byId = new Map(results.map((r) => [r.referenceId, r]));

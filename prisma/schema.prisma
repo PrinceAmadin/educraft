@@ -1148,6 +1148,13 @@ model ResearchJob {
   corePercent           Float?
   closelyRelatedPercent Float?
 
+  /// The goal-first project analysis written once at the start of the run
+  /// (goal, components, subproblems, off-topic guards). Every downstream
+  /// Claude call — query generation, Tier 2 relevance — reads this so it
+  /// judges each paper against the SYSTEM the student is building, not the
+  /// keywords in the title. Null on jobs run before 30 Sept 2026.
+  projectAnalysis Json?
+
   /// Last-verified-by-CrossRef titles this job has already tried, so
   /// replacement rounds don't re-propose the same rejected candidates.
   triedTitles String[] @default([])
