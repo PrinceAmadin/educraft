@@ -58,6 +58,40 @@ export class SecondaryDataError extends Error {
   }
 }
 
+/**
+ * A short, human-readable diagnostic for the orchestrator's `reasonDetail`
+ * (or any log). The message on a `NOTHING_FETCHED` error is generic; the
+ * useful information lives on `details.missing` (per-variable reasons) and
+ * `details.requests` (per-URL status/ms/timedOut). We fold both into a
+ * capped string so the "Needs attention" panel and the SecondaryDataCard
+ * can show them.
+ */
+export function summarizeSecondaryDataFailure(error: unknown, maxLen = 1000): string {
+  const base = error instanceof Error ? error.message : String(error);
+  if (!(error instanceof SecondaryDataError) || !error.details) return base.slice(0, maxLen);
+  const lines: string[] = [base];
+  const missing = error.details.missing ?? [];
+  if (missing.length) {
+    lines.push("");
+    lines.push(`Missing (${missing.length}):`);
+    for (const m of missing) lines.push(`  • ${m.symbol} (${m.name}): ${m.reason}`);
+  }
+  const requests = error.details.requests ?? [];
+  if (requests.length) {
+    const failed = requests.filter((r) => !r.ok);
+    const slowest = Math.max(0, ...requests.map((r) => r.ms));
+    lines.push("");
+    lines.push(`Requests: ${requests.length} · failed ${failed.length} · slowest ${(slowest / 1000).toFixed(1)} s`);
+    for (const r of failed.slice(0, 12)) {
+      const shape = r.timedOut ? "timed out" : r.status ? `HTTP ${r.status}` : "network error";
+      lines.push(`  • ${shape} in ${(r.ms / 1000).toFixed(1)} s — ${r.url}`);
+      if (r.error) lines.push(`      ${r.error}`);
+    }
+    if (failed.length > 12) lines.push(`  … and ${failed.length - 12} more`);
+  }
+  return lines.join("\n").slice(0, maxLen);
+}
+
 /** Everything one fetch produced, kept as JSON on the ProjectFile row. */
 export interface StoredSecondaryData {
   version: 1;

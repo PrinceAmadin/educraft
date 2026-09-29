@@ -36,7 +36,7 @@ import { selfBaseUrl } from "@/lib/self-base-url";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { alertReportReady, alertReportStopped } from "@/lib/services/team-alerts";
 import { openDataPause } from "@/lib/services/data-pause";
-import { runSecondaryDataFetch } from "@/lib/services/secondary-data";
+import { runSecondaryDataFetch, summarizeSecondaryDataFailure } from "@/lib/services/secondary-data";
 import { ModeNotApprovedError } from "@/lib/services/mode-errors";
 import { approvedChapterInput } from "./approved-inputs";
 import { readChapterOneStatements, statementsUnreadable } from "./chapter-one-statements";
@@ -490,9 +490,9 @@ async function perform(ctx: Ctx, action: Action): Promise<Outcome> {
       try {
         await runSecondaryDataFetch(project.id, { userId: run.startedById, role: "ADMIN" });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`${TAG} ${code}: the dataset could not be fetched`, message);
-        await update(run.id, { reasonDetail: message.slice(0, 1000) }).catch(() => {});
+        const detail = summarizeSecondaryDataFailure(error);
+        console.warn(`${TAG} ${code}: the dataset could not be fetched`, detail);
+        await update(run.id, { reasonDetail: detail }).catch(() => {});
         return { again: false };
       }
       await update(run.id, { fetchAttempts: 0 });
