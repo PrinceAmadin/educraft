@@ -4,6 +4,7 @@ import { APPROVAL_WINDOW_HOURS, RerunRequestError, reviewRerunRequest } from "@/
 import { estimateEta, type EtaJob } from "@/lib/research-eta";
 import { RESEARCH_SUBSYSTEM } from "@/lib/services/operations/research-ledger";
 import type { Actor } from "@/lib/services/operations/actor";
+import { hasPdf } from "@/lib/services/research-files";
 
 /**
  * Research approvals for the COO: every research run (pending approval,
@@ -269,7 +270,7 @@ export async function getResearchProgress(id: string): Promise<ResearchProgress>
               errorMessage: true,
               driveFolderLink: true,
               createdAt: true,
-              references: { select: { status: true, round: true, doi: true, access: true, classification: true, driveFileId: true } },
+              references: { select: { status: true, round: true, doi: true, access: true, classification: true, pdfBlobPath: true, driveFileId: true } },
             },
           },
         },
@@ -296,7 +297,7 @@ export async function getResearchProgress(id: string): Promise<ResearchProgress>
         kept: refs.filter((r) => r.status === "KEPT").length,
         core: refs.filter((r) => r.status === "KEPT" && r.classification === "CORE").length,
         closelyRelated: refs.filter((r) => r.status === "KEPT" && r.classification === "CLOSELY_RELATED").length,
-        uploaded: refs.filter((r) => r.status === "KEPT" && r.driveFileId && r.driveFileId !== "SKIPPED").length,
+        uploaded: refs.filter((r) => r.status === "KEPT" && hasPdf(r)).length,
       }
     : {
         candidates: 0,
@@ -334,7 +335,7 @@ export async function getResearchProgress(id: string): Promise<ResearchProgress>
       state: state(2),
       detail: stored ? `${counts.kept} kept` : `${counts.kept} kept · ${counts.core} core · ${counts.closelyRelated} closely related${job && job.replacementRound > 0 ? ` · replacement round ${job.replacementRound}` : ""}`,
     },
-    { key: "drive", label: "Save PDFs and the reference list to Drive", state: state(3), detail: `${counts.uploaded} PDFs uploaded` },
+    { key: "drive", label: "Save the PDFs and build the reference list", state: state(3), detail: `${counts.uploaded} PDFs saved` },
     {
       key: "final",
       label: "Verified references",
@@ -355,7 +356,7 @@ export async function getResearchProgress(id: string): Promise<ResearchProgress>
         replacementRound: job.replacementRound,
         searchQueries: job.searchQueries,
         searchCursor: job.searchCursor,
-        references: refs.map((r) => ({ status: r.status, round: r.round, doi: r.doi, access: r.access, classification: r.classification, driveFileId: r.driveFileId })),
+        references: refs.map((r) => ({ status: r.status, round: r.round, doi: r.doi, access: r.access, classification: r.classification, pdfBlobPath: r.pdfBlobPath, driveFileId: r.driveFileId })),
       } satisfies EtaJob);
       etaSeconds = eta?.remainingSeconds ?? null;
     } catch {

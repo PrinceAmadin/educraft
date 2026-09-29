@@ -1,4 +1,4 @@
-import type { Reference, ReferenceClassification } from "@prisma/client";
+import type { ReferenceClassification } from "@prisma/client";
 import { db } from "@/lib/db";
 import { callClaudeForJson, AnthropicError } from "@/lib/anthropic";
 import { resolveOpenAccessPdf } from "@/lib/unpaywall";
@@ -6,13 +6,10 @@ import { searchWorks } from "@/lib/openalex";
 // Legacy cleanup only — jobs run before Zotero was dropped from the pipeline
 // still have a collection and items that "Run research again" should remove.
 import { deleteCollection, deleteItems } from "@/lib/zotero";
-import {
-  createDocInFolder,
-  deleteFile,
-  ensureProjectFolder,
-  uploadPdfToFolder,
-  GoogleDriveError,
-} from "@/lib/google-drive";
+import crypto from "crypto";
+import { putPrivateFile } from "@/lib/files/storage";
+import { buildPrivatePath } from "@/lib/files/paths";
+import { deleteReferencePdf } from "@/lib/services/research-files";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { isStaffRole } from "@/lib/roles";
 import { ledgerRunFinished } from "@/lib/services/operations/research-ledger";
@@ -71,9 +68,7 @@ const FOUNDATIONAL_PREFIX = "[foundational] ";
 
 const RESOLVE_BATCH = 8; // Unpaywall lookups per step, run concurrently
 const CLASSIFY_BATCH = 20; // references per Tier 2 call
-const DRIVE_BATCH = 3; // PDF downloads+uploads per step, run concurrently
-
-const PAYWALLED_DOC_TITLE = "Paywalled References — Access via your university library";
+const DRIVE_BATCH = 3; // PDF downloads+writes per step, run concurrently
 
 // ── Ownership / lifecycle ────────────────────────────────────
 
@@ -210,10 +205,10 @@ export async function getResearchOverview(workerId: string, idOrCode: string) {
 
 /**
  * Throws away a project's research job so it can be run again from scratch —
- * e.g. a job produced under the old open-access-only rules. Cleans up what it
- * created in Zotero and Drive first (best effort: a cleanup failure is logged
- * and never blocks the reset). The project's Drive folder itself is kept and
- * reused by the next run.
+ * e.g. a job produced under the old open-access-only rules. Cleans up the
+ * per-reference PDFs (private Blob store, or legacy Drive files) and any
+ * Zotero items from older jobs first (best effort: a cleanup failure is logged
+ * and never blocks the reset).
  */
 export async function resetResearchJob(workerId: string | null, idOrCode: string): Promise<void> {
   const project = await db.project.findFirst({
@@ -224,7 +219,7 @@ export async function resetResearchJob(workerId: string | null, idOrCode: string
 
   const job = await db.researchJob.findUnique({
     where: { projectId: project.id },
-    include: { references: { select: { zoteroItemKey: true, driveFileId: true } } },
+    include: { references: { select: { zoteroItemKey: true, driveFileId: true, pdfBlobPath: true } } },
   });
   if (!job) return;
 
@@ -236,13 +231,7 @@ export async function resetResearchJob(workerId: string | null, idOrCode: string
     console.error("[research reset] Zotero cleanup failed", job.id, error);
   }
 
-  const driveIds = [
-    ...job.references.map((r) => r.driveFileId).filter((id): id is string => Boolean(id) && id !== "SKIPPED"),
-    ...(job.paywalledDocId ? [job.paywalledDocId] : []),
-  ];
-  const results = await Promise.allSettled(driveIds.map((id) => deleteFile(id)));
-  const failed = results.filter((r) => r.status === "rejected").length;
-  if (failed > 0) console.error(`[research reset] ${failed} Drive file(s) could not be deleted`, job.id);
+  await Promise.allSettled(job.references.map((r) => deleteReferencePdf(r)));
 
   await db.researchJob.delete({ where: { id: job.id } });
 }
@@ -404,39 +393,6 @@ Classify every reference listed, using its exact id.`;
 
 async function candidatesFetchedThisRound(jobId: string, round: number): Promise<number> {
   return db.reference.count({ where: { researchJobId: jobId, round } });
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-/** Client-facing — deliberately says nothing about how the references were found. */
-function paywalledDocHtml(ctx: ProjectContext, refs: Reference[]): string {
-  const sorted = [...refs].sort(
-    (a, b) => (a.authors ?? "").localeCompare(b.authors ?? "") || (a.year ?? 0) - (b.year ?? 0)
-  );
-  const items = sorted
-    .map((r) => {
-      const doiUrl = `https://doi.org/${r.doi}`;
-      const parts = [
-        `${escapeHtml(r.authors || "Unknown author")} (${r.year ?? "n.d."}).`,
-        `<i>${escapeHtml(r.title ?? r.proposedTitle)}</i>.`,
-        r.journal ? `${escapeHtml(r.journal)}.` : "",
-        `<a href="${escapeHtml(doiUrl)}">${escapeHtml(doiUrl)}</a>`,
-      ];
-      return `<li>${parts.filter(Boolean).join(" ")}</li>`;
-    })
-    .join("\n");
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
-<h1>${escapeHtml(PAYWALLED_DOC_TITLE)}</h1>
-<p><b>Project:</b> ${escapeHtml(ctx.projectId)} — ${escapeHtml(ctx.topic)}</p>
-<p>These ${refs.length} references are part of your project's reference list, but we couldn't save a PDF of them for you. Some are free to read straight from the DOI link. For the rest, open the link while signed in to your university library portal (or connected to campus Wi-Fi) — your library's journal subscriptions usually give full access. The papers we could download are saved as PDFs in this same folder.</p>
-<ol>
-${items}
-</ol>
-<p>EduCraft — Providing Affordable Academic Services</p>
-</body></html>`;
 }
 
 // ── The state machine ────────────────────────────────────────
@@ -803,63 +759,75 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
   return { job: updated, done: false };
 }
 
-async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
-  let folder: { folderId: string; webViewLink: string };
+/**
+ * Downloads a kept reference's open-access PDF and stores it in the private
+ * Blob store. Returns the stored path, or null if the download failed or the
+ * bytes weren't a real PDF — a failed row falls into the paywalled list and
+ * doesn't stop the run. Same 25 s timeout and `%PDF-` sniff the Drive
+ * uploader used.
+ */
+async function savePdfToBlob(projectDbId: string, referenceId: string, fileUrl: string): Promise<string | null> {
+  let bytes: Buffer;
   try {
-    folder = await ensureProjectFolder(ctx.projectId);
+    const res = await fetch(fileUrl, { headers: { Accept: "application/pdf" }, signal: AbortSignal.timeout(25_000) });
+    if (!res.ok) {
+      console.error("[research] PDF fetch not ok", fileUrl, res.status);
+      return null;
+    }
+    bytes = Buffer.from(await res.arrayBuffer());
   } catch (error) {
-    if (error instanceof GoogleDriveError) throw new ResearchError(error.message);
-    throw error;
+    console.error("[research] PDF fetch threw", fileUrl, error);
+    return null;
   }
-  if (!job.driveFolderLink) {
-    await db.researchJob.update({ where: { id: job.id }, data: { driveFolderLink: folder.webViewLink } });
+  // Judge by the bytes, not the header — some hosts serve real PDFs as
+  // application/octet-stream, others serve an HTML login page labelled PDF.
+  if (bytes.subarray(0, 5).toString("latin1") !== "%PDF-") {
+    console.error("[research] URL did not serve a PDF", fileUrl);
+    return null;
   }
+  const path = buildPrivatePath({
+    projectDbId,
+    purpose: "research",
+    targetId: referenceId,
+    random: crypto.randomBytes(12).toString("hex"),
+    ext: "pdf",
+  });
+  try {
+    await putPrivateFile(path, new Uint8Array(bytes), "application/pdf");
+    return path;
+  } catch (error) {
+    console.error("[research] Blob write failed", fileUrl, error);
+    return null;
+  }
+}
 
-  // Track A: open-access PDFs into the project's Drive folder.
+async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
+  // Track A: open-access PDFs into the private Blob store. Since 29 Sept 2026
+  // this replaces the Google Drive uploader — no Google account, no refresh
+  // token. Old jobs' `driveFileId` rows stay readable via a fallback.
   const pending = await db.reference.findMany({
-    where: { researchJobId: job.id, status: "KEPT", access: "OPEN_ACCESS", pdfUrl: { not: null }, driveFileId: null },
+    where: { researchJobId: job.id, status: "KEPT", access: "OPEN_ACCESS", pdfUrl: { not: null }, pdfBlobPath: null, driveFileId: null },
     take: DRIVE_BATCH,
   });
 
   if (pending.length > 0) {
-    const fileIds = await Promise.all(
-      pending.map((ref) => {
-        const fileName = `${(ref.title ?? ref.proposedTitle).slice(0, 80).replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
-        return uploadPdfToFolder(folder.folderId, fileName, ref.pdfUrl as string);
-      })
+    const results = await Promise.all(
+      pending.map((ref) => savePdfToBlob(job.projectId, ref.id, ref.pdfUrl as string))
     );
-    // A failed download isn't fatal — it's listed in the paywalled-references doc instead.
+    // A failed download isn't fatal — the row stays without a PDF and shows in
+    // the paywalled reference list generated on demand.
     await db.$transaction(
       pending.map((ref, i) =>
-        db.reference.update({ where: { id: ref.id }, data: { driveFileId: fileIds[i] ?? "SKIPPED" } })
+        db.reference.update({ where: { id: ref.id }, data: results[i] ? { pdfBlobPath: results[i] } : { driveFileId: "SKIPPED" } })
       )
     );
     const updated = await db.researchJob.findUniqueOrThrow({ where: { id: job.id } });
     return { job: updated, done: false };
   }
 
-  // Track B: every kept reference with no PDF in Drive, as one Google Doc of DOI links.
-  if (!job.paywalledDocId) {
-    const linkOnly = await db.reference.findMany({
-      where: {
-        researchJobId: job.id,
-        status: "KEPT",
-        OR: [{ access: { not: "OPEN_ACCESS" } }, { driveFileId: "SKIPPED" }, { driveFileId: null }],
-      },
-    });
-    if (linkOnly.length > 0) {
-      try {
-        const doc = await createDocInFolder(folder.folderId, PAYWALLED_DOC_TITLE, paywalledDocHtml(ctx, linkOnly));
-        await db.researchJob.update({
-          where: { id: job.id },
-          data: { paywalledDocId: doc.id, paywalledDocLink: doc.webViewLink },
-        });
-      } catch (error) {
-        if (error instanceof GoogleDriveError) throw new ResearchError(error.message);
-        throw error;
-      }
-    }
-  }
+  // Track B (the paywalled reference list) is no longer stored: the worker's
+  // Research panel offers a "Paywalled references (N).docx" download that
+  // renders from the DB on demand, always up to date.
 
   const next = await db.researchJob.update({ where: { id: job.id }, data: { status: "PASSED" } });
   await ledgerRunFinished(job.projectId, job.id, "COMPLETE");
@@ -869,7 +837,14 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
     const [total, withPdf] = await Promise.all([
       db.reference.count({ where: { researchJobId: job.id, status: "KEPT" } }),
       db.reference.count({
-        where: { researchJobId: job.id, status: "KEPT", driveFileId: { not: null }, NOT: { driveFileId: "SKIPPED" } },
+        where: {
+          researchJobId: job.id,
+          status: "KEPT",
+          OR: [
+            { pdfBlobPath: { not: null } },
+            { AND: [{ driveFileId: { not: null } }, { NOT: { driveFileId: "SKIPPED" } }] },
+          ],
+        },
       }),
     ]);
     const message = `${ctx.projectId}: ${total} verified references ready (${withPdf} with PDFs, ${total - withPdf} reference-only).`;

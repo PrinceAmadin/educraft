@@ -1240,7 +1240,11 @@ model Reference {
 
   /// Legacy — only set by jobs run before Zotero was dropped from the pipeline; used to clean them up.
   zoteroItemKey String?
+  /// Legacy — set by jobs run before research PDFs moved to the private Blob store. Kept for a read-only fallback on old rows.
   driveFileId   String?
+  /// The private Blob path holding this reference's downloaded open-access PDF (`projects/{cuid}/research/{refCuid}/{random}.pdf`).
+  /// Null until Step 4 saves the PDF, or when the download failed and the reference falls back to the paywalled list.
+  pdfBlobPath   String?
 
   status               ReferenceStatus          @default(CANDIDATE)
   classification       ReferenceClassification?

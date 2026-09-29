@@ -59,7 +59,8 @@ export function parseStoredPath(pathname: string): StoredPath | null {
     purpose !== "message" &&
     purpose !== "data" &&
     purpose !== "source" &&
-    purpose !== "receipt"
+    purpose !== "receipt" &&
+    purpose !== "research"
   ) return null;
   return { projectDbId, purpose, targetId, name };
 }

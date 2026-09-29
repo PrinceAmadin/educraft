@@ -34,6 +34,7 @@ interface ReferenceRow {
   doi: string | null;
   access: "OPEN_ACCESS" | "PAYWALLED" | null;
   pdfUrl: string | null;
+  pdfBlobPath: string | null;
   driveFileId: string | null;
   citedByCount: number | null;
   round: number;
@@ -81,7 +82,7 @@ const STATUS_LABEL: Record<string, string> = {
   IMPORTING_ZOTERO: "Checking which papers have free PDFs…",
   CLASSIFYING: "Checking relevance to the topic…",
   REPLACING: "Finding replacements for off-topic papers…",
-  UPLOADING_DRIVE: "Saving PDFs and the paywalled-references list to Drive…",
+  UPLOADING_DRIVE: "Saving the PDFs and building the reference list…",
 };
 
 const CLASSIFICATION_VARIANT: Record<string, "success" | "info" | "warning" | "danger"> = {
@@ -99,7 +100,7 @@ async function fetchJson(url: string, init?: RequestInit) {
 }
 
 function hasDrivePdf(r: ReferenceRow) {
-  return Boolean(r.driveFileId) && r.driveFileId !== "SKIPPED";
+  return Boolean(r.pdfBlobPath) || (Boolean(r.driveFileId) && r.driveFileId !== "SKIPPED");
 }
 
 function ReferenceItem({ r }: { r: ReferenceRow }) {
@@ -586,6 +587,14 @@ export function ResearchPanel({ projectCode, generationState = null }: { project
                 References list
               </a>
             </Button>
+            {keptPaywalled.length > 0 ? (
+              <Button size="sm" variant="outline" asChild>
+                <a href={`/api/worker/projects/${projectCode}/research/paywalled.docx`} download>
+                  <LuDownload className="size-4" aria-hidden />
+                  Paywalled references ({keptPaywalled.length})
+                </a>
+              </Button>
+            ) : null}
             {startOverButton}
           </div>
           <ReportGenerationFooter projectCode={projectCode} state={generationState} />

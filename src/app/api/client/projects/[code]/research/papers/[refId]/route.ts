@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireClient } from "@/lib/api";
 import { contentDisposition } from "@/lib/files/policy";
-import { downloadDriveFile } from "@/lib/google-drive";
+import { readReferencePdf } from "@/lib/services/research-files";
 import { clientPaper } from "@/lib/services/client-research";
 
 export const dynamic = "force-dynamic";
@@ -9,8 +9,9 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
- * GET: one open-access paper from the project's research, streamed from our
- * Drive folder so the client never needs (or sees) the Drive link.
+ * GET: one open-access paper from the project's research, streamed from the
+ * private Blob store (new-flow) or Google Drive (old-flow fallback) so the
+ * client never sees a raw storage URL.
  */
 export async function GET(_req: NextRequest, { params }: { params: { code: string; refId: string } }) {
   const guard = await requireClient();
@@ -20,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: { code: strin
   if (!paper) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
-    const file = await downloadDriveFile(paper.driveFileId);
+    const file = await readReferencePdf(paper);
     if (!file) return NextResponse.json({ error: "This paper is no longer available. Message us." }, { status: 404 });
     return new Response(file.stream, {
       headers: {

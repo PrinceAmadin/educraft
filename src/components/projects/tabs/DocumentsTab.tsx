@@ -7,6 +7,7 @@ import { greetingName, toWaNumber } from "@/lib/whatsapp";
 import { DeliverableReviewCard } from "@/components/projects/documents/DeliverableReviewCard";
 import { AddDeliverableForm, ResearchShareControl } from "@/components/projects/documents/DocumentsControls";
 import { formatDate } from "@/lib/utils";
+import { hasPdf } from "@/lib/services/research-files";
 
 const QA_PASSED = ["APPROVED", "BALANCE_VERIFIED", "DELIVERED", "SUPERVISOR_CORRECTIONS", "COMPLETED"];
 
@@ -37,7 +38,7 @@ export async function DocumentsTab({
     select: {
       status: true,
       releasedToClientAt: true,
-      references: { where: { status: "KEPT" }, select: { driveFileId: true } },
+      references: { where: { status: "KEPT" }, select: { pdfBlobPath: true, driveFileId: true } },
     },
   });
   const contact = {
@@ -49,7 +50,7 @@ export async function DocumentsTab({
   const canReleaseFinal = QA_PASSED.includes(project.status);
   const active = deliverables.filter((d) => !d.archived);
   const archived = deliverables.filter((d) => d.archived);
-  const withPdf = job?.references.filter((r) => r.driveFileId && r.driveFileId !== "SKIPPED").length ?? 0;
+  const withPdf = job?.references.filter(hasPdf).length ?? 0;
 
   return (
     <div className="space-y-12">

@@ -128,7 +128,16 @@ export async function ledgerRunFinished(projectId: string, jobId: string, outcom
     });
     const [total, withPdf] = await Promise.all([
       db.reference.count({ where: { researchJobId: jobId, status: "KEPT" } }),
-      db.reference.count({ where: { researchJobId: jobId, status: "KEPT", driveFileId: { not: null }, NOT: { driveFileId: "SKIPPED" } } }),
+      db.reference.count({
+        where: {
+          researchJobId: jobId,
+          status: "KEPT",
+          OR: [
+            { pdfBlobPath: { not: null } },
+            { AND: [{ driveFileId: { not: null } }, { NOT: { driveFileId: "SKIPPED" } }] },
+          ],
+        },
+      }),
     ]);
     const since = running?.startedAt ?? job?.createdAt ?? undefined;
     const cost = await db.aiUsageLog.aggregate({

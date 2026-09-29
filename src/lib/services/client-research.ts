@@ -6,6 +6,7 @@ import { toWaNumber, waLink } from "@/lib/whatsapp";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { clientProjectPath, notifyClient } from "@/lib/services/client-notify";
 import { DeliverableError } from "@/lib/services/deliverables";
+import { hasPdf } from "@/lib/services/research-files";
 
 /**
  * Research papers in the client's dashboard, instead of a Drive link. Shared
@@ -31,8 +32,6 @@ export interface ClientResearchView {
   downloadableCount: number;
 }
 
-const hasPdf = (driveFileId: string | null) => Boolean(driveFileId && driveFileId !== "SKIPPED");
-
 function readCode(code: string): string {
   try {
     return decodeURIComponent(code).trim().toUpperCase();
@@ -50,7 +49,7 @@ export async function getClientResearch(projectDbId: string): Promise<ClientRese
       releasedToClientAt: true,
       references: {
         where: { status: "KEPT" },
-        select: { id: true, title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true, driveFileId: true },
+        select: { id: true, title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true, pdfBlobPath: true, driveFileId: true },
       },
     },
   });
@@ -63,7 +62,7 @@ export async function getClientResearch(projectDbId: string): Promise<ClientRese
       year: r.year,
       journal: r.journal,
       doi: r.doi,
-      downloadable: hasPdf(r.driveFileId),
+      downloadable: hasPdf(r),
     }))
     .sort((a, b) => Number(b.downloadable) - Number(a.downloadable) || a.title.localeCompare(b.title));
   return {
@@ -78,7 +77,7 @@ export async function clientPaper(
   scope: ClientScope,
   code: string,
   referenceId: string
-): Promise<{ driveFileId: string; downloadAs: string } | null> {
+): Promise<{ pdfBlobPath: string | null; driveFileId: string | null; downloadAs: string } | null> {
   const ref = await db.reference.findFirst({
     where: {
       id: referenceId,
@@ -86,13 +85,14 @@ export async function clientPaper(
       project: { projectId: readCode(code), clientId: { in: scope.clientIds } },
       researchJob: { status: "PASSED", releasedToClientAt: { not: null } },
     },
-    select: { driveFileId: true, title: true, proposedTitle: true, authors: true, year: true },
+    select: { pdfBlobPath: true, driveFileId: true, title: true, proposedTitle: true, authors: true, year: true },
   });
-  if (!ref || !hasPdf(ref.driveFileId)) return null;
+  if (!ref || !hasPdf(ref)) return null;
   const firstAuthor = (ref.authors ?? "").split(";")[0]?.split(",")[0]?.trim() ?? "";
   const title = (ref.title ?? ref.proposedTitle).trim().split(/\s+/).slice(0, 10).join(" ");
   return {
-    driveFileId: ref.driveFileId!,
+    pdfBlobPath: ref.pdfBlobPath,
+    driveFileId: ref.driveFileId,
     downloadAs: downloadName([firstAuthor, ref.year ? String(ref.year) : "", title], "pdf"),
   };
 }

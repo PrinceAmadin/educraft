@@ -15,7 +15,7 @@ export const PHASES: { key: PhaseKey; label: string }[] = [
   { key: "search", label: "Searching academic databases" },
   { key: "pdfs", label: "Checking which papers have free PDFs" },
   { key: "relevance", label: "Checking relevance to the topic" },
-  { key: "drive", label: "Saving PDFs and the reference list to Drive" },
+  { key: "drive", label: "Saving the PDFs and building the reference list" },
 ];
 
 /**
@@ -62,7 +62,7 @@ export interface EtaJob {
   replacementRound: number;
   searchQueries: string[];
   searchCursor: number;
-  references: { status: string; round: number; doi: string | null; access: string | null; classification: string | null; driveFileId: string | null }[];
+  references: { status: string; round: number; doi: string | null; access: string | null; classification: string | null; pdfBlobPath: string | null; driveFileId: string | null }[];
 }
 
 export interface Eta {
@@ -96,7 +96,7 @@ function remainingSeconds(job: EtaJob, phase: PhaseKey, sec: Record<PhaseKey, nu
 
   const keptPdfsPending =
     phase === "drive"
-      ? refs.filter((r) => r.status === "KEPT" && r.access === "OPEN_ACCESS" && r.driveFileId === null).length
+      ? refs.filter((r) => r.status === "KEPT" && r.access === "OPEN_ACCESS" && r.pdfBlobPath === null && r.driveFileId === null).length
       : Math.round((refs.length + toFind) * EXPECTED_KEEP_RATE * EXPECTED_PDF_RATE);
   const driveSteps = steps(keptPdfsPending, DRIVE_BATCH) + 1;
 
