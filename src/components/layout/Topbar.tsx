@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeftRight, BellOff, BellRing, Download, LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
 import { usePwa } from "@/components/pwa/PwaProvider";
 import { usePush } from "@/hooks/use-push";
-import { signOutAndClear } from "@/lib/pwa/sign-out";
+import { signOutAndClear, switchAccountSilent } from "@/lib/pwa/sign-out";
 import { LogoLockup } from "@/components/shared/Logo";
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { AiBalanceIndicator } from "@/components/layout/AiBalanceIndicator";
@@ -86,6 +86,9 @@ export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts =
   const otherPortals = portals.filter((p) => p !== role && PORTAL_LABELS[p]);
   const { canInstall, promptInstall } = usePwa();
   const push = usePush();
+  // Which switch item is mid-swap — the menu item goes disabled + says "Switching…" so a
+  // double-click can't fire two swaps.
+  const [switchingTo, setSwitchingTo] = React.useState<string | null>(null);
   // The project search lands on /admin/projects, so only roles who own that page get it.
   const canSearchProjects = role === "admin" && canAccessRoute(userRole, "/admin/projects");
 
@@ -191,11 +194,19 @@ export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts =
               </DropdownMenuItem>
             ))}
             {switchAccounts.map((a) => (
-              <DropdownMenuItem key={a.email} onClick={() => void signOutAndClear(`/login?email=${encodeURIComponent(a.email)}`)}>
+              <DropdownMenuItem
+                key={a.email}
+                disabled={switchingTo !== null}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  if (switchingTo) return;
+                  setSwitchingTo(a.email);
+                  void switchAccountSilent({ email: a.email, label: a.label });
+                }}
+              >
                 <ArrowLeftRight />
                 <span className="flex min-w-0 flex-col">
-                  <span>Switch to {a.label}</span>
-                  <span className="truncate text-xs text-muted-foreground">Signs out, then sign in as {a.email}</span>
+                  <span>{switchingTo === a.email ? "Switching…" : `Switch to ${a.label}`}</span>
                 </span>
               </DropdownMenuItem>
             ))}

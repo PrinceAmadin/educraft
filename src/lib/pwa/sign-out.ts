@@ -1,4 +1,4 @@
-import { signOut } from "next-auth/react";
+import { signIn, signOut } from "next-auth/react";
 import { disablePush } from "@/lib/pwa/push-client";
 
 /**
@@ -38,6 +38,47 @@ export async function signOutAndClear(next?: string): Promise<void> {
   await clearOfflineData();
   const switchTo = next && /^\/login(\?|$)/.test(next) ? next : null;
   await signOut({ callbackUrl: switchTo ?? (fromClientPortal ? "/client/login" : "/login") });
+}
+
+/**
+ * One-click switch between an executive's HQ login and their other-email
+ * worker/ambassador login (see CLAUDE.md, "Executives are Platinum" and
+ * "One login, one dashboard"). Never signs out and never visits `/login`:
+ *   1. asks the server for a short-lived HMAC swap token,
+ *   2. wipes the previous account's push subscription and offline cache,
+ *   3. calls NextAuth's `account-switch` provider, which replaces the JWT.
+ * On any failure the device falls back to `signOutAndClear("/login?email=…")`
+ * so the founder is never stranded on a spinning menu item.
+ */
+export async function switchAccountSilent(target: { email: string; label: string }): Promise<void> {
+  try {
+    const res = await fetch("/api/auth/switch-account/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ toEmail: target.email }),
+    });
+    if (!res.ok) throw new Error(`token endpoint ${res.status}`);
+    const body = (await res.json()) as {
+      swapToken: string;
+      fromUserId: string;
+      toUserId: string;
+      exp: number;
+      targetHome: string;
+    };
+    await Promise.race([disablePush(), new Promise((resolve) => setTimeout(resolve, 2500))]);
+    await clearOfflineData();
+    await signIn("account-switch", {
+      swapToken: body.swapToken,
+      fromUserId: body.fromUserId,
+      toUserId: body.toUserId,
+      exp: String(body.exp),
+      callbackUrl: body.targetHome,
+      redirect: true,
+    });
+  } catch (error) {
+    console.error("[switch-account] silent switch failed, falling back to sign-out", error);
+    await signOutAndClear(`/login?email=${encodeURIComponent(target.email)}`);
+  }
 }
 
 /**

@@ -66,6 +66,29 @@ export async function execForLoginEmail(email: string | null | undefined): Promi
   return exec && exec.primaryEmail !== key ? exec : null;
 }
 
+/**
+ * True iff two logins belong to the same person, per the executive's own login
+ * email plus every one of their "Other emails" (`ExecProfile.otherEmails`).
+ * The only relationship that allows a one-click account switch — every other
+ * pair is refused by the token API and by the `account-switch` credentials
+ * provider.
+ */
+export async function sameExecPerson(userIdA: string, userIdB: string): Promise<boolean> {
+  if (!userIdA || !userIdB || userIdA === userIdB) return false;
+  const users = await db.user.findMany({
+    where: { id: { in: [userIdA, userIdB] } },
+    select: { id: true, email: true },
+  });
+  if (users.length !== 2) return false;
+  const emailA = normaliseEmail(users.find((u) => u.id === userIdA)?.email);
+  const emailB = normaliseEmail(users.find((u) => u.id === userIdB)?.email);
+  if (!emailA || !emailB) return false;
+  const index = await loadExecIndex();
+  const execA = index.get(emailA);
+  const execB = index.get(emailB);
+  return !!execA && !!execB && execA.userId === execB.userId;
+}
+
 export type LinkedPortal = "worker" | "ambassador" | "client";
 
 export interface LinkedAccount {

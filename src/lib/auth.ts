@@ -9,6 +9,8 @@ import { isStaffRole, primaryPortal, type Portal } from "@/lib/roles";
 import { EXEC_ROLE_LABELS } from "@/lib/rbac";
 import { linkClientOrders } from "@/lib/services/account-links";
 import { recheckLogin } from "@/lib/session-check";
+import { sameExecPerson } from "@/lib/services/executives";
+import { verifySwapToken } from "@/lib/auth-switch";
 
 // Landing route per role lives with the rest of the access rules (edge-safe);
 // re-exported here because every caller already imports it from `@/lib/auth`.
@@ -120,6 +122,65 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           name,
           role: user.role,
         };
+      },
+    }),
+    // One-click account switching between an executive's login and their
+    // other-email worker/ambassador login. `authorize` accepts an HMAC-signed
+    // swap token from POST /api/auth/switch-account/token (60 s TTL) and
+    // re-verifies the same-person link before it swaps — an `otherEmails` edit
+    // inside the window cancels the swap.
+    Credentials({
+      id: "account-switch",
+      name: "Account switch",
+      credentials: {
+        swapToken: { label: "Swap token", type: "text" },
+        fromUserId: { label: "From user id", type: "text" },
+        toUserId: { label: "To user id", type: "text" },
+        exp: { label: "Expires at", type: "text" },
+      },
+      async authorize(raw) {
+        const parsed = z
+          .object({
+            swapToken: z.string().min(1).max(200),
+            fromUserId: z.string().min(1).max(64),
+            toUserId: z.string().min(1).max(64),
+            exp: z.coerce.number().int().positive(),
+          })
+          .safeParse(raw);
+        if (!parsed.success) return null;
+
+        const { swapToken, fromUserId, toUserId, exp } = parsed.data;
+        if (!verifySwapToken({ fromUserId, toUserId, exp }, swapToken)) return null;
+
+        // Belt and braces: re-check the same-person link right before the swap.
+        const linked = await sameExecPerson(fromUserId, toUserId);
+        if (!linked) return null;
+
+        const target = await db.user.findUnique({
+          where: { id: toUserId },
+          include: {
+            execProfile: { select: { fullName: true } },
+            workerProfile: { select: { fullName: true, status: true } },
+            ambassadorProfile: { select: { fullName: true, status: true } },
+            clientProfiles: { select: { fullName: true }, take: 1 },
+          },
+        });
+        if (!target || !target.isActive) return null;
+
+        await touchSignIn(target.id);
+        if (!isStaffRole(target.role)) {
+          await linkClientOrders(target.id, target.email);
+        }
+
+        const name =
+          target.execProfile?.fullName ??
+          target.displayName ??
+          target.workerProfile?.fullName ??
+          target.ambassadorProfile?.fullName ??
+          target.clientProfiles[0]?.fullName ??
+          target.email.split("@")[0];
+
+        return { id: target.id, email: target.email, name, role: target.role };
       },
     }),
     // Clients: Client ID (or email) + the password they set (once, with an emailed code).
