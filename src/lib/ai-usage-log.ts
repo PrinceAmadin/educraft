@@ -1,9 +1,11 @@
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { rollUpAiExpense } from "@/lib/services/expenses";
-import { costUsd, usdToNairaRate } from "@/lib/ai-pricing";
+import { costUsd } from "@/lib/ai-pricing";
+import { getUsdToNairaRate } from "@/lib/fx-rate";
 
 export { costUsd, usdToNairaRate } from "@/lib/ai-pricing";
+export { getUsdToNairaRate } from "@/lib/fx-rate";
 
 export interface AiUsageContext {
   /** Project.id (not the EC-XXXXX code). */
@@ -38,9 +40,12 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
       writeTokens: rec.cacheWriteTokens,
       readTokens: rec.cacheReadTokens,
     });
-    const project = rec.projectId
-      ? await db.project.findUnique({ where: { id: rec.projectId }, select: { workerId: true } })
-      : null;
+    const [project, rate] = await Promise.all([
+      rec.projectId
+        ? db.project.findUnique({ where: { id: rec.projectId }, select: { workerId: true } })
+        : Promise.resolve(null),
+      getUsdToNairaRate(),
+    ]);
     const log = await db.aiUsageLog.create({
       data: {
         projectId: rec.projectId ?? null,
@@ -55,7 +60,8 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
         cacheReadTokens: rec.cacheReadTokens ?? 0,
         webSearchRequests: rec.webSearchRequests ?? 0,
         costUsd: usd,
-        costNaira: usd * usdToNairaRate(),
+        // Frozen: this row keeps the naira it was posted at, even after the rate moves.
+        costNaira: usd * rate,
         durationMs: rec.durationMs,
         status: rec.status,
       },

@@ -328,7 +328,12 @@ export type FounderDrawStatus = "NONE" | "PENDING" | "PARTIAL" | "DISTRIBUTED";
 
 export interface AiBalance {
   configured: boolean;
-  remaining: number | null;
+  /** USD is the stored source of truth (the Anthropic Console figure). */
+  remainingUsd: number | null;
+  /** Naira derived from `remainingUsd × usdRate` at read time. */
+  remainingNaira: number | null;
+  /** Current ₦/$ rate used for the naira figure. */
+  usdRate: number | null;
   /** 0–100, null when not configured. */
   percentRemaining: number | null;
   level: "ok" | "low" | "critical" | null;

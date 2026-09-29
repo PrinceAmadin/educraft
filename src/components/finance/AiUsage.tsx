@@ -25,13 +25,25 @@ export type BalanceData =
   | { configured: false }
   | {
       configured: true;
-      loaded: number;
+      loadedUsd: number;
+      spentUsd: number;
+      remainingUsd: number;
+      loadedNaira: number;
+      spentNaira: number;
+      remainingNaira: number;
+      usdRate: number;
+      /** Where the current ₦/$ rate came from — set by getCreditBalance. */
+      rateSource?: "manual" | "auto" | "env" | "default";
+      rateOverridden?: boolean;
+      rateFetchedAt?: string | null;
+      rateAutoSource?: string | null;
       setAt: string;
-      spent: number;
-      remaining: number;
       percentRemaining: number;
       level: "ok" | "low" | "critical";
     };
+
+const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const NAIRA_RATE = new Intl.NumberFormat("en-NG");
 
 export function AiBalanceCard({ balance, canEdit }: { balance: BalanceData; canEdit: boolean }) {
   const router = useRouter();
@@ -48,7 +60,7 @@ export function AiBalanceCard({ balance, canEdit }: { balance: BalanceData; canE
       const res = await fetch("/api/admin/ai-usage/balance", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ balanceNaira: Number(value) }),
+        body: JSON.stringify({ balanceUsd: Number(value) }),
       });
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? "Could not save");
       setEditing(false);
@@ -95,18 +107,30 @@ export function AiBalanceCard({ balance, canEdit }: { balance: BalanceData; canE
           {balance.configured ? (
             <>
               <p className="mt-2 font-mono text-[clamp(2.25rem,6vw,3.25rem)] font-medium leading-none tabular-nums text-foreground">
-                {formatNaira(balance.remaining)}
+                {USD.format(balance.remainingUsd)}
+              </p>
+              <p className="mt-1 font-mono text-sm tabular-nums text-muted-foreground">
+                ≈ {formatNaira(balance.remainingNaira)} at ₦{NAIRA_RATE.format(balance.usdRate)}/$
+                {balance.rateSource === "manual" ? (
+                  <span className="ml-2 font-sans normal-case text-subtle">(manual override)</span>
+                ) : balance.rateSource === "auto" && balance.rateAutoSource ? (
+                  <span className="ml-2 font-sans normal-case text-subtle">(auto · {balance.rateAutoSource})</span>
+                ) : balance.rateSource === "env" ? (
+                  <span className="ml-2 font-sans normal-case text-subtle">(env fallback)</span>
+                ) : balance.rateSource === "default" ? (
+                  <span className="ml-2 font-sans normal-case text-subtle">(default — click Refresh in Settings)</span>
+                ) : null}
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
-                {formatNaira(balance.spent)} used since the balance was set on{" "}
+                {USD.format(balance.spentUsd)} (≈ {formatNaira(balance.spentNaira)}) used since the balance was set on{" "}
                 {new Date(balance.setAt).toLocaleDateString("en-NG", { day: "numeric", month: "short" })} ·{" "}
                 {balance.percentRemaining}% left
               </p>
             </>
           ) : (
             <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-              Anthropic has no API for prepaid credit, so enter the balance shown in the Console once — HQ subtracts
-              every call it logs from there.
+              Anthropic has no API for prepaid credit, so enter the balance shown in the Console once (USD) — HQ
+              subtracts every call it logs from there.
             </p>
           )}
         </div>
@@ -140,26 +164,34 @@ export function AiBalanceCard({ balance, canEdit }: { balance: BalanceData; canE
       {canEdit && editing ? (
         <form onSubmit={save} className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="ai-balance">
-            Balance in naira
+            Balance in US dollars
           </label>
-          <input
-            id="ai-balance"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="any"
-            required
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="Balance in ₦ (Console USD × rate)"
-            className="h-12 w-full rounded-lg border border-input-border bg-input px-3 text-sm sm:w-72"
-          />
+          <div className="relative w-full sm:w-72">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-muted-foreground"
+            >
+              $
+            </span>
+            <input
+              id="ai-balance"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              required
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="e.g. 25.00"
+              className="h-12 w-full rounded-lg border border-input-border bg-input pl-7 pr-3 text-sm"
+            />
+          </div>
           <Button type="submit" disabled={saving || value === ""}>
             {saving ? "Saving…" : "Save balance"}
           </Button>
           <p className="w-full text-xs text-muted-foreground">
-            Enter only the API credit balance for this HQ workspace. Claude Code and Claude.ai usage are tracked
-            separately in the Anthropic Console.
+            Enter the API credit balance shown on your Anthropic Console (USD). EduCraft converts it to naira using the
+            current ₦/$ rate. Claude Code and Claude.ai usage are tracked separately in the Anthropic Console.
           </p>
           {error ? <p className="w-full text-sm text-danger">{error}</p> : null}
         </form>

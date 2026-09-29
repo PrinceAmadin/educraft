@@ -32,7 +32,8 @@ export async function PATCH(req: NextRequest) {
         };
   // parentCommissionRate is omitted from that object like commissionRates —
   // pricing, so OPS_MANAGER can't touch it. alertEmails is omitted too: where
-  // the founder's alerts go is the founder's call.
+  // the founder's alerts go is the founder's call. The FX rate fields are
+  // pricing too (they set the ledger's ₦/$ rate), so only Super Admin.
 
   try {
     await updateGeneralSettings(data);

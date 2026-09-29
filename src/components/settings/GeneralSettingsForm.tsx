@@ -14,8 +14,24 @@ import { FormSection } from "@/components/forms/FormSection";
 import { generalSettingsSchema, splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 import type { GeneralSettings } from "@/lib/services/settings";
 import type { AlertRoleRecipient } from "@/lib/services/team-alerts";
+import { computeEffective, type FxRateSnapshot } from "@/lib/fx-rate";
 
 const TIERS = ["BRONZE", "SILVER", "GOLD", "PLATINUM"] as const;
+
+const NAIRA = new Intl.NumberFormat("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function formatWhen(iso: string | null): string {
+  if (!iso) return "never";
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "never";
+  const mins = Math.round((Date.now() - then) / 60_000);
+  if (mins < 2) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return `${days} d ago`;
+}
 const TIER_LABEL: Record<(typeof TIERS)[number], string> = {
   BRONZE: "Bronze",
   SILVER: "Silver",
@@ -41,6 +57,7 @@ export function GeneralSettingsForm({
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<GeneralSettingsInput>({
     resolver: zodResolver(generalSettingsSchema),
@@ -55,8 +72,48 @@ export function GeneralSettingsForm({
       commissionRates: settings.commissionRates,
       parentCommissionRate: settings.parentCommissionRate,
       alertEmails: settings.alertEmails,
+      fxRateMarginPercent: settings.fxRateMarginPercent,
+      fxRateManualOverride: settings.fxRateManualOverride,
     },
   });
+
+  // FX rate section — live snapshot of the auto value and "Refresh now" state.
+  const [fxSnapshot, setFxSnapshot] = React.useState<FxRateSnapshot>(settings.fxRateSnapshot);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
+  const watchedMargin = watch("fxRateMarginPercent");
+  const watchedOverride = watch("fxRateManualOverride");
+
+  const previewBase = (() => {
+    const overrideRaw = typeof watchedOverride === "string" ? watchedOverride.trim() : "";
+    if (overrideRaw !== "") {
+      const n = Number(overrideRaw);
+      if (Number.isFinite(n) && n > 0) return { value: n, source: "manual" as const };
+    }
+    return { value: fxSnapshot.baseRate, source: fxSnapshot.source };
+  })();
+  const marginForPreview = (() => {
+    const raw = Number(watchedMargin);
+    if (Number.isFinite(raw)) return raw;
+    return settings.fxRateMarginPercent;
+  })();
+  const previewEffective = computeEffective(previewBase.value, marginForPreview);
+
+  const onRefreshFx = React.useCallback(async () => {
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const res = await fetch("/api/admin/settings/fx-rate/refresh", { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; reason?: string; snapshot?: FxRateSnapshot } | null;
+      if (!res.ok) throw new Error(body?.reason ?? "Could not refresh");
+      if (body?.snapshot) setFxSnapshot(body.snapshot);
+      if (body?.ok === false) setRefreshError(body.reason ?? "The FX source didn't answer.");
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : "Could not refresh");
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
 
   const onSubmit = async (data: GeneralSettingsInput) => {
     setSubmitError(null);
@@ -196,6 +253,95 @@ export function GeneralSettingsForm({
             />
           </Field>
         </div>
+      </FormSection>
+
+      <FormSection
+        title="AI cost — ₦/$ rate"
+        description={
+          canEditPricing
+            ? "The rate HQ uses to convert Claude's US-dollar costs to naira. Anthropic marks the market rate up by ~2–3 % on top-up, so a small margin keeps our figures honest. Old AI usage rows are frozen at the rate they were logged with."
+            : "Only the founder (Super Admin) can change the ₦/$ rate used for AI cost conversion."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="space-y-2 rounded-xl bg-zone px-4 py-3 text-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <p className="meta-label">Auto-fetched base</p>
+              <p className="mt-1 font-mono text-foreground">
+                ₦{NAIRA.format(fxSnapshot.baseRate)}
+                <span className="ml-2 font-normal text-muted-foreground">
+                  {fxSnapshot.source === "auto"
+                    ? `from ${fxSnapshot.autoSource ?? "FX API"} · fetched ${formatWhen(fxSnapshot.fetchedAt)}`
+                    : fxSnapshot.source === "manual"
+                      ? "manual override in effect"
+                      : fxSnapshot.source === "env"
+                        ? "from USD_NGN_RATE env"
+                        : "default (nothing fetched yet)"}
+                </span>
+              </p>
+            </div>
+            {canEditPricing ? (
+              <Button type="button" variant="outline" size="sm" onClick={onRefreshFx} disabled={refreshing}>
+                {refreshing ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+                {refreshing ? "Refreshing…" : "Refresh now"}
+              </Button>
+            ) : null}
+          </div>
+          {refreshError ? (
+            <p role="alert" className="flex items-start gap-2 text-danger">
+              <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              {refreshError}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <Field
+            label="Margin %"
+            htmlFor="fxRateMarginPercent"
+            error={errors.fxRateMarginPercent?.message}
+            hint="Anthropic charges roughly 2–3 % above the market rate — this covers the gap."
+          >
+            <Input
+              id="fxRateMarginPercent"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={20}
+              step={0.1}
+              disabled={!canEditPricing}
+              {...register("fxRateMarginPercent")}
+            />
+          </Field>
+          <Field
+            label="Manual override (₦/$)"
+            htmlFor="fxRateManualOverride"
+            error={errors.fxRateManualOverride?.message}
+            hint="Leave empty to use the auto rate. A value here replaces the auto value; the margin still applies."
+          >
+            <Input
+              id="fxRateManualOverride"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step={0.01}
+              placeholder="e.g. 1352"
+              disabled={!canEditPricing}
+              {...register("fxRateManualOverride")}
+            />
+          </Field>
+        </div>
+
+        <p className="rounded-xl bg-zone px-4 py-3 text-sm text-muted-foreground">
+          Effective rate ={" "}
+          <span className="font-mono text-foreground">₦{NAIRA.format(previewBase.value)}</span>
+          {" × (1 + "}
+          <span className="font-mono text-foreground">{Number.isFinite(marginForPreview) ? marginForPreview : 0}%</span>
+          {") = "}
+          <span className="font-mono text-foreground">₦{NAIRA.format(previewEffective)}</span> per $
+          {previewBase.source === "manual" ? " (manual override)" : null}
+        </p>
       </FormSection>
 
       <FormSection

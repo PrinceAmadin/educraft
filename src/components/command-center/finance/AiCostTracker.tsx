@@ -25,6 +25,7 @@ const BAR: Record<"ok" | "low" | "critical", string> = { ok: "bg-primary", low: 
 
 // "4.2M", "12.5K", "860" — a token count is never read to the digit.
 const COMPACT = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function compactCount(n: number): string {
   return COMPACT.format(n);
@@ -80,8 +81,11 @@ function MetricRow({
 
 export function AiCostTracker({ usage, monthLabel, href }: { usage: Usage; monthLabel: string; href: string }) {
   const b = usage.balance;
-  // AiBalance is not a discriminated union: all four fields must agree before the meter shows.
-  const live = b.configured && b.remaining !== null && b.percentRemaining !== null && b.level !== null ? b : null;
+  // AiBalance is not a discriminated union: every field must agree before the meter shows.
+  const live =
+    b.configured && b.remainingUsd !== null && b.remainingNaira !== null && b.percentRemaining !== null && b.level !== null
+      ? b
+      : null;
   const percent = live && live.percentRemaining !== null ? Math.round(live.percentRemaining) : 0;
   const level = live && live.level !== null ? live.level : "ok";
 
@@ -123,16 +127,21 @@ export function AiCostTracker({ usage, monthLabel, href }: { usage: Usage; month
       </div>
 
       <div className="mt-4">
-        {live && live.remaining !== null ? (
+        {live && live.remainingUsd !== null && live.remainingNaira !== null ? (
           <Link
             href={href}
             className="group/credit -mx-2 block rounded-lg px-2 py-2 transition-colors duration-fast hover:bg-zone focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <span className="flex items-baseline justify-between gap-3">
               <span className="meta-label group-hover/credit:text-foreground">Claude credit remaining</span>
-              <span className="shrink-0 font-mono text-sm font-medium tabular-nums text-foreground">
-                {formatNaira(live.remaining)}
-                <span className="font-normal text-muted-foreground"> · {percent}% left</span>
+              <span className="shrink-0 text-right">
+                <span className="block font-mono text-sm font-medium tabular-nums text-foreground">
+                  {USD.format(live.remainingUsd)}
+                  <span className="font-normal text-muted-foreground"> · {percent}% left</span>
+                </span>
+                <span className="block font-mono text-[12px] tabular-nums text-muted-foreground">
+                  ≈ {formatNaira(live.remainingNaira)}
+                </span>
               </span>
             </span>
             <span

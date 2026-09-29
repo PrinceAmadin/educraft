@@ -337,10 +337,13 @@ async function payoutStatus(month: string): Promise<FinancePayload["payoutStatus
 // ── AI usage ─────────────────────────────────────────────────────
 
 function toAiBalance(balance: Awaited<ReturnType<typeof getCreditBalance>>): AiBalance {
-  if (!balance.configured) return { configured: false, remaining: null, percentRemaining: null, level: null };
+  if (!balance.configured)
+    return { configured: false, remainingUsd: null, remainingNaira: null, usdRate: null, percentRemaining: null, level: null };
   return {
     configured: true,
-    remaining: balance.remaining,
+    remainingUsd: balance.remainingUsd,
+    remainingNaira: balance.remainingNaira,
+    usdRate: balance.usdRate,
     percentRemaining: balance.percentRemaining,
     level: balance.level,
   };

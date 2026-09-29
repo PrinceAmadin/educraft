@@ -27,7 +27,7 @@
  */
 import { Prisma, type GenerationCheckpoint, type GenerationStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { costUsd, usdToNairaRate } from "@/lib/ai-usage-log";
+import { costUsd, getUsdToNairaRate } from "@/lib/ai-usage-log";
 import { ClaudeStreamError, streamClaude, type ClaudeEffort, type ClaudeStreamInput, type ClaudeStreamResult, type ClaudeTextBlock } from "@/lib/anthropic";
 import type { ClaudeUsage } from "@/lib/anthropic-stream";
 import { loadChapterPrompt, splitPromptBlocks, type ChapterPromptInput } from "./prompt-loader";
@@ -640,7 +640,7 @@ export async function getGenerationStatus(projectId: string, opts: { chapter?: n
       ...(opts.withOutput ? { partialOutput: true, draftText: true, fullOutput: true } : {}),
     },
   });
-  const rate = usdToNairaRate();
+  const rate = await getUsdToNairaRate();
   return rows.map((r) => {
     const plan = r.plan as unknown as ChapterPlan | null;
     return {

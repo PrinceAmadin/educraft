@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { DOWNPAYMENT_PERCENTAGE, TIER_COMMISSION_RATE } from "@/lib/constants";
 import { DEFAULT_PARENT_COMMISSION_RATE } from "@/lib/commission";
 import { splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
+import { DEFAULT_FX_MARGIN_PERCENT, FX_RATE_SETTING_KEYS, clampMargin, resolveFxRate, type FxRateSnapshot } from "@/lib/fx-rate";
 
 /** Setting keys this module owns. Everything else lives in its own service. */
 const KEYS = {
@@ -19,6 +20,9 @@ const KEYS = {
   ratePlatinum: "commission_rate_platinum",
   parentCommissionRate: "parent_commission_rate",
   alertEmails: "alert_emails",
+  fxMargin: FX_RATE_SETTING_KEYS.marginPercent,
+  fxManualOverride: FX_RATE_SETTING_KEYS.manualOverride,
+  fxManualOverrideSetAt: FX_RATE_SETTING_KEYS.manualOverrideSetAt,
 } as const;
 
 const RATE_KEY_BY_TIER: Record<AmbassadorTier, string> = {
@@ -55,6 +59,12 @@ export interface GeneralSettings {
   parentCommissionRate: number;
   /** The founder's inboxes, comma-separated: every team alert (the COO and HOG get theirs at their login email). */
   alertEmails: string;
+  /** Margin % applied on top of the base ₦/$ rate (0–20). */
+  fxRateMarginPercent: number;
+  /** Manual override for the base ₦/$ rate; empty string when unset. */
+  fxRateManualOverride: string;
+  /** The resolved rate snapshot, so the form can show the live effective figure. */
+  fxRateSnapshot: FxRateSnapshot;
 }
 
 /**
@@ -105,7 +115,7 @@ export async function getCommissionRates(): Promise<Record<AmbassadorTier, numbe
 }
 
 export async function getGeneralSettings(): Promise<GeneralSettings> {
-  const s = await readAll();
+  const [s, fxRateSnapshot] = await Promise.all([readAll(), resolveFxRate()]);
   const num = (raw: string | undefined, fallback: number) => {
     const n = raw != null ? Number(raw) : NaN;
     return Number.isFinite(n) ? n : fallback;
@@ -126,6 +136,9 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
     },
     parentCommissionRate: num(s[KEYS.parentCommissionRate], DEFAULT_PARENT_COMMISSION_RATE),
     alertEmails: splitEmailList(s[KEYS.alertEmails] ?? "").join(", ") || DEFAULTS.alertEmails,
+    fxRateMarginPercent: clampMargin(num(s[KEYS.fxMargin], DEFAULT_FX_MARGIN_PERCENT)),
+    fxRateManualOverride: s[KEYS.fxManualOverride] ?? "",
+    fxRateSnapshot,
   };
 }
 
@@ -162,6 +175,21 @@ export async function updateGeneralSettings(input: GeneralSettingsInput): Promis
     writes.push({ key: KEYS.parentCommissionRate, value: String(input.parentCommissionRate) });
   if (input.alertEmails !== undefined)
     writes.push({ key: KEYS.alertEmails, value: splitEmailList(input.alertEmails).join(", ") });
+
+  if (input.fxRateMarginPercent !== undefined)
+    writes.push({ key: KEYS.fxMargin, value: String(clampMargin(input.fxRateMarginPercent)) });
+  if (input.fxRateManualOverride !== undefined) {
+    const trimmed = input.fxRateManualOverride.trim();
+    if (trimmed === "") {
+      // An empty override clears the row so the auto value wins again.
+      await db.setting.deleteMany({
+        where: { key: { in: [KEYS.fxManualOverride, KEYS.fxManualOverrideSetAt] } },
+      });
+    } else {
+      writes.push({ key: KEYS.fxManualOverride, value: trimmed });
+      writes.push({ key: KEYS.fxManualOverrideSetAt, value: new Date().toISOString() });
+    }
+  }
 
   if (writes.length === 0) return;
 

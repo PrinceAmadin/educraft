@@ -13,18 +13,18 @@ export async function GET() {
   }
 }
 
-const bodySchema = z.object({ balanceNaira: z.number().min(0).max(1_000_000_000) });
+const bodySchema = z.object({ balanceUsd: z.number().min(0).max(100_000) });
 
-/** The owner records the balance shown in the Anthropic Console after a top-up. */
+/** The owner records the balance shown in the Anthropic Console (USD) after a top-up. */
 export async function PUT(req: NextRequest) {
   const guard = await requireSuperAdmin();
   if (!guard.ok) return guard.response;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return badRequest("Enter the balance as a number of naira", parsed.error.flatten());
+  if (!parsed.success) return badRequest("Enter the balance as a number of US dollars", parsed.error.flatten());
 
   try {
-    await setCreditBalance(parsed.data.balanceNaira);
+    await setCreditBalance(parsed.data.balanceUsd);
     return NextResponse.json(await getCreditBalance());
   } catch (error) {
     return serverError("PUT /api/admin/ai-usage/balance", error);

@@ -1,4 +1,4 @@
-import { usdToNairaRate } from "@/lib/ai-usage-log";
+import { getUsdToNairaRate } from "@/lib/ai-usage-log";
 import { generationContext, listPauseSnapshots, projectPhase } from "@/lib/services/generation-dashboard";
 import { queueStateFor } from "@/lib/services/generation-queue";
 import { chapterOutputStatsMany, listGenerationSnapshots } from "./generate-chapter";
@@ -78,7 +78,7 @@ export function generationEventStream(opts: GenerationStreamOptions): Response {
       let idleSent = false;
       let errors = 0;
       let tick = 0;
-      const rate = usdToNairaRate();
+      const rate = await getUsdToNairaRate();
       send(`retry: ${RECONNECT_MS}\n\n`);
       // Read alongside the first tick rather than before it: every round trip counts on a slow link.
       const contextRead = opts.queue ? generationContext(opts.projectId).catch(() => null) : Promise.resolve(null);

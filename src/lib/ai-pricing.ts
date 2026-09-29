@@ -17,7 +17,12 @@ const WEB_SEARCH_USD = 10 / 1000;
 const CACHE_WRITE_MULTIPLIER = 1.25;
 const CACHE_READ_MULTIPLIER = 0.1;
 
-/** ₦ per US$. Override with USD_NGN_RATE in the environment. */
+/**
+ * ₦ per US$ — last-ditch synchronous fallback used when the DB is unreachable
+ * (`resolveFxRate()` in `fx-rate.ts` calls this for its "env"/"default" layer).
+ * Application code should call `getUsdToNairaRate()` from `fx-rate.ts` for the
+ * effective rate (auto-fetched value + margin, or a manual override).
+ */
 export function usdToNairaRate(): number {
   const n = Number(process.env.USD_NGN_RATE);
   return Number.isFinite(n) && n > 0 ? n : 1500;

@@ -1,10 +1,12 @@
 import type { AiUsageLog } from "@prisma/client";
 import { db } from "@/lib/db";
+import { resolveFxRate } from "@/lib/fx-rate";
 
 export type UsagePeriod = "today" | "week" | "month" | "year";
 export const USAGE_PERIODS: UsagePeriod[] = ["today", "week", "month", "year"];
 
-const BALANCE_KEY = "ai.creditBalanceNaira";
+const BALANCE_USD_KEY = "ai.creditBalanceUsd";
+const LEGACY_BALANCE_NAIRA_KEY = "ai.creditBalanceNaira";
 const BALANCE_SET_AT_KEY = "ai.creditBalanceSetAt";
 const SLOW_CALL_MS = 5 * 60 * 1000;
 const REGENERATION_THRESHOLD = 3;
@@ -312,36 +314,76 @@ export async function getUsageAnomalies(period: UsagePeriod = "month"): Promise<
 // balance shown in the Console when they top up; "remaining" is that figure
 // minus everything logged since. Only calls made through EduCraft are counted.
 
+/**
+ * The balance the founder types is USD (matching the Anthropic Console), so USD
+ * is the stored source of truth; naira is derived at read time from
+ * `usdToNairaRate()` so a rate change on Vercel shows on the next page load
+ * with no re-save. If only the legacy `ai.creditBalanceNaira` row is present
+ * (from before this change), it is read as naira and converted to USD on the
+ * fly at the current rate — the next `setCreditBalance` deletes it.
+ */
 export async function getCreditBalance() {
-  const rows = await db.setting.findMany({ where: { key: { in: [BALANCE_KEY, BALANCE_SET_AT_KEY] } } });
+  const [rows, fx] = await Promise.all([
+    db.setting.findMany({
+      where: { key: { in: [BALANCE_USD_KEY, LEGACY_BALANCE_NAIRA_KEY, BALANCE_SET_AT_KEY] } },
+    }),
+    resolveFxRate(),
+  ]);
   const val = (k: string) => rows.find((r) => r.key === k)?.value;
-  const loaded = Number(val(BALANCE_KEY));
   const setAt = val(BALANCE_SET_AT_KEY);
-  if (!Number.isFinite(loaded) || !setAt) return { configured: false as const };
+  const usdRate = fx.effectiveRate;
 
-  const since = await db.aiUsageLog.aggregate({ where: { createdAt: { gte: new Date(setAt) } }, _sum: { costNaira: true } });
-  const spent = since._sum.costNaira ?? 0;
-  const remaining = Math.max(0, loaded - spent);
-  const percentRemaining = loaded > 0 ? Math.round((remaining / loaded) * 100) : 0;
+  const usdRow = Number(val(BALANCE_USD_KEY));
+  const nairaRow = Number(val(LEGACY_BALANCE_NAIRA_KEY));
+  let loadedUsd: number | null = null;
+  if (Number.isFinite(usdRow) && val(BALANCE_USD_KEY) !== undefined) loadedUsd = usdRow;
+  else if (Number.isFinite(nairaRow) && val(LEGACY_BALANCE_NAIRA_KEY) !== undefined)
+    loadedUsd = usdRate > 0 ? nairaRow / usdRate : 0;
+
+  if (loadedUsd === null || !setAt) return { configured: false as const };
+
+  const since = await db.aiUsageLog.aggregate({
+    where: { createdAt: { gte: new Date(setAt) } },
+    _sum: { costUsd: true, costNaira: true },
+  });
+  const spentUsd = since._sum.costUsd ?? 0;
+  const spentNaira = since._sum.costNaira ?? 0;
+  const remainingUsd = Math.max(0, loadedUsd - spentUsd);
+  const remainingNaira = remainingUsd * usdRate;
+  const percentRemaining = loadedUsd > 0 ? Math.round((remainingUsd / loadedUsd) * 100) : 0;
   return {
     configured: true as const,
-    loaded: round(loaded),
+    loadedUsd: round(loadedUsd, 4),
+    spentUsd: round(spentUsd, 4),
+    remainingUsd: round(remainingUsd, 4),
+    loadedNaira: round(loadedUsd * usdRate),
+    spentNaira: round(spentNaira),
+    remainingNaira: round(remainingNaira),
+    usdRate,
+    rateSource: fx.source,
+    rateOverridden: fx.overridden,
+    rateFetchedAt: fx.fetchedAt,
+    rateAutoSource: fx.autoSource,
     setAt,
-    spent: round(spent),
-    remaining: round(remaining),
     percentRemaining,
     level: percentRemaining < 10 ? ("critical" as const) : percentRemaining < 20 ? ("low" as const) : ("ok" as const),
   };
 }
 
-export async function setCreditBalance(balanceNaira: number) {
+export async function setCreditBalance(balanceUsd: number) {
+  const nowIso = new Date().toISOString();
   await db.$transaction([
-    db.setting.upsert({ where: { key: BALANCE_KEY }, update: { value: String(balanceNaira) }, create: { key: BALANCE_KEY, value: String(balanceNaira) } }),
+    db.setting.upsert({
+      where: { key: BALANCE_USD_KEY },
+      update: { value: String(balanceUsd) },
+      create: { key: BALANCE_USD_KEY, value: String(balanceUsd) },
+    }),
     db.setting.upsert({
       where: { key: BALANCE_SET_AT_KEY },
-      update: { value: new Date().toISOString() },
-      create: { key: BALANCE_SET_AT_KEY, value: new Date().toISOString() },
+      update: { value: nowIso },
+      create: { key: BALANCE_SET_AT_KEY, value: nowIso },
     }),
+    db.setting.deleteMany({ where: { key: LEGACY_BALANCE_NAIRA_KEY } }),
   ]);
 }
 
