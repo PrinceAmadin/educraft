@@ -40,7 +40,19 @@ export interface DhsSource {
   indicator: string;
 }
 
-export type SeriesSource = WbSource | CbnSource | ImfSource | DhsSource;
+/** Our World in Data: one column of a grapher chart, for Nigeria. Only charts whose every origin allows commercial reuse are used. */
+export interface OwidSource {
+  source: "OWID";
+  /** The chart's slug (ourworldindata.org/grapher/{slug}). */
+  slug: string;
+  /** The column's short name in the chart's CSV. */
+  column: string;
+  multiplier?: number;
+  /** The original producer, and any attribution its licence requires, for the notes. */
+  origin: string;
+}
+
+export type SeriesSource = WbSource | CbnSource | ImfSource | DhsSource | OwidSource;
 
 export type SourceName = SeriesSource["source"];
 

@@ -16,6 +16,8 @@ import { parseWorldBank, worldBankUrl, WORLD_BANK_CONCURRENCY } from "../src/lib
 import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/sources/cbn";
 import { imfUrl, parseImf } from "../src/lib/data-fetchers/sources/imf";
 import { dhsUrl, parseDhs } from "../src/lib/data-fetchers/sources/dhs";
+import { owidUrl, parseOwid } from "../src/lib/data-fetchers/sources/owid";
+import { parseCsv } from "../src/lib/data-fetchers/csv";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, isPermanentMissing, MISSING_CODE_LABELS, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
 import { catalogueForPrompt, lastCompleteYear, modelSpecTool, MODEL_SPEC_TEXT, relevantSections, statedPeriods, validateSpec, ModelSpecError, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
@@ -239,6 +241,21 @@ async function main() {
   throws("DHS: an answer with no Data is a failure", () => parseDhs({ error: "x" }, "X", 2000, 2025), /unexpected answer/);
   check("DHS falls in after the World Bank on the survey entries", ["stunting", "wasting", "skilled_birth_attendance", "contraceptive_prevalence"].every((k) => indicatorFor(k)!.sources[0].source === "WB" && indicatorFor(k)!.sources[1]?.source === "DHS"));
   check("Nursing is offered the NDHS measures", ["facility_delivery", "antenatal_4plus", "fully_vaccinated_children", "maternal_mortality_ratio", "life_expectancy"].every((k) => catalogueKeysForDomains(routeDepartment("Nursing").domains).includes(k)));
+
+  // ─── CSV reader and Our World in Data ──────────────────────────────────────
+  check("CSV: quoted commas, doubled quotes, CRLF, a BOM and blank lines", JSON.stringify(parseCsv('﻿a,b\r\n"x, y","say ""hi"""\r\n\r\n1,\n')) === JSON.stringify([["a", "b"], ["x, y", 'say "hi"'], ["1", ""]]));
+  check("OWID URL: the chart's full CSV with short column names", owidUrl("co-emissions-per-capita") === "https://ourworldindata.org/grapher/co-emissions-per-capita.csv?v=1&csvType=full&useColumnShortNames=true");
+  const owidCsv = ["entity,code,year,emissions_total_per_capita,note", "Ghana,GHA,2020,0.6,", '"Korea, North",PRK,2020,2.1,', "Nigeria,NGA,1999,0.5,", "Nigeria,NGA,2000,0.51,x", "Nigeria,NGA,2001,,", "Nigeria,NGA,2023,0.58,"].join("\n");
+  const owid = parseOwid(owidCsv, "emissions_total_per_capita", 2000, 2023);
+  check("OWID: Nigeria's rows only, in the period, an empty cell left out", JSON.stringify(owid.values) === JSON.stringify({ 2000: 0.51, 2023: 0.58 }), owid.values);
+  throws("OWID: a column the chart no longer has is a failure", () => parseOwid(owidCsv, "gone", 2000, 2023), /no longer has the column gone/);
+  throws("OWID: a CSV without code and year is a failure", () => parseOwid("a,b\n1,2", "b", 2000, 2023), /without code and year/);
+  check("OWID: every chart names its origin for the notes", INDICATOR_CATALOGUE.every((i) => i.sources.every((s) => s.source !== "OWID" || s.origin.length > 10)));
+  check("OWID: no chart from a non-commercial or proprietary origin is offered", !INDICATOR_CATALOGUE.some((i) => i.sources.some((s) => s.source === "OWID" && /cereal-yield|forest-area|per-capita-energy-use|share-electricity-renewables|electricity-generation/.test(s.slug))));
+  check("Copernicus data carries the attribution its licence asks for", indicatorFor("temperature_anomaly")!.sources.some((s) => s.source === "OWID" && /Contains modified Copernicus Climate Change Service information/.test(s.origin) && /neither the European Commission nor ECMWF/.test(s.origin)));
+  check("Agronomy is offered crop, climate and land series", ["cereal_yield", "annual_precipitation", "temperature_anomaly", "arable_land", "co2_emissions_per_capita"].every((k) => catalogueKeysForDomains(routeDepartment("Agronomy").domains).includes(k)));
+  check("Economics can still use CO2 (the growth–environment studies)", catalogueKeysForDomains(routeDepartment("Economics").domains).includes("co2_emissions_per_capita"));
+  check("Cyber Security is offered the ICT series", ["internet_users", "mobile_subscriptions", "secure_internet_servers", "fixed_broadband"].every((k) => catalogueKeysForDomains(routeDepartment("Cyber Security").domains).includes(k)));
 
   // ─── The 8-second request ──────────────────────────────────────────────────
   check("the timeout is 8 seconds", FETCH_TIMEOUT_MS === 8_000);
