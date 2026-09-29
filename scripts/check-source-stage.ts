@@ -9,7 +9,7 @@
  * view and blockers, and the lines the chapter prompts get.
  */
 import { validateObjectives } from "../src/lib/generation/objectives-rules";
-import { objectivesUserPrompt } from "../src/lib/generation/objectives-drafter";
+import { extractClientStatedObjectives, objectivesUserPrompt } from "../src/lib/generation/objectives-drafter";
 import { formatPrimarySource } from "../src/lib/generation/prompt-loader";
 import { cleanArchivePlan, judgeUserPrompt, readJudgement } from "../src/lib/research/archive-fetcher";
 import { cleanPoints, vetRecordedCases } from "../src/lib/research/legal-source-fetcher";
@@ -164,11 +164,11 @@ const kept = readJudgement(
 expect("only real records, once each, for real questions", kept.map((k) => [k.pointIndex, k.record.title, k.relevance]), [[0, "B", "shows B"]]);
 
 // ── Objectives ──
-expect("3 good objectives pass (tidied)", validateObjectives(["1. To examine the legal basis of plea bargaining in Nigeria.", "To assess its effect on sentencing", "To compare it with the English approach;"]), {
+expect("4 good objectives pass (tidied)", validateObjectives(["1. To examine the legal basis of plea bargaining in Nigeria.", "To assess its effect on sentencing", "To compare it with the English approach;", "To propose reforms for Nigeria"]), {
   ok: true,
-  objectives: ["To examine the legal basis of plea bargaining in Nigeria", "To assess its effect on sentencing", "To compare it with the English approach"],
+  objectives: ["To examine the legal basis of plea bargaining in Nigeria", "To assess its effect on sentencing", "To compare it with the English approach", "To propose reforms for Nigeria"],
 });
-expect("two are too few", validateObjectives(["To examine a", "To assess b c d e f g"]).ok, false);
+expect("three are too few (new MIN=4)", validateObjectives(["To examine a b c", "To assess b c d e f g", "To compare c d e f g"]).ok, false);
 expect("six are too many", validateObjectives(Array.from({ length: 6 }, (_, i) => `To examine aspect number ${i}`)).ok, false);
 const bad = validateObjectives(["Examine the law of plea bargaining", "To assess its effect on sentencing", "To assess its effect on sentencing", `To ${"x".repeat(260)}`]);
 expect("must begin with To, no repeats, no overlong ones", bad.ok ? [] : bad.problems, [
@@ -176,8 +176,70 @@ expect("must begin with To, no repeats, no overlong ones", bad.ok ? [] : bad.pro
   "Objective 4 is over 250 characters.",
   "Objective 3 repeats an earlier one.",
 ]);
-const prompt = objectivesUserPrompt({ topic: "Plea bargaining in Nigeria", department: "Law", modeLabel: null, modeHint: null, specialInstructions: "  Use Lagos cases  ", departmentOutline: null, referenceTitles: ["A study"] });
-expect("the drafter prompt carries the topic, the client's words and the titles", [prompt.includes("Project topic: Plea bargaining in Nigeria"), prompt.includes("Client's instructions: Use Lagos cases"), prompt.includes("- A study")], [true, true, true]);
+const prompt = objectivesUserPrompt({ title: "  Plea bargaining in Nigeria  ", department: "Law", degree: "LL.B", modeNumber: 1 });
+expect(
+  "the drafter prompt carries the four labelled inputs",
+  [
+    prompt.includes("PROJECT TITLE: Plea bargaining in Nigeria"),
+    prompt.includes("RESEARCH MODE: Mode 1 (Thematic)"),
+    prompt.includes("DEPARTMENT: Law"),
+    prompt.includes("DEGREE: LL.B"),
+  ],
+  [true, true, true, true],
+);
+
+// ── Client-stated objectives fallback (pure) ──
+// If the client's brief or the supervisor's outline already lists 4–5 "To …"
+// lines, use them verbatim (fromClient=true) and skip the Claude call.
+expect(
+  "special instructions listing 4 numbered To-lines → extracted",
+  extractClientStatedObjectives({
+    specialInstructions: "Please cover these objectives:\n1. To examine the causes of X in Nigeria\n2. To analyse the effects of X on Y\n3. To assess mitigation measures for X\n4. To recommend a framework for handling X",
+    departmentOutline: null,
+  }),
+  [
+    "To examine the causes of X in Nigeria",
+    "To analyse the effects of X on Y",
+    "To assess mitigation measures for X",
+    "To recommend a framework for handling X",
+  ],
+);
+expect(
+  "department outline bullets with 5 To-lines → extracted",
+  extractClientStatedObjectives({
+    specialInstructions: null,
+    departmentOutline:
+      "OBJECTIVES\n• To examine A in Nigerian schools\n• To assess B among students\n• To determine C in Lagos\n• To compare D across regions\n• To propose E for policy",
+  }),
+  [
+    "To examine A in Nigerian schools",
+    "To assess B among students",
+    "To determine C in Lagos",
+    "To compare D across regions",
+    "To propose E for policy",
+  ],
+);
+expect(
+  "only 3 To-lines → returns null (below MIN)",
+  extractClientStatedObjectives({
+    specialInstructions: "1. To examine the causes\n2. To assess the effects\n3. To propose a solution",
+    departmentOutline: null,
+  }),
+  null,
+);
+expect(
+  "prose with no To-lines → returns null",
+  extractClientStatedObjectives({
+    specialInstructions: "The student should focus on Lagos State. Please cross-check with quality delivery.",
+    departmentOutline: null,
+  }),
+  null,
+);
+expect(
+  "both fields null → returns null",
+  extractClientStatedObjectives({ specialInstructions: null, departmentOutline: null }),
+  null,
+);
 
 // ── Where a stopped stage carries on ──
 expect("no objectives: draft them", resumeStatusFor({ objectives: [], sourceKind: "CASE", points: null, searchedAt: null }), "DRAFTING_OBJECTIVES");
@@ -196,8 +258,8 @@ const row = (over: Partial<BriefCardRow>): BriefCardRow => ({
   status: "READY",
   sourceKind: "CASE",
   department: "Law",
-  draftedObjectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria"],
-  objectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria"],
+  draftedObjectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria", "To propose w for Nigeria"],
+  objectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria", "To propose w for Nigeria"],
   objectivesFromClient: false,
   points: [
     { index: 0, text: "Point A", searches: 2, outcome: "FOUND", queries: [], attempts: [] },
@@ -243,7 +305,7 @@ expect("a finished search with no points: Search again is offered", [emptySearch
 const lockedView = buildBriefView(row({}), { costNaira: 0, currentDepartment: "Law", locked: true, now });
 expect("locked: nothing editable", [lockedView.canEdit, lockedView.canRedraft, lockedView.canStart], [false, false, false]);
 const badObjectives = buildBriefView(row({ objectives: ["To x"] }), { costNaira: 0, currentDepartment: "Law", locked: false, now });
-expect("bad saved objectives block approval", briefBlockers(badObjectives, true)[0], "Give 3 to 5 objectives (there is 1).");
+expect("bad saved objectives block approval", briefBlockers(badObjectives, true)[0], "Give 4 to 5 objectives (there is 1).");
 const hansard = buildBriefView(row({ sourceKind: "ARCHIVE", department: "History", sources: [{ ...row({}).sources[0], id: "h1", kind: "ARCHIVE", origin: "HANSARD" }] }), { costNaira: 0, currentDepartment: "History", locked: false, now });
 expect("Hansard used: the licence attribution shows", hansard.attribution, "Contains Parliamentary information licensed under the Open Parliament Licence v3.0.");
 

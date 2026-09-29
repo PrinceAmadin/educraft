@@ -3,7 +3,7 @@
  * the COO edited it. Pure (no I/O), so the COO's card can check as they type.
  */
 
-export const MIN_OBJECTIVES = 3;
+export const MIN_OBJECTIVES = 4;
 export const MAX_OBJECTIVES = 5;
 export const MAX_OBJECTIVE_CHARS = 250;
 
@@ -21,7 +21,7 @@ export type ObjectivesCheck = { ok: true; objectives: string[] } | { ok: false; 
 
 /**
  * The rules an objectives list must meet, whether the drafter wrote it or the
- * COO edited it: 3 to 5, each "To …", one sentence, at most 250 characters,
+ * COO edited it: 4 to 5, each "To …", one sentence, at most 250 characters,
  * no repeats. Pure: used by the drafter, the card and the approval.
  */
 export function validateObjectives(raw: unknown): ObjectivesCheck {

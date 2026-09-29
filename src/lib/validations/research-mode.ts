@@ -26,7 +26,7 @@ export const modeDecisionSchema = z.object({
     })
     .nullish(),
   notes: z.string().trim().max(1000, "Keep the note under 1,000 characters").nullish(),
-  /** D3b: the objectives as edited on the card (3 to 5; the rules are checked by validateObjectives). */
+  /** D3b: the objectives as edited on the card (4 to 5; the rules are checked by validateObjectives). */
   objectives: z.array(z.string().max(600)).max(8).optional(),
   /** D3b: the ids of the cases or archival sources ticked on the card. */
   selectedSourceIds: z.array(z.string().min(1).max(40)).max(100).optional(),

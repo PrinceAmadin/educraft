@@ -24,8 +24,9 @@ import { WebSearchCallError } from "@/lib/anthropic";
 import { buildPrivatePath } from "@/lib/files/paths";
 import { putPrivateFile } from "@/lib/files/storage";
 import { isReportTemplate } from "@/lib/generation/generation-state";
-import { OBJECTIVES_TEXT, draftObjectives } from "@/lib/generation/objectives-drafter";
-import { isModeNumber, modeTitle } from "@/lib/mode-classifier";
+import { draftObjectives, extractClientStatedObjectives } from "@/lib/generation/objectives-drafter";
+import { getDegreeFromDepartment } from "@/lib/generation/department-map";
+import { isModeNumber } from "@/lib/mode-classifier";
 import { notifyOperations } from "@/lib/services/notifications";
 import { judgeArchiveResults, planArchivePoints, runArchiveQuery, type ArchiveAttempt, type JudgeInput } from "./archive-fetcher";
 import { planLegalPoints, searchCasesForPoint, type FoundCase, type SourceContext } from "./legal-source-fetcher";
@@ -214,24 +215,21 @@ async function stepDraft(brief: StageBrief): Promise<void> {
     return;
   }
   const mode = savedMode;
-  const references = await db.reference.findMany({
-    where: { projectId: brief.projectId, status: "KEPT", classification: "CORE" },
-    orderBy: { citedByCount: "desc" },
-    take: 10,
-    select: { title: true, proposedTitle: true },
-  });
-  const drafted = await draftObjectives(
-    {
-      topic: ctx.topic,
-      department: ctx.department,
-      modeLabel: modeTitle(mode),
-      modeHint: OBJECTIVES_TEXT.modeHints[mode],
-      specialInstructions: p.specialInstructions,
-      departmentOutline: p.departmentOutline,
-      referenceTitles: references.map((r) => r.title ?? r.proposedTitle).filter(Boolean),
-    },
-    usage(brief, "draft_objectives"),
-  );
+  // Pre-check: if the client's own brief or the supervisor's outline already
+  // lists the objectives (a run of 4–5 "To …" lines), use them word for word
+  // and skip the Claude call. Preserves the fromClient flag used by the card.
+  const stated = extractClientStatedObjectives({ specialInstructions: p.specialInstructions, departmentOutline: p.departmentOutline });
+  const drafted = stated
+    ? { objectives: stated, fromClient: true }
+    : await draftObjectives(
+        {
+          title: ctx.topic,
+          department: ctx.department,
+          degree: getDegreeFromDepartment(ctx.department),
+          modeNumber: mode,
+        },
+        usage(brief, "draft_objectives"),
+      );
   const next: SourceStageStatus = brief.redraftOnly || !brief.sourceKind ? "READY" : "PLANNING_POINTS";
   const res = await db.projectBrief.updateMany({
     where: { id: brief.id, status: "DRAFTING_OBJECTIVES" },
