@@ -44,6 +44,7 @@ const WB = (code: string): SeriesSource => ({ source: "WB", code });
 const IMF = (indicator: string, multiplier?: number): SeriesSource => ({ source: "IMF", indicator, ...(multiplier ? { multiplier } : {}) });
 const DHS = (indicator: string): SeriesSource => ({ source: "DHS", indicator });
 const OWID = (slug: string, column: string, origin: string, multiplier?: number): SeriesSource => ({ source: "OWID", slug, column, origin, ...(multiplier ? { multiplier } : {}) });
+const POWER = (parameter: string): SeriesSource => ({ source: "NASA_POWER", parameter });
 
 const ALL: Domain[] = [...DOMAINS];
 const MACRO: Domain[] = ["MACRO_FINANCE"];
@@ -226,6 +227,13 @@ export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   { key: "electricity_carbon_intensity", name: "Carbon intensity of electricity (grams of CO2 equivalent per kWh)", unit: "gCO2e per kWh", scale: 1, decimals: 1, hint: "emissions per unit of electricity generated", domains: SCIENCE, sources: [OWID("carbon-intensity-electricity", "co2_intensity__gco2_kwh", "Ember, Yearly Electricity Data (CC BY 4.0)")] },
   { key: "temperature_anomaly", name: "Annual surface temperature anomaly (°C, against the 1991–2020 average)", unit: "°C", scale: 1, decimals: 2, hint: "temperature change, warming, climate change, average temperature", domains: SCIENCE_AND_HEALTH, sources: [OWID("annual-temperature-anomalies", "temperature_anomaly", COPERNICUS)] },
   { key: "annual_precipitation", name: "Total annual precipitation (mm)", unit: "mm", scale: 1, decimals: 1, hint: "rainfall, precipitation, climate", domains: SCIENCE, sources: [OWID("average-precipitation-per-year", "total_precipitation", COPERNICUS)] },
+  { key: "power_temperature_mean", name: "Mean air temperature at 2 m, central Nigeria (°C, NASA POWER)", unit: "°C", scale: 1, decimals: 2, hint: "average temperature in °C (a level, not an anomaly), at the centre of Nigeria", domains: SCIENCE_AND_HEALTH, sources: [POWER("T2M")] },
+  { key: "power_temperature_max", name: "Highest air temperature at 2 m in the year, central Nigeria (°C, NASA POWER)", unit: "°C", scale: 1, decimals: 2, hint: "maximum temperature, heat extremes", domains: SCIENCE, sources: [POWER("T2M_MAX")] },
+  { key: "power_temperature_min", name: "Lowest air temperature at 2 m in the year, central Nigeria (°C, NASA POWER)", unit: "°C", scale: 1, decimals: 2, hint: "minimum temperature", domains: SCIENCE, sources: [POWER("T2M_MIN")] },
+  { key: "power_precipitation", name: "Mean daily precipitation, central Nigeria (mm per day, NASA POWER)", unit: "mm per day", scale: 1, decimals: 2, hint: "rainfall rate at a point", domains: SCIENCE, sources: [POWER("PRECTOTCORR")] },
+  { key: "solar_radiation", name: "All-sky surface shortwave radiation, central Nigeria (MJ/m² per day, NASA POWER)", unit: "MJ/m² per day", scale: 1, decimals: 2, hint: "solar irradiance, insolation, solar energy potential", domains: SCIENCE, sources: [POWER("ALLSKY_SFC_SW_DWN")] },
+  { key: "relative_humidity", name: "Relative humidity at 2 m, central Nigeria (%, NASA POWER)", unit: "%", scale: 1, decimals: 2, hint: "humidity", domains: SCIENCE_AND_HEALTH, sources: [POWER("RH2M")] },
+  { key: "wind_speed", name: "Wind speed at 2 m, central Nigeria (m/s, NASA POWER)", unit: "m/s", scale: 1, decimals: 2, hint: "wind speed, wind energy potential", domains: SCIENCE, sources: [POWER("WS2M")] },
   { key: "renewable_energy_consumption", name: "Renewable energy consumption (% of total final energy consumption)", unit: "% of final energy consumption", scale: 1, decimals: 2, hint: "renewable energy use", domains: SCIENCE_AND_MACRO, sources: [WB("EG.FEC.RNEW.ZS")] },
   { key: "renewable_electricity_output", name: "Renewable electricity output (% of total electricity output)", unit: "% of electricity output", scale: 1, decimals: 2, hint: "renewable share of electricity, hydropower share", domains: SCIENCE, sources: [WB("EG.ELC.RNEW.ZS")] },
   { key: "energy_use_per_capita", name: "Energy use (kg of oil equivalent per capita)", unit: "kg of oil equivalent per person", scale: 1, decimals: 1, hint: "energy consumption per head", domains: SCIENCE_AND_MACRO, sources: [WB("EG.USE.PCAP.KG.OE")] },

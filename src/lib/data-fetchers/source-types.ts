@@ -52,7 +52,14 @@ export interface OwidSource {
   origin: string;
 }
 
-export type SeriesSource = WbSource | CbnSource | ImfSource | DhsSource | OwidSource;
+/** NASA Langley POWER: one parameter's annual value at the geographic centre of Nigeria. */
+export interface NasaPowerSource {
+  source: "NASA_POWER";
+  /** A POWER parameter (T2M, PRECTOTCORR, ALLSKY_SFC_SW_DWN, ...). */
+  parameter: string;
+}
+
+export type SeriesSource = WbSource | CbnSource | ImfSource | DhsSource | OwidSource | NasaPowerSource;
 
 export type SourceName = SeriesSource["source"];
 

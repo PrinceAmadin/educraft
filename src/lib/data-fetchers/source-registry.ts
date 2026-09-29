@@ -8,6 +8,7 @@ import type { SeriesSource, SourceName } from "./source-types";
 import { cbnModule } from "./sources/cbn";
 import { dhsModule } from "./sources/dhs";
 import { imfModule } from "./sources/imf";
+import { nasaPowerModule } from "./sources/nasa-power";
 import { owidModule } from "./sources/owid";
 import { worldBankModule } from "./sources/world-bank";
 
@@ -17,6 +18,7 @@ export const SOURCE_REGISTRY: { readonly [N in SourceName]: SourceModule<N> } = 
   IMF: imfModule,
   DHS: dhsModule,
   OWID: owidModule,
+  NASA_POWER: nasaPowerModule,
 };
 
 export const SOURCE_NAMES = Object.keys(SOURCE_REGISTRY) as SourceName[];

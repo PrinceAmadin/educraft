@@ -17,6 +17,7 @@ import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/
 import { imfUrl, parseImf } from "../src/lib/data-fetchers/sources/imf";
 import { dhsUrl, parseDhs } from "../src/lib/data-fetchers/sources/dhs";
 import { owidUrl, parseOwid } from "../src/lib/data-fetchers/sources/owid";
+import { nasaPowerUrl, parseNasaPower } from "../src/lib/data-fetchers/sources/nasa-power";
 import { parseCsv } from "../src/lib/data-fetchers/csv";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, isPermanentMissing, MISSING_CODE_LABELS, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
@@ -258,6 +259,19 @@ async function main() {
   check("Agronomy is offered crop, climate and land series", ["cereal_yield", "annual_precipitation", "temperature_anomaly", "arable_land", "co2_emissions_per_capita"].every((k) => catalogueKeysForDomains(routeDepartment("Agronomy").domains).includes(k)));
   check("Economics can still use CO2 (the growth–environment studies)", catalogueKeysForDomains(routeDepartment("Economics").domains).includes("co2_emissions_per_capita"));
   check("Cyber Security is offered the ICT series", ["internet_users", "mobile_subscriptions", "secure_internet_servers", "fixed_broadband"].every((k) => catalogueKeysForDomains(routeDepartment("Cyber Security").domains).includes(k)));
+
+  // ─── NASA POWER ────────────────────────────────────────────────────────────
+  check("NASA POWER URL: the monthly endpoint at the centre of Nigeria, from 1981 at the earliest", nasaPowerUrl("T2M", 1970, 2023) === "https://power.larc.nasa.gov/api/temporal/monthly/point?parameters=T2M&community=AG&longitude=8.6753&latitude=9.082&start=1981&end=2023&format=JSON");
+  const power = parseNasaPower(
+    { type: "Feature", properties: { parameter: { T2M: { "200001": 26.9, "200013": 24.72, "200113": 24.59, "200213": -999, "202313": 26.23, "202413": 26.05 } } } },
+    "T2M",
+    2000,
+    2023
+  );
+  check("NASA POWER: month 13 is the year's value; months and -999 are left out; kept to the period", JSON.stringify(power.values) === JSON.stringify({ 2000: 24.72, 2001: 24.59, 2023: 26.23 }), power.values);
+  throws("NASA POWER: a parameter it did not send is a failure", () => parseNasaPower({ properties: { parameter: { T2M: {} } } }, "RH2M", 2000, 2023), /does not publish the parameter RH2M/);
+  throws("NASA POWER: a web page or error body is a failure", () => parseNasaPower({ messages: ["x"] }, "T2M", 2000, 2023), /unexpected answer/);
+  check("NASA POWER series say they are one point, not a national average", indicatorFor("power_temperature_mean")!.name.includes("central Nigeria") && /not a national average/.test(SOURCE_REGISTRY.NASA_POWER.note({ source: "NASA_POWER", parameter: "T2M" }, { values: {}, lastUpdated: null }) ?? ""));
 
   // ─── The 8-second request ──────────────────────────────────────────────────
   check("the timeout is 8 seconds", FETCH_TIMEOUT_MS === 8_000);
