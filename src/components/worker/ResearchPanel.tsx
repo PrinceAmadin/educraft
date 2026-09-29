@@ -19,6 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn, formatDateTime } from "@/lib/utils";
 import { PHASES, estimateEta, formatEta } from "@/lib/research-eta";
 import { RESEARCH_LOCKED_TOOLTIP } from "@/lib/generation/orchestrator-rules";
+import type { ResearchPanelGenerationState } from "@/lib/generation/research-panel-state";
+import { useRouter } from "next/navigation";
 
 interface ReferenceRow {
   id: string;
@@ -335,7 +337,7 @@ function RerunControl({
 const STALE_AFTER_MS = 150_000;
 const POLL_MS = 3000;
 
-export function ResearchPanel({ projectCode }: { projectCode: string }) {
+export function ResearchPanel({ projectCode, generationState = null }: { projectCode: string; generationState?: ResearchPanelGenerationState | null }) {
   const [job, setJob] = React.useState<ResearchJobData | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [starting, setStarting] = React.useState(false);
@@ -586,9 +588,7 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
             </Button>
             {startOverButton}
           </div>
-          <p className="text-sm text-muted">
-            Your research is done. The report is written from the admin side — EduCraft will take it from here.
-          </p>
+          <ReportGenerationFooter projectCode={projectCode} state={generationState} />
 
           {showRefs ? (
             <div className="space-y-4 border-t border-border pt-3">
@@ -629,5 +629,100 @@ export function ResearchPanel({ projectCode }: { projectCode: string }) {
       ) : null}
 
     </section>
+  );
+}
+
+const NO_REFS_WARNING =
+  "This report has no verified references. The writer will use [REFERENCE TO BE SUPPLIED] placeholders where a citation would go.";
+
+function ReportGenerationFooter({ projectCode, state }: { projectCode: string; state: ResearchPanelGenerationState | null }) {
+  if (!state) return null;
+  if (state.kind === "in_progress") {
+    return (
+      <p className="text-sm text-muted">
+        Writing Chapter {state.chapterNum} — {state.title} ({state.progressPercent}%). Live progress on the Report tab.
+      </p>
+    );
+  }
+  if (state.kind === "paused") {
+    return (
+      <div className="space-y-1">
+        <p className="text-sm font-medium">{state.message}</p>
+        <p className="text-sm text-muted">{state.statusLine} See the Report tab.</p>
+      </div>
+    );
+  }
+  if (state.kind === "complete") {
+    return <p className="text-sm text-muted">Report complete and submitted for QA review.</p>;
+  }
+  return <ProceedToWriteReport projectCode={projectCode} />;
+}
+
+function ProceedToWriteReport({ projectCode }: { projectCode: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  async function start(confirmNoReferences: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/worker/projects/${encodeURIComponent(projectCode)}/generation/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmNoReferences }),
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { ok?: true; error?: string; code?: string; refusals?: string[]; warnings?: string[] }
+        | null;
+      if (res.status === 409 && json?.code === "NEEDS_CONFIRMATION") {
+        setConfirmOpen(true);
+        return;
+      }
+      if (!res.ok || !json?.ok) {
+        setError(json?.refusals?.length ? json.refusals.join(" ") : json?.error ?? "That didn't work. Try again.");
+        return;
+      }
+      setConfirmOpen(false);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-muted">Research complete. Click below to begin report generation.</p>
+      <Button size="sm" disabled={busy} onClick={() => start(false)}>
+        {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuBookOpen className="size-4" aria-hidden />}
+        Proceed to Write Report
+      </Button>
+      {error ? (
+        <p className="flex items-start gap-2 text-sm text-danger">
+          <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+          {error}
+        </p>
+      ) : null}
+
+      <Dialog open={confirmOpen} onOpenChange={(v) => (busy ? null : setConfirmOpen(v))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Start with no verified references?</DialogTitle>
+            <DialogDescription>{NO_REFS_WARNING}</DialogDescription>
+          </DialogHeader>
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => start(true)}>
+              {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+              Start anyway
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

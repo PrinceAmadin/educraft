@@ -20,6 +20,7 @@ import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
 import { PreliminaryPagesCard } from "@/components/generation/PreliminaryPagesCard";
 import { getPreliminaryPagesView } from "@/lib/services/preliminary-pages";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
+import { deriveResearchPanelGenerationState } from "@/lib/generation/research-panel-state";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -237,7 +238,7 @@ export default async function WorkerAssignmentPage({
             label: "Research",
             content: (
               <div className="space-y-8">
-                <ResearchPanel projectCode={project.projectId} />
+                <ResearchPanel projectCode={project.projectId} generationState={deriveResearchPanelGenerationState(dashboard)} />
                 {dashboard ? null : secondaryCard}
               </div>
             ),
