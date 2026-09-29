@@ -17,13 +17,13 @@
  * Setting rows), so the check script can run this with fake sources.
  */
 
-import type { DomainRouting } from "./domain-map";
-import { indicatorFor, type CatalogueIndicator } from "./indicator-catalogue";
+import { routeDepartment, type DomainRouting } from "./domain-map";
+import { indicatorFor, sourceNamesForDomains, type CatalogueIndicator } from "./indicator-catalogue";
 import { roundTo, type Dataset, type DatasetColumn, type MissingItem, missingYears, yearRanges } from "./dataset-csv";
 import type { ModelSpec } from "./model-spec";
 import type { AnnualSeries } from "./series";
 import type { SourceContext, SourceModule } from "./source-module";
-import { moduleFor, seriesCacheKey, sourceCode, sourceLabel } from "./source-registry";
+import { moduleFor, seriesCacheKey, sourceCode, sourceLabel, SOURCE_REGISTRY } from "./source-registry";
 import type { SeriesSource, SourceName } from "./source-types";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, type FetchLike, type RequestLogEntry } from "./timed-fetch";
 
@@ -66,6 +66,18 @@ export interface SecondaryDataResult {
 const noCache: SeriesCache = { get: async () => null, set: async () => {} };
 
 const formatDay = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** Why a variable has no data, as the card, the panel and the chapter prompt say it (for the founder to review). */
+export const MISSING_TEXT = {
+  NO_SOURCE_FOR_DOMAIN: (department: string | null) =>
+    `No automatic data source covers ${department ?? "this department"}. The specialist supplies it.`,
+  NO_CATALOGUE_MATCH: (sources: string[]) =>
+    `${sources.length ? `None of the sources for this department (${sources.join(", ")})` : "No automatic source"} publishes this for Nigeria. The specialist supplies it.`,
+  FETCHED_EMPTY: (sources: string[], start: number, end: number) =>
+    `${sources.join(" and ")} answered, but ${sources.length > 1 ? "hold" : "holds"} no value for Nigeria for ${start}–${end}. The specialist supplies it.`,
+  ALL_SOURCES_FAILED: (failures: string[]) => `Could not be fetched: ${failures.join("; ")}. Fetch again later; if it keeps failing, the specialist supplies it.`,
+  YEARS_MISSING: (source: string, ranges: string) => `${source} has no value for ${ranges}. The specialist fills these years or the COO shortens the period.`,
+} as const;
 
 function scaled(ind: CatalogueIndicator, raw: Record<number, number>, start: number, end: number): Record<number, number> {
   const out: Record<number, number> = {};
@@ -145,21 +157,34 @@ export async function fetchSecondaryData(spec: ModelSpec, opts: FetchSecondaryOp
     }
   };
 
+  const routing = opts.routing ?? routeDepartment(null);
+  const routingSources = sourceNamesForDomains(routing.domains).map((n) => SOURCE_REGISTRY[n].shortName);
+
   const columnFor = async (v: ModelSpec["variables"][number]): Promise<{ column: DatasetColumn; missing: MissingItem[] }> => {
     const ind = indicatorFor(v.catalogueKey);
     const base = { symbol: v.symbol, name: v.name, role: v.role, catalogueKey: v.catalogueKey, decimals: ind?.decimals ?? 2 };
     if (!ind) {
+      const none = routing.domains.length === 0;
       return {
         column: { ...base, unit: null, source: null, code: null, sourceNote: null, values: {} },
-        missing: [{ symbol: v.symbol, name: v.name, reason: "Not available from the World Bank or the CBN automatically. The specialist supplies it (for example from the CBN Statistical Bulletin or NBS)." }],
+        missing: [
+          none
+            ? { symbol: v.symbol, name: v.name, code: "NO_SOURCE_FOR_DOMAIN", reason: MISSING_TEXT.NO_SOURCE_FOR_DOMAIN(routing.matched ?? routing.department) }
+            : { symbol: v.symbol, name: v.name, code: "NO_CATALOGUE_MATCH", reason: MISSING_TEXT.NO_CATALOGUE_MATCH(routingSources), sources: routingSources },
+        ],
       };
     }
     const failures: string[] = [];
+    const empty: string[] = [];
+    const asked: string[] = [];
     for (const s of ind.sources) {
+      const short = moduleFor(s).shortName;
+      if (!asked.includes(short)) asked.push(short);
       try {
         const series = await live(s);
         if (Object.keys(series.values).length === 0) {
           failures.push(`${sourceLabel(s)} has no value for ${start}–${end}`);
+          if (!empty.includes(short)) empty.push(short);
           continue;
         }
         await saveToCache(s, series);
@@ -190,9 +215,15 @@ export async function fetchSecondaryData(spec: ModelSpec, opts: FetchSecondaryOp
         };
       }
     }
+    // Every source answered with nothing for the period: asking again will not change it.
+    const allEmpty = asked.length > 0 && asked.every((a) => empty.includes(a));
     return {
       column: { ...base, unit: ind.unit, source: null, code: null, sourceNote: null, values: {} },
-      missing: [{ symbol: v.symbol, name: v.name, reason: `Could not be fetched: ${failures.join("; ")}.` }],
+      missing: [
+        allEmpty
+          ? { symbol: v.symbol, name: v.name, code: "FETCHED_EMPTY", reason: MISSING_TEXT.FETCHED_EMPTY(asked, start, end), sources: asked }
+          : { symbol: v.symbol, name: v.name, code: "ALL_SOURCES_FAILED", reason: MISSING_TEXT.ALL_SOURCES_FAILED(failures), sources: asked },
+      ],
     };
   };
 
@@ -202,7 +233,7 @@ export async function fetchSecondaryData(spec: ModelSpec, opts: FetchSecondaryOp
   for (const c of dataset.columns) {
     if (!c.source) continue;
     const gaps = missingYears(dataset, c);
-    if (gaps.length) missing.push({ symbol: c.symbol, name: c.name, reason: `${c.source} has no value for ${yearRanges(gaps)}. The specialist fills these years or the COO shortens the period.` });
+    if (gaps.length) missing.push({ symbol: c.symbol, name: c.name, code: "YEARS_MISSING", reason: MISSING_TEXT.YEARS_MISSING(c.source, yearRanges(gaps)), years: gaps });
   }
   return { dataset, missing, requests };
 }

@@ -27,6 +27,8 @@ import {
   datasetCsv,
   datasetNotes,
   describeDataset,
+  isPermanentMissing,
+  MISSING_CODE_LABELS,
   statsTableText,
   type ColumnStats,
   type CorrelationMatrix,
@@ -59,7 +61,24 @@ export class SecondaryDataError extends Error {
   ) {
     super(message);
   }
+
+  /**
+   * Whether fetching again could change the answer. A source that did not
+   * answer (503, or a NOTHING_FETCHED with a source that failed) could; a
+   * project state (409) or variables no source publishes cannot.
+   */
+  get retryable(): boolean {
+    if (this.status === 503) return true;
+    if (this.code !== "NOTHING_FETCHED") return false;
+    return (this.details?.missing ?? []).some((m) => !isPermanentMissing(m.code));
+  }
 }
+
+/** Why nothing was fetched, in one sentence (for the card and the orchestrator's panel; for the founder to review). */
+export const NOTHING_FETCHED_TEXT = {
+  permanent: "None of this model's variables can be fetched automatically for this department. The specialist supplies the data: upload it on the card.",
+  retryable: "Nothing could be fetched for this model. See what is missing below: fetch again later, or the specialist supplies the data.",
+} as const;
 
 /**
  * A short, human-readable diagnostic for the orchestrator's `reasonDetail`
@@ -77,7 +96,7 @@ export function summarizeSecondaryDataFailure(error: unknown, maxLen = 1000): st
   if (missing.length) {
     lines.push("");
     lines.push(`Missing (${missing.length}):`);
-    for (const m of missing) lines.push(`  • ${m.symbol} (${m.name}): ${m.reason}`);
+    for (const m of missing) lines.push(`  • ${m.symbol} (${m.name})${m.code ? ` [${MISSING_CODE_LABELS[m.code]}]` : ""}: ${m.reason}`);
   }
   const requests = error.details.requests ?? [];
   if (requests.length) {
@@ -375,7 +394,8 @@ export async function runSecondaryDataFetch(projectDbId: string, actor: { userId
 
   const result = await fetchSecondaryData(spec, { cache: settingSeriesCache, routing });
   if (!result.dataset.columns.some((c) => c.source)) {
-    throw new SecondaryDataError("Nothing could be fetched for this model. See what is missing below; try again later or the specialist supplies the data.", 502, "NOTHING_FETCHED", {
+    const permanent = result.missing.every((m) => isPermanentMissing(m.code));
+    throw new SecondaryDataError(permanent ? NOTHING_FETCHED_TEXT.permanent : NOTHING_FETCHED_TEXT.retryable, 502, "NOTHING_FETCHED", {
       missing: result.missing,
       requests: result.requests,
     });

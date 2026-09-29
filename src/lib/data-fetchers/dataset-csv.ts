@@ -31,10 +31,41 @@ export interface Dataset {
   columns: DatasetColumn[];
 }
 
+/**
+ * Why a variable (or some of its years) has no data:
+ *   NO_SOURCE_FOR_DOMAIN  the department has no automatic source at all;
+ *   NO_CATALOGUE_MATCH    the department's sources do not publish this variable;
+ *   FETCHED_EMPTY         its sources answered, with no value for the period;
+ *   ALL_SOURCES_FAILED    its sources did not answer or refused (worth a retry);
+ *   YEARS_MISSING         it was fetched, but some years have no value.
+ * The first two cannot change by fetching again: only the specialist can supply them.
+ */
+export type MissingCode = "NO_SOURCE_FOR_DOMAIN" | "NO_CATALOGUE_MATCH" | "FETCHED_EMPTY" | "ALL_SOURCES_FAILED" | "YEARS_MISSING";
+
+export const MISSING_CODE_LABELS: Record<MissingCode, string> = {
+  NO_SOURCE_FOR_DOMAIN: "No source for this department",
+  NO_CATALOGUE_MATCH: "Not published by these sources",
+  FETCHED_EMPTY: "No values for the period",
+  ALL_SOURCES_FAILED: "Sources did not answer",
+  YEARS_MISSING: "Some years missing",
+};
+
+/** Fetching again cannot change these. */
+export function isPermanentMissing(code: MissingCode | undefined): boolean {
+  return code === "NO_SOURCE_FOR_DOMAIN" || code === "NO_CATALOGUE_MATCH";
+}
+
 export interface MissingItem {
   symbol: string;
   name: string;
+  /** The plain sentence the card, the panel and the chapter prompt show. */
   reason: string;
+  /** Why, as a code (absent on datasets fetched before 29 Sept 2026). */
+  code?: MissingCode;
+  /** The sources that were asked (FETCHED_EMPTY, ALL_SOURCES_FAILED) or searched (NO_CATALOGUE_MATCH). */
+  sources?: string[];
+  /** YEARS_MISSING: the years with no value. */
+  years?: number[];
 }
 
 export function years(d: Pick<Dataset, "start" | "end">): number[] {

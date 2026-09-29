@@ -15,9 +15,9 @@ import { SOURCE_NAMES, SOURCE_REGISTRY, seriesCacheKey, sourceCode } from "../sr
 import { parseWorldBank, worldBankUrl, WORLD_BANK_CONCURRENCY } from "../src/lib/data-fetchers/sources/world-bank";
 import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/sources/cbn";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
-import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
+import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, isPermanentMissing, MISSING_CODE_LABELS, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
 import { catalogueForPrompt, lastCompleteYear, modelSpecTool, MODEL_SPEC_TEXT, relevantSections, statedPeriods, validateSpec, ModelSpecError, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
-import { fetchSecondaryData, type CachedSeries, type SeriesCache } from "../src/lib/data-fetchers/secondary-data-fetcher";
+import { fetchSecondaryData, MISSING_TEXT, type CachedSeries, type SeriesCache } from "../src/lib/data-fetchers/secondary-data-fetcher";
 import { contentTypeFor } from "../src/lib/files/policy";
 import { buildPrivatePath, parsePrivatePath, parseStoredPath } from "../src/lib/files/paths";
 
@@ -364,6 +364,44 @@ async function main() {
     const r = await fetchSecondaryData(spec([["INF", "inflation"], ["NSE", null]]), { fetchImpl: fakeFetch(async () => ({ status: 503, body: "down" })), print: quiet });
     check("fallback: nothing live and nothing saved → missing, with the reason", r.dataset.columns[0].source === null && r.missing.some((m) => m.symbol === "INF" && /Could not be fetched/.test(m.reason)));
     check("a variable outside the catalogue is an empty column for the specialist", r.dataset.columns[1].source === null && r.missing.some((m) => m.symbol === "NSE" && /specialist supplies it/.test(m.reason)));
+  }
+
+  // ─── Why a variable is missing (the codes) ─────────────────────────────────
+  {
+    const code = (r: { missing: { symbol: string; code?: string; sources?: string[] }[] }, symbol: string) => r.missing.find((m) => m.symbol === symbol);
+    const down = fakeFetch(async () => ({ status: 503, body: "down" }));
+    // Sources failed (a 503 on World Bank and CBN).
+    const failedRun = await fetchSecondaryData(spec([["INF", "inflation"], ["NSE", null]]), { fetchImpl: down, timeoutMs: 400, print: quiet });
+    check("ALL_SOURCES_FAILED: its sources did not answer, both named", code(failedRun, "INF")?.code === "ALL_SOURCES_FAILED" && code(failedRun, "INF")?.sources?.join() === "World Bank,CBN", code(failedRun, "INF"));
+    check("NO_CATALOGUE_MATCH: an unmatched variable names the department's sources", code(failedRun, "NSE")?.code === "NO_CATALOGUE_MATCH" && /None of the sources for this department \(World Bank, CBN\)/.test(failedRun.missing.find((m) => m.symbol === "NSE")!.reason), failedRun.missing);
+    check("…both are sentences with no source-specific jargon about the World Bank or CBN only", !failedRun.missing.some((m) => /Not available from the World Bank or the CBN automatically/.test(m.reason)));
+    // No automatic source for the department at all.
+    const history = await fetchSecondaryData(spec([["X", null], ["Y", null]]), { routing: routeDepartment("History"), fetchImpl: down, print: quiet });
+    check("NO_SOURCE_FOR_DOMAIN: every variable of a History project, naming the department", history.missing.length === 2 && history.missing.every((m) => m.code === "NO_SOURCE_FOR_DOMAIN" && /covers History/.test(m.reason)) && history.requests.length === 0, history.missing);
+    // Every source answered with nothing for the period (the World Bank twice, as its policy retries an empty answer).
+    const emptyRun = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["EXR", "exchange_rate"]]), {
+      fetchImpl: fakeFetch(wbRoute((c) => (c === "PA.NUS.FCRF" ? null : 5e9))),
+      timeoutMs: 400,
+      print: quiet,
+    });
+    check("FETCHED_EMPTY: every source answered, with no value for the period", code(emptyRun, "EXR")?.code === "FETCHED_EMPTY" && /World Bank answered, but holds no value for Nigeria for 2000–2023/.test(emptyRun.missing.find((m) => m.symbol === "EXR")!.reason), emptyRun.missing);
+    // One source empty, the other failing: worth another try, so not "empty".
+    const mixed = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["INF", "inflation"]]), {
+      fetchImpl: fakeFetch(async (u, signal) => (u.includes("cbn.gov.ng") ? { status: 503, body: "down" } : wbRoute((c) => (c === "FP.CPI.TOTL.ZG" ? null : 5e9))(u, signal))),
+      timeoutMs: 400,
+      print: quiet,
+    });
+    check("an empty answer plus a failure is ALL_SOURCES_FAILED (a later fetch could work)", code(mixed, "INF")?.code === "ALL_SOURCES_FAILED", mixed.missing);
+    // Some years only.
+    const gaps = await fetchSecondaryData(spec([["GDP", "gdp_current_usd"], ["INF", "inflation"]]), {
+      fetchImpl: fakeFetch(wbRoute((c, y) => (c === "FP.CPI.TOTL.ZG" && y < 2003 ? null : 7))),
+      print: quiet,
+    });
+    const gap = gaps.missing.find((m) => m.symbol === "INF");
+    check("YEARS_MISSING: a fetched series with gaps lists its years", gap?.code === "YEARS_MISSING" && gap.years?.join() === "2000,2001,2002" && /2000–2002/.test(gap.reason), gap);
+    check("the first two codes are permanent, the others are not", isPermanentMissing("NO_SOURCE_FOR_DOMAIN") && isPermanentMissing("NO_CATALOGUE_MATCH") && !isPermanentMissing("FETCHED_EMPTY") && !isPermanentMissing("ALL_SOURCES_FAILED") && !isPermanentMissing("YEARS_MISSING") && !isPermanentMissing(undefined));
+    check("every code has a label for the card", Object.keys(MISSING_CODE_LABELS).length === 5 && Object.values(MISSING_CODE_LABELS).every((l) => l.length > 0));
+    check("every reason sentence is plain text for the founder to review", typeof MISSING_TEXT.NO_CATALOGUE_MATCH([]) === "string" && /No automatic source publishes/.test(MISSING_TEXT.NO_CATALOGUE_MATCH([])));
   }
   {
     const seen: string[] = [];

@@ -4,21 +4,22 @@ import * as React from "react";
 import { LuChartLine, LuDownload, LuLoaderCircle, LuRefreshCw, LuTriangleAlert } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import type { SecondaryDataResponse, SecondaryDataStatus } from "@/lib/services/secondary-data";
+import { isPermanentMissing, MISSING_CODE_LABELS, type MissingItem } from "@/lib/data-fetchers/dataset-csv";
 import type { RequestLogEntry } from "@/lib/data-fetchers/timed-fetch";
 import { formatDateTime } from "@/lib/utils";
 
 /**
- * D5: a Mode 5 project's dataset, fetched from the World Bank and the CBN for
- * the model its Chapter 3 specifies. The assigned worker sees it on their
- * project page and the founder / COO on the Report tab: what was fetched, from
- * where, what is missing, the CSV, and Fetch again (free until Chapter 4
- * starts; after that the data is frozen).
+ * A Mode 5 project's dataset, fetched for the model its Chapter 3 specifies
+ * from the sources its department routes to. The assigned worker sees it on
+ * their project page and the founder / COO on the Report tab: what was
+ * fetched, from where, what is missing and why, the CSV, and Fetch again
+ * (free until Chapter 4 starts; after that the data is frozen).
  */
 export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: SecondaryDataStatus; endpoint: string; filesBase: string }) {
   const [status, setStatus] = React.useState(initial);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [failed, setFailed] = React.useState<{ missing?: { symbol: string; reason: string }[]; requests?: RequestLogEntry[] } | null>(null);
+  const [failed, setFailed] = React.useState<{ missing?: MissingItem[]; requests?: RequestLogEntry[] } | null>(null);
   const data = status.latest;
 
   async function fetchData() {
@@ -60,8 +61,14 @@ export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: S
         <p className="text-sm text-muted-foreground">
           {data
             ? `Fetched ${formatDateTime(data.fetchedAt)} for the model in Chapter 3 (each variable's source is below). Chapters 4 and 5 are written from it.`
-            : "Once Chapter 3 is written, the data for its model is fetched from the World Bank and the CBN. Chapters 4 and 5 are written from it."}
+            : "Once Chapter 3 is written, the data for its model is fetched from the sources for this department. Chapters 4 and 5 are written from it."}
         </p>
+        {status.routing ? (
+          <p className="text-xs text-muted-foreground">
+            {status.routing.basis}
+            {status.routing.sources.length ? <span className="block">Sources: {status.routing.sources.join(" · ")}</span> : null}
+          </p>
+        ) : null}
       </div>
 
       {data ? <DatasetDetails data={data} filesBase={filesBase} /> : null}
@@ -72,15 +79,7 @@ export function SecondaryDataCard({ initial, endpoint, filesBase }: { initial: S
             <LuTriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
             {error}
           </p>
-          {failed?.missing?.length ? (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
-              {failed.missing.map((m) => (
-                <li key={m.symbol}>
-                  <span className="font-mono">{m.symbol}</span>: {m.reason}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          {failed?.missing?.length ? <MissingList items={failed.missing} /> : null}
           {failed?.requests?.length ? <RequestSummary requests={failed.requests} /> : null}
         </div>
       ) : null}
@@ -134,13 +133,7 @@ function DatasetDetails({ data, filesBase }: { data: SecondaryDataResponse; file
       {data.missing.length ? (
         <div className="space-y-2">
           <p className="meta-label text-gold">Missing ({data.missing.length})</p>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
-            {data.missing.map((m, i) => (
-              <li key={`${m.symbol}-${i}`}>
-                <span className="font-mono">{m.symbol}</span>: {m.reason}
-              </li>
-            ))}
-          </ul>
+          <MissingList items={data.missing} />
         </div>
       ) : null}
 
@@ -166,6 +159,25 @@ function DatasetDetails({ data, filesBase }: { data: SecondaryDataResponse; file
         <RequestSummary requests={data.requests} />
       </div>
     </div>
+  );
+}
+
+function MissingList({ items }: { items: MissingItem[] }) {
+  return (
+    <ul className="space-y-2.5">
+      {items.map((m, i) => (
+        <li key={`${m.symbol}-${i}`} className="space-y-0.5 text-sm">
+          <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="font-mono font-semibold text-foreground">{m.symbol}</span>
+            <span className="text-muted-foreground">{m.name}</span>
+            {m.code ? (
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${isPermanentMissing(m.code) ? "bg-gold/15 text-gold" : "bg-card text-muted-foreground"}`}>{MISSING_CODE_LABELS[m.code]}</span>
+            ) : null}
+          </p>
+          <p className="text-foreground">{m.reason}</p>
+        </li>
+      ))}
+    </ul>
   );
 }
 

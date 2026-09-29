@@ -36,7 +36,7 @@ import { selfBaseUrl } from "@/lib/self-base-url";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { alertReportReady, alertReportStopped } from "@/lib/services/team-alerts";
 import { openDataPause } from "@/lib/services/data-pause";
-import { runSecondaryDataFetch, summarizeSecondaryDataFailure } from "@/lib/services/secondary-data";
+import { runSecondaryDataFetch, SecondaryDataError, summarizeSecondaryDataFailure } from "@/lib/services/secondary-data";
 import { ModeNotApprovedError } from "@/lib/services/mode-errors";
 import { approvedChapterInput } from "./approved-inputs";
 import { readChapterOneStatements, statementsUnreadable } from "./chapter-one-statements";
@@ -58,6 +58,7 @@ import {
   type StartProject,
 } from "./orchestrator-view";
 import {
+  MAX_FETCH_ATTEMPTS,
   ORCHESTRATOR_TEXT,
   RUN_LEASE_MS,
   attentionLine,
@@ -492,8 +493,13 @@ async function perform(ctx: Ctx, action: Action): Promise<Outcome> {
       } catch (error) {
         const detail = summarizeSecondaryDataFailure(error);
         console.warn(`${TAG} ${code}: the dataset could not be fetched`, detail);
-        await update(run.id, { reasonDetail: detail }).catch(() => {});
-        return { again: false };
+        // Nothing a second fetch could change (no source publishes these variables, or a project state): ask a person now.
+        const final = error instanceof SecondaryDataError && !error.retryable;
+        const saved = await update(run.id, { reasonDetail: detail, ...(final ? { fetchAttempts: MAX_FETCH_ATTEMPTS } : {}) }).then(
+          () => true,
+          () => false
+        );
+        return { again: final && saved };
       }
       await update(run.id, { fetchAttempts: 0 });
       return { again: true };
