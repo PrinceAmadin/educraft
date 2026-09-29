@@ -11,10 +11,15 @@
  * each chart was checked origin by origin in its indicator metadata
  * (api.ourworldindata.org/v1/indicators/{id}.metadata.json) and only charts
  * whose every origin allows commercial reuse are in the catalogue: Global
- * Carbon Project and Jones et al. (CC BY 4.0), Ember (CC BY 4.0), Copernicus
- * ERA5 (the Copernicus Licence: "for any purpose in so far as it is lawful").
- * Left out: energy use, electricity generation and renewables share (they mix
- * in "© Energy Institute" data), forest area and cereal yield (FAO, CC BY-NC-SA).
+ * Carbon Project (CC BY 4.0), Ember (CC BY 4.0), Copernicus ERA5 (the
+ * Copernicus Licence: "for any purpose in so far as it is lawful"), and FAO's
+ * crop statistics: OWID still tags them CC BY-NC-SA 3.0 IGO, but FAO's own
+ * database terms (fao.org/contact-us/terms/db-terms-of-use) now license "all
+ * datasets disseminated through FAO corporate statistical databases" under CC
+ * BY 4.0, and FAO's page is the one that counts. Left out: energy use,
+ * electricity generation and renewables share (they mix in "© Energy
+ * Institute" data) and forest area (publisher-copyright origins); cereal yield
+ * comes from the World Bank.
  */
 
 import { parseCsv } from "../csv";

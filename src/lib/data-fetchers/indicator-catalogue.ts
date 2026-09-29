@@ -58,6 +58,7 @@ const TECH_AND_MACRO: Domain[] = ["TECH_CYBER", "MACRO_FINANCE"];
 
 /** The attribution each OWID origin's licence asks for, as the notes print it. */
 const GCP = "Global Carbon Project, Global Carbon Budget (CC BY 4.0)";
+const FAO_CROPS = "FAO, FAOSTAT Production: Crops and livestock products, licence CC BY 4.0";
 const COPERNICUS =
   "Contains modified Copernicus Climate Change Service information (ERA5); neither the European Commission nor ECMWF is responsible for any use made of it";
 
@@ -248,6 +249,16 @@ export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   { key: "fertilizer_consumption", name: "Fertiliser consumption (kg per hectare of arable land)", unit: "kg per hectare", scale: 1, decimals: 2, hint: "fertiliser use", domains: SCIENCE, sources: [WB("AG.CON.FERT.ZS")] },
   { key: "agriculture_employment", name: "Employment in agriculture (% of total employment, modelled ILO estimate)", unit: "% of employment", scale: 1, decimals: 2, hint: "agricultural labour share", domains: SCIENCE_AND_MACRO, sources: [WB("SL.AGR.EMPL.ZS")] },
   { key: "agriculture_value_added_usd", name: "Agriculture, forestry and fishing, value added (current US$)", unit: "US$ billion", scale: 1e9, decimals: 2, hint: "agricultural output in dollars, agricultural GDP", domains: SCIENCE_AND_MACRO, sources: [WB("NV.AGR.TOTL.CD")] },
+
+  // ── Crops (FAO production statistics, CC BY 4.0 under FAO's own database terms, read through Our World in Data's charts:
+  //    FAOSTAT's own API now needs an account token). No chart exists for yam or sorghum.
+  { key: "maize_production", name: "Maize (corn) production (thousand tonnes)", unit: "thousand tonnes", scale: 1e3, decimals: 1, hint: "maize output, corn production", domains: SCIENCE_AND_MACRO, sources: [OWID("maize-production", "maize__00000056__production__005510__tonnes", FAO_CROPS)] },
+  { key: "rice_production", name: "Rice production (thousand tonnes)", unit: "thousand tonnes", scale: 1e3, decimals: 1, hint: "rice output, paddy production", domains: SCIENCE_AND_MACRO, sources: [OWID("rice-production", "rice__00000027__production__005510__tonnes", FAO_CROPS)] },
+  { key: "cassava_production", name: "Cassava production (thousand tonnes)", unit: "thousand tonnes", scale: 1e3, decimals: 1, hint: "cassava output", domains: SCIENCE_AND_MACRO, sources: [OWID("cassava-production", "cassava__00000125__production__005510__tonnes", FAO_CROPS)] },
+  { key: "cocoa_production", name: "Cocoa bean production (thousand tonnes)", unit: "thousand tonnes", scale: 1e3, decimals: 1, hint: "cocoa output, cash crop production", domains: SCIENCE_AND_MACRO, sources: [OWID("cocoa-bean-production", "cocoa_beans__00000661__production__005510__tonnes", FAO_CROPS)] },
+  { key: "maize_yield", name: "Maize (corn) yield (tonnes per hectare)", unit: "tonnes per hectare", scale: 1, decimals: 2, hint: "maize productivity", domains: SCIENCE, sources: [OWID("maize-yields", "maize_yield", FAO_CROPS)] },
+  { key: "rice_yield", name: "Rice yield (tonnes per hectare)", unit: "tonnes per hectare", scale: 1, decimals: 2, hint: "rice productivity", domains: SCIENCE, sources: [OWID("rice-yields", "rice__00000027__yield__005412__tonnes_per_hectare", FAO_CROPS)] },
+  { key: "cassava_yield", name: "Cassava yield (tonnes per hectare)", unit: "tonnes per hectare", scale: 1, decimals: 2, hint: "cassava productivity", domains: SCIENCE, sources: [OWID("cassava-yields", "cassava__00000125__yield__005412__tonnes_per_hectare", FAO_CROPS)] },
 
   // ── Technology and ICT (World Bank, CC BY 4.0) ──
   { key: "internet_users", name: "Individuals using the Internet (% of population)", unit: "% of population", scale: 1, decimals: 2, hint: "internet penetration, internet usage, digital adoption", domains: TECH_AND_MACRO, sources: [WB("IT.NET.USER.ZS")] },
