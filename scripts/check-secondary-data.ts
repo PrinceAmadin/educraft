@@ -15,6 +15,7 @@ import { SOURCE_NAMES, SOURCE_REGISTRY, seriesCacheKey, sourceCode } from "../sr
 import { parseWorldBank, worldBankUrl, WORLD_BANK_CONCURRENCY } from "../src/lib/data-fetchers/sources/world-bank";
 import { cbnAnnual, cbnSeries, parseCbnMonthly } from "../src/lib/data-fetchers/sources/cbn";
 import { imfUrl, parseImf } from "../src/lib/data-fetchers/sources/imf";
+import { dhsUrl, parseDhs } from "../src/lib/data-fetchers/sources/dhs";
 import { FETCH_TIMEOUT_MS, FetchFailure, limiter, timedGetJson, type FetchLike, type RequestLogEntry } from "../src/lib/data-fetchers/timed-fetch";
 import { correlationMatrix, datasetCsv, datasetNotes, describeColumn, isPermanentMissing, MISSING_CODE_LABELS, pearson, statsTableText, yearRanges, type Dataset } from "../src/lib/data-fetchers/dataset-csv";
 import { catalogueForPrompt, lastCompleteYear, modelSpecTool, MODEL_SPEC_TEXT, relevantSections, statedPeriods, validateSpec, ModelSpecError, type ModelSpec } from "../src/lib/data-fetchers/model-spec";
@@ -80,6 +81,17 @@ function imfAnswer(indicator: string, value: (year: number) => number) {
   const nga: Record<string, number> = {};
   for (let y = 1991; y <= 2031; y++) nga[y] = value(y);
   return { values: { [indicator]: { SDN: { 2000: 8.4 }, NGA: nga, GHA: { 2000: 3.7 } } }, api: { version: "1", "output-method": "json" } };
+}
+
+/** A row as the live DHS API sends it. */
+function dhsRow(indicator: string, survey: string, year: number, preferred: 0 | 1, value: number, type = "DHS") {
+  return { IndicatorId: indicator, SurveyId: survey, SurveyYear: year, SurveyType: type, CharacteristicCategory: "Total", CharacteristicLabel: "Total", IsPreferred: preferred, Value: value, DHS_CountryCode: survey.slice(0, 2) };
+}
+/** The live NDHS shape for skilled delivery (29 Sept 2026): a preferred and non-preferred estimate per survey, 1990 outside most periods. */
+function dhsAnswer(indicator: string) {
+  const preferred: [string, number, number][] = [["NG1990DHS", 1990, 31.8], ["NG2003DHS", 2003, 37], ["NG2008DHS", 2008, 40], ["NG2013DHS", 2013, 40.2], ["NG2018DHS", 2018, 45.3], ["NG2024DHS", 2024, 45.7]];
+  const Data = preferred.flatMap(([s, y, v]) => [dhsRow(indicator, s, y, 0, v - 1), dhsRow(indicator, s, y, 1, v)]);
+  return { TotalPages: 1, Data, RecordsReturned: Data.length, Page: 1, RecordCount: Data.length };
 }
 
 type Route = (url: string, signal: AbortSignal) => Promise<{ status: number; body: string }>;
@@ -215,6 +227,18 @@ async function main() {
   check("IMF: an indicator with no Nigeria row is an empty series, not a failure", Object.keys(parseImf({ values: { LUR: { SDN: { 2020: 1 } } } }, "LUR", 2000, 2023).values).length === 0);
   throws("IMF: an unknown indicator (a country list, no values) is a failure", () => parseImf({ countries: { ABW: { label: "Aruba" } } }, "NOT_A_CODE", 2000, 2023), /does not publish the indicator NOT_A_CODE/);
   check("IMF: fallback entries keep the World Bank first", ["gdp_growth", "gdp_current_usd", "gdp_per_capita_usd", "population", "current_account_gdp"].every((k) => indicatorFor(k)!.sources[0].source === "WB" && indicatorFor(k)!.sources.some((s) => s.source === "IMF")));
+
+  // ─── DHS Program (NDHS) ─────────────────────────────────────────────────────
+  check("DHS URL: Nigeria, the indicator, the national figures", dhsUrl("CN_NUTS_C_HA2") === "https://api.dhsprogram.com/rest/dhs/data?countryIds=NG&indicatorIds=CN_NUTS_C_HA2&breakdown=national&perpage=1000&f=json");
+  const dhs = parseDhs(dhsAnswer("RH_DELA_C_SKP"), "RH_DELA_C_SKP", 2000, 2025);
+  check("DHS: one preferred national value per survey, in the period", JSON.stringify(dhs.values) === JSON.stringify({ 2003: 37, 2008: 40, 2013: 40.2, 2018: 45.3, 2024: 45.7 }), dhs.values);
+  check("DHS: a DHS beats an MIS in the same year", parseDhs({ Data: [dhsRow("X", "NG2010DHS", 2010, 1, 5), dhsRow("X", "NG2010MIS", 2010, 1, 9, "MIS")] }, "X", 2000, 2025).values[2010] === 5);
+  throws("DHS: two different national values for one survey year is refused", () => parseDhs({ Data: [dhsRow("X", "NG2010DHS", 2010, 1, 5), dhsRow("X", "NG2010DHS", 2010, 1, 6)] }, "X", 2000, 2025), /more than one national value for 2010/);
+  throws("DHS: another country's survey is refused", () => parseDhs({ Data: [dhsRow("X", "GH2014DHS", 2014, 1, 5)] }, "X", 2000, 2025), /other than Nigeria's/);
+  check("DHS: no rows is an empty series", Object.keys(parseDhs({ Data: [] }, "X", 2000, 2025).values).length === 0);
+  throws("DHS: an answer with no Data is a failure", () => parseDhs({ error: "x" }, "X", 2000, 2025), /unexpected answer/);
+  check("DHS falls in after the World Bank on the survey entries", ["stunting", "wasting", "skilled_birth_attendance", "contraceptive_prevalence"].every((k) => indicatorFor(k)!.sources[0].source === "WB" && indicatorFor(k)!.sources[1]?.source === "DHS"));
+  check("Nursing is offered the NDHS measures", ["facility_delivery", "antenatal_4plus", "fully_vaccinated_children", "maternal_mortality_ratio", "life_expectancy"].every((k) => catalogueKeysForDomains(routeDepartment("Nursing").domains).includes(k)));
 
   // ─── The 8-second request ──────────────────────────────────────────────────
   check("the timeout is 8 seconds", FETCH_TIMEOUT_MS === 8_000);

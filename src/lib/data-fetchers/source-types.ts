@@ -34,7 +34,13 @@ export interface ImfSource {
   multiplier?: number;
 }
 
-export type SeriesSource = WbSource | CbnSource | ImfSource;
+/** The DHS Program Indicator Data API: Nigeria's Demographic and Health Surveys and Malaria Indicator Surveys (survey years only). */
+export interface DhsSource {
+  source: "DHS";
+  indicator: string;
+}
+
+export type SeriesSource = WbSource | CbnSource | ImfSource | DhsSource;
 
 export type SourceName = SeriesSource["source"];
 

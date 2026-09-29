@@ -42,9 +42,13 @@ export interface CatalogueIndicator {
 
 const WB = (code: string): SeriesSource => ({ source: "WB", code });
 const IMF = (indicator: string, multiplier?: number): SeriesSource => ({ source: "IMF", indicator, ...(multiplier ? { multiplier } : {}) });
+const DHS = (indicator: string): SeriesSource => ({ source: "DHS", indicator });
 
 const ALL: Domain[] = [...DOMAINS];
 const MACRO: Domain[] = ["MACRO_FINANCE"];
+const HEALTH: Domain[] = ["HEALTH"];
+const HEALTH_AND_MACRO: Domain[] = ["HEALTH", "MACRO_FINANCE"];
+const HEALTH_AND_SCIENCE: Domain[] = ["HEALTH", "SCIENCE_ENV_AG"];
 
 export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   // ── Output ──
@@ -55,7 +59,7 @@ export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   { key: "gdp_growth", name: "GDP growth (annual %)", unit: "%", scale: 1, decimals: 2, hint: "economic growth rate, real GDP growth", domains: ALL, sources: [WB("NY.GDP.MKTP.KD.ZG"), IMF("NGDP_RPCH")] },
   { key: "gdp_per_capita_usd", name: "GDP per capita (current US$)", unit: "US$", scale: 1, decimals: 2, hint: "income per head, nominal", domains: ALL, sources: [WB("NY.GDP.PCAP.CD"), IMF("NGDPDPC")] },
   { key: "gdp_per_capita_constant_usd", name: "GDP per capita (constant 2015 US$)", unit: "US$ (2015 prices)", scale: 1, decimals: 2, hint: "real income per head, living standard proxy", domains: ALL, sources: [WB("NY.GDP.PCAP.KD")] },
-  { key: "gdp_per_capita_ppp", name: "GDP per capita, PPP (current international $)", unit: "international $", scale: 1, decimals: 2, hint: "income per head at purchasing power parity", domains: ["MACRO_FINANCE", "HEALTH"], sources: [IMF("PPPPC")] },
+  { key: "gdp_per_capita_ppp", name: "GDP per capita, PPP (current international $)", unit: "international $", scale: 1, decimals: 2, hint: "income per head at purchasing power parity", domains: ["MACRO_FINANCE", "HEALTH"], sources: [WB("NY.GDP.PCAP.PP.CD"), IMF("PPPPC")] },
 
   // ── Prices ──
   {
@@ -163,6 +167,45 @@ export const INDICATOR_CATALOGUE: CatalogueIndicator[] = [
   { key: "electricity_access", name: "Access to electricity (% of population)", unit: "%", scale: 1, decimals: 2, hint: "electricity access, energy access", domains: ["MACRO_FINANCE", "SCIENCE_ENV_AG", "TECH_CYBER"], sources: [WB("EG.ELC.ACCS.ZS")] },
   { key: "health_expenditure_gdp", name: "Current health expenditure (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "health spending", domains: ["MACRO_FINANCE", "HEALTH"], sources: [WB("SH.XPD.CHEX.GD.ZS")] },
   { key: "education_expenditure_gdp", name: "Government expenditure on education (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "education spending (World Bank has 2012 onwards only)", domains: MACRO, sources: [WB("SE.XPD.TOTL.GD.ZS")] },
+
+  // ── Health (the World Bank's copies of the WHO / UN series, each CC BY 4.0 in its own metadata; probed for Nigeria 29 Sept 2026).
+  //    Not offered: TB incidence (a constant 219 for every year), nurses and midwives (a reporting break in 2020), hospital beds (one year).
+  //    WHO's own Global Health Observatory is not used: its dataset licence is for public health purposes and forbids selling the data on.
+  { key: "life_expectancy", name: "Life expectancy at birth, total (years)", unit: "years", scale: 1, decimals: 2, hint: "life expectancy, longevity", domains: HEALTH_AND_MACRO, sources: [WB("SP.DYN.LE00.IN")] },
+  { key: "under_five_mortality", name: "Mortality rate, under-5 (per 1,000 live births)", unit: "per 1,000 live births", scale: 1, decimals: 1, hint: "child mortality, under-five mortality rate (U5MR)", domains: HEALTH_AND_MACRO, sources: [WB("SH.DYN.MORT")] },
+  { key: "infant_mortality", name: "Mortality rate, infant (per 1,000 live births)", unit: "per 1,000 live births", scale: 1, decimals: 1, hint: "infant mortality rate (IMR), deaths before age one", domains: HEALTH_AND_MACRO, sources: [WB("SP.DYN.IMRT.IN")] },
+  { key: "neonatal_mortality", name: "Mortality rate, neonatal (per 1,000 live births)", unit: "per 1,000 live births", scale: 1, decimals: 1, hint: "neonatal mortality, deaths in the first 28 days", domains: HEALTH, sources: [WB("SH.DYN.NMRT")] },
+  { key: "maternal_mortality_ratio", name: "Maternal mortality ratio (modelled estimate, per 100,000 live births)", unit: "per 100,000 live births", scale: 1, decimals: 0, hint: "maternal mortality ratio (MMR), maternal deaths", domains: HEALTH, sources: [WB("SH.STA.MMRT")] },
+  { key: "immunization_dpt", name: "Immunisation, DPT (% of children ages 12–23 months)", unit: "% of children 12–23 months", scale: 1, decimals: 0, hint: "DPT3 / DTP3 / pentavalent vaccine coverage, routine immunisation", domains: HEALTH, sources: [WB("SH.IMM.IDPT")] },
+  { key: "immunization_measles", name: "Immunisation, measles (% of children ages 12–23 months)", unit: "% of children 12–23 months", scale: 1, decimals: 0, hint: "measles vaccine coverage (MCV1)", domains: HEALTH, sources: [WB("SH.IMM.MEAS")] },
+  { key: "hiv_prevalence", name: "Prevalence of HIV, total (% of population ages 15–49)", unit: "% of population aged 15–49", scale: 1, decimals: 2, hint: "HIV prevalence, HIV/AIDS", domains: HEALTH, sources: [WB("SH.DYN.AIDS.ZS")] },
+  { key: "malaria_incidence", name: "Incidence of malaria (per 1,000 population at risk)", unit: "per 1,000 population at risk", scale: 1, decimals: 2, hint: "malaria incidence, malaria cases", domains: HEALTH, sources: [WB("SH.MLR.INCD.P3")] },
+  { key: "basic_sanitation", name: "People using at least basic sanitation services (% of population)", unit: "% of population", scale: 1, decimals: 2, hint: "access to sanitation, toilet facilities", domains: HEALTH_AND_SCIENCE, sources: [WB("SH.STA.BASS.ZS")] },
+  { key: "safely_managed_sanitation", name: "People using safely managed sanitation services (% of population)", unit: "% of population", scale: 1, decimals: 2, hint: "safely managed sanitation (SDG 6.2)", domains: HEALTH_AND_SCIENCE, sources: [WB("SH.STA.SMSS.ZS")] },
+  { key: "basic_drinking_water", name: "People using at least basic drinking water services (% of population)", unit: "% of population", scale: 1, decimals: 2, hint: "access to safe or improved drinking water", domains: HEALTH_AND_SCIENCE, sources: [WB("SH.H2O.BASW.ZS")] },
+  { key: "physicians_per_1000", name: "Physicians (per 1,000 people)", unit: "per 1,000 people", scale: 1, decimals: 2, hint: "doctors per population, health workforce density", domains: HEALTH, sources: [WB("SH.MED.PHYS.ZS")] },
+  { key: "health_expenditure_per_capita", name: "Current health expenditure per capita (current US$)", unit: "US$", scale: 1, decimals: 2, hint: "health spending per head", domains: HEALTH_AND_MACRO, sources: [WB("SH.XPD.CHEX.PC.CD")] },
+  { key: "government_health_expenditure_gdp", name: "Domestic general government health expenditure (% of GDP)", unit: "% of GDP", scale: 1, decimals: 2, hint: "public or government health spending", domains: HEALTH_AND_MACRO, sources: [WB("SH.XPD.GHED.GD.ZS")] },
+  { key: "out_of_pocket_share", name: "Out-of-pocket expenditure (% of current health expenditure)", unit: "% of current health expenditure", scale: 1, decimals: 2, hint: "out-of-pocket health spending by households", domains: HEALTH_AND_MACRO, sources: [WB("SH.XPD.OOPC.CH.ZS")] },
+  { key: "fertility_rate", name: "Fertility rate, total (births per woman)", unit: "births per woman", scale: 1, decimals: 2, hint: "total fertility rate (TFR)", domains: HEALTH_AND_MACRO, sources: [WB("SP.DYN.TFRT.IN")] },
+  { key: "crude_birth_rate", name: "Birth rate, crude (per 1,000 people)", unit: "per 1,000 people", scale: 1, decimals: 2, hint: "crude birth rate", domains: HEALTH_AND_MACRO, sources: [WB("SP.DYN.CBRT.IN")] },
+  { key: "crude_death_rate", name: "Death rate, crude (per 1,000 people)", unit: "per 1,000 people", scale: 1, decimals: 2, hint: "crude death rate, mortality", domains: HEALTH_AND_MACRO, sources: [WB("SP.DYN.CDRT.IN")] },
+  { key: "undernourishment", name: "Prevalence of undernourishment (% of population)", unit: "% of population", scale: 1, decimals: 1, hint: "hunger, food insecurity", domains: HEALTH_AND_SCIENCE, sources: [WB("SN.ITK.DEFC.ZS")] },
+  { key: "anaemia_children", name: "Prevalence of anaemia among children (% of children ages 6–59 months)", unit: "% of children 6–59 months", scale: 1, decimals: 1, hint: "child anaemia", domains: HEALTH, sources: [WB("SH.ANM.CHLD.ZS")] },
+  { key: "stunting", name: "Prevalence of stunting, height for age (% of children under 5)", unit: "% of children under 5", scale: 1, decimals: 1, hint: "child stunting, chronic malnutrition (survey years only)", domains: HEALTH, sources: [WB("SH.STA.STNT.ZS"), DHS("CN_NUTS_C_HA2")] },
+  { key: "wasting", name: "Prevalence of wasting, weight for height (% of children under 5)", unit: "% of children under 5", scale: 1, decimals: 1, hint: "child wasting, acute malnutrition (survey years only)", domains: HEALTH, sources: [WB("SH.STA.WAST.ZS"), DHS("CN_NUTS_C_WH2")] },
+  { key: "skilled_birth_attendance", name: "Births attended by skilled health staff (% of total)", unit: "% of births", scale: 1, decimals: 1, hint: "skilled birth attendance, delivery by a doctor, nurse or midwife (survey years only)", domains: HEALTH, sources: [WB("SH.STA.BRTC.ZS"), DHS("RH_DELA_C_SKP")] },
+  { key: "antenatal_care", name: "Pregnant women receiving prenatal care (%)", unit: "% of pregnant women", scale: 1, decimals: 1, hint: "antenatal (prenatal) care coverage, at least one visit (survey years only)", domains: HEALTH, sources: [WB("SH.STA.ANVC.ZS")] },
+  { key: "contraceptive_prevalence", name: "Contraceptive prevalence, any method (% of married women ages 15–49)", unit: "% of married women 15–49", scale: 1, decimals: 1, hint: "contraceptive use, family planning uptake (survey years only)", domains: HEALTH, sources: [WB("SP.DYN.CONU.ZS"), DHS("FP_CUSM_W_ANY")] },
+
+  // ── Health: Nigeria Demographic and Health Surveys (DHS Program API; survey years 1990, 2003, 2008, 2013, 2018, 2024, plus MIS 2010, 2015, 2021 where measured).
+  { key: "modern_contraceptive_prevalence", name: "Married women using a modern method of contraception (%), NDHS", unit: "% of currently married women", scale: 1, decimals: 1, hint: "modern contraceptive prevalence rate (mCPR), NDHS", domains: HEALTH, sources: [DHS("FP_CUSM_W_MOD")] },
+  { key: "antenatal_4plus", name: "Women with four or more antenatal visits (%), NDHS", unit: "% of women with a recent live birth", scale: 1, decimals: 1, hint: "ANC4+, at least four antenatal care visits, NDHS", domains: HEALTH, sources: [DHS("RH_ANCN_W_N4P")] },
+  { key: "facility_delivery", name: "Births delivered in a health facility (%), NDHS", unit: "% of recent live births", scale: 1, decimals: 1, hint: "institutional delivery, hospital or clinic births, NDHS", domains: HEALTH, sources: [DHS("RH_DELP_C_DHF")] },
+  { key: "fully_vaccinated_children", name: "Children fully vaccinated, all basic antigens (%), NDHS", unit: "% of children 12–23 months", scale: 1, decimals: 1, hint: "full immunisation coverage, all basic vaccinations, NDHS", domains: HEALTH, sources: [DHS("CH_VACC_C_BAS")] },
+  { key: "zero_dose_children", name: "Children who received no vaccinations (%), NDHS", unit: "% of children 12–23 months", scale: 1, decimals: 1, hint: "zero-dose children, unvaccinated, NDHS", domains: HEALTH, sources: [DHS("CH_VACC_C_NON")] },
+  { key: "underweight_children", name: "Children underweight, weight for age (% of children under 5), NDHS", unit: "% of children under 5", scale: 1, decimals: 1, hint: "child underweight, NDHS", domains: HEALTH, sources: [DHS("CN_NUTS_C_WA2")] },
+  { key: "households_with_itn", name: "Households with at least one insecticide-treated net (%), NDHS and MIS", unit: "% of households", scale: 1, decimals: 1, hint: "ITN ownership, mosquito nets, malaria prevention", domains: HEALTH, sources: [DHS("ML_NETP_H_ITN")] },
 ];
 
 export const CATALOGUE_KEYS: string[] = INDICATOR_CATALOGUE.map((i) => i.key);
