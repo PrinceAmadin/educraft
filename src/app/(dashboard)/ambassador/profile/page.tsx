@@ -7,7 +7,7 @@ import { AmbassadorBankForm } from "@/components/ambassadors/AmbassadorBankForm"
 import { WeeklyEmailToggle } from "@/components/ambassadors/WeeklyEmailToggle";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { referralLink, TIER_LADDER } from "@/lib/ambassador";
+import { referralLink } from "@/lib/ambassador";
 import { PAYING_CLIENTS_HINT, tierProgressLine } from "@/lib/ambassador-copy";
 import { formatDate } from "@/lib/utils";
 
@@ -28,7 +28,7 @@ export default async function AmbassadorProfilePage() {
     return <EmptyState icon={LuInbox} title="No ambassador profile" description="Contact an admin." />;
   }
 
-  const { profile, progress, rate, nextRate, rates } = await getAmbassadorProfile(ambassador.id);
+  const { profile, progress, rate, nextRate, rates, ladder } = await getAmbassadorProfile(ambassador.id);
   const link = referralLink(origin(), profile.referralCode);
 
   return (
@@ -72,7 +72,7 @@ export default async function AmbassadorProfilePage() {
           {rate}% on every project. {tierProgressLine(progress, { current: rate, next: nextRate })}
         </p>
         <ol className="mt-3 flex flex-wrap gap-2">
-          {TIER_LADDER.map((t) => (
+          {ladder.map((t) => (
             <li
               key={t.tier}
               className={

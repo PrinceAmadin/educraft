@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { LaunchNoticeButton } from "@/components/ambassadors/platform/LaunchNoticeButton";
-import { COMMISSION_RATES } from "@/lib/finance/commission-config";
+import { LEVEL1, level1Row, retainedFraction } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { wantsLaunchNotice } from "@/lib/services/ambassador-platform/growth-associates";
 
 export const metadata: Metadata = { title: "Growth Associates" };
@@ -15,10 +16,11 @@ const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
 
 /** Phase 3 Section 7 — Growth Associates: a Year 2 feature, explained now (the schema is already in place). */
 export default async function GrowthAssociatesPage() {
-  const [session, pendingApplications] = await Promise.all([auth(), db.ambassadorApplication.count({ where: { status: "PENDING" } })]);
+  const [session, pendingApplications, active] = await Promise.all([auth(), db.ambassadorApplication.count({ where: { status: "PENDING" } }), getActiveCashflow()]);
   const subscribed = session?.user?.id ? await wantsLaunchNotice(session.user.id) : false;
-  const retained = 1 - COMMISSION_RATES.workers - COMMISSION_RATES.ambassador - COMMISSION_RATES.hog - COMMISSION_RATES.coo;
-  const ga = COMMISSION_RATES.growthAssociate;
+  // The structure's figures: the retained share, and the Growth Associate row (inactive until Year 2).
+  const retained = retainedFraction(active.structure);
+  const ga = (level1Row(active.structure, LEVEL1.growthAssociate)?.percentage ?? 0) / 100;
 
   return (
     <div className="space-y-7">

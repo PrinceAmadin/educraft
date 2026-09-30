@@ -5,18 +5,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LuCircleAlert, LuLoaderCircle, LuLock } from "react-icons/lu";
+import { LuCircleAlert, LuLoaderCircle, LuLock, LuTriangleAlert } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/forms/Field";
 import { FormActions } from "@/components/forms/FormActions";
 import { FormSection } from "@/components/forms/FormSection";
 import { generalSettingsSchema, splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 import type { GeneralSettings } from "@/lib/services/settings";
+import { hqContactChanges, type HqContactChange } from "@/lib/hq-contact-rules";
 import type { AlertRoleRecipient } from "@/lib/services/team-alerts";
 import { computeEffective, type FxRateSnapshot } from "@/lib/fx-rate";
-
-const TIERS = ["BRONZE", "SILVER", "GOLD", "PLATINUM"] as const;
 
 const NAIRA = new Intl.NumberFormat("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -32,12 +32,6 @@ function formatWhen(iso: string | null): string {
   const days = Math.round(hours / 24);
   return `${days} d ago`;
 }
-const TIER_LABEL: Record<(typeof TIERS)[number], string> = {
-  BRONZE: "Bronze",
-  SILVER: "Silver",
-  GOLD: "Gold",
-  PLATINUM: "Platinum",
-};
 
 export function GeneralSettingsForm({
   settings,
@@ -52,6 +46,10 @@ export function GeneralSettingsForm({
   const router = useRouter();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [saved, setSaved] = React.useState(false);
+  // What the HQ contact is now, for the confirm-before-save preview; moves on with every save.
+  const [baseline, setBaseline] = React.useState(settings);
+  const [pending, setPending] = React.useState<{ data: GeneralSettingsInput; changes: HqContactChange[] } | null>(null);
+  const [saving, setSaving] = React.useState(false);
 
   const {
     register,
@@ -65,12 +63,12 @@ export function GeneralSettingsForm({
       companyName: settings.companyName,
       companyPhone: settings.companyPhone,
       companyEmail: settings.companyEmail,
+      hqWhatsapp: settings.hqWhatsapp,
+      hqTelegram: settings.hqTelegram,
+      hqAddress: settings.hqAddress,
       bankName: settings.bankName,
       accountNumber: settings.accountNumber,
       accountName: settings.accountName,
-      downpaymentPercentage: settings.downpaymentPercentage,
-      commissionRates: settings.commissionRates,
-      parentCommissionRate: settings.parentCommissionRate,
       alertEmails: settings.alertEmails,
       fxRateMarginPercent: settings.fxRateMarginPercent,
       fxRateManualOverride: settings.fxRateManualOverride,
@@ -115,15 +113,14 @@ export function GeneralSettingsForm({
     }
   }, []);
 
-  const onSubmit = async (data: GeneralSettingsInput) => {
+  const save = async (data: GeneralSettingsInput) => {
     setSubmitError(null);
     setSaved(false);
+    setSaving(true);
+    // Only the founder changes the HQ contact, the alert inbox and the ₦/$ rate; anyone else here saves the bank details.
     const payload: GeneralSettingsInput = canEditPricing
       ? data
       : {
-          companyName: data.companyName,
-          companyPhone: data.companyPhone,
-          companyEmail: data.companyEmail,
           bankName: data.bankName,
           accountNumber: data.accountNumber,
           accountName: data.accountName,
@@ -139,33 +136,118 @@ export function GeneralSettingsForm({
         throw new Error(body?.error ?? "Could not save settings.");
       }
       // What was saved becomes the new baseline (so "Settings saved." shows),
-      // with the alert list as the server stores it: lower-case, comma-separated.
-      reset({
+      // with the alert list as the server stores it: lower-case, comma-separated
+      // and the Telegram name without its @.
+      const stored: GeneralSettingsInput = {
         ...data,
         ...(data.alertEmails !== undefined ? { alertEmails: splitEmailList(data.alertEmails).join(", ") } : {}),
-      });
+        ...(data.hqTelegram !== undefined ? { hqTelegram: data.hqTelegram.replace(/^@/, "") } : {}),
+      };
+      reset(stored);
+      setBaseline((b) => ({ ...b, ...stored }) as GeneralSettings);
+      setPending(null);
       setSaved(true);
       router.refresh();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Could not save settings.");
+    } finally {
+      setSaving(false);
     }
+  };
+
+  // A contact change reaches every public page, ambassador link, receipt and
+  // email footer the moment it is saved, so it is shown back first.
+  const onSubmit = async (data: GeneralSettingsInput) => {
+    const changes = canEditPricing ? hqContactChanges(baseline, data) : [];
+    if (changes.length > 0) {
+      setSubmitError(null);
+      setPending({ data, changes });
+      return;
+    }
+    await save(data);
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="max-w-3xl space-y-12">
-      <FormSection title="Company info" description="Shown to clients on the intake confirmation and tracker.">
+      <FormSection
+        title="Company info"
+        description={
+          canEditPricing
+            ? "The number, WhatsApp line and mailbox on every public page, in every ambassador link, on receipts and in every email footer. A change reaches all of them the moment it is saved."
+            : "Only the founder (Super Admin) can change EduCraft's contact details."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <Field label="Company name" required htmlFor="companyName" error={errors.companyName?.message}>
-            <Input id="companyName" {...register("companyName")} />
+            <Input id="companyName" disabled={!canEditPricing} {...register("companyName")} />
           </Field>
-          <Field label="Contact phone" required htmlFor="companyPhone" error={errors.companyPhone?.message}>
-            <Input id="companyPhone" inputMode="tel" {...register("companyPhone")} />
+          <Field label="Contact phone" required htmlFor="companyPhone" error={errors.companyPhone?.message} hint="As people dial it, e.g. 0706 342 1088.">
+            <Input id="companyPhone" inputMode="tel" disabled={!canEditPricing} {...register("companyPhone")} />
+          </Field>
+          <Field
+            label="WhatsApp line"
+            htmlFor="hqWhatsapp"
+            error={errors.hqWhatsapp?.message}
+            hint="What every ambassador link and 'message us' link opens. Leave blank to use the contact phone."
+          >
+            <Input id="hqWhatsapp" inputMode="tel" placeholder="Same as the contact phone" disabled={!canEditPricing} {...register("hqWhatsapp")} />
           </Field>
           <Field label="Contact email" required htmlFor="companyEmail" error={errors.companyEmail?.message}>
-            <Input id="companyEmail" type="email" inputMode="email" {...register("companyEmail")} />
+            <Input id="companyEmail" type="email" inputMode="email" disabled={!canEditPricing} {...register("companyEmail")} />
+          </Field>
+          <Field label="Telegram" htmlFor="hqTelegram" error={errors.hqTelegram?.message} hint="Username, with or without the @. Optional.">
+            <Input id="hqTelegram" autoComplete="off" placeholder="@educraft" disabled={!canEditPricing} {...register("hqTelegram")} />
+          </Field>
+          <Field label="Address" htmlFor="hqAddress" error={errors.hqAddress?.message} hint="Shown in the site footer. Optional.">
+            <Input id="hqAddress" disabled={!canEditPricing} {...register("hqAddress")} />
           </Field>
         </div>
       </FormSection>
+
+      <Dialog open={pending != null} onOpenChange={(o) => { if (!o && !saving) setPending(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Change EduCraft&apos;s contact details?</DialogTitle>
+            <DialogDescription>
+              This updates every ambassador link, the site footer, receipts and every client, worker and ambassador email footer immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <ul className="space-y-2 text-sm">
+              {(pending?.changes ?? []).map((c) => (
+                <li key={c.field} className="flex flex-col gap-0.5">
+                  <span className="meta-label">{c.label}</span>
+                  <span className="break-words text-foreground">
+                    <span className="text-muted-foreground">{c.before || "not set"}</span>
+                    {" → "}
+                    <span className="font-medium">{c.after || "not set"}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="flex items-start gap-2 rounded-xl bg-gold/10 px-3 py-2 text-[13px] text-gold">
+              <LuTriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              Ambassadors have shared their links: the new WhatsApp line must be a live EduCraft number before you confirm.
+            </p>
+            {submitError ? (
+              <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+                <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                {submitError}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" disabled={saving} onClick={() => setPending(null)}>
+                Cancel
+              </Button>
+              <Button type="button" disabled={saving} onClick={() => pending && save(pending.data)}>
+                {saving ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+                {saving ? "Saving…" : "Confirm and save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <FormSection
         title="Bank details"
@@ -185,74 +267,15 @@ export function GeneralSettingsForm({
       </FormSection>
 
       <FormSection
-        title="Pricing defaults"
-        description={
-          canEditPricing
-            ? "The downpayment default pre-fills new services — each service can still override it. Commission rates apply to every ambassador immediately."
-            : "Only the founder (Super Admin) can change pricing and commission rates."
-        }
-        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+        title="Commission structure"
+        description="Every rate — the worker share, the ambassador total and tier rates, the Core override, the executives' commissions, the buckets and pots, the founder draw tiers and the downpayment baseline — is published as a versioned structure."
       >
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          <Field
-            label="Default downpayment %"
-            htmlFor="downpaymentPercentage"
-            error={errors.downpaymentPercentage?.message}
-          >
-            <Input
-              id="downpaymentPercentage"
-              type="number"
-              inputMode="decimal"
-              min={0}
-              max={100}
-              disabled={!canEditPricing}
-              {...register("downpaymentPercentage")}
-            />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-          {TIERS.map((tier) => (
-            <Field key={tier} label={`${TIER_LABEL[tier]} %`} htmlFor={`rate-${tier}`}>
-              <Input
-                id={`rate-${tier}`}
-                type="number"
-                inputMode="decimal"
-                min={0}
-                max={100}
-                disabled={!canEditPricing}
-                {...register(`commissionRates.${tier}`)}
-              />
-            </Field>
-          ))}
-        </div>
-      </FormSection>
-
-      <FormSection
-        title="Parent ambassadors"
-        description={
-          canEditPricing
-            ? "What a parent (Core) ambassador earns from a sub-ambassador's job, by default. Set a different rate for one pair from that sub-ambassador's page."
-            : "Only the founder (Super Admin) can change this rate."
-        }
-        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
-      >
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          <Field
-            label="Default parent commission %"
-            htmlFor="parentCommissionRate"
-            error={errors.parentCommissionRate?.message}
-          >
-            <Input
-              id="parentCommissionRate"
-              type="number"
-              inputMode="decimal"
-              min={0}
-              max={100}
-              disabled={!canEditPricing}
-              {...register("parentCommissionRate")}
-            />
-          </Field>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          <Link href="/admin/settings/cashflow" className="text-primary hover:underline">
+            Open EduCraft Cashflow
+          </Link>
+          {canEditPricing ? " to change it. A change becomes a new version; projects keep the version they were created under." : ". Only the founder (Super Admin) can publish a change."}
+        </p>
       </FormSection>
 
       <FormSection
@@ -400,7 +423,7 @@ export function GeneralSettingsForm({
         </div>
       </FormSection>
 
-      {submitError ? (
+      {submitError && pending == null ? (
         <p role="alert" className="flex items-start gap-2 text-sm text-danger">
           <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
           {submitError}
@@ -409,9 +432,9 @@ export function GeneralSettingsForm({
       {saved && !isDirty ? <p className="text-sm text-success">Settings saved.</p> : null}
 
       <FormActions>
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
-          {isSubmitting ? "Saving…" : "Save settings"}
+        <Button type="submit" disabled={isSubmitting || saving}>
+          {isSubmitting || saving ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+          {isSubmitting || saving ? "Saving…" : "Save settings"}
         </Button>
       </FormActions>
     </form>

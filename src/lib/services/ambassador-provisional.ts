@@ -3,6 +3,7 @@ import { PROVISIONAL_WARN_DAYS, provisionalDaysLeft } from "@/lib/ambassador";
 import { releaseSlotFor } from "@/lib/services/ambassador-roster";
 import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
 import { provisionalLapsedEmail, provisionalReminderEmail } from "@/lib/emails/ambassador-provisional";
+import { getHqContact } from "@/lib/services/hq-contact";
 import type { SendFn } from "@/lib/services/ambassador-weekly-report";
 
 /**
@@ -101,6 +102,9 @@ export async function runProvisionalSweep(opts: {
     base.failures.push({ ambassadorId: id, error: err instanceof Error ? err.message : String(err) });
   };
 
+  // EduCraft's line for the email footers, read once for the whole sweep.
+  const hq = await getHqContact();
+
   for (const a of toWarn) {
     try {
       const daysLeft = provisionalDaysLeft(a.provisionalUntil!, now);
@@ -110,6 +114,7 @@ export async function runProvisionalSweep(opts: {
           daysLeft,
           referralLink: `${opts.siteUrl}/EduCraftA/${a.legacySlotId}`,
           dashboardUrl: `${opts.siteUrl}/ambassador`,
+          hq,
         });
         const sent = await opts.send({ to: a.email, ...mail });
         if (!sent.ok) fail(a.ambassadorId, sent.error ?? "send failed");
@@ -141,7 +146,7 @@ export async function runProvisionalSweep(opts: {
       });
 
       if (a.email) {
-        const mail = provisionalLapsedEmail({ fullName: a.fullName, applyUrl: `${opts.siteUrl}/apply` });
+        const mail = provisionalLapsedEmail({ fullName: a.fullName, applyUrl: `${opts.siteUrl}/apply`, hq });
         const sent = await opts.send({ to: a.email, ...mail });
         if (!sent.ok) fail(a.ambassadorId, sent.error ?? "send failed");
       }

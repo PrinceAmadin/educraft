@@ -78,11 +78,29 @@ export function DistributeDraws({ panel, canAct, isFounder }: { panel: MonthlyDr
 
       {canAct && anyOutstanding ? (
         <div className="flex flex-wrap items-end gap-3">
-          {isFounder ? (
-            <label className="block">
-              <span className="mb-1 block meta-label">Partial amount each (optional)</span>
-              <Input type="number" inputMode="numeric" min={0} step={1000} value={partial} onChange={(e) => setPartial(e.target.value)} placeholder={String(panel.drawEach)} className="h-10 w-44 text-sm" />
-            </label>
+          {/* The three figures the CFO chooses between (founder, 30 Sept 2026): the tier's draw, what the bucket holds, and what it can sustain. */}
+          <dl className="grid w-full grid-cols-3 gap-x-4 gap-y-1 text-[13px]">
+            <div>
+              <dt className="text-muted-foreground">Tier amount each</dt>
+              <dd className="font-mono tabular-nums text-foreground">{formatNaira(panel.drawEach)}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Founder Distribution holds</dt>
+              <dd className={cn("font-mono tabular-nums", panel.funded ? "text-foreground" : "text-gold")}>{formatNaira(panel.bucketBalance)}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Sustainable each (÷ 2)</dt>
+              <dd className="font-mono tabular-nums text-foreground">{formatNaira(panel.sustainableEach)}</dd>
+            </div>
+          </dl>
+          <label className="block">
+            <span className="mb-1 block meta-label">Amount each (optional)</span>
+            <Input type="number" inputMode="numeric" min={0} step={1000} value={partial} onChange={(e) => setPartial(e.target.value)} placeholder={String(panel.drawEach)} className="h-10 w-44 text-sm" />
+          </label>
+          {panel.sustainableEach > 0 && panel.sustainableEach < panel.drawEach ? (
+            <Button type="button" size="sm" variant="ghost" disabled={busy !== null} onClick={() => setPartial(String(panel.sustainableEach))}>
+              Use the sustainable amount
+            </Button>
           ) : null}
           <Button disabled={busy !== null || !panel.funded && !partial.trim()} onClick={() => distribute()}>
             {busy === "both" ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuCheck className="size-4" aria-hidden />}
@@ -91,7 +109,7 @@ export function DistributeDraws({ panel, canAct, isFounder }: { panel: MonthlyDr
           {!panel.funded ? (
             <p className="w-full text-[13px] text-danger">
               Founder Distribution holds {formatNaira(panel.bucketBalance)} — {formatNaira(panel.shortfall)} short of this month&apos;s draws.
-              {isFounder ? " You can distribute a smaller amount each." : " The founder can distribute a smaller amount."}
+              {isFounder ? " You can distribute any smaller amount each." : ` You can distribute up to ${formatNaira(panel.sustainableEach)} each; the founder can go beyond that.`}
             </p>
           ) : null}
         </div>

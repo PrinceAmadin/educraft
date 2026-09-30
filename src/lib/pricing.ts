@@ -1,5 +1,3 @@
-import { DOWNPAYMENT_PERCENTAGE, WORKER_PAYOUT_RATE } from "@/lib/constants";
-
 export interface PriceInputs {
   basePrice: number;
   variantAddon?: number;
@@ -7,8 +5,8 @@ export interface PriceInputs {
   isExpressDelivery?: boolean;
   /** When set, replaces the computed total (VARIABLE / QUOTE pricing). */
   override?: number | null;
-  /** Per-service override of the downpayment split. Defaults to the global 45%. */
-  downpaymentPercentage?: number;
+  /** The service's downpayment split (Service.downpaymentPercentage). */
+  downpaymentPercentage: number;
 }
 
 export interface PriceBreakdown {
@@ -37,16 +35,19 @@ export function computePrice(inputs: PriceInputs): PriceBreakdown {
     inputs.override != null && Number.isFinite(inputs.override) && naira(inputs.override) !== computed;
   const total = overridden ? naira(inputs.override as number) : computed;
 
-  const downpaymentPct = inputs.downpaymentPercentage ?? DOWNPAYMENT_PERCENTAGE;
-  const downpaymentAmount = naira((total * downpaymentPct) / 100);
+  const downpaymentAmount = naira((total * inputs.downpaymentPercentage) / 100);
   const balanceAmount = total - downpaymentAmount;
 
   return { base, variantAddon, expressSurcharge, total, downpaymentAmount, balanceAmount, overridden };
 }
 
-/** Split a project total into the worker / ambassador / EduCraft legs. */
-export function computeSplit(total: number, ambassadorRate: number | null) {
-  const workerPayout = naira((total * WORKER_PAYOUT_RATE) / 100);
+/**
+ * Split a project total into the worker / ambassador / EduCraft legs.
+ * `workersPercent` is the Workers row of the cashflow structure in force
+ * (40 in v1); it is frozen on the project as `workerPayoutRate`.
+ */
+export function computeSplit(total: number, ambassadorRate: number | null, workersPercent: number) {
+  const workerPayout = naira((total * workersPercent) / 100);
   const ambassadorCommission =
     ambassadorRate != null ? naira((total * ambassadorRate) / 100) : null;
   const educraftRevenue = total - workerPayout - (ambassadorCommission ?? 0);

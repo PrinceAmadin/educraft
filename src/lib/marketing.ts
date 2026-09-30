@@ -11,7 +11,7 @@ import {
   IconSpecialists,
   type AppIcon,
 } from "@/lib/icons";
-import { DOWNPAYMENT_PERCENTAGE, MAX_REVISIONS } from "@/lib/constants";
+import { MAX_REVISIONS } from "@/lib/constants";
 
 /**
  * Marketing content model.
@@ -127,7 +127,9 @@ export interface ProcessStep {
   icon: AppIcon;
 }
 
-export const PROCESS: ProcessStep[] = [
+/** The five stages; the downpayment share comes from the published cashflow structure. */
+export function processSteps(downpaymentPercent: number): ProcessStep[] {
+  return [
   {
     index: "01",
     title: "Brief",
@@ -138,8 +140,8 @@ export const PROCESS: ProcessStep[] = [
   {
     index: "02",
     title: "Specialist",
-    body: `A writer who works inside your discipline is assigned to the project. Work begins on a ${DOWNPAYMENT_PERCENTAGE}% downpayment — the balance is only due at the end.`,
-    meta: `EduCraft · ${DOWNPAYMENT_PERCENTAGE}% to start`,
+    body: `A writer who works inside your discipline is assigned to the project. Work begins on a ${downpaymentPercent}% downpayment — the balance is only due at the end.`,
+    meta: `EduCraft · ${downpaymentPercent}% to start`,
     icon: IconSpecialists,
   },
   {
@@ -163,7 +165,8 @@ export const PROCESS: ProcessStep[] = [
     meta: `You · ${MAX_REVISIONS} revision rounds`,
     icon: IconDelivery,
   },
-];
+  ];
+}
 
 /* ── Disciplines ────────────────────────────────────────────
    Set as an index, not as pills. The sub-line is a breakdown of

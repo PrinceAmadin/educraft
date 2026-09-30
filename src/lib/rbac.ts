@@ -91,6 +91,8 @@ export const ROUTE_PERMISSIONS: readonly RoutePermission[] = [
   { prefix: "/admin/settings/services", roles: ["SUPER_ADMIN"] },
   // Deleting test projects is the founder's alone (the COO and anyone he appoints only flag them).
   { prefix: "/admin/settings/cleanup", roles: ["SUPER_ADMIN"] },
+  // The commission structure: every executive may read it; only the founder publishes (founder, 30 Sept 2026).
+  { prefix: "/admin/settings/cashflow", roles: ALL_EXECS },
   { prefix: "/admin/settings/bank", roles: ALL_EXECS },
   { prefix: "/admin", roles: ["SUPER_ADMIN"] },
 ];
@@ -109,6 +111,8 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/team", roles: ["SUPER_ADMIN"] },
   { prefix: "/api/admin/settings/bank", roles: ALL_EXECS },
   { prefix: "/api/admin/settings", roles: ["SUPER_ADMIN"] },
+  // The cashflow structure: read by every executive, published (POST) by the founder only.
+  { prefix: "/api/admin/cashflow", roles: ["SUPER_ADMIN"], readOnly: ["CO_CEO_CFO", "HOG", "COO"] },
   // The COO's own corner of the payout engine: their worker list and its submission.
   { prefix: "/api/admin/finance/payouts/coo-view", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },
   { prefix: "/api/admin/finance/payouts/coo-submit", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },

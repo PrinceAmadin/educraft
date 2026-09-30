@@ -29,46 +29,33 @@ export function pausePhaseFor(mode: number, afterChapter: number): PausePhase | 
 /**
  * The worker's banner, per phase. `dataFrom` RAW = the order includes our data analysis.
  *
- * TODO(COO): Prince to confirm every title, message and upload line below before go-live.
  * The client also sees the title and the message on the Progress tab; the specialist sees
  * the upload lines under "What Chapter N needs" on the Report tab.
  */
 export const PAUSE_PHASE_TEXT: Record<PausePhase, { title: string; message: (dataFrom: "RAW" | "ANALYSED" | null) => string; uploadRequired: string[] }> = {
   SURVEY_DATA: {
-    // TODO(COO): Prince to confirm wording before go-live
     title: "Waiting for the survey results",
-    // TODO(COO): Prince to confirm wording before go-live
     message: (dataFrom) =>
       `Chapters 1 to 3 are written. Chapter 4 needs the survey results. ${
         dataFrom === "RAW"
           ? "This order includes our data analysis: the client sends their completed questionnaires or data sheet, and you run the analysis and upload the SPSS or Excel output here."
           : "The client sends their own SPSS or Excel output."
       }`,
-    // TODO(COO): Prince to confirm wording before go-live
     uploadRequired: ["SPSS output or Excel export", "Reliability test (Cronbach's Alpha)", "Hypothesis test tables (t-test, ANOVA, chi-square or regression)"],
   },
   BUILD_SPECIFICATION: {
-    // TODO(COO): Prince to confirm wording before go-live
     title: "Waiting for the build specification",
-    // TODO(COO): Prince to confirm wording before go-live
     message: () => "Chapters 1 and 2 are written. Chapter 3 needs the build specification: the tools and technologies, the system architecture and the modules to be built.",
-    // TODO(COO): Prince to confirm wording before go-live
     uploadRequired: ["Tools and technologies (languages, frameworks, hardware)", "Architecture or design diagrams", "List of modules or features", "Screenshots or mock-ups, if any"],
   },
   TEST_RESULTS: {
-    // TODO(COO): Prince to confirm wording before go-live
     title: "Waiting for the test results",
-    // TODO(COO): Prince to confirm wording before go-live
     message: () => "Chapter 3 is written. Chapter 4 needs the test results from the working system.",
-    // TODO(COO): Prince to confirm wording before go-live
     uploadRequired: ["Test cases with pass/fail results", "Performance measurements or benchmarks", "User acceptance feedback", "Screenshots of the working system"],
   },
   LAB_DATA: {
-    // TODO(COO): Prince to confirm wording before go-live
     title: "Waiting for the lab results",
-    // TODO(COO): Prince to confirm wording before go-live
     message: () => "Chapters 1 to 3 are written. Chapter 4 needs the laboratory results.",
-    // TODO(COO): Prince to confirm wording before go-live
     uploadRequired: ["Tabulated measurements", "ANOVA or other statistical output", "Post-hoc test results", "Figures or graphs"],
   },
 };

@@ -3,6 +3,7 @@ import { requireClient, serverError } from "@/lib/api";
 import { db } from "@/lib/db";
 import { readStoredReceipt } from "@/lib/services/billing";
 import { getReceiptData } from "@/lib/services/client-portal";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { buildReceiptPdf } from "@/lib/receipts";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: { code: strin
     const stored = await db.payment
       .findUnique({ where: { id: params.paymentId }, select: { receiptBlobPath: true } })
       .then((p) => (p?.receiptBlobPath ? readStoredReceipt(p.receiptBlobPath) : null));
-    const pdf = stored ?? buildReceiptPdf(receipt);
+    const pdf = stored ?? buildReceiptPdf(receipt, { hq: await getHqContact() });
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",

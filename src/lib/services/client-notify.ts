@@ -4,6 +4,7 @@ import { sendMail } from "@/lib/mailer";
 import { realEmail } from "@/lib/client-email";
 import { siteUrl } from "@/lib/site-url";
 import { clientUpdateEmail } from "@/lib/emails/client-update";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { notifyUsers, type NotificationType } from "@/lib/services/notifications";
 
 /**
@@ -86,6 +87,7 @@ export async function notifyClient(projectDbId: string, notice: ClientNotice): P
       lines: notice.email.lines,
       ctaLabel: notice.email.ctaLabel,
       ctaUrl: `${siteUrl()}${path}`,
+      hq: await getHqContact(),
     });
     const kind = notice.email.kind;
     waitUntil(

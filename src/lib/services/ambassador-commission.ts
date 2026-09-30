@@ -13,11 +13,13 @@ import { commissionEmail } from "@/lib/emails/commission";
 import { parentCommissionEmail } from "@/lib/emails/parent-commission";
 import { sendMail } from "@/lib/mailer";
 import { notifyUsers } from "@/lib/services/notifications";
-import { getCommissionRates, getDefaultParentCommissionRate } from "@/lib/services/settings";
 import { syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
 import { cancelProjectReferral, ensureProjectReferral } from "@/lib/services/ambassador-platform/referrals";
-import { COMMISSION_RATES } from "@/lib/finance/commission-config";
+import { ratePercentForTier } from "@/lib/finance/commission-config";
+import { coreOverrideFor } from "@/lib/finance/cashflow-rules";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { formatNaira } from "@/lib/utils";
 
 /**
@@ -71,7 +73,7 @@ export async function resolveAmbassadorRate(
     );
   }
 
-  const resolved = rate ?? (await getCommissionRates())[ambassador.tier];
+  const resolved = rate ?? ratePercentForTier(ambassador.tier, (await getActiveCashflow()).structure.tiers);
   if (!isValidCommissionRate(resolved)) {
     throw new CommissionError(
       `Commission must be between ${MIN_COMMISSION_RATE}% and ${MAX_COMMISSION_RATE}%.`
@@ -92,26 +94,29 @@ export interface ResolvedParent {
  * otherwise; allocation just proceeds without a parent commission, never an
  * error, since the child ambassador is still perfectly valid on their own.
  *
- * v2.0 (Phase 2): EduCraft pays 15% in total on a referred job, so the Core
- * earns 15 minus the sub's own rate on this job (a Bronze sub at 10% leaves
- * 5%; a Gold sub at 15% leaves nothing). An admin override on the link can
- * only lower that, never raise it.
+ * v2.0 (Phase 2): EduCraft pays the structure's ambassador total (15% in v1)
+ * on a referred job, so the Core earns that total minus the sub's own rate on
+ * this job (a Bronze sub at 10% leaves 5%; a Gold sub at 15% leaves nothing).
+ * An admin override on the link can only lower that, never raise it.
  */
 export async function resolveParentCommission(childId: string, childRatePercent: number): Promise<ResolvedParent | null> {
-  const child = await db.ambassador.findUnique({
-    where: { id: childId },
-    select: {
-      parentCommRate: true,
-      parentCommRateIsOverride: true,
-      parent: { select: { id: true, fullName: true, tier: true, status: true } },
-    },
-  });
+  const [child, active] = await Promise.all([
+    db.ambassador.findUnique({
+      where: { id: childId },
+      select: {
+        parentCommRate: true,
+        parentCommRateIsOverride: true,
+        parent: { select: { id: true, fullName: true, tier: true, status: true } },
+      },
+    }),
+    getActiveCashflow(),
+  ]);
   const parent = child?.parent;
   if (!parent) return null;
   if (INACTIVE_STATUSES.includes(parent.status)) return null;
   if (!(PARENT_ACTIVATION_TIERS as readonly string[]).includes(parent.tier)) return null;
 
-  const standard = Math.max(0, Math.round((COMMISSION_RATES.ambassador * 100 - childRatePercent) * 100) / 100);
+  const standard = coreOverrideFor(childRatePercent, active.structure);
   const rate = child.parentCommRateIsOverride && child.parentCommRate != null ? Math.min(child.parentCommRate, standard) : standard;
   if (rate <= 0) return null;
   return { id: parent.id, fullName: parent.fullName, rate };
@@ -306,6 +311,7 @@ export async function emailCommission(
       jobAmount: project.price,
       rate,
       commission,
+      hq: await getHqContact(),
     });
     const result = await sendMail({ to: ambassador.email, ...message });
     if (result.ok) {
@@ -373,6 +379,7 @@ export async function emailParentCommission(
       jobAmount: project.price,
       rate,
       commission,
+      hq: await getHqContact(),
     });
     const result = await sendMail({ to: parent.email, ...message });
     if (result.ok) {
@@ -633,7 +640,7 @@ export interface AllocatableAmbassador {
 }
 
 export async function listAllocatableAmbassadors(): Promise<AllocatableAmbassador[]> {
-  const [rows, rates, defaultParentRate] = await Promise.all([
+  const [rows, active] = await Promise.all([
     db.ambassador.findMany({
       where: { status: { notIn: INACTIVE_STATUSES } },
       orderBy: { fullName: "asc" },
@@ -644,26 +651,30 @@ export async function listAllocatableAmbassadors(): Promise<AllocatableAmbassado
         tier: true,
         email: true,
         parentCommRate: true,
+        parentCommRateIsOverride: true,
         parent: { select: { id: true, fullName: true, tier: true, status: true } },
         university: { select: { abbreviation: true } },
       },
     }),
-    getCommissionRates(),
-    getDefaultParentCommissionRate(),
+    getActiveCashflow(),
   ]);
+  const s = active.structure;
   return rows.map((a) => {
+    const tierRate = ratePercentForTier(a.tier, s.tiers);
     const parentQualifies =
       a.parent != null &&
       !INACTIVE_STATUSES.includes(a.parent.status) &&
       (PARENT_ACTIVATION_TIERS as readonly string[]).includes(a.parent.tier);
-    const parentRate = parentQualifies ? (a.parentCommRate ?? defaultParentRate) : 0;
+    // The Core's standard cut at this sub's tier rate; a link override can only lower it.
+    const standard = coreOverrideFor(tierRate, s);
+    const parentRate = parentQualifies ? (a.parentCommRateIsOverride && a.parentCommRate != null ? Math.min(a.parentCommRate, standard) : standard) : 0;
     return {
       id: a.id,
       code: a.ambassadorId,
       name: a.fullName,
       university: a.university?.abbreviation ?? null,
       tier: a.tier,
-      tierRate: rates[a.tier],
+      tierRate,
       email: a.email,
       parent:
         parentQualifies && parentRate > 0 && a.parent

@@ -1,5 +1,4 @@
-import type { BucketType } from "@prisma/client";
-import { bucketShareOfRevenue, type BucketHealthLevel } from "@/lib/finance/commission-config";
+import type { BucketHealthLevel } from "@/lib/finance/commission-config";
 import type { BucketCard as BucketCardData } from "@/lib/services/finance/buckets";
 import type { GrowthFundQuarter } from "@/lib/services/finance/surplus";
 import { cn, formatNaira } from "@/lib/utils";
@@ -54,7 +53,7 @@ function BucketCard({ card, extras }: { card: BucketCardData; extras: BucketExtr
             {card.label}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {pct(card.shareOfRetained)} of retained share · {pct(bucketShareOfRevenue(card.bucket as BucketType))} of revenue
+            {pct(card.shareOfRetained)} of retained share · {pct(card.shareOfRevenue)} of revenue
           </p>
         </div>
         <p className="shrink-0 text-right">

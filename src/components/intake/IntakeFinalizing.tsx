@@ -17,7 +17,7 @@ type StatusResponse =
  * creating the project server-side, so this polls until it shows up rather
  * than assuming it's already there.
  */
-export function IntakeFinalizing({ reference }: { reference: string }) {
+export function IntakeFinalizing({ reference, phone }: { reference: string; phone: string }) {
   const router = useRouter();
   const [failed, setFailed] = React.useState(false);
   const attemptsRef = React.useRef(0);
@@ -69,7 +69,7 @@ export function IntakeFinalizing({ reference }: { reference: string }) {
           We couldn&apos;t confirm your payment
         </h1>
         <p className="mt-3 text-muted-foreground">
-          If Paystack took your payment, message us on 07063421088 with your payment reference and
+          If Paystack took your payment, message us on {phone} with your payment reference and
           we&apos;ll sort it out. Otherwise, you can try submitting again.
         </p>
         <p className="mt-2 font-mono text-xs text-muted-foreground">{reference}</p>

@@ -9,6 +9,7 @@ import { deviceCookieName } from "@/lib/pro-bono";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { ProBonoClaim } from "@/components/intake/ProBonoClaim";
 import { ProBonoIntake } from "@/components/intake/ProBonoIntake";
+import { getHqContact } from "@/lib/services/hq-contact";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -107,11 +108,12 @@ export default async function ProBonoPage({ params }: { params: { token: string 
     }
   }
 
+  const hq = await getHqContact();
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:py-12">
       {body}
       <p className="mt-10 text-xs text-subtle">
-        Questions? <Link href="/" className="underline">EduCraft</Link> · 07063421088
+        Questions? <Link href="/" className="underline">EduCraft</Link> · {hq.phone}
       </p>
     </div>
   );

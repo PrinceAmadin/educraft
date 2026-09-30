@@ -6,6 +6,8 @@ import { ProcessTimeline } from "@/components/marketing/ProcessTimeline";
 import { QualityControl } from "@/components/marketing/QualityControl";
 import { ServiceBento } from "@/components/marketing/ServiceBento";
 import { TestimonialStage } from "@/components/marketing/TestimonialStage";
+import { processSteps } from "@/lib/marketing";
+import { publicDownpaymentPercent } from "@/lib/services/cashflow";
 
 /**
  * Homepage composition.
@@ -26,13 +28,14 @@ import { TestimonialStage } from "@/components/marketing/TestimonialStage";
  * visible without a border.
  *   Closing     ink    immersive   full-bleed statement
  */
-export default function LandingPage() {
+export default async function LandingPage() {
+  const steps = processSteps(await publicDownpaymentPercent());
   return (
     <>
       <Hero />
       <Ledger />
       <ServiceBento />
-      <ProcessTimeline />
+      <ProcessTimeline steps={steps} />
       <Expertise />
       <QualityControl />
       <TestimonialStage />

@@ -1,8 +1,11 @@
 import { type AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
 import { notifyAdmins } from "@/lib/services/notifications";
-import { PAID_ORDER, tierProgress, type TierProgress } from "@/lib/ambassador";
-import { getCommissionRates } from "@/lib/services/settings";
+import { PAID_ORDER } from "@/lib/ambassador";
+import { tierLadderRows, tierProgress, type TierProgress } from "@/lib/ambassadors/tier-utils";
+import { ratePercentForTier } from "@/lib/finance/commission-config";
+import { TIER_KEYS } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import type { ReferralFilter } from "@/lib/validations/ambassador";
 
 export async function getAmbassadorByUserId(userId: string) {
@@ -82,17 +85,17 @@ export async function getAmbassadorDashboard(ambassadorId: string): Promise<Amba
     ambassador.referredClients.map((c) => c._count.projects),
     ambassador.projects
   );
-  const progress = tierProgress(ambassador.tier, metrics.payingClients);
-  const rates = await getCommissionRates();
+  const { tiers } = (await getActiveCashflow()).structure;
+  const progress = tierProgress(ambassador.tier, metrics.payingClients, tiers);
 
   return {
     fullName: ambassador.fullName,
     referralCode: ambassador.referralCode,
     tier: ambassador.tier,
-    rate: rates[ambassador.tier],
+    rate: ratePercentForTier(ambassador.tier, tiers),
     metrics,
     progress,
-    nextRate: progress.next ? rates[progress.next] : null,
+    nextRate: progress.next ? ratePercentForTier(progress.next, tiers) : null,
   };
 }
 
@@ -264,8 +267,9 @@ export async function getAmbassadorProfile(ambassadorId: string) {
   });
 
   const payingClients = ambassador.referredClients.filter((c) => c._count.projects > 0).length;
-  const progress = tierProgress(ambassador.tier, payingClients);
-  const rates = await getCommissionRates();
+  const { tiers } = (await getActiveCashflow()).structure;
+  const progress = tierProgress(ambassador.tier, payingClients, tiers);
+  const rates = Object.fromEntries(TIER_KEYS.map((t) => [t, ratePercentForTier(t, tiers)])) as Record<AmbassadorTier, number>;
   return {
     profile: ambassador,
     progress,
@@ -273,6 +277,8 @@ export async function getAmbassadorProfile(ambassadorId: string) {
     nextRate: progress.next ? rates[progress.next] : null,
     /** Every tier's live rate, so the ladder on screen matches Settings. */
     rates,
+    /** The ladder as published: threshold and rate per tier. */
+    ladder: tierLadderRows(tiers),
   };
 }
 

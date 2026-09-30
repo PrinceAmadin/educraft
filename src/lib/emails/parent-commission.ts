@@ -9,6 +9,8 @@ export interface ParentCommissionEmailInput {
   jobAmount: number;
   rate: number;
   commission: number;
+  /** EduCraft's WhatsApp line for the footer (HQ contact settings). */
+  hq: { phone: string };
 }
 
 /**
@@ -57,7 +59,7 @@ export function parentCommissionEmail(
       ${row(`Your parent commission (${input.rate}%)`, `<strong style="color:#0D9488">${escapeHtml(commission)}</strong>`, true)}
     </table>
     <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#475569">Your commission is paid to the bank account on your ambassador record.</p>
-    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;color:#64748B">EduCraft — Academic &amp; Technical Documentation Experts. This is an automated message; reply on WhatsApp at 07063421088 with any questions.</p>
+    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;color:#64748B">EduCraft — Academic &amp; Technical Documentation Experts. This is an automated message; reply on WhatsApp at ${escapeHtml(input.hq.phone)} with any questions.</p>
   </div>
 </body></html>`;
 

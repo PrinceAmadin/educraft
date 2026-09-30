@@ -42,6 +42,8 @@ import { getPreliminaryPagesView } from "@/lib/services/preliminary-pages";
 import { ResearchRerunControl } from "@/components/projects/ResearchRerunControl";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
 import { getModeCard, isReportTemplate } from "@/lib/services/research-mode";
+import { cashflowForProjectId } from "@/lib/services/cashflow";
+import { personLegs } from "@/lib/finance/commission-config";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +97,10 @@ export default async function ProjectDetailPage({
     reportProject ? getPreliminaryPagesView(project.id) : Promise.resolve(null),
   ]);
   const adminBase = `/api/admin/projects/${encodeURIComponent(project.projectId)}`;
+  // The HOG's leg under the cashflow version this project was created under.
+  const structure = await cashflowForProjectId(db, project.id);
+  const hog = personLegs(project, structure).find((l) => l.role === "HOG");
+  const hogLeg = hog ? { amount: hog.amount, ratePercent: hog.ratePercent } : null;
   const dataToCheck = pauses.some((p) => p.status === "SUBMITTED");
   // An AI draft waits for the specialist, not for the COO: only people's uploads count here.
   const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED" && !v.aiDraft)).length;
@@ -255,6 +261,7 @@ export default async function ProjectDetailPage({
         project={project}
         ops={ops}
         expected={expected}
+        hogLeg={hogLeg}
         actions={
           <CooActions
             code={project.projectId}

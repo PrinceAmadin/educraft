@@ -565,6 +565,11 @@ model Project {
   workerPayout         Float?
   workerPayoutPaid     Boolean     @default(false)
   educraftRevenue      Float?
+  /// The cashflow structure this project is computed under: the version active
+  /// when it was created, forever (the grandfather rule). Null only on rows the
+  /// seed has not stamped yet, which then read the version in force at createdAt.
+  cashflowVersionId    String?
+  cashflowVersion      CashflowVersion? @relation(fields: [cashflowVersionId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -607,6 +612,7 @@ model Project {
   @@index([createdAt])
   @@index([atRisk])
   @@index([parentProjectId])
+  @@index([cashflowVersionId])
 }
 
 /// A project the founder deleted as test data (Settings > Test data). The
@@ -2223,6 +2229,54 @@ model FounderDraw {
   updatedAt     DateTime @updatedAt
 
   @@index([month, drawType])
+}
+
+// ─── CASHFLOW STRUCTURE (super-admin editable, versioned) ───────────────
+
+/// One immutable snapshot of the whole commission and bucket structure
+/// (`CashflowStructure` JSON: revenue split, buckets, pots, tiers, bonuses,
+/// founder draw tiers, trigger config). Publishing closes the active version
+/// (effectiveTo) and creates the next. A project is stamped with the version
+/// active at its creation and keeps it.
+model CashflowVersion {
+  id            String    @id @default(cuid())
+  versionNumber Int       @unique
+  structure     Json
+  /// Hash of the canonical JSON; publishing an identical structure is refused.
+  structureHash String
+  /// The human-readable changes from the previous version.
+  diff          Json?
+  effectiveFrom DateTime  @default(now())
+  /// Null = the active version.
+  effectiveTo   DateTime?
+  createdById   String
+  changeReason  String?
+  createdAt     DateTime  @default(now())
+
+  projects Project[]
+
+  @@index([effectiveFrom])
+  @@index([effectiveTo])
+}
+
+/// Who changed what in the money settings and, later, who cleared a payout
+/// batch, reversed a commission or processed a refund. Before/after are the
+/// JSON of the thing changed.
+model CashflowAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String
+  /// published_version, changed_hq_contact, cleared_batch, undid_batch, reversed_commission, processed_refund, …
+  action      String
+  entityType  String
+  entityId    String
+  beforeJson  Json?
+  afterJson   Json?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 /// The COO's monthly payout list, submitted to the CFO. One row per month,

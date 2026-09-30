@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyAdmins, notifyGrowth } from "@/lib/services/notifications";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { generateReferralCode, provisionalDeadline } from "@/lib/ambassador";
 import { isLegacyApplication, scoreApplication, type ApplicationScore } from "@/lib/ambassador-score";
 import { nextGeneralCode } from "@/lib/services/ambassador-roster";
@@ -634,7 +635,7 @@ export async function rejectApplication(
   // The applicant hears the outcome by email (the note stays internal). Sent
   // after the response; a failed send never undoes the rejection.
   if (application.email) {
-    const mail = applicationRejectedEmail({ fullName: application.fullName, role: "ambassador" });
+    const mail = applicationRejectedEmail({ fullName: application.fullName, role: "ambassador", hq: await getHqContact() });
     const to = application.email;
     waitUntil(
       sendMail({ to, ...mail }).then((sent) => {

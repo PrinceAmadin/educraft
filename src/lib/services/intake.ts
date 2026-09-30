@@ -6,7 +6,8 @@ import { ensureProjectReferral } from "@/lib/services/ambassador-platform/referr
 import type { SubmittedContact } from "@/lib/submitted-contact";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
-import { getCommissionRates } from "@/lib/services/settings";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { ratePercentForTier, workersPercent } from "@/lib/finance/commission-config";
 import {
   resolveParentCommission,
   upsertCommissionExpense,
@@ -154,6 +155,9 @@ export async function submitIntake(
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,
   });
+  // The structure in force now is the one this project is computed under for good.
+  const cashflow = await getActiveCashflow();
+  const structure = cashflow.structure;
 
   // Referral link
   let ambassadorId: string | null = null;
@@ -171,13 +175,13 @@ export async function submitIntake(
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
       ambassadorName = ambassador.fullName;
-      ambassadorCommRate = (await getCommissionRates())[ambassador.tier];
+      ambassadorCommRate = ratePercentForTier(ambassador.tier, structure.tiers);
       referralCodeUsed = code;
       ambassadorUserId = ambassador.userId;
     }
   }
 
-  const split = computeSplit(price.total, ambassadorCommRate);
+  const split = computeSplit(price.total, ambassadorCommRate, workersPercent(structure));
   const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId, ambassadorCommRate ?? 0) : null;
   const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
@@ -344,6 +348,7 @@ export async function submitIntake(
           clientDeadline,
           internalDeadline,
           expectedDeliveryAt: clientDeadline ?? internalDeadline,
+          cashflowVersionId: cashflow.id,
           ...(proBono
             ? {
                 ...proBonoFinancials(),
@@ -363,7 +368,7 @@ export async function submitIntake(
                 parentAmbassadorId: parentInfo?.id ?? null,
                 parentCommRate: parentInfo?.rate ?? null,
                 parentCommission,
-                workerPayoutRate: 40,
+                workerPayoutRate: workersPercent(structure),
                 workerPayout: split.workerPayout,
                 educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
               }),

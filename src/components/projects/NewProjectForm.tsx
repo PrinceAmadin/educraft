@@ -46,6 +46,7 @@ interface ServiceOption {
   estimatedDays: number;
   intakeFormTemplate: string;
   expressDeliverySurcharge: number | null;
+  downpaymentPercentage: number;
   variants: { id: string; name: string; priceAddon: number }[];
 }
 
@@ -79,6 +80,7 @@ function priceFor(
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: isExpress,
     override: Number.isFinite(overrideNum) ? overrideNum : null,
+    downpaymentPercentage: service.downpaymentPercentage,
   });
 }
 
@@ -88,11 +90,14 @@ export function NewProjectForm({
   universities,
   services,
   ambassadors,
+  workersPercent,
   canProBono = false,
 }: {
   universities: UniversityOption[];
   services: ServiceOption[];
   ambassadors: AllocatableAmbassador[];
+  /** The Workers row of the cashflow structure in force (40 in v1), for the split preview. */
+  workersPercent: number;
   /** Super admin only: offers the "pro bono" switch on the service step. */
   canProBono?: boolean;
 }) {
@@ -221,7 +226,7 @@ export function NewProjectForm({
             <ClientStep universities={universities} clientMode={clientMode} setValue={setValue} />
           )}
           {step === 1 && (
-            <ServiceStep services={services} ambassadors={ambassadors} canProBono={canProBono} />
+            <ServiceStep services={services} ambassadors={ambassadors} canProBono={canProBono} workersPercent={workersPercent} />
           )}
           {step === 2 && <DetailsStep service={service} />}
           {step === 3 && (
@@ -229,6 +234,7 @@ export function NewProjectForm({
               universities={universities}
               services={services}
               ambassadors={ambassadors}
+              workersPercent={workersPercent}
               values={getValues()}
             />
           )}
@@ -534,10 +540,12 @@ function ServiceStep({
   services,
   ambassadors,
   canProBono,
+  workersPercent,
 }: {
   services: ServiceOption[];
   ambassadors: AllocatableAmbassador[];
   canProBono: boolean;
+  workersPercent: number;
 }) {
   const {
     register,
@@ -668,7 +676,7 @@ function ServiceStep({
         </div>
       ) : null}
 
-      {price && !proBono ? <AmbassadorSection ambassadors={ambassadors} total={price.total} /> : null}
+      {price && !proBono ? <AmbassadorSection ambassadors={ambassadors} total={price.total} workersPercent={workersPercent} /> : null}
     </div>
   );
 }
@@ -681,9 +689,11 @@ function ServiceStep({
 function AmbassadorSection({
   ambassadors,
   total,
+  workersPercent,
 }: {
   ambassadors: AllocatableAmbassador[];
   total: number;
+  workersPercent: number;
 }) {
   const {
     watch,
@@ -730,7 +740,7 @@ function AmbassadorSection({
           ) : null}
           <CommissionPreview
             price={total}
-            workerPayout={computeSplit(total, null).workerPayout}
+            workerPayout={computeSplit(total, null, workersPercent).workerPayout}
             rate={effectiveRate}
             parent={selected.parent}
           />
@@ -907,11 +917,13 @@ function ReviewStep({
   universities,
   services,
   ambassadors,
+  workersPercent,
   values,
 }: {
   universities: UniversityOption[];
   services: ServiceOption[];
   ambassadors: AllocatableAmbassador[];
+  workersPercent: number;
   values: CreateProjectInput;
 }) {
   const proBono = Boolean(values.proBono);
@@ -1027,7 +1039,7 @@ function ReviewStep({
                 label="EduCraft keeps after worker and commission"
                 value={
                   price.total -
-                  computeSplit(price.total, null).workerPayout -
+                  computeSplit(price.total, null, workersPercent).workerPayout -
                   commissionFor(price.total, ambassadorRate) -
                   (ambassador?.parent ? commissionFor(price.total, ambassador.parent.rate) : 0)
                 }

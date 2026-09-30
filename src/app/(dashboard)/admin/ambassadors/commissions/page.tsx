@@ -14,9 +14,10 @@ import { Button } from "@/components/ui/button";
 import { ExtendChallengeButton, HistoryFilters, ProcessBonusesButton, WhatsappUpdateButton } from "@/components/ambassadors/platform/CommissionActions";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { db } from "@/lib/db";
-import { CHALLENGE_BONUS, currentQuarterKey, getCommissionHistory, getCommissionMonth, getQuarterTracker, recentQuarterKeys, type BonusState, type TrackerRow } from "@/lib/services/ambassador-platform/commissions";
+import { currentQuarterKey, getCommissionHistory, getCommissionMonth, getQuarterTracker, recentQuarterKeys, type BonusState, type TrackerRow } from "@/lib/services/ambassador-platform/commissions";
 import { currentMonthKey } from "@/lib/services/finance/surplus";
-import { COMMISSION_RATES, PLATINUM_QUARTERLY_BONUS_PER_CLIENT } from "@/lib/finance/commission-config";
+import { ambassadorTotalRate } from "@/lib/finance/commission-config";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { percentLabel } from "@/lib/ambassadors/tier-utils";
 import { commissionHistoryQuerySchema, commissionMonthQuerySchema, quarterQuerySchema } from "@/lib/validations/ambassador-platform";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
@@ -56,7 +57,8 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
 }
 
 async function CurrentMonth({ month }: { month: string }) {
-  const data = await getCommissionMonth(month);
+  const [data, active] = await Promise.all([getCommissionMonth(month), getActiveCashflow()]);
+  const ambassadorTotal = percentLabel(ambassadorTotalRate(active.structure));
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -75,7 +77,7 @@ async function CurrentMonth({ month }: { month: string }) {
       <section className={STATS_GRID} aria-label="Month totals">
         <StatsCard label="Total commissions" value={formatNaira(data.totals.total)} detail={`${data.totals.recipients} ambassador${data.totals.recipients === 1 ? "" : "s"} · ${data.label}`} icon={LuWallet} />
         <StatsCard label="Personal referrals" value={formatNaira(data.totals.personal)} detail="Their own tier rate" icon={LuUsers} />
-        <StatsCard label="Core overrides" value={formatNaira(data.totals.overrides)} detail={`${percentLabel(COMMISSION_RATES.ambassador)} minus the Sub's rate`} icon={LuUsers} tone="gold" />
+        <StatsCard label="Core overrides" value={formatNaira(data.totals.overrides)} detail={`${ambassadorTotal} minus the Sub's rate`} icon={LuUsers} tone="gold" />
         <StatsCard label="Still to pay" value={formatNaira(data.totals.unpaid)} detail={data.totals.paid > 0 ? `${formatNaira(data.totals.paid)} paid so far` : "Nothing paid yet"} icon={LuWallet} tone={data.totals.unpaid > 0 ? "danger" : "success"} href="/admin/finance/payouts" />
       </section>
 
@@ -289,8 +291,8 @@ async function Quarterly({ quarter }: { quarter: string }) {
       </div>
 
       <section className={STATS_GRID} aria-label="Quarter totals">
-        <StatsCard label="Platinum per-client bonus" value={formatNaira(data.totals.platinumEarned)} detail={`${formatNaira(PLATINUM_QUARTERLY_BONUS_PER_CLIENT)} per client referred in ${data.quarter.label}`} icon={LuTrophy} tone="gold" wrapLabel />
-        <StatsCard label="Challenge bonuses" value={formatNaira(data.totals.challengeEarned)} detail={`${formatNaira(CHALLENGE_BONUS)} for 10+ clients in the quarter`} icon={LuTrophy} wrapLabel />
+        <StatsCard label="Platinum per-client bonus" value={formatNaira(data.totals.platinumEarned)} detail={`${formatNaira(data.figures.platinumPerClient)} per client referred in ${data.quarter.label}`} icon={LuTrophy} tone="gold" wrapLabel />
+        <StatsCard label="Challenge bonuses" value={formatNaira(data.totals.challengeEarned)} detail={`${formatNaira(data.figures.challengeBonus)} for ${data.figures.challengeTarget}+ clients in the quarter`} icon={LuTrophy} wrapLabel />
         <StatsCard label="In the challenge" value={String(data.totals.ambassadorsInChallenge)} detail="Ambassadors with a conversion this quarter" icon={LuUsers} wrapLabel />
         <StatsCard label="Processed" value={String(data.totals.processed)} detail="Bonus payouts created for finance" icon={LuWallet} tone="success" wrapLabel />
       </section>
@@ -368,7 +370,7 @@ async function Quarterly({ quarter }: { quarter: string }) {
         </>
       )}
       <p className="text-xs text-muted-foreground">
-        Two different bonuses: the Platinum quarterly bonus is {formatNaira(PLATINUM_QUARTERLY_BONUS_PER_CLIENT)} per client referred in the quarter (Platinum only, paid quarterly); the quarterly challenge is a flat {formatNaira(CHALLENGE_BONUS)} for 10 or more clients in the quarter window, open to every tier, with one one-week extension the HOG can grant.
+        Two different bonuses: the Platinum quarterly bonus is {formatNaira(data.figures.platinumPerClient)} per client referred in the quarter (Platinum only, paid quarterly); the quarterly challenge is a flat {formatNaira(data.figures.challengeBonus)} for {data.figures.challengeTarget} or more clients in the quarter window, open to every tier, with one {data.figures.challengeExtensionDays}-day extension the HOG can grant.
       </p>
     </div>
   );

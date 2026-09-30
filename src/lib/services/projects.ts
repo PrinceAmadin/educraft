@@ -2,7 +2,8 @@ import { Prisma, type ProjectStatus } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
-import { getCommissionRates } from "@/lib/services/settings";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { ratePercentForTier, workersPercent } from "@/lib/finance/commission-config";
 import {
   CommissionError,
   emailCommission,
@@ -1426,6 +1427,9 @@ export async function createProjectManual(
     include: { variants: true },
   });
   if (!service) throw new TransitionError("Service not found");
+  // The structure in force now is the one this project is computed under for good.
+  const cashflow = await getActiveCashflow();
+  const structure = cashflow.structure;
 
   let variantAddon = 0;
   let serviceVariantId: string | null = null;
@@ -1473,12 +1477,12 @@ export async function createProjectManual(
     if (ambassador && ambassador.status !== "Suspended" && ambassador.status !== "Terminated") {
       ambassadorId = ambassador.id;
       ambassadorName = ambassador.fullName;
-      ambassadorCommRate = (await getCommissionRates())[ambassador.tier];
+      ambassadorCommRate = ratePercentForTier(ambassador.tier, structure.tiers);
       referralCodeUsed = referralCode;
     }
   }
 
-  const split = computeSplit(price.total, ambassadorCommRate);
+  const split = computeSplit(price.total, ambassadorCommRate, workersPercent(structure));
   const parentInfo = ambassadorId && !proBono ? await resolveParentCommission(ambassadorId, ambassadorCommRate ?? 0) : null;
   const parentCommission = parentInfo ? commissionFor(price.total, parentInfo.rate) : null;
 
@@ -1574,6 +1578,7 @@ export async function createProjectManual(
         clientDeadline,
         internalDeadline,
         expectedDeliveryAt: clientDeadline ?? internalDeadline,
+        cashflowVersionId: cashflow.id,
         ...(proBono
           ? { ...proBonoFinancials(), proBonoReason: input.proBonoReason?.trim() || null }
           : {
@@ -1589,7 +1594,7 @@ export async function createProjectManual(
               parentAmbassadorId: parentInfo?.id ?? null,
               parentCommRate: parentInfo?.rate ?? null,
               parentCommission,
-              workerPayoutRate: 40,
+              workerPayoutRate: workersPercent(structure),
               workerPayout: split.workerPayout,
               educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
             }),

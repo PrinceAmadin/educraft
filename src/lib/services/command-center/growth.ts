@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { PAID_ORDER } from "@/lib/ambassador";
 import { tierFor } from "@/lib/finance/commission-config";
+import type { TierRule } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { execForRecord } from "@/lib/executive-identity";
 import { loadExecIndex } from "@/lib/services/executives";
 import { fractionToPercent } from "@/lib/command-center/rag";
@@ -128,7 +130,7 @@ async function ordersLadder(): Promise<Ladder> {
 // ── Sections ──────────────────────────────────────────────────────
 
 /** Ambassadors in the network per tier at each of the last six month ends, from the ladder. */
-function tierDistribution(ladder: Ladder, roster: readonly AmbassadorRow[], months: readonly string[]): TierDistributionPoint[] {
+function tierDistribution(ladder: Ladder, roster: readonly AmbassadorRow[], months: readonly string[], tiers: readonly TierRule[]): TierDistributionPoint[] {
   return months.map((month) => {
     const cutoff = monthBounds(month).end.getTime();
     const point: TierDistributionPoint = {
@@ -142,7 +144,7 @@ function tierDistribution(ladder: Ladder, roster: readonly AmbassadorRow[], mont
     for (const a of roster) {
       if (a.createdAt.getTime() >= cutoff) continue;
       const conversions = (ladder.get(a.id) ?? []).filter((at) => at < cutoff).length;
-      point[TIER_FIELD[a.executive ? "PLATINUM" : tierFor(conversions)]] += 1;
+      point[TIER_FIELD[a.executive ? "PLATINUM" : tierFor(conversions, tiers)]] += 1;
     }
     return point;
   });
@@ -273,9 +275,10 @@ export async function getGrowth(now: Date = new Date()): Promise<GrowthPayload> 
   const fromReferrals = conversions.source === "referrals";
 
   // Group 3: activation over the same conversions, and main's ladder when phase-3 is not in this build.
-  const [activation, ladder] = await Promise.all([
+  const [activation, ladder, cashflow] = await Promise.all([
     activationSnapshot(now, conversions),
     fromReferrals ? Promise.resolve(referralLadder(conversions.rows)) : ordersLadder(),
+    getActiveCashflow(),
   ]);
 
   const monthRows = conversions.rows.filter((r) => inRange(r.at, start, end));
@@ -319,7 +322,8 @@ export async function getGrowth(now: Date = new Date()): Promise<GrowthPayload> 
       points: tierDistribution(
         ladder,
         ambassadors.filter((a) => isOpen(a.status)),
-        lastMonths(TIER_MONTHS, now)
+        lastMonths(TIER_MONTHS, now),
+        cashflow.structure.tiers
       ),
     },
     topAmbassadors: top,

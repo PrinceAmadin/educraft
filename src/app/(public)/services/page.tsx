@@ -3,7 +3,7 @@ import { LuInbox } from "react-icons/lu";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ServicesCatalogue } from "@/components/services/ServicesCatalogue";
 import { getActiveServices } from "@/lib/services/intake";
-import { DOWNPAYMENT_PERCENTAGE } from "@/lib/constants";
+import { publicDownpaymentPercent } from "@/lib/services/cashflow";
 
 export const metadata: Metadata = {
   title: "Services",
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ServicesPage() {
-  const services = await getActiveServices();
+  const [services, downpaymentPercent] = await Promise.all([getActiveServices(), publicDownpaymentPercent()]);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pb-24 pt-[clamp(2.5rem,7vh,4.5rem)] sm:px-6">
@@ -23,7 +23,7 @@ export default async function ServicesPage() {
         </h1>
         <p className="mt-3 max-w-[54ch] text-[15px] leading-relaxed text-muted-foreground sm:text-base">
           Everything you need for academic, technical and professional documentation. Prices are up
-          front — you pay {DOWNPAYMENT_PERCENTAGE}% to begin and the balance once the work passes quality
+          front — you pay {downpaymentPercent}% to begin and the balance once the work passes quality
           review.
         </p>
       </header>

@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { AMBASSADOR_TIERS, COMMISSION_RATES, executiveLegs, workerLeg, type ProjectLegs } from "@/lib/finance/commission-config";
+import { personLegs, ratePercentForTier, workerLeg, workersPercent, type ProjectLegs } from "@/lib/finance/commission-config";
+import { TIER_LABELS, isActiveRow, type CashflowStructure, type PersonTrigger } from "@/lib/finance/cashflow-types";
+import { cashflowForProject, getActiveCashflow } from "@/lib/services/cashflow";
 import { monthKeyOf } from "@/lib/services/finance/buckets";
 import { monthLabel, monthRange } from "@/lib/services/finance/surplus";
 import { nextId } from "@/lib/services/projects";
@@ -10,15 +12,16 @@ import { formatNaira } from "@/lib/utils";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 
 /**
- * The payout engine. Every naira owed out on a completed project is one
- * PayoutRecord per leg and recipient — WORKER (40%), AMBASSADOR (the
- * referrer's rate), PARENT (the Core's override), HOG (2.5% on
- * ambassador-driven jobs), COO (2.5% on every job). Records are produced
- * when a project reaches COMPLETED and reconciled whenever its legs change;
- * `calculateMonthlyPayouts` re-reconciles a whole month. Marking paid is a
- * claim (PENDING -> PAID under a count check) that writes one OUTFLOW
- * Payment per recipient and flips the project's legacy paid flags, so the
- * worker and ambassador portals keep reading the same truth.
+ * The payout engine. Every naira owed out on a project is one PayoutRecord
+ * per leg and recipient — WORKER, AMBASSADOR (the referrer's rate), PARENT
+ * (the Core's override), HOG, COO, and any person row the founder added to
+ * the cashflow structure. Each project is computed under ITS version of the
+ * structure (stamped at creation); a row is produced when its trigger fires
+ * (the downpayment, full payment or completion) and reconciled whenever the
+ * legs change; `calculateMonthlyPayouts` re-reconciles a whole month.
+ * Marking paid is a claim (PENDING -> PAID under a count check) that writes
+ * one OUTFLOW Payment per recipient and flips the project's legacy paid
+ * flags, so the worker and ambassador portals keep reading the same truth.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -26,9 +29,13 @@ type Db = Tx | typeof db;
 
 export class PayoutError extends Error {}
 
-/** BONUS: an ambassador quarterly bonus (Phase 3) — no project behind it, keyed by `bonusKey`. */
-export type PayoutLeg = "WORKER" | "AMBASSADOR" | "PARENT" | "HOG" | "COO" | "BONUS";
-export type RecipientType = "WORKER" | "AMBASSADOR" | "EXECUTIVE";
+/**
+ * The built-in legs, plus BONUS (an ambassador quarterly bonus, keyed by
+ * `bonusKey`) and the upper-cased key of any person row the founder added.
+ */
+export type PayoutLeg = "WORKER" | "AMBASSADOR" | "PARENT" | "HOG" | "COO" | "BONUS" | (string & {});
+/** USER: a person row that pays one named login (recipientId is the User id). */
+export type RecipientType = "WORKER" | "AMBASSADOR" | "EXECUTIVE" | "USER";
 export type ExecRecipient = "HOG" | "COO";
 
 const PROJECT_SELECT = {
@@ -37,6 +44,10 @@ const PROJECT_SELECT = {
   status: true,
   isProBono: true,
   price: true,
+  createdAt: true,
+  cashflowVersionId: true,
+  balanceStatus: true,
+  balanceDate: true,
   workerPayout: true,
   workerPayoutRate: true,
   ambassadorCommission: true,
@@ -66,25 +77,38 @@ export interface LegRow {
   recipientName: string;
   amount: number;
   basis: string;
+  /** When this leg becomes owed, from the structure the project is computed under. */
+  trigger: PersonTrigger;
 }
 
 export interface ExecNames {
   HOG: { name: string; userId: string | null };
   COO: { name: string; userId: string | null };
+  /** Logins named by person rows the founder added (`assignedUserId`), by user id. */
+  users: Record<string, { name: string; userId: string }>;
 }
 
-/** The HOG and COO by role: the exec profile's name, else the login's, else the title. */
-export async function execNames(client: Db = db): Promise<ExecNames> {
+/**
+ * The HOG and COO by role (the exec profile's name, else the login's, else
+ * the title), plus the logins any custom person row of the structure names.
+ */
+export async function execNames(client: Db = db, s?: CashflowStructure): Promise<ExecNames> {
+  const assigned = [...new Set((s?.level1 ?? []).map((r) => (r.recipients === "user" ? r.assignedUserId : null)).filter((x): x is string => Boolean(x)))];
   const users = await client.user.findMany({
-    where: { role: { in: ["HOG", "COO"] }, isActive: true },
+    where: { OR: [{ role: { in: ["HOG", "COO"] }, isActive: true }, ...(assigned.length ? [{ id: { in: assigned } }] : [])] },
     select: { id: true, role: true, displayName: true, email: true, execProfile: { select: { fullName: true } } },
     orderBy: { createdAt: "asc" },
   });
   const pick = (role: ExecRecipient, fallback: string) => {
-    const u = users.find((x) => x.role === role);
+    const u = users.find((x) => x.role === role && x.role === role);
     return { name: u?.execProfile?.fullName ?? u?.displayName ?? fallback, userId: u?.id ?? null };
   };
-  return { HOG: pick("HOG", "Head of Growth"), COO: pick("COO", "Chief Operating Officer") };
+  const byId: ExecNames["users"] = {};
+  for (const id of assigned) {
+    const u = users.find((x) => x.id === id);
+    if (u) byId[id] = { name: u.execProfile?.fullName ?? u.displayName ?? u.email, userId: u.id };
+  }
+  return { HOG: pick("HOG", "Head of Growth"), COO: pick("COO", "Chief Operating Officer"), users: byId };
 }
 
 function pct(rate: number | null | undefined, fallback: number): string {
@@ -94,24 +118,30 @@ function pct(rate: number | null | undefined, fallback: number): string {
 
 /**
  * The tier a commission rate belongs to (10% Bronze, 12% Silver, 15% Gold or
- * Platinum), for the record's basis. Since Phase 3 an ambassador's tier moves
- * with every conversion, so the tier at allocation is read from the rate the
- * job was allocated at, not from today's tier.
+ * Platinum under v1), for the record's basis. An ambassador's tier moves with
+ * every conversion, so the tier at allocation is read from the rate the job
+ * was allocated at, not from today's tier.
  */
-function rateTierLabel(ratePercent: number | null | undefined): string {
-  const rate = (ratePercent ?? 0) / 100;
-  const tiers = AMBASSADOR_TIERS.filter((t) => Math.abs(t.rate - rate) < 1e-9).map((t) => t.label);
+function rateTierLabel(ratePercent: number | null | undefined, s: CashflowStructure): string {
+  const rate = ratePercent ?? 0;
+  const tiers = s.tiers.filter((t) => Math.abs(t.ratePercent - rate) < 1e-6).map((t) => TIER_LABELS[t.key]);
   return tiers.length ? `${tiers.join(" or ")} tier` : "custom rate";
 }
 
-/** The legs a completed project owes, whole naira, zero amounts left out. Pure given the names. */
-export function legsFor(p: ProjectForLegs, execs: ExecNames): LegRow[] {
+function triggerOfRecipients(s: CashflowStructure, recipients: "workers" | "ambassadors"): PersonTrigger {
+  const row = s.level1.find((r) => r.kind === "person" && r.recipients === recipients);
+  return row?.trigger ?? (recipients === "ambassadors" ? "downpayment" : "completion");
+}
+
+/** The legs a project owes, whole naira, zero amounts left out. Pure given the names and the structure. */
+export function legsFor(p: ProjectForLegs, execs: ExecNames, s: CashflowStructure): LegRow[] {
   if (p.isProBono || p.price <= 0) return [];
   const legs: ProjectLegs = p;
   const out: LegRow[] = [];
+  const lowestTier = [...s.tiers].sort((a, b) => a.minConversions - b.minConversions)[0]?.ratePercent ?? 0;
 
   if (p.workerId && p.worker) {
-    const amount = workerLeg(legs);
+    const amount = workerLeg(legs, s);
     if (amount > 0) {
       out.push({
         leg: "WORKER",
@@ -119,7 +149,8 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames): LegRow[] {
         recipientId: p.worker.id,
         recipientName: p.worker.fullName,
         amount,
-        basis: `${pct(p.workerPayoutRate, COMMISSION_RATES.workers * 100)} worker rate`,
+        basis: `${pct(p.workerPayoutRate, workersPercent(s))} worker rate`,
+        trigger: triggerOfRecipients(s, "workers"),
       });
     }
   }
@@ -131,7 +162,8 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames): LegRow[] {
       recipientId: p.ambassador.id,
       recipientName: p.ambassador.fullName,
       amount: Math.round(p.ambassadorCommission ?? 0),
-      basis: `${pct(p.ambassadorCommRate, 10)} ${sub ? "Sub-Ambassador" : "ambassador"} rate (${rateTierLabel(p.ambassadorCommRate)})`,
+      basis: `${pct(p.ambassadorCommRate, lowestTier)} ${sub ? "Sub-Ambassador" : "ambassador"} rate (${rateTierLabel(p.ambassadorCommRate, s)})`,
+      trigger: triggerOfRecipients(s, "ambassadors"),
     });
   }
   if (p.parentAmbassadorId && p.parentAmbassador && (p.parentCommission ?? 0) > 0) {
@@ -141,28 +173,22 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames): LegRow[] {
       recipientId: p.parentAmbassador.id,
       recipientName: p.parentAmbassador.fullName,
       amount: Math.round(p.parentCommission ?? 0),
-      basis: `${pct(p.parentCommRate, 5)} Core override`,
+      basis: `${pct(p.parentCommRate, 0)} Core override`,
+      trigger: triggerOfRecipients(s, "ambassadors"),
     });
   }
-  const exec = executiveLegs(legs);
-  if (exec.hog > 0) {
+  for (const leg of personLegs(legs, s)) {
+    const recipientId = leg.role ?? leg.assignedUserId;
+    if (!recipientId) continue;
+    const name = leg.role ? execs[leg.role].name : (execs.users[recipientId]?.name ?? leg.label);
     out.push({
-      leg: "HOG",
-      recipientType: "EXECUTIVE",
-      recipientId: "HOG",
-      recipientName: execs.HOG.name,
-      amount: exec.hog,
-      basis: `${COMMISSION_RATES.hog * 100}% HOG commission on ambassador-driven project`,
-    });
-  }
-  if (exec.coo > 0) {
-    out.push({
-      leg: "COO",
-      recipientType: "EXECUTIVE",
-      recipientId: "COO",
-      recipientName: execs.COO.name,
-      amount: exec.coo,
-      basis: `${COMMISSION_RATES.coo * 100}% COO commission on delivered project`,
+      leg: leg.key.toUpperCase(),
+      recipientType: leg.role ? "EXECUTIVE" : "USER",
+      recipientId,
+      recipientName: name,
+      amount: leg.amount,
+      basis: `${pct(leg.ratePercent, 0)} ${leg.label} commission${leg.role === "HOG" ? " on ambassador-driven project" : leg.role === "COO" ? " on delivered project" : ""}`,
+      trigger: leg.trigger,
     });
   }
   return out;
@@ -181,19 +207,21 @@ export interface ReconcileResult {
   cancelled: number;
 }
 
-/** Ambassador legs are owed from the confirmed downpayment (Phase 3); the rest from completion. */
-const CONVERSION_LEGS: PayoutLeg[] = ["AMBASSADOR", "PARENT"];
 const DEAD_STATUSES = ["CANCELLED", "REFUNDED"];
 
 /**
- * Bring a project's PayoutRecords in line with what it owes now.
+ * Bring a project's PayoutRecords in line with what it owes now, under the
+ * cashflow structure the project was created under.
  *
- * - The ambassador's commission and the Core's override are owed as soon as
- *   the referred client's downpayment is confirmed (the conversion — "commission
- *   is paid to ambassadors immediately when the client pays the downpayment"),
- *   in the month of that downpayment, and stay there through completion.
- * - The worker, HOG and COO legs are owed when the project is COMPLETED, in
- *   the completion month (`opts.month` overrides it for a monthly recalculation).
+ * - A leg triggered at the downpayment (the ambassador's commission and the
+ *   Core's override in v1) is owed as soon as the referred client's
+ *   downpayment is confirmed (the conversion — "commission is paid to
+ *   ambassadors immediately when the client pays the downpayment"), in the
+ *   month of that downpayment, and stays there through completion.
+ * - A leg triggered at completion (the worker, HOG and COO in v1) is owed when
+ *   the project is COMPLETED, in the completion month (`opts.month` overrides
+ *   it for a monthly recalculation); one triggered at full payment when the
+ *   balance is verified.
  * - A cancelled or refunded project owes nothing: its PENDING records are
  *   cancelled. A PAID record is never touched. A leg already marked paid on
  *   the project before the engine existed is recorded as PAID.
@@ -201,13 +229,18 @@ const DEAD_STATUSES = ["CANCELLED", "REFUNDED"];
 export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts: { month?: string } = {}): Promise<ReconcileResult> {
   const project = await tx.project.findUnique({ where: { id: projectDbId }, select: PROJECT_SELECT });
   if (!project) return { created: 0, updated: 0, cancelled: 0 };
-  const execs = await execNames(tx);
+  const s = await cashflowForProject(project);
+  const execs = await execNames(tx, s);
   const alive = !DEAD_STATUSES.includes(project.status);
   const converted = alive && project.downpaymentStatus === "Verified";
-  const all = alive ? legsFor(project, execs) : [];
-  const produced = project.status === "COMPLETED" ? all : converted ? all.filter((l) => CONVERSION_LEGS.includes(l.leg)) : [];
+  const completed = alive && project.status === "COMPLETED";
+  const fullyPaid = alive && (project.balanceStatus === "Verified" || completed);
+  const fired = (trigger: PersonTrigger) => (trigger === "downpayment" ? converted : trigger === "full_payment" ? fullyPaid : completed);
+  const all = alive ? legsFor(project, execs, s) : [];
+  const produced = all.filter((l) => fired(l.trigger));
   const completionMonth = opts.month ?? monthKeyOf(project.finalCompletionDate ?? new Date());
   const conversionMonth = monthKeyOf(project.downpaymentDate ?? project.finalCompletionDate ?? new Date());
+  const fullPaymentMonth = monthKeyOf(project.balanceDate ?? project.finalCompletionDate ?? new Date());
   const existing = await tx.payoutRecord.findMany({ where: { projectId: projectDbId } });
   const result: ReconcileResult = { created: 0, updated: 0, cancelled: 0 };
   const keep = new Set<string>();
@@ -218,9 +251,9 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
     const key = `${leg.leg}:${leg.recipientId}`;
     keep.add(key);
     const row = existing.find((r) => r.leg === leg.leg && r.recipientId === leg.recipientId);
-    // A conversion leg stays in the month it was first recorded in: records
+    // A downpayment leg stays in the month it was first recorded in: records
     // made before Phase 3 (at completion) are not moved to an earlier month.
-    const month = CONVERSION_LEGS.includes(leg.leg) ? (row?.month ?? conversionMonth) : completionMonth;
+    const month = leg.trigger === "downpayment" ? (row?.month ?? conversionMonth) : leg.trigger === "full_payment" ? (row?.month ?? fullPaymentMonth) : completionMonth;
     if (!row) {
       const paidBefore = legacyPaid(project, leg.leg);
       await tx.payoutRecord.create({
@@ -261,7 +294,7 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
     result.cancelled += 1;
     if (row.recipientType === "AMBASSADOR") touched.add(row.recipientId);
   }
-  for (const id of touched) await recountAmbassador(tx, id);
+  for (const id of touched) await recountAmbassador(tx, id, s.tiers);
   return result;
 }
 
@@ -370,7 +403,11 @@ export interface AmbassadorPayoutGroup extends GroupBase {
 }
 
 export interface ExecutivePayoutGroup extends GroupBase {
-  recipientId: ExecRecipient;
+  /** "HOG" / "COO", or the User id of a person row the founder added. */
+  recipientId: string;
+  recipientType: "EXECUTIVE" | "USER";
+  /** The row's label in the structure ("Head of Growth", "Growth Associate"). */
+  label: string;
   rate: number;
   userId: string | null;
 }
@@ -519,12 +556,14 @@ async function submissionInfo(month: string): Promise<SubmissionInfo | null> {
 
 /** Everything owed for a month, grouped by recipient, with bonuses, the COO's submission and the bonus metrics. */
 export async function getPayoutMonth(month: string): Promise<PayoutMonth> {
+  const active = await getActiveCashflow();
+  const s = active.structure;
   const [records, bonuses, metrics, submission, execs] = await Promise.all([
     db.payoutRecord.findMany({ where: { month, status: { not: "CANCELLED" } }, include: RECORD_INCLUDE }),
     db.performanceBonus.findMany({ where: { month, status: { not: "CANCELLED" } }, orderBy: { createdAt: "asc" } }),
     getBonusMetrics(month),
     submissionInfo(month),
-    execNames(),
+    execNames(db, s),
   ]);
 
   const byRecipient = new Map<string, RecordRow[]>();
@@ -564,11 +603,35 @@ export async function getPayoutMonth(month: string): Promise<PayoutMonth> {
     };
   });
 
-  const executives: ExecutivePayoutGroup[] = (["HOG", "COO"] as const).map((role) => {
-    const rows = byRecipient.get(`EXECUTIVE:${role}`) ?? [];
-    const base = groupBase(role, execs[role].name, rows.map(toLine));
-    return { ...base, recipientId: role, rate: role === "HOG" ? COMMISSION_RATES.hog * 100 : COMMISSION_RATES.coo * 100, userId: execs[role].userId };
-  });
+  // The single-recipient people rows of the structure in force (HOG, COO, anyone the founder added),
+  // then any executive/user record in the month that no active row produces any more.
+  const personRows = s.level1.filter((r) => r.kind === "person" && isActiveRow(r) && (r.recipients === "role" || r.recipients === "user"));
+  const executives: ExecutivePayoutGroup[] = [];
+  const covered = new Set<string>();
+  for (const row of personRows) {
+    const recipientType: "EXECUTIVE" | "USER" = row.recipients === "role" ? "EXECUTIVE" : "USER";
+    const recipientId = row.recipients === "role" ? row.role : row.assignedUserId;
+    if (!recipientId) continue;
+    const key = `${recipientType}:${recipientId}`;
+    covered.add(key);
+    const rows = byRecipient.get(key) ?? [];
+    const name = recipientType === "EXECUTIVE" ? execs[recipientId as ExecRecipient].name : (execs.users[recipientId]?.name ?? row.label);
+    const userId = recipientType === "EXECUTIVE" ? execs[recipientId as ExecRecipient].userId : recipientId;
+    executives.push({ ...groupBase(recipientId, name, rows.map(toLine)), recipientId, recipientType, label: row.label, rate: row.percentage, userId });
+  }
+  for (const [key, rows] of byRecipient) {
+    const [recipientType, recipientId] = key.split(":") as [RecipientType, string];
+    if ((recipientType !== "EXECUTIVE" && recipientType !== "USER") || covered.has(key)) continue;
+    const rates = rows.map((r) => Number(/^([\d.]+)%/.exec(r.basis)?.[1])).filter((n) => Number.isFinite(n));
+    executives.push({
+      ...groupBase(recipientId, rows[0]?.recipientName ?? recipientId, rows.map(toLine)),
+      recipientId,
+      recipientType,
+      label: rows[0]?.recipientName ?? recipientId,
+      rate: rates.length ? rates[0] : 0,
+      userId: recipientType === "USER" ? recipientId : (execs[recipientId as ExecRecipient]?.userId ?? null),
+    });
+  }
 
   const bonusRows: BonusRow[] = bonuses.map((b) => ({
     id: b.id,
@@ -709,8 +772,9 @@ const PAYMENT_TYPE: Record<RecipientType, "WORKER_PAYOUT" | "AMBASSADOR_COMMISSI
   WORKER: "WORKER_PAYOUT",
   AMBASSADOR: "AMBASSADOR_COMMISSION",
   EXECUTIVE: "EXECUTIVE_COMMISSION",
+  USER: "EXECUTIVE_COMMISSION",
 };
-const PERSON_ROLE: Record<RecipientType, string> = { WORKER: "Worker", AMBASSADOR: "Ambassador", EXECUTIVE: "Executive" };
+const PERSON_ROLE: Record<RecipientType, string> = { WORKER: "Worker", AMBASSADOR: "Ambassador", EXECUTIVE: "Executive", USER: "Staff" };
 
 /**
  * Record a transfer: the PENDING records become PAID under a count check
@@ -726,7 +790,7 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
         ? { month: target.month, recipientType: target.recipientType, recipientId: target.recipientId, status: "PENDING" }
         : { month: target.month, recipientType: target.recipientType, status: "PENDING" };
   const paidOn = input.date ? new Date(input.date) : new Date();
-  const execs = await execNames();
+  const execs = await execNames(db, (await getActiveCashflow()).structure);
   // Several payments are minted in one transaction: number them from one read so they never collide.
   const firstPaymentId = await nextId("PAYMENT");
   const firstNumber = Number(/(\d+)$/.exec(firstPaymentId)?.[1] ?? 0);
@@ -754,7 +818,9 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
             ? ((await tx.worker.findUnique({ where: { id: recipientId }, select: { userId: true } }))?.userId ?? null)
             : recipientType === "AMBASSADOR"
               ? ((await tx.ambassador.findUnique({ where: { id: recipientId }, select: { userId: true } }))?.userId ?? null)
-              : (execs[recipientId as ExecRecipient]?.userId ?? null);
+              : recipientType === "USER"
+                ? recipientId
+                : (execs[recipientId as ExecRecipient]?.userId ?? null);
 
         const claimed = await tx.payoutRecord.updateMany({ where: { id: { in: ids }, status: "PENDING" }, data: { status: "PAID" } });
         if (claimed.count !== ids.length) throw new PayoutError("Someone else just recorded part of this payout. Refresh the page.");
@@ -874,14 +940,14 @@ export async function markBonusPaid(id: string, input: MarkPaidInput): Promise<M
 }
 
 /** Owed and paid by leg for a month — the finance figures other pages read (never Payment OUTFLOW sums). */
-export async function payoutTotalsForMonth(month: string): Promise<{ owed: number; paid: number; unpaid: number; byLeg: Record<PayoutLeg, number> }> {
+export async function payoutTotalsForMonth(month: string): Promise<{ owed: number; paid: number; unpaid: number; byLeg: Record<string, number> }> {
   const rows = await db.payoutRecord.groupBy({ by: ["leg", "status"], where: { month, status: { not: "CANCELLED" } }, _sum: { amount: true } });
-  const byLeg: Record<PayoutLeg, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0, BONUS: 0 };
+  const byLeg: Record<string, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0, BONUS: 0 };
   let owed = 0;
   let paid = 0;
   for (const r of rows) {
     const amt = Math.round(r._sum.amount ?? 0);
-    byLeg[r.leg as PayoutLeg] += amt;
+    byLeg[r.leg] = (byLeg[r.leg] ?? 0) + amt;
     owed += amt;
     if (r.status === "PAID") paid += amt;
   }

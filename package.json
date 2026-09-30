@@ -52,6 +52,9 @@
     "check:prelim": "tsx scripts/check-preliminary-pages.ts",
     "check:billing": "tsx scripts/check-billing.ts",
     "check:cleanup": "tsx scripts/check-cleanup.ts",
+    "check:cashflow": "tsx scripts/check-cashflow.ts",
+    "check:cashflow-static": "tsx scripts/check-cashflow-static.ts",
+    "cashflow:seed": "dotenv -e .env.local -- tsx scripts/cashflow-seed.ts",
     "orchestrator:schedule": "dotenv -e .env.local -- tsx scripts/setup-orchestrator-schedule.ts"
   },
   "prisma": {

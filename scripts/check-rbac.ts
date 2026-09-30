@@ -34,17 +34,19 @@ const labelsFor = (role: string) => adminNavForRole(role).flatMap((s) => s.items
 
 // ── The matrix, as the spec's checklist words it ─────────────────────────────
 
+// Every executive reads EduCraft Cashflow (the commission structure); only the founder publishes (founder, 30 Sept 2026).
 expect(
   "CO_CEO_CFO sees exactly her tabs",
   labelsFor("CO_CEO_CFO"),
-  ["Clients", "Finance", "Bank details"]
+  ["Clients", "Finance", "EduCraft Cashflow", "Bank details"]
 );
-expect("HOG sees exactly his tabs", labelsFor("HOG"), ["Ambassadors", "Growth", "Growth reports", "Bank details"]);
+expect("HOG sees exactly his tabs", labelsFor("HOG"), ["Ambassadors", "Growth", "Growth reports", "EduCraft Cashflow", "Bank details"]);
 expect(
   "COO sees exactly his tabs",
   labelsFor("COO"),
-  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Payouts", "Operations reports", "Bank details"]
+  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Payouts", "Operations reports", "EduCraft Cashflow", "Bank details"]
 );
+expect("everyone opens EduCraft Cashflow, only the founder may publish", [EXEC_ROLES.map((r) => canAccessRoute(r, "/admin/settings/cashflow")), EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cashflow/publish", "POST")), EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cashflow", "GET"))], [[true, true, true, true], [true, false, false, false], [true, true, true, true]]);
 expect(
   "SUPER_ADMIN sees every tab",
   labelsFor("SUPER_ADMIN"),

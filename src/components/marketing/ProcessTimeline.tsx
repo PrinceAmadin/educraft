@@ -3,7 +3,7 @@
 import * as React from "react";
 import { DisplayHeading, Eyebrow, Section } from "@/components/primitives/Section";
 import { Reveal } from "@/components/primitives/Reveal";
-import { PROCESS } from "@/lib/marketing";
+import type { ProcessStep } from "@/lib/marketing";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * Every stage is fully legible at all times. Only the marker and the stage
  * title change state; body copy never dims below its readable value.
  */
-export function ProcessTimeline() {
+export function ProcessTimeline({ steps: PROCESS }: { steps: ProcessStep[] }) {
   const [active, setActive] = React.useState(0);
   const stageRefs = React.useRef<(HTMLLIElement | null)[]>([]);
 

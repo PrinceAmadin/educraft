@@ -1,8 +1,10 @@
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { ScrollNav } from "@/components/marketing/ScrollNav";
+import { getHqContact } from "@/lib/services/hq-contact";
 
-export default function PublicLayout({ children }: { children: React.ReactNode }) {
+export default async function PublicLayout({ children }: { children: React.ReactNode }) {
+  const hq = await getHqContact();
   return (
     <div className="flex min-h-screen flex-col bg-background">
       {/*
@@ -31,7 +33,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
 
       <ScrollNav />
 
-      <SiteFooter />
+      <SiteFooter hq={hq} />
     </div>
   );
 }

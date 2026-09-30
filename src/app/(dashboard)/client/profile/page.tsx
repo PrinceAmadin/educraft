@@ -8,6 +8,7 @@ import { FormSection } from "@/components/forms/FormSection";
 import { ClientPasswordForm } from "@/components/client/ClientPasswordForm";
 import { ClientAccountActions } from "@/components/client/ClientAccountActions";
 import { educraftWaLink } from "@/lib/whatsapp";
+import { getHqContact } from "@/lib/services/hq-contact";
 
 export const metadata: Metadata = { title: "Profile" };
 export const dynamic = "force-dynamic";
@@ -32,6 +33,7 @@ export default async function ClientProfilePage() {
     },
   });
   if (!client) redirect("/client/login");
+  const hq = await getHqContact();
 
   const details: { label: string; value: string | null; mono?: boolean }[] = [
     { label: "Client ID", value: client.clientId, mono: true },
@@ -62,7 +64,7 @@ export default async function ClientProfilePage() {
             ))}
         </dl>
         <a
-          href={educraftWaLink(`Hi EduCraft, please update my details. My Client ID is ${client.clientId}.`)}
+          href={educraftWaLink(hq.whatsapp, `Hi EduCraft, please update my details. My Client ID is ${client.clientId}.`)}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"

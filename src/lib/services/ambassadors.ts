@@ -6,9 +6,10 @@ import {
   isProvisional,
   PAID_ORDER,
   provisionalDeadline,
-  tierProgress,
 } from "@/lib/ambassador";
-import { getCommissionRates } from "@/lib/services/settings";
+import { tierProgress } from "@/lib/ambassadors/tier-utils";
+import { ratePercentForTier } from "@/lib/finance/commission-config";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import {
   MAX_SUB_AMBASSADORS,
   PARENT_ACTIVATION_TIERS,
@@ -140,7 +141,7 @@ export async function listAmbassadors(params: {
     db.ambassador.count({ where }),
   ]);
 
-  const rates = await getCommissionRates();
+  const { tiers } = (await getActiveCashflow()).structure;
   const rows: AmbassadorListRow[] = ambassadors.map((a) => {
     const m = computeMetrics(
       a.referredClients.map((c) => c._count.projects),
@@ -154,7 +155,7 @@ export async function listAmbassadors(params: {
       tier: a.tier,
       status: a.status,
       provisional: isProvisional(a),
-      rate: rates[a.tier],
+      rate: ratePercentForTier(a.tier, tiers),
       referrals: m.referrals,
       payingClients: m.payingClients,
       revenueGenerated: m.revenueGenerated,
@@ -281,7 +282,7 @@ export async function getAmbassadorDetail(id: string) {
     ambassador.projects
   );
 
-  const [payouts, parentCommission] = await Promise.all([
+  const [payouts, parentCommission, active] = await Promise.all([
     db.payment.findMany({
       where: {
         type: "AMBASSADOR_COMMISSION",
@@ -292,12 +293,13 @@ export async function getAmbassadorDetail(id: string) {
       select: { id: true, paymentId: true, amount: true, reference: true, status: true, date: true },
     }),
     ambassador.children.length > 0 ? getParentCommissionSummary(ambassador.id) : Promise.resolve(null),
+    getActiveCashflow(),
   ]);
 
   return {
     ambassador,
     metrics,
-    progress: tierProgress(ambassador.tier, metrics.payingClients),
+    progress: tierProgress(ambassador.tier, metrics.payingClients, active.structure.tiers),
     payouts,
     parentCommission,
   };

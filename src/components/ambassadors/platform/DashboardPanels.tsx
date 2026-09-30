@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { LuArrowRight, LuCircleAlert, LuInfo, LuZap } from "react-icons/lu";
 import type { AttentionCounts, TierSlice } from "@/lib/services/ambassador-platform/dashboard";
-import { tierCaption } from "@/lib/services/ambassador-platform/dashboard";
 import { TIER_BADGE } from "@/lib/ambassador";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +18,7 @@ export function TierBreakdown({ tiers, total }: { tiers: TierSlice[]; total: num
             <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${total > 0 ? t.percent : 0}%` }} />
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            {t.percent}% of the network · {tierCaption(t.tier)}
+            {t.percent}% of the network · {t.caption}
           </p>
         </Link>
       ))}

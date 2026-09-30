@@ -13,6 +13,7 @@ import { ActionLink } from "@/components/primitives/ActionLink";
 import { getServiceByCode } from "@/lib/services/intake";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { SERVICE_GROUPS, groupKeyFor, priceLabel, turnaroundLabel } from "@/lib/service-groups";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { formatNaira } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export async function generateMetadata({
  * beside what it costs and what happens next.
  */
 export default async function ServiceDetailPage({ params }: { params: { serviceCode: string } }) {
-  const service = await getServiceByCode(params.serviceCode);
+  const [service, hq] = await Promise.all([getServiceByCode(params.serviceCode), getHqContact()]);
   if (!service) notFound();
 
   const group = SERVICE_GROUPS.find((g) => g.key === groupKeyFor(service));
@@ -151,7 +152,7 @@ export default async function ServiceDetailPage({ params }: { params: { serviceC
 
       <p className="mt-10 flex items-center gap-2 text-[13px] text-muted-foreground">
         <LuUserCheck className="size-4 shrink-0" aria-hidden />
-        Questions first? Call or WhatsApp 07063421088.
+        Questions first? Call or WhatsApp {hq.phone}.
       </p>
     </div>
   );

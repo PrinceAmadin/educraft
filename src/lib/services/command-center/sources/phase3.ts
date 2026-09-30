@@ -1,7 +1,8 @@
 import type { AmbassadorTier } from "@prisma/client";
 import { db } from "@/lib/db";
-import { AMBASSADOR_TIERS, PLATINUM_QUARTERLY_BONUS_PER_CLIENT } from "@/lib/finance/commission-config";
-import { platinumBonusClients } from "@/lib/services/ambassador-platform/commissions";
+import { TIER_KEYS, TIER_LABELS } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { bonusFigures, platinumBonusClients } from "@/lib/services/ambassador-platform/commissions";
 import {
   RHYTHM_POSTS,
   contentConsistencyOf,
@@ -60,14 +61,14 @@ const CONTENT_LABELS: Record<string, string> = {
   OTHER: "Other post",
 };
 
-const TIER_ORDER: readonly string[] = AMBASSADOR_TIERS.map((t) => t.name);
+const TIER_ORDER: readonly string[] = TIER_KEYS;
 
 function isTier(v: string): v is TierKey {
   return TIER_ORDER.includes(v);
 }
 
 function tierLabel(tier: string): string {
-  return AMBASSADOR_TIERS.find((t) => t.name === tier)?.label ?? tier;
+  return isTier(tier) ? TIER_LABELS[tier] : tier;
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -229,10 +230,11 @@ export async function platinumBonusAlerts(now: Date): Promise<CcAlert[] | null> 
         ]);
         const recorded = new Set(records.map((r) => r.recipientId));
         // The tracker's own count: the stored tier, and an executive's clients only from the day they became Platinum.
-        const bonusOf = await platinumBonusClients(last, ambassadors);
+        const cashflow = (await getActiveCashflow()).structure;
+        const bonusOf = await platinumBonusClients(last, ambassadors, cashflow.tiers);
         const owed = ambassadors.filter((a) => (bonusOf.get(a.id)?.clients ?? 0) > 0 && !recorded.has(a.id));
         if (owed.length > 0) {
-          const amount = owed.reduce((sum, a) => sum + (bonusOf.get(a.id)?.clients ?? 0) * PLATINUM_QUARTERLY_BONUS_PER_CLIENT, 0);
+          const amount = owed.reduce((sum, a) => sum + (bonusOf.get(a.id)?.clients ?? 0) * bonusFigures(cashflow).platinumPerClient, 0);
           alerts.push({
             key: `platinum_bonus:unprocessed:${last.key}`,
             severity: "critical",

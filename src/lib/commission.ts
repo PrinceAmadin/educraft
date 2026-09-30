@@ -16,12 +16,11 @@ export const MIN_COMMISSION_RATE = 1;
 export const MAX_COMMISSION_RATE = 50;
 
 /**
- * The parent-ambassador rate (CLAUDE.md's "5% from sub's referrals") — a
- * global default in Settings, with a per-relationship override the admin can
- * set when linking a sub to their parent. 0 is allowed: it links them without
- * paying a commission yet.
+ * A per-relationship override of what a parent (Core) ambassador earns from a
+ * sub's job. Without one, the Core earns the cashflow structure's ambassador
+ * total less the sub's tier rate (`coreOverrideFor`); an override can only
+ * lower that. 0 is allowed: it links them without paying a commission yet.
  */
-export const DEFAULT_PARENT_COMMISSION_RATE = 5;
 export const MIN_PARENT_COMMISSION_RATE = 0;
 export const MAX_PARENT_COMMISSION_RATE = 50;
 

@@ -1,11 +1,9 @@
 /**
  * WhatsApp links. There is no WhatsApp API here: these open a chat with a
  * message already typed, and the person taps send (or attaches a file first).
- * Pure: safe in server and client components.
+ * Pure: safe in server and client components. EduCraft's own line comes from
+ * the HQ contact settings (`getHqContact()`), never from a number typed here.
  */
-
-/** EduCraft's own WhatsApp line, in international form. */
-export const EDUCRAFT_WHATSAPP = "2347063421088";
 
 /**
  * A Nigerian phone number as WhatsApp wants it: "0803 123 4567", "+234 803…",
@@ -24,9 +22,9 @@ export function waLink(number: string, message: string): string {
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
-/** A chat with EduCraft, e.g. from a client page. */
-export function educraftWaLink(message: string): string {
-  return waLink(EDUCRAFT_WHATSAPP, message);
+/** A chat with EduCraft's line (international digits from the HQ contact settings), e.g. from a client page. */
+export function educraftWaLink(whatsapp: string, message: string): string {
+  return waLink(whatsapp, message);
 }
 
 /** "OYEWOLE Tunde" -> "Oyewole": a greeting shouldn't shout. */

@@ -6,7 +6,7 @@ import { LuSearch, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { TIER_LADDER } from "@/lib/ambassador";
+import { TIER_KEYS, TIER_LABELS } from "@/lib/finance/cashflow-types";
 import { ACTIVITY_LABELS } from "@/lib/ambassadors/tier-utils";
 
 const FILTER_KEYS = ["tier", "school", "status", "role", "joinedFrom", "joinedTo", "q", "includeClosed"] as const;
@@ -66,9 +66,9 @@ export function DirectoryFilters({ schools }: { schools: { id: string; abbreviat
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
         <FilterSelect label="Tier" value={searchParams.get("tier") ?? ""} onChange={(v) => commit({ tier: v || null })}>
           <option value="">All tiers</option>
-          {TIER_LADDER.map((t) => (
-            <option key={t.tier} value={t.tier}>
-              {t.label}
+          {TIER_KEYS.map((t) => (
+            <option key={t} value={t}>
+              {TIER_LABELS[t]}
             </option>
           ))}
         </FilterSelect>

@@ -9,6 +9,7 @@ import { nextId } from "@/lib/services/projects";
 import { setAmbassadorParent, AmbassadorHierarchyError } from "@/lib/services/ambassadors";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import type { CreateDirectoryAmbassadorInput, DirectoryQuery } from "@/lib/validations/ambassador-platform";
 
 /**
@@ -128,12 +129,12 @@ export async function listDirectory(q: DirectoryQuery, now: Date = new Date()): 
         }
       : {}),
   };
-  const [found, execIndex] = await Promise.all([db.ambassador.findMany({ where, select: ROW_SELECT }), loadExecIndex()]);
+  const [found, execIndex, active] = await Promise.all([db.ambassador.findMany({ where, select: ROW_SELECT }), loadExecIndex(), getActiveCashflow()]);
   const all = found.map((a) => toRow(a, now, execIndex));
   let filtered = q.status ? all.filter((r) => r.activity === q.status) : all;
   if (q.near) {
     filtered = filtered.filter((r) => {
-      const left = toNextTier(r.tier, r.lifetimeConversions);
+      const left = toNextTier(r.tier, r.lifetimeConversions, active.structure.tiers);
       return left != null && left > 0 && left <= 2;
     });
   }
@@ -390,7 +391,7 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
   });
   if (!a) return null;
   const month = currentMonthKey(now);
-  const [quarter, commission, referrals, earnings, recruiter] = await Promise.all([
+  const [quarter, commission, referrals, earnings, recruiter, active] = await Promise.all([
     getChallengeView(id, month, now),
     commissionBreakdown(id, month),
     db.ambassadorReferral.findMany({
@@ -416,7 +417,9 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
         : a.recruitedBy && a.recruitedByType === "PARTNERSHIP"
           ? db.partnership.findUnique({ where: { id: a.recruitedBy }, select: { organisationName: true } }).then((x) => x?.organisationName ?? null)
           : Promise.resolve(null),
+    getActiveCashflow(),
   ]);
+  const tiers = active.structure.tiers;
   const conversions = a.lifetimeConversions;
   return {
     id: a.id,
@@ -436,8 +439,8 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
       conversionRate: a.lifetimeReferrals > 0 ? Math.round((conversions / a.lifetimeReferrals) * 100) : null,
       lifetimeEarnings: a.lifetimeEarnings,
       nextTier: nextTier(a.tier),
-      toNext: toNextTier(a.tier, conversions),
-      percent: tierProgressFor(a.tier, conversions),
+      toNext: toNextTier(a.tier, conversions, tiers),
+      percent: tierProgressFor(a.tier, conversions, tiers),
     },
     quarter: { label: quarter.label, conversions: quarter.conversions, challenge: quarter.challenge },
     subTeam: a.children.map((c) => ({ id: c.id, ambassadorId: c.ambassadorId, fullName: c.fullName, tier: c.tier, lifetimeConversions: c.lifetimeConversions, activity: activityStatus(c, now) })),
@@ -480,7 +483,11 @@ export async function listSubCandidates(coreId: string): Promise<{ id: string; a
  * the HOG who added them.
  */
 export async function createDirectoryAmbassador(input: CreateDirectoryAmbassadorInput, createdById: string): Promise<{ id: string; ambassadorId: string; referralCode: string }> {
-  const uni = await db.university.findUnique({ where: { id: input.universityId }, select: { id: true, abbreviation: true } });
+  const [uni, active] = await Promise.all([
+    db.university.findUnique({ where: { id: input.universityId }, select: { id: true, abbreviation: true } }),
+    getActiveCashflow(),
+  ]);
+  const tiers = active.structure.tiers;
   if (!uni) throw new DirectoryError("Pick a university from the list");
   const partnership = input.partnershipId ? await db.partnership.findUnique({ where: { id: input.partnershipId }, select: { id: true } }) : null;
   if (input.partnershipId && !partnership) throw new DirectoryError("That partnership no longer exists");
@@ -489,7 +496,7 @@ export async function createDirectoryAmbassador(input: CreateDirectoryAmbassador
     core = await db.ambassador.findUnique({ where: { id: input.coreAmbassadorId || "" }, select: { id: true, fullName: true, tier: true, parentId: true, status: true, _count: { select: { children: true } } } });
     if (!core) throw new DirectoryError("Pick the Core ambassador they work under");
     if (core.parentId) throw new DirectoryError(`${core.fullName} is a Sub-ambassador — a sub-team is one level deep`);
-    if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs ${subTeamThresholdLabel()} or more to take on Sub-ambassadors`);
+    if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs ${subTeamThresholdLabel(tiers)} or more to take on Sub-ambassadors`);
     if (core._count.children >= MAX_SUB_AMBASSADORS) throw new DirectoryError(`${core.fullName} already has ${MAX_SUB_AMBASSADORS} Sub-ambassadors, the maximum`);
     if (CLOSED_STATUSES.includes(core.status)) throw new DirectoryError(`${core.fullName} is ${core.status.toLowerCase()}`);
   }
@@ -507,7 +514,7 @@ export async function createDirectoryAmbassador(input: CreateDirectoryAmbassador
           department: input.department || null,
           level: input.level || null,
           referralCode: attempt === 0 && input.referralCode ? input.referralCode : buildReferralCode(input.fullName, uni.abbreviation),
-          tier: calculateTier(0),
+          tier: calculateTier(0, tiers),
           status: "Active",
           notes: input.notes || null,
           recruitedBy: partnership ? partnership.id : createdById,
@@ -575,10 +582,13 @@ export async function activateAmbassador(id: string): Promise<void> {
 
 /** Put `subId` under `coreId`: the Core must be Silver+ and have room; one level deep. */
 export async function addSubAmbassador(coreId: string, subId: string): Promise<void> {
-  const core = await db.ambassador.findUnique({ where: { id: coreId }, select: { id: true, fullName: true, tier: true, parentId: true } });
+  const [core, active] = await Promise.all([
+    db.ambassador.findUnique({ where: { id: coreId }, select: { id: true, fullName: true, tier: true, parentId: true } }),
+    getActiveCashflow(),
+  ]);
   if (!core) throw new DirectoryError("Core ambassador not found");
   if (core.parentId) throw new DirectoryError(`${core.fullName} is a Sub-ambassador themselves — a sub-team is one level deep`);
-  if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs ${subTeamThresholdLabel()} or more before taking on Sub-ambassadors`);
+  if (!isEligibleForSubTeam(core.tier)) throw new DirectoryError(`${core.fullName} is Bronze: a Core needs ${subTeamThresholdLabel(active.structure.tiers)} or more before taking on Sub-ambassadors`);
   try {
     await setAmbassadorParent(subId, { parentId: coreId });
   } catch (error) {

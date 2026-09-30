@@ -28,6 +28,7 @@ import { PrismaClient } from "@prisma/client";
 import { recountAmbassador } from "../src/lib/services/ambassador-platform/conversions";
 import { reconcileProjectPayouts } from "../src/lib/services/finance/payouts-engine";
 import { ambassadorTier } from "../src/lib/ambassadors/tier-utils";
+import { cashflowStructureSchema, toStructure } from "../src/lib/validations/cashflow";
 import { execForRecord } from "../src/lib/executive-identity";
 import { loadExecIndex } from "../src/lib/services/executives";
 
@@ -122,12 +123,15 @@ async function main() {
     const existing = await db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED" }, _count: { _all: true } });
     const converted = new Map(existing.map((e) => [e.ambassadorId, e._count._all]));
     for (const p of projects) if (p.downpaymentStatus === "Verified") converted.set(p.ambassadorId!, (converted.get(p.ambassadorId!) ?? 0) + 1);
-    // The same rule recountAmbassador applies: an executive's record stays Platinum.
+    // The same rule recountAmbassador applies: an executive's record stays Platinum, everyone else by the ladder in force.
     const execIndex = await loadExecIndex(db);
+    const activeVersion = await db.cashflowVersion.findFirst({ where: { effectiveTo: null }, orderBy: { versionNumber: "desc" } });
+    if (!activeVersion) throw new Error("No cashflow version has been published. Run `npm run cashflow:seed -- --apply` first.");
+    const tiers = toStructure(cashflowStructureSchema.parse(activeVersion.structure)).tiers;
     let moves = 0;
     for (const a of ambassadors) {
       const n = converted.get(a.id) ?? 0;
-      const tier = ambassadorTier(n, execForRecord(execIndex, a) != null);
+      const tier = ambassadorTier(n, execForRecord(execIndex, a) != null, tiers);
       if (tier !== a.tier) {
         moves += 1;
         console.log(`   would move ${a.fullName}: ${a.tier} → ${tier} (${n} conversion${n === 1 ? "" : "s"})`);

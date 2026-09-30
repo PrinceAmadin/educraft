@@ -6,75 +6,71 @@ import { LuCheck, LuCircleAlert, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { BonusMetrics, BonusRow } from "@/lib/services/finance/payouts-engine";
+import type { BonusMetricKey, BonusRule } from "@/lib/finance/cashflow-types";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
-/** The four bonuses the spec names, each judged by the CFO against the month's metric. */
-const ENTRIES: { key: string; recipientId: "HOG" | "COO"; label: string; reason: string; metric: (m: BonusMetrics) => string; met: (m: BonusMetrics) => boolean | null }[] = [
-  {
-    key: "hog-activation",
-    recipientId: "HOG",
-    label: "HOG bonus — activation rate above 30%",
-    reason: "Ambassador activation rate above 30%",
-    metric: (m) => (m.activationRate.rate == null ? "no active ambassadors" : `${m.activationRate.rate}% (${m.activationRate.activated} of ${m.activationRate.active} active ambassadors brought a paying client)`),
-    met: (m) => (m.activationRate.rate == null ? null : m.activationRate.rate > 30),
-  },
-  {
-    key: "coo-qa",
-    recipientId: "COO",
-    label: "COO bonus — QA first-pass rate above 85%",
-    reason: "QA first-pass rate above 85%",
-    metric: (m) => (m.qaFirstPassRate.rate == null ? "nothing approved this month" : `${m.qaFirstPassRate.rate}% (${m.qaFirstPassRate.firstPass} of ${m.qaFirstPassRate.approved} approved without a revision)`),
-    met: (m) => (m.qaFirstPassRate.rate == null ? null : m.qaFirstPassRate.rate > 85),
-  },
-  {
-    key: "coo-ontime",
-    recipientId: "COO",
-    label: "COO bonus — on-time delivery above 97%",
-    reason: "On-time delivery rate above 97%",
-    metric: (m) => (m.onTimeRate.rate == null ? "nothing delivered against a deadline" : `${m.onTimeRate.rate}% (${m.onTimeRate.onTime} of ${m.onTimeRate.delivered} delivered on time)`),
-    met: (m) => (m.onTimeRate.rate == null ? null : m.onTimeRate.rate > 97),
-  },
-  {
-    key: "coo-supervisor",
-    recipientId: "COO",
-    label: "COO bonus — zero supervisor rejections",
-    reason: "Zero supervisor rejections",
-    metric: (m) => `${m.supervisorRejections} supervisor correction${m.supervisorRejections === 1 ? "" : "s"} this month`,
-    met: (m) => m.supervisorRejections === 0,
-  },
-];
+/** How each Operations figure reads, beside the bonus it decides. */
+const METRIC_TEXT: Record<BonusMetricKey, (m: BonusMetrics) => string> = {
+  activationRate: (m) => (m.activationRate.rate == null ? "no active ambassadors" : `${m.activationRate.rate}% (${m.activationRate.activated} of ${m.activationRate.active} active ambassadors brought a paying client)`),
+  qaFirstPassRate: (m) => (m.qaFirstPassRate.rate == null ? "nothing approved this month" : `${m.qaFirstPassRate.rate}% (${m.qaFirstPassRate.firstPass} of ${m.qaFirstPassRate.approved} approved without a revision)`),
+  onTimeRate: (m) => (m.onTimeRate.rate == null ? "nothing delivered against a deadline" : `${m.onTimeRate.rate}% (${m.onTimeRate.onTime} of ${m.onTimeRate.delivered} delivered on time)`),
+  supervisorRejections: (m) => `${m.supervisorRejections} supervisor correction${m.supervisorRejections === 1 ? "" : "s"} this month`,
+};
+
+function metricValue(key: BonusMetricKey, m: BonusMetrics): number | null {
+  switch (key) {
+    case "activationRate":
+      return m.activationRate.rate;
+    case "qaFirstPassRate":
+      return m.qaFirstPassRate.rate;
+    case "onTimeRate":
+      return m.onTimeRate.rate;
+    case "supervisorRejections":
+      return m.supervisorRejections;
+  }
+}
+
+/** Met, not met, or unknown (no data this month / judged by hand). */
+function isMet(rule: BonusRule, m: BonusMetrics): boolean | null {
+  if (!rule.metric) return null;
+  const value = metricValue(rule.metric.key, m);
+  if (value == null) return null;
+  return rule.metric.op === ">" ? value > rule.metric.value : value === rule.metric.value;
+}
 
 /**
- * Performance bonuses are the CFO's judgment, never automatic: the metric
- * each one is judged on sits beside its entry so nobody has to ask
- * Operations for the numbers.
+ * Performance bonuses are the CFO's judgment, never automatic: each bonus of
+ * the cashflow structure is listed with the Operations figure it is judged on
+ * (where there is one) and its amount prefilled, so nobody has to ask
+ * Operations for the numbers or Settings for the figure.
  */
-export function BonusPanel({ month, metrics, bonuses, canAct }: { month: string; metrics: BonusMetrics; bonuses: BonusRow[]; canAct: boolean }) {
+export function BonusPanel({ month, metrics, bonuses, bonusRules, canAct }: { month: string; metrics: BonusMetrics; bonuses: BonusRow[]; bonusRules: BonusRule[]; canAct: boolean }) {
   const router = useRouter();
+  const entries = bonusRules.filter((r) => r.recipient === "hog" || r.recipient === "coo");
   const [amounts, setAmounts] = React.useState<Record<string, string>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [paying, setPaying] = React.useState<string | null>(null);
 
-  async function add(entry: (typeof ENTRIES)[number]) {
-    const amount = Number(amounts[entry.key] ?? "");
+  async function add(rule: BonusRule) {
+    const amount = Number(amounts[rule.key] ?? rule.amountNgn);
     if (!amount || amount <= 0) {
       setError("Enter the bonus amount first.");
       return;
     }
-    setBusy(entry.key);
+    setBusy(rule.key);
     setError(null);
     try {
       const res = await fetch("/api/admin/finance/payouts/bonus", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, recipientId: entry.recipientId, amount, reason: entry.reason }),
+        body: JSON.stringify({ month, recipientId: rule.recipient === "hog" ? "HOG" : "COO", amount, reason: rule.condition || rule.label }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(data?.error ?? "The bonus could not be added.");
       }
-      setAmounts((a) => ({ ...a, [entry.key]: "" }));
+      setAmounts((a) => ({ ...a, [rule.key]: "" }));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "The bonus could not be added.");
@@ -106,19 +102,25 @@ export function BonusPanel({ month, metrics, bonuses, canAct }: { month: string;
         Performance bonuses
       </h2>
       <p className="mt-1 text-[13px] text-muted-foreground">
-        Entered by hand after reviewing the month. The figure each bonus is judged on is shown beside it, from Operations data.
+        Entered by hand after reviewing the month. The figure each bonus is judged on is shown beside it, from Operations data; the amounts come from EduCraft Cashflow.
       </p>
 
+      {entries.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">No executive bonuses are set up in the cashflow structure.</p> : null}
       <ul className="mt-4 divide-y divide-border/70">
-        {ENTRIES.map((entry) => {
-          const met = entry.met(metrics);
+        {entries.map((rule) => {
+          const met = isMet(rule, metrics);
+          const who = rule.recipient === "hog" ? "HOG" : "COO";
           return (
-            <li key={entry.key} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
+            <li key={rule.key} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-x-6">
               <div className="min-w-0 sm:flex-1">
-                <p className="text-sm text-foreground">{entry.label}</p>
-                <p className={cn("mt-0.5 text-xs", met === true ? "text-success" : met === false ? "text-muted-foreground" : "text-muted-foreground")}>
+                <p className="text-sm text-foreground">
+                  {who} bonus — {rule.label}
+                </p>
+                <p className={cn("mt-0.5 text-xs", met === true ? "text-success" : "text-muted-foreground")}>
                   {met === true ? "Met · " : met === false ? "Not met · " : ""}
-                  {entry.metric(metrics)}
+                  {rule.metric ? METRIC_TEXT[rule.metric.key](metrics) : "Judged by hand"}
+                  {" · "}
+                  {formatNaira(rule.amountNgn)} {rule.cadence}
                 </p>
               </div>
               {canAct ? (
@@ -128,14 +130,14 @@ export function BonusPanel({ month, metrics, bonuses, canAct }: { month: string;
                     inputMode="numeric"
                     min={0}
                     step={1000}
-                    aria-label={`${entry.label} amount`}
-                    placeholder="₦"
-                    value={amounts[entry.key] ?? ""}
-                    onChange={(e) => setAmounts((a) => ({ ...a, [entry.key]: e.target.value }))}
+                    aria-label={`${rule.label} amount`}
+                    placeholder={String(rule.amountNgn)}
+                    value={amounts[rule.key] ?? ""}
+                    onChange={(e) => setAmounts((a) => ({ ...a, [rule.key]: e.target.value }))}
                     className="h-10 min-w-0 flex-1 text-sm sm:w-32 sm:flex-none"
                   />
-                  <Button size="sm" variant="outline" disabled={busy === entry.key} onClick={() => add(entry)}>
-                    {busy === entry.key ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+                  <Button size="sm" variant="outline" disabled={busy === rule.key} onClick={() => add(rule)}>
+                    {busy === rule.key ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
                     Add bonus
                   </Button>
                 </div>

@@ -1,6 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { COMMISSION_RATES, annualProfitShare, founderDrawFor, type AnnualProfitShare, type FounderDrawTier } from "@/lib/finance/commission-config";
+import { annualProfitShare, founderDrawFor, founderDrawTiers, type AnnualProfitShare, type FounderDrawTier } from "@/lib/finance/commission-config";
+import type { CashflowStructure } from "@/lib/finance/cashflow-types";
+import { cashflowAt } from "@/lib/services/cashflow";
 import { getBucketBalances } from "@/lib/services/finance/buckets";
 import { getFinanceSettings } from "@/lib/services/finance/settings";
 import { currentMonthKey, getSurplusAnalysis, monthLabel, monthRange, netRevenueForMonths, semesterOf, type SurplusAnalysis } from "@/lib/services/finance/surplus";
@@ -44,6 +46,16 @@ export async function founderNames(): Promise<FounderNames> {
 
 // ── Monthly draws ────────────────────────────────────────────────────────
 
+/** The last instant of a month (UTC): the draw tiers a month is judged by are the ones in force when it closed. */
+function monthEnd(month: string): Date {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0, 23, 59, 59, 999));
+}
+
+async function structureForMonth(month: string): Promise<CashflowStructure> {
+  return (await cashflowAt(monthEnd(month))).structure;
+}
+
 export interface TierRow extends FounderDrawTier {
   current: boolean;
 }
@@ -76,6 +88,8 @@ export interface MonthlyDrawPanel {
   funded: boolean;
   shortfall: number;
   remainingAfterDraws: number;
+  /** What the bucket could pay each founder without going below zero (balance ÷ 2). */
+  sustainableEach: number;
   rows: DrawRow[];
 }
 
@@ -87,14 +101,15 @@ async function monthlyDistributed(month: string) {
 }
 
 export async function getMonthlyDrawPanel(month: string): Promise<MonthlyDrawPanel> {
-  const [monthRevenue, names, balances, inflowAgg, distributed] = await Promise.all([
+  const [monthRevenue, names, balances, inflowAgg, distributed, s] = await Promise.all([
     netRevenueForMonths([month]),
     founderNames(),
     getBucketBalances(),
     db.bucketTransaction.aggregate({ where: { bucketType: "FOUNDER_DISTRIBUTION", amount: { gt: 0 }, month }, _sum: { amount: true } }),
     monthlyDistributed(month),
+    structureForMonth(month),
   ]);
-  const tier = founderDrawFor(monthRevenue);
+  const tier = founderDrawFor(monthRevenue, s);
   const rows: DrawRow[] = RECIPIENTS.map((recipient) => {
     const mine = distributed.filter((d) => d.recipient === recipient);
     const paid = Math.round(mine.reduce((s, d) => s + d.amount, 0));
@@ -117,7 +132,7 @@ export async function getMonthlyDrawPanel(month: string): Promise<MonthlyDrawPan
     monthLabel: monthLabel(month),
     monthRevenue,
     tier,
-    tiers: COMMISSION_RATES.founderDrawTiers.map((t) => ({ ...t, current: t.minRevenue === tier.minRevenue })),
+    tiers: founderDrawTiers(s).map((t) => ({ ...t, current: t.minRevenue === tier.minRevenue })),
     drawEach: tier.drawEach,
     bucketBalance: balances.founderDistribution,
     bucketInflowThisMonth: Math.round(inflowAgg._sum.amount ?? 0),
@@ -127,6 +142,7 @@ export async function getMonthlyDrawPanel(month: string): Promise<MonthlyDrawPan
     funded: balances.founderDistribution >= outstandingTotal,
     shortfall: Math.max(0, outstandingTotal - balances.founderDistribution),
     remainingAfterDraws: balances.founderDistribution - outstandingTotal,
+    sustainableEach: Math.max(0, Math.floor(balances.founderDistribution / 2)),
     rows,
   };
 }
@@ -141,9 +157,9 @@ export interface CurrentTier {
 }
 
 export async function getCurrentTier(month: string = currentMonthKey()): Promise<CurrentTier> {
-  const monthRevenue = await netRevenueForMonths([month]);
-  const tier = founderDrawFor(monthRevenue);
-  const tiers = COMMISSION_RATES.founderDrawTiers;
+  const [monthRevenue, s] = await Promise.all([netRevenueForMonths([month]), structureForMonth(month)]);
+  const tier = founderDrawFor(monthRevenue, s);
+  const tiers = founderDrawTiers(s);
   const idx = tiers.findIndex((t) => t.minRevenue === tier.minRevenue);
   const next = idx >= 0 && idx < tiers.length - 1 ? tiers[idx + 1] : null;
   return { month, monthRevenue, tier, next, toNext: next ? Math.max(0, next.minRevenue - monthRevenue) : null };
@@ -189,7 +205,10 @@ export async function distributeMonthlyDraws(input: DistributeInput): Promise<Di
   if (input.month > currentMonthKey()) throw new DrawError("That month has not started yet");
   const panel = await getMonthlyDrawPanel(input.month);
   const wanted = input.recipients ?? RECIPIENTS;
-  if (input.amountEach != null && !input.isFounder) throw new DrawError("Only the founder may distribute a partial amount");
+  // The CFO may choose a smaller figure the bucket can sustain (balance ÷ 2 each); only the founder may go beyond that (founder, 30 Sept 2026).
+  if (input.amountEach != null && !input.isFounder && input.amountEach > panel.sustainableEach) {
+    throw new DrawError(`Founder Distribution can sustain ${formatNaira(panel.sustainableEach)} each; only the founder may distribute more`);
+  }
 
   const plan = panel.rows
     .filter((r) => wanted.includes(r.recipient))
@@ -477,14 +496,15 @@ export interface DrawHistoryRow {
 export async function getDrawHistory(year: number): Promise<DrawHistoryRow[]> {
   const current = currentMonthKey();
   const months = monthRange(`${year}-01`, `${year}-12`).filter((m) => m <= current);
-  const [draws, revenues] = await Promise.all([
+  const [draws, revenues, structures] = await Promise.all([
     db.founderDraw.findMany({ where: { month: { in: months }, status: "DISTRIBUTED" }, select: { month: true, drawType: true, amount: true } }),
     Promise.all(months.map((m) => netRevenueForMonths([m]))),
+    Promise.all(months.map((m) => structureForMonth(m))),
   ]);
   return months
     .map((month, i) => {
       const revenue = revenues[i];
-      const tier = founderDrawFor(revenue);
+      const tier = founderDrawFor(revenue, structures[i]);
       const mine = draws.filter((d) => d.month === month);
       const distributed = Math.round(mine.filter((d) => d.drawType === "MONTHLY" || d.drawType === "MONTHLY_TOPUP").reduce((s, d) => s + d.amount, 0));
       const semesterBonus = Math.round(mine.filter((d) => d.drawType === "SEMESTER_BONUS").reduce((s, d) => s + d.amount, 0));

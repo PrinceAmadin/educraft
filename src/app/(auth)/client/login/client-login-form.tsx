@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CLIENT_ID_EXAMPLE, normalizeClientIdInput } from "@/lib/id-format";
-import { EDUCRAFT_WHATSAPP_URL, formatWait, type CodeRequestResult } from "@/lib/code-request";
+import { formatWait, type CodeRequestResult } from "@/lib/code-request";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const RESEND_SECONDS = 60;
@@ -24,16 +24,18 @@ const IN_APP_BROWSER = /WhatsApp|FBAN|FBAV|Instagram/i;
 
 const inlineLink = "font-medium underline underline-offset-4";
 
-const contactUs = (
-  <a href={EDUCRAFT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className={inlineLink}>
+/** "message EduCraft on WhatsApp", opening EduCraft's line (the HQ contact settings, passed in by the page). */
+const contactLink = (whatsappUrl: string) => (
+  <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className={inlineLink}>
     message EduCraft on WhatsApp
   </a>
 );
 
 /** What to tell a client when no code went out. `typed` is the Client ID or email they entered (already tidied). */
-function refusal(result: CodeRequestResult, typed: string): Alert {
+function refusal(result: CodeRequestResult, typed: string, whatsappUrl: string): Alert {
   const isEmail = typed.includes("@");
   const shown = <strong className="font-medium [overflow-wrap:anywhere]">{typed}</strong>;
+  const contactUs = contactLink(whatsappUrl);
   switch (result.status) {
     case "invalid":
       return { tone: "error", body: `Enter your Client ID (like ${CLIENT_ID_EXAMPLE}) or your email.` };
@@ -96,7 +98,16 @@ function refusal(result: CodeRequestResult, typed: string): Alert {
  * typed address, and proves ownership before a password can be set. Asking for
  * a code says plainly when the ID or email is not registered.
  */
-export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { initialId?: string; callbackUrl?: string }) {
+export function ClientLoginForm({
+  initialId = "",
+  callbackUrl = "/client",
+  whatsappUrl,
+}: {
+  initialId?: string;
+  callbackUrl?: string;
+  /** EduCraft's WhatsApp chat link (HQ contact settings). */
+  whatsappUrl: string;
+}) {
   const router = useRouter();
   const [step, setStep] = React.useState<Step>("signin");
   const [identifier, setIdentifier] = React.useState(initialId);
@@ -207,7 +218,7 @@ export function ClientLoginForm({ initialId = "", callbackUrl = "/client" }: { i
       } else {
         // Back to the ID field, so the message sits next to what they typed.
         setStep("request");
-        setAlert(refusal(result, id));
+        setAlert(refusal(result, id, whatsappUrl));
       }
     } catch {
       fail("Something went wrong. Please try again.");

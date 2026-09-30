@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { executiveLegs, workerLeg } from "@/lib/finance/commission-config";
+import { cashflowForProject } from "@/lib/services/cashflow";
 import { AI_COST_PER_PROJECT } from "@/lib/command-center/rag";
 import { currentMonthKey, monthBounds, monthLongLabel, shiftMonth } from "@/lib/command-center/time";
 import type {
@@ -97,6 +98,8 @@ async function cashBasisLegs(start: Date, end: Date): Promise<CashLegs> {
             parentCommission: true,
             ambassadorId: true,
             isProBono: true,
+            createdAt: true,
+            cashflowVersionId: true,
           },
         });
 
@@ -108,8 +111,10 @@ async function cashBasisLegs(start: Date, end: Date): Promise<CashLegs> {
     // Share of the project's price that this month's cash represents (a refund month can be negative).
     const f = p.price > 0 ? (moneyIn.get(p.id) ?? 0) / p.price : 0;
     if (f === 0) continue;
-    const exec = executiveLegs(p);
-    worker += workerLeg(p) * f;
+    // Each project's legs under its own cashflow version (cached per version, so this is one read per version).
+    const s = await cashflowForProject(p);
+    const exec = executiveLegs(p, s);
+    worker += workerLeg(p, s) * f;
     // Ambassador 15% in total = the referrer's leg + the Core override, both frozen on the project at allocation.
     ambassador += ((p.ambassadorCommission ?? 0) + (p.parentCommission ?? 0)) * f;
     hog += exec.hog * f;

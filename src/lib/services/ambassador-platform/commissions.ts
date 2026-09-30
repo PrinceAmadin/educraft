@@ -1,7 +1,8 @@
 import type { AmbassadorTier, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { activityStatus, platinumBonusClientCount, platinumByOffice, TOP_TIER, TOP_TIER_MIN_CONVERSIONS, type ActivityStatus } from "@/lib/ambassadors/tier-utils";
-import { PLATINUM_QUARTERLY_BONUS_PER_CLIENT, QUARTERLY_CHALLENGE } from "@/lib/finance/commission-config";
+import { activityStatus, platinumBonusClientCount, platinumByOffice, TOP_TIER, topTierMinConversions, type ActivityStatus, type TierLadder } from "@/lib/ambassadors/tier-utils";
+import type { CashflowStructure } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { getPayoutMonth, type AmbassadorPayoutGroup } from "@/lib/services/finance/payouts-engine";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { formatNaira } from "@/lib/utils";
@@ -18,9 +19,27 @@ import type { CommissionHistoryQuery } from "@/lib/validations/ambassador-platfo
  * project, one `bonusKey` per bonus), paid through the same queue.
  */
 
-export const CHALLENGE_TARGET = QUARTERLY_CHALLENGE.target;
-export const CHALLENGE_BONUS = QUARTERLY_CHALLENGE.bonus;
 const DAY = 86_400_000;
+
+/** The ambassador bonus figures of a cashflow structure (the Platinum per-client bonus and the quarterly challenge). */
+export interface BonusFigures {
+  platinumPerClient: number;
+  /** Infinity when the structure has no challenge: nobody completes it. */
+  challengeTarget: number;
+  challengeBonus: number;
+  challengeExtensionDays: number;
+}
+
+export function bonusFigures(s: CashflowStructure): BonusFigures {
+  const platinum = s.bonuses.find((b) => b.key === "platinum_per_client");
+  const challenge = s.bonuses.find((b) => b.key === "quarterly_challenge");
+  return {
+    platinumPerClient: platinum?.amountNgn ?? 0,
+    challengeTarget: challenge?.target ?? Number.POSITIVE_INFINITY,
+    challengeBonus: challenge?.amountNgn ?? 0,
+    challengeExtensionDays: challenge?.extensionDays ?? 0,
+  };
+}
 
 // ── Quarter keys: the platform writes "Q3-2026"; finance's quarterOf() says "2026-Q3" ──
 
@@ -280,6 +299,8 @@ export interface QuarterTracker {
   canProcess: boolean;
   rows: TrackerRow[];
   totals: { platinumEarned: number; challengeEarned: number; ambassadorsInChallenge: number; processed: number };
+  /** The bonus figures of the structure in force, for the page's captions. */
+  figures: BonusFigures;
 }
 
 const CLOSED = ["Suspended", "Terminated"];
@@ -299,12 +320,13 @@ export interface PlatinumBonusCount {
 export async function platinumBonusClients(
   quarter: { start: Date; end: Date },
   ambassadors: readonly { id: string; tier: AmbassadorTier; lifetimeConversions: number }[],
+  tiers: TierLadder,
   tx: Prisma.TransactionClient | typeof db = db
 ): Promise<Map<string, PlatinumBonusCount>> {
   const platinum = ambassadors.filter((a) => a.tier === TOP_TIER);
   const out = new Map<string, PlatinumBonusCount>();
   if (platinum.length === 0) return out;
-  const byOffice = new Set(platinum.filter((a) => platinumByOffice(a.tier, a.lifetimeConversions)).map((a) => a.id));
+  const byOffice = new Set(platinum.filter((a) => platinumByOffice(a.tier, a.lifetimeConversions, tiers)).map((a) => a.id));
   const [converted, promotions] = await Promise.all([
     tx.ambassadorReferral.findMany({
       where: { ambassadorId: { in: platinum.map((a) => a.id) }, status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } },
@@ -334,16 +356,19 @@ function bonusState(earned: number, ended: boolean, record: { status: string } |
 export async function getQuarterTracker(key: string = currentQuarterKey(), now: Date = new Date()): Promise<QuarterTracker> {
   const quarter = quarterFromKey(key);
   const ended = now.getTime() >= quarter.end.getTime();
-  const [ambassadors, conversions, challenges, records, execIndex] = await Promise.all([
+  const [ambassadors, conversions, challenges, records, execIndex, active] = await Promise.all([
     db.ambassador.findMany({ where: { status: { notIn: CLOSED } }, select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, ...EXEC_RECORD_SELECT } }),
     db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } }, _count: { _all: true } }),
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: key } }),
     db.payoutRecord.findMany({ where: { leg: "BONUS", OR: [{ bonusKey: { startsWith: `platinum:${key}:` } }, { bonusKey: { startsWith: `challenge:${key}:` } }], status: { not: "CANCELLED" } }, select: { bonusKey: true, status: true, amount: true } }),
     loadExecIndex(),
+    getActiveCashflow(),
   ]);
+  const tiers = active.structure.tiers;
+  const figures = bonusFigures(active.structure);
   const convOf = new Map(conversions.map((c) => [c.ambassadorId, c._count._all]));
   const recordOf = new Map(records.map((r) => [r.bonusKey!, r]));
-  const bonusOf = await platinumBonusClients(quarter, ambassadors);
+  const bonusOf = await platinumBonusClients(quarter, ambassadors, tiers);
 
   // Extension conversions: a one-week extension lets conversions in the extra week count for the challenge.
   const extended = challenges.filter((c) => c.extensionGranted && c.extensionEndDate);
@@ -359,17 +384,17 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
       const inQuarter = convOf.get(a.id) ?? 0;
       const ch = challenges.find((c) => c.ambassadorId === a.id);
       const challengeCount = inQuarter + (extraConv.get(a.id) ?? 0);
-      const target = ch?.targetCount ?? CHALLENGE_TARGET;
+      const target = ch?.targetCount ?? figures.challengeTarget;
       const completed = ch?.completed || challengeCount >= target;
       const challengeEnd = ch?.extensionGranted && ch.extensionEndDate ? ch.extensionEndDate : quarter.end;
       const challengeEnded = now.getTime() >= challengeEnd.getTime();
       const bonus = bonusOf.get(a.id);
       const isPlatinum = a.tier === TOP_TIER;
       const platinumClients = bonus?.clients ?? 0;
-      const platinumEarned = isPlatinum ? platinumClients * PLATINUM_QUARTERLY_BONUS_PER_CLIENT : 0;
+      const platinumEarned = isPlatinum ? platinumClients * figures.platinumPerClient : 0;
       // An executive promoted during this quarter: say from when clients count.
       const countsFrom = bonus?.countsFrom && bonus.countsFrom.getTime() > quarter.start.getTime() ? bonus.countsFrom.toISOString() : null;
-      const challengeBonus = completed ? (ch?.bonusAmount ?? CHALLENGE_BONUS) : 0;
+      const challengeBonus = completed ? (ch?.bonusAmount ?? figures.challengeBonus) : 0;
       return {
         id: a.id,
         code: a.ambassadorId,
@@ -381,7 +406,7 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
           clients: isPlatinum ? platinumClients : 0,
           earned: platinumEarned,
           state: isPlatinum ? bonusState(platinumEarned, ended, recordOf.get(`platinum:${key}:${a.id}`)) : "NOT_EARNED",
-          toPlatinum: isPlatinum ? null : Math.max(0, TOP_TIER_MIN_CONVERSIONS - a.lifetimeConversions),
+          toPlatinum: isPlatinum ? null : Math.max(0, topTierMinConversions(tiers) - a.lifetimeConversions),
           countsFrom,
         },
         challenge: {
@@ -414,6 +439,7 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
       ambassadorsInChallenge: rows.filter((r) => r.challenge.count > 0).length,
       processed: records.length,
     },
+    figures,
   };
 }
 
@@ -432,7 +458,7 @@ export async function processQuarterBonuses(key: string, byUserId: string, now: 
   const month = tracker.quarter.payoutMonth;
   for (const r of tracker.rows) {
     const wanted: { bonusKey: string; amount: number; basis: string }[] = [];
-    if (r.platinum.earned > 0) wanted.push({ bonusKey: `platinum:${key}:${r.id}`, amount: r.platinum.earned, basis: `Platinum quarterly bonus ${tracker.quarter.label}: ${r.platinum.clients} client${r.platinum.clients === 1 ? "" : "s"} × ${formatNaira(PLATINUM_QUARTERLY_BONUS_PER_CLIENT)}` });
+    if (r.platinum.earned > 0) wanted.push({ bonusKey: `platinum:${key}:${r.id}`, amount: r.platinum.earned, basis: `Platinum quarterly bonus ${tracker.quarter.label}: ${r.platinum.clients} client${r.platinum.clients === 1 ? "" : "s"} × ${formatNaira(tracker.figures.platinumPerClient)}` });
     if (r.challenge.bonus > 0) wanted.push({ bonusKey: `challenge:${key}:${r.id}`, amount: r.challenge.bonus, basis: `Quarterly challenge ${tracker.quarter.label}: ${r.challenge.count} clients (target ${r.challenge.target})` });
     for (const w of wanted) {
       const existing = await db.payoutRecord.findUnique({ where: { bonusKey: w.bonusKey }, select: { id: true } });
@@ -465,7 +491,9 @@ export async function grantChallengeExtension(ambassadorId: string, key: string,
   if (!ambassador) throw new CommissionsError("Ambassador not found");
   const existing = await db.ambassadorQuarterlyChallenge.findUnique({ where: { ambassadorId_quarter: { ambassadorId, quarter: key } } });
   if (existing?.extensionGranted) throw new CommissionsError(`${ambassador.fullName} already has their one extension for ${quarter.label}`);
-  const extensionEndDate = new Date(quarter.end.getTime() + QUARTERLY_CHALLENGE.extensionDays * DAY);
+  const { challengeExtensionDays } = bonusFigures((await getActiveCashflow()).structure);
+  if (challengeExtensionDays <= 0) throw new CommissionsError("The quarterly challenge has no extension in the cashflow structure");
+  const extensionEndDate = new Date(quarter.end.getTime() + challengeExtensionDays * DAY);
   const count = await db.ambassadorReferral.count({ where: { ambassadorId, status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } } });
   await db.ambassadorQuarterlyChallenge.upsert({
     where: { ambassadorId_quarter: { ambassadorId, quarter: key } },

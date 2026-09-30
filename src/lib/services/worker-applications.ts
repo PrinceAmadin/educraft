@@ -4,6 +4,7 @@ import { Prisma, type ApplicationStatus, type WorkerApplication } from "@prisma/
 import { db } from "@/lib/db";
 import { nextId } from "@/lib/services/projects";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { alertWorkerApplication } from "@/lib/services/team-alerts";
 import { sendMail } from "@/lib/mailer";
 import { siteUrl } from "@/lib/site-url";
@@ -359,6 +360,7 @@ export async function approveWorkerApplication(
     // land on their ambassador dashboard. Signed out, it goes via /login.
     loginUrl: `${siteUrl()}/worker`,
     existingLogin: Boolean(login?.isActive),
+    hq: await getHqContact(),
   });
   waitUntil(
     sendMail({ to: application.email, ...mail }).then((sent) => {
@@ -403,7 +405,7 @@ export async function rejectWorkerApplication(
 
   // The applicant hears the outcome by email (the note stays internal). Sent
   // after the response; a failed send never undoes the rejection.
-  const mail = applicationRejectedEmail({ fullName: application.fullName, role: "worker" });
+  const mail = applicationRejectedEmail({ fullName: application.fullName, role: "worker", hq: await getHqContact() });
   waitUntil(
     sendMail({ to: application.email, ...mail }).then((sent) => {
       if (sent.ok) console.info("[rejectWorkerApplication] decision email sent");

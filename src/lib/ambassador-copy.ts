@@ -1,4 +1,4 @@
-import type { TierProgress } from "@/lib/ambassador";
+import type { TierProgress } from "@/lib/ambassadors/tier-utils";
 
 /**
  * Plain-language wording for the ambassador portal.

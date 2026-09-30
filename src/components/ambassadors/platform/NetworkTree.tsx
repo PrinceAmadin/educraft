@@ -10,7 +10,7 @@ import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { RoleChip } from "@/components/layout/RoleChip";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { TIER_LADDER } from "@/lib/ambassador";
+import { TIER_KEYS, TIER_LABELS } from "@/lib/finance/cashflow-types";
 import type { NetworkCluster, NetworkMap, NetworkPerson, NetworkSolo } from "@/lib/services/ambassador-platform/network";
 import { cn } from "@/lib/utils";
 
@@ -99,9 +99,9 @@ export function NetworkTree({ data }: { data: NetworkMap }) {
           <span className="mb-1 block meta-label">Tier</span>
           <Select value={tier} onChange={(e) => setTier(e.target.value)} className="h-11 text-sm" aria-label="Filter by tier">
             <option value="">All tiers</option>
-            {TIER_LADDER.map((t) => (
-              <option key={t.tier} value={t.tier}>
-                {t.label}
+            {TIER_KEYS.map((t) => (
+              <option key={t} value={t}>
+                {TIER_LABELS[t]}
               </option>
             ))}
           </Select>

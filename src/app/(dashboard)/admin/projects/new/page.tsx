@@ -5,13 +5,15 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { NewProjectForm } from "@/components/projects/NewProjectForm";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { workersPercent } from "@/lib/finance/commission-config";
 
 export const metadata: Metadata = { title: "New project" };
 export const dynamic = "force-dynamic";
 
 export default async function NewProjectPage() {
   const session = await auth();
-  const [universities, services, ambassadors] = await Promise.all([
+  const [universities, services, ambassadors, active] = await Promise.all([
     db.university.findMany({
       orderBy: { name: "asc" },
       select: { id: true, name: true, abbreviation: true },
@@ -27,6 +29,7 @@ export default async function NewProjectPage() {
         estimatedDays: true,
         intakeFormTemplate: true,
         expressDeliverySurcharge: true,
+        downpaymentPercentage: true,
         variants: {
           where: { isActive: true },
           orderBy: { sortOrder: "asc" },
@@ -35,6 +38,7 @@ export default async function NewProjectPage() {
       },
     }),
     listAllocatableAmbassadors(),
+    getActiveCashflow(),
   ]);
 
   return (
@@ -61,6 +65,7 @@ export default async function NewProjectPage() {
         universities={universities}
         services={services}
         ambassadors={ambassadors}
+        workersPercent={workersPercent(active.structure)}
         canProBono={session?.user?.role === "SUPER_ADMIN"}
       />
     </div>

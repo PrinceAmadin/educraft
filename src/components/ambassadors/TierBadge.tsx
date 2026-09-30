@@ -1,9 +1,9 @@
 import type { AmbassadorTier } from "@prisma/client";
-import { TIER_BADGE, TIER_LADDER } from "@/lib/ambassador";
+import { TIER_BADGE } from "@/lib/ambassador";
+import { TIER_LABELS } from "@/lib/finance/cashflow-types";
 import { cn } from "@/lib/utils";
 
 export function TierBadge({ tier, className }: { tier: AmbassadorTier; className?: string }) {
-  const label = TIER_LADDER.find((t) => t.tier === tier)?.label ?? tier;
   return (
     <span
       className={cn(
@@ -12,7 +12,7 @@ export function TierBadge({ tier, className }: { tier: AmbassadorTier; className
         className
       )}
     >
-      {label}
+      {TIER_LABELS[tier] ?? tier}
     </span>
   );
 }

@@ -4,7 +4,8 @@ import { badgesFor, isBackFromDormant, isPromotion, type Badge } from "@/lib/amb
 import { spotlightMessage } from "@/lib/ambassadors/spotlight";
 import { shortDay, weekEnd, weekStart } from "@/lib/ambassadors/weeks";
 import { currentMonthKey, monthLabel } from "@/lib/services/finance/surplus";
-import { CHALLENGE_TARGET, currentQuarterKey, quarterFromKey } from "@/lib/services/ambassador-platform/commissions";
+import { bonusFigures, currentQuarterKey, quarterFromKey } from "@/lib/services/ambassador-platform/commissions";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { execRoleForRecord } from "@/lib/executive-identity";
 import type { ExecRole } from "@/lib/rbac";
 import { loadExecIndex } from "@/lib/services/executives";
@@ -130,11 +131,14 @@ export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeCo
   const qKey = currentQuarterKey(now);
   const quarter = quarterFromKey(qKey);
   const d7 = new Date(now.getTime() - 7 * DAY);
-  const [challenges, tierLogs, previous] = await Promise.all([
+  const [challenges, tierLogs, previous, active] = await Promise.all([
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: qKey, ambassadorId: { in: ids } }, select: { ambassadorId: true, targetCount: true, completed: true, extensionGranted: true, extensionEndDate: true } }),
     db.ambassadorTierLog.findMany({ where: { ambassadorId: { in: ids }, createdAt: { gte: mStart } }, orderBy: { createdAt: "asc" }, select: { ambassadorId: true, fromTier: true, toTier: true } }),
     db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { ambassadorId: { in: ids }, status: "CONVERTED", convertedAt: { lt: mStart } }, _max: { convertedAt: true } }),
+    getActiveCashflow(),
   ]);
+  const figures = bonusFigures(active.structure);
+  const tiers = active.structure.tiers;
   const latestExtension = challenges.reduce<Date | null>((m, c) => (c.extensionGranted && c.extensionEndDate && (!m || c.extensionEndDate > m) ? c.extensionEndDate : m), null);
   const windowStart = new Date(Math.min(quarter.start.getTime(), mStart.getTime(), d7.getTime()));
   const windowEnd = latestExtension && latestExtension > quarter.end ? latestExtension : new Date(Math.max(quarter.end.getTime(), now.getTime() + 1));
@@ -148,7 +152,7 @@ export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeCo
     const ch = challenges.find((c) => c.ambassadorId === a.id);
     const challengeEnd = ch?.extensionGranted && ch.extensionEndDate ? ch.extensionEndDate : quarter.end;
     const inChallenge = mine.filter((r) => r.convertedAt! >= quarter.start && r.convertedAt! < challengeEnd).length;
-    const target = ch?.targetCount ?? CHALLENGE_TARGET;
+    const target = ch?.targetCount ?? figures.challengeTarget;
     const thisMonth = mine.filter((r) => r.convertedAt! >= mStart).map((r) => r.convertedAt!).sort((x, y) => x.getTime() - y.getTime());
     // Tier logs store the tier names as plain strings.
     const promotions = tierLogs.filter((t) => t.ambassadorId === a.id && isPromotion(t.fromTier as AmbassadorTier, t.toTier as AmbassadorTier));
@@ -161,7 +165,7 @@ export async function badgesForAmbassadors(ambassadors: { id: string; lifetimeCo
         tierUpThisMonthTo: promotions.length ? (promotions[promotions.length - 1].toTier as AmbassadorTier) : null,
         backFromDormant: isBackFromDormant(thisMonth[0] ?? null, prevOf.get(a.id) ?? null, a.createdAt),
         executive: a.executive,
-      })
+      }, tiers)
     );
   }
   return out;

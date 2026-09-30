@@ -2,7 +2,8 @@ import type { AmbassadorTier, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { activityStatus, isEligibleForSubTeam, nextTier, tierLabel, toNextTier } from "@/lib/ambassadors/tier-utils";
 import { platinumBonusClients } from "@/lib/services/ambassador-platform/commissions";
-import { AMBASSADOR_TIERS } from "@/lib/finance/commission-config";
+import { TIER_KEYS, TIER_LABELS, tierRule, type CashflowStructure } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { lastWeeks, weekStart } from "@/lib/ambassadors/weeks";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
 import { weekRhythm, type WeekRhythm } from "@/lib/services/ambassador-platform/content";
@@ -38,6 +39,8 @@ export interface TierSlice {
   label: string;
   count: number;
   percent: number;
+  /** "6–15 conversions · 12% · next Gold", from the ladder in force. */
+  caption: string;
 }
 
 export interface AttentionCounts {
@@ -101,10 +104,14 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
   const quarterKey = `Q${quarter.key.split("-Q")[1]}-${qy}`;
 
   // Small sequential batches: Prisma's pool is shared with every other page.
-  const ambassadors = await db.ambassador.findMany({
-    where: OPEN,
-    select: { id: true, fullName: true, tier: true, lifetimeConversions: true, lastConversionAt: true, lastReferralAt: true, createdAt: true, parentId: true, university: { select: { abbreviation: true } }, _count: { select: { children: true } } },
-  });
+  const [ambassadors, active] = await Promise.all([
+    db.ambassador.findMany({
+      where: OPEN,
+      select: { id: true, fullName: true, tier: true, lifetimeConversions: true, lastConversionAt: true, lastReferralAt: true, createdAt: true, parentId: true, university: { select: { abbreviation: true } }, _count: { select: { children: true } } },
+    }),
+    getActiveCashflow(),
+  ]);
+  const s = active.structure;
   const [referralsMtd, referralsLast, conversionsMtd, conversionsLast] = await Promise.all([
     db.ambassadorReferral.count({ where: { status: { not: "CANCELLED" }, submittedAt: { gte: mStart, lt: mNext } } }),
     db.ambassadorReferral.count({ where: { status: { not: "CANCELLED" }, submittedAt: { gte: lmStart, lt: mStart } } }),
@@ -142,22 +149,20 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
   const tone: DashboardStats["active"]["tone"] = rate >= ACTIVATION_STRETCH ? "success" : rate >= ACTIVATION_TARGET ? "gold" : "danger";
 
   // ── Tiers ──
-  const tiers: TierSlice[] = [...AMBASSADOR_TIERS]
-    .sort((a, b) => a.minConversions - b.minConversions)
-    .map((t) => {
-      const count = ambassadors.filter((a) => a.tier === t.name).length;
-      return { tier: t.name, label: t.label, count, percent: total > 0 ? Math.round((count / total) * 100) : 0 };
-    });
+  const tiers: TierSlice[] = TIER_KEYS.map((key) => {
+    const count = ambassadors.filter((a) => a.tier === key).length;
+    return { tier: key, label: TIER_LABELS[key], count, percent: total > 0 ? Math.round((count / total) * 100) : 0, caption: tierCaption(key, s) };
+  });
 
   // ── Needs attention ──
   const inactive60 = ambassadors.filter((a) => activityStatus(a, now) === "INACTIVE").length;
   const nearPromotion = ambassadors.filter((a) => {
-    const left = toNextTier(a.tier, a.lifetimeConversions);
+    const left = toNextTier(a.tier, a.lifetimeConversions, s.tiers);
     return left != null && left > 0 && left <= 2;
   }).length;
   const paidSet = new Set(challengesPaid.map((c) => c.ambassadorId));
   // The same count the quarterly tracker pays on (an executive's clients count from the day they became Platinum).
-  const bonusOf = await platinumBonusClients({ start: qStart, end: new Date(Date.UTC(qy, qm + 2, 1)) }, ambassadors);
+  const bonusOf = await platinumBonusClients({ start: qStart, end: new Date(Date.UTC(qy, qm + 2, 1)) }, ambassadors, s.tiers);
   const platinumBonus = ambassadors.filter((a) => (bonusOf.get(a.id)?.clients ?? 0) > 0 && !paidSet.has(a.id)).length;
   const readySubTeams = ambassadors.filter((a) => !a.parentId && isEligibleForSubTeam(a.tier) && a._count.children === 0).length;
 
@@ -192,9 +197,10 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
 }
 
 /** Where a tier's next step is, for the tier cards' captions. */
-export function tierCaption(tier: AmbassadorTier): string {
+export function tierCaption(tier: AmbassadorTier, s: CashflowStructure): string {
   const next = nextTier(tier);
-  const t = AMBASSADOR_TIERS.find((x) => x.name === tier)!;
-  const range = !Number.isFinite(t.maxConversions) ? `${t.minConversions}+` : `${t.minConversions}–${t.maxConversions}`;
-  return next ? `${range} conversions · ${Math.round(t.rate * 100)}% · next ${tierLabel(next)}` : `${range} conversions · ${Math.round(t.rate * 100)}% + quarterly bonus`;
+  const t = tierRule(s, tier);
+  if (!t) return "";
+  const range = t.maxConversions == null ? `${t.minConversions}+` : `${t.minConversions}–${t.maxConversions}`;
+  return next ? `${range} conversions · ${t.ratePercent}% · next ${tierLabel(next)}` : `${range} conversions · ${t.ratePercent}% + quarterly bonus`;
 }

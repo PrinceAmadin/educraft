@@ -14,7 +14,19 @@ import { cn, formatDate, formatNaira } from "@/lib/utils";
  * the sub-team, the current month's commission from PayoutRecord, the last
  * 20 referrals and earnings by month.
  */
-export function DirectoryProfile({ detail, subCandidates }: { detail: DirectoryDetail; subCandidates: SubCandidate[] }) {
+export function DirectoryProfile({
+  detail,
+  subCandidates,
+  ambassadorTotalLabel,
+  subTeamThreshold,
+}: {
+  detail: DirectoryDetail;
+  subCandidates: SubCandidate[];
+  /** "15%": what EduCraft pays ambassadors in total, from the cashflow structure. */
+  ambassadorTotalLabel: string;
+  /** "Silver (6 conversions)": the first tier that may lead a sub-team. */
+  subTeamThreshold: string;
+}) {
   const p = detail.performance;
   const ch = detail.quarter.challenge;
   return (
@@ -71,7 +83,17 @@ export function DirectoryProfile({ detail, subCandidates }: { detail: DirectoryD
         </dl>
       </section>
 
-      <SubTeam coreId={detail.id} coreName={detail.fullName} coreTier={detail.tier} subTeam={detail.subTeam} canHaveSubs={detail.canHaveSubs} slotsLeft={detail.subSlotsLeft} candidates={subCandidates} />
+      <SubTeam
+        coreId={detail.id}
+        coreName={detail.fullName}
+        coreTier={detail.tier}
+        subTeam={detail.subTeam}
+        canHaveSubs={detail.canHaveSubs}
+        slotsLeft={detail.subSlotsLeft}
+        candidates={subCandidates}
+        ambassadorTotalLabel={ambassadorTotalLabel}
+        subTeamThreshold={subTeamThreshold}
+      />
 
       <section className="surface p-4">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">

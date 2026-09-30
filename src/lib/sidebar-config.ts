@@ -20,6 +20,7 @@ import {
   Megaphone,
   MoreHorizontal,
   Package,
+  Percent,
   Settings,
   ShieldCheck,
   TrendingUp,
@@ -82,6 +83,8 @@ export const ADMIN_SIDEBAR: NavSection[] = [
       { label: "General", href: "/admin/settings", icon: Settings, roles: [SA] },
       { label: "Team & roles", href: "/admin/settings/team", icon: ShieldCheck, roles: [SA] },
       { label: "Services", href: "/admin/settings/services", icon: Package, roles: [SA] },
+      // The commission structure: the founder edits, every executive reads.
+      { label: "EduCraft Cashflow", href: "/admin/settings/cashflow", icon: Percent, roles: ALL },
       { label: "Bank details", href: "/admin/settings/bank", icon: Landmark, roles: ALL },
     ],
   },

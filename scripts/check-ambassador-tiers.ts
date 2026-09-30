@@ -2,10 +2,15 @@
  * Phase 3 step 2: the tier utilities are pure, so they are proven here
  * without a database. `npm run check:tiers`.
  */
-import { activityStatus, ambassadorTier, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, percentLabel, platinumBonusClientCount, platinumByOffice, subTeamThresholdLabel, tierProgressFor, tierProgressPercent, tierRate, toNextTier, TOP_TIER, TOP_TIER_MIN_CONVERSIONS } from "../src/lib/ambassadors/tier-utils";
+import { activityStatus, ambassadorTier, buildReferralCode, calculateTier, conversionsTillNextTier, isEligibleForSubTeam, percentLabel, platinumBonusClientCount, platinumByOffice, subTeamThresholdLabel, tierLadderRows, tierProgress, tierProgressFor, tierProgressPercent, tierRate, toNextTier, TOP_TIER, topTierMinConversions } from "../src/lib/ambassadors/tier-utils";
 import { buildExecIndex, execForRecord, execRoleForRecord } from "../src/lib/executive-identity";
-import { calculateAmbassadorSplit, COMMISSION_RATES, nairaPercent } from "../src/lib/finance/commission-config";
-import { badgesFor, isBackFromDormant, isPromotion } from "../src/lib/ambassadors/badges";
+import { ambassadorTotalRate, calculateAmbassadorSplit, nairaPercent, personLegs } from "../src/lib/finance/commission-config";
+import { DEFAULT_CASHFLOW } from "../src/lib/finance/cashflow-default";
+import { badgesFor as badgesForLadder, isBackFromDormant, isPromotion, type BadgeInput } from "../src/lib/ambassadors/badges";
+
+const S = DEFAULT_CASHFLOW;
+const T = S.tiers;
+const badgesFor = (input: BadgeInput) => badgesForLadder(input, T);
 import { leaderboardMessage, spotlightMessage } from "../src/lib/ambassadors/spotlight";
 import { isoWeekKey, weekStart } from "../src/lib/ambassadors/weeks";
 
@@ -23,20 +28,27 @@ function expect(label: string, actual: unknown, wanted: unknown) {
 for (const [n, tier] of [
   [0, "BRONZE"], [5, "BRONZE"], [6, "SILVER"], [15, "SILVER"], [16, "GOLD"], [30, "GOLD"], [31, "PLATINUM"], [200, "PLATINUM"], [-3, "BRONZE"],
 ] as const) {
-  expect(`calculateTier(${n})`, calculateTier(n), tier);
+  expect(`calculateTier(${n})`, calculateTier(n, T), tier);
 }
-expect("rates follow the config", [tierRate("BRONZE"), tierRate("SILVER"), tierRate("GOLD"), tierRate("PLATINUM")], [0.1, 0.12, 0.15, 0.15]);
+expect("rates follow the structure", [tierRate("BRONZE", T), tierRate("SILVER", T), tierRate("GOLD", T), tierRate("PLATINUM", T)], [0.1, 0.12, 0.15, 0.15]);
 
 // Distance to the next tier.
 for (const [n, left] of [[0, 6], [5, 1], [6, 10], [15, 1], [16, 15], [30, 1], [31, null], [40, null]] as const) {
-  expect(`conversionsTillNextTier(${n})`, conversionsTillNextTier(n), left);
+  expect(`conversionsTillNextTier(${n})`, conversionsTillNextTier(n, T), left);
 }
-expect("progress through Bronze at 3", tierProgressPercent(3), 50);
-expect("progress at Platinum", tierProgressPercent(31), 100);
+expect("progress through Bronze at 3", tierProgressPercent(3, T), 50);
+expect("progress at Platinum", tierProgressPercent(31, T), 100);
 
-// Labels derived from the config (no figures typed into components).
-expect("sub-team threshold label", subTeamThresholdLabel(), "Silver (6 conversions)");
-expect("percent labels", [percentLabel(COMMISSION_RATES.ambassador), percentLabel(COMMISSION_RATES.hog), percentLabel(0.12)], ["15%", "2.5%", "12%"]);
+// Labels derived from the structure (no figures typed into components).
+expect("sub-team threshold label", subTeamThresholdLabel(T), "Silver (6 conversions)");
+expect("percent labels", [percentLabel(ambassadorTotalRate(S)), percentLabel(personLegs({ price: 100, workerPayout: 40, ambassadorCommission: 15, parentCommission: null, ambassadorId: "a" }, S).find((l) => l.role === "HOG")!.ratePercent / 100), percentLabel(0.12)], ["15%", "2.5%", "12%"]);
+expect("the portal's ladder rows", tierLadderRows(T).map((r) => `${r.label}:${r.minPayingClients}:${r.rate}`), ["Bronze:0:10", "Silver:6:12", "Gold:16:15", "Platinum:31:15"]);
+expect("portal progress from the stored tier", tierProgress("SILVER", 9, T), { current: "SILVER", currentLabel: "Silver", next: "GOLD", nextLabel: "Gold", payingClients: 9, toNext: 7, percent: 30, eligibleForPromotion: false });
+expect("a count above the stored tier is eligible for promotion", tierProgress("BRONZE", 8, T).eligibleForPromotion, true);
+
+// A different ladder (published later) moves every threshold and rate with it.
+const wider = T.map((t) => (t.key === "SILVER" ? { ...t, minConversions: 4, ratePercent: 11 } : t.key === "BRONZE" ? { ...t, maxConversions: 3 } : t));
+expect("a new ladder: Silver from 4 at 11%", [calculateTier(4, wider), tierRate("SILVER", wider), conversionsTillNextTier(2, wider)], ["SILVER", 0.11, 2]);
 
 // Sub-teams from Silver up.
 expect("Bronze cannot activate a sub-team", isEligibleForSubTeam("BRONZE"), false);
@@ -46,9 +58,9 @@ expect("Platinum can", isEligibleForSubTeam("PLATINUM"), true);
 
 // The 15% rule, from the same config the payout engine uses.
 for (const [subTier, subPct, corePct] of [["BRONZE", 10, 5], ["SILVER", 12, 3], ["GOLD", 15, 0], ["PLATINUM", 15, 0]] as const) {
-  const split = calculateAmbassadorSplit(tierRate(subTier));
+  const split = calculateAmbassadorSplit(tierRate(subTier, T), S);
   expect(`sub at ${subTier}: sub ${subPct}% + core ${corePct}% = 15%`, [Math.round(split.subRate * 100), Math.round(split.coreOverride * 100)], [subPct, corePct]);
-  expect(`sub at ${subTier}: total is 15%`, Math.round((split.subRate + split.coreOverride) * 100), Math.round(COMMISSION_RATES.ambassador * 100));
+  expect(`sub at ${subTier}: total is 15%`, Math.round((split.subRate + split.coreOverride) * 100), Math.round(ambassadorTotalRate(S) * 100));
 }
 expect("Bronze sub on ₦70,000: sub ₦7,000 + core ₦3,500 = ₦10,500", [nairaPercent(70000, 0.1), nairaPercent(70000, 0.05), nairaPercent(70000, 0.1) + nairaPercent(70000, 0.05)], [7000, 3500, 10500]);
 expect("Gold sub on ₦70,000: sub ₦10,500 + core ₦0", [nairaPercent(70000, 0.15), nairaPercent(70000, 0)], [10500, 0]);
@@ -105,12 +117,12 @@ expect("leaderboard message lines", board.split("\n").slice(0, 4), ["THIS MONTH"
 expect("no emoji in either message", [emoji.test(spot), emoji.test(board)], [false, false]);
 
 // Executives (founder, 27 Sept 2026): an executive's ambassador record is always Platinum.
-expect("an executive is Platinum whatever the count", [ambassadorTier(0, true), ambassadorTier(2, true), ambassadorTier(40, true)], ["PLATINUM", "PLATINUM", "PLATINUM"]);
-expect("everyone else by count", [ambassadorTier(0, false), ambassadorTier(6, false), ambassadorTier(31, false)], ["BRONZE", "SILVER", "PLATINUM"]);
-expect("top tier and its floor", [TOP_TIER, TOP_TIER_MIN_CONVERSIONS], ["PLATINUM", 31]);
-expect("stored Platinum on 2 conversions: nothing to the next tier, progress full", [toNextTier("PLATINUM", 2), tierProgressFor("PLATINUM", 2)], [null, 100]);
-expect("stored tier matches the count: same as before", [toNextTier("BRONZE", 5), tierProgressFor("BRONZE", 3), toNextTier("SILVER", 14)], [1, 50, 2]);
-expect("Platinum by office vs by count", [platinumByOffice("PLATINUM", 2), platinumByOffice("PLATINUM", 31), platinumByOffice("GOLD", 2)], [true, false, false]);
+expect("an executive is Platinum whatever the count", [ambassadorTier(0, true, T), ambassadorTier(2, true, T), ambassadorTier(40, true, T)], ["PLATINUM", "PLATINUM", "PLATINUM"]);
+expect("everyone else by count", [ambassadorTier(0, false, T), ambassadorTier(6, false, T), ambassadorTier(31, false, T)], ["BRONZE", "SILVER", "PLATINUM"]);
+expect("top tier and its floor", [TOP_TIER, topTierMinConversions(T)], ["PLATINUM", 31]);
+expect("stored Platinum on 2 conversions: nothing to the next tier, progress full", [toNextTier("PLATINUM", 2, T), tierProgressFor("PLATINUM", 2, T)], [null, 100]);
+expect("stored tier matches the count: same as before", [toNextTier("BRONZE", 5, T), tierProgressFor("BRONZE", 3, T), toNextTier("SILVER", 14, T)], [1, 50, 2]);
+expect("Platinum by office vs by count", [platinumByOffice("PLATINUM", 2, T), platinumByOffice("PLATINUM", 31, T), platinumByOffice("GOLD", 2, T)], [true, false, false]);
 expect("an executive is never 'away' from a tier and never 'tier up'", kinds(badgesFor({ ...quiet, lifetimeConversions: 5, tierUpThisMonthTo: "PLATINUM", executive: true })), []);
 expect("but an executive can still be on fire", kinds(badgesFor({ ...quiet, lifetimeConversions: 5, conversionsLast7Days: 3, executive: true })), ["ON_FIRE"]);
 

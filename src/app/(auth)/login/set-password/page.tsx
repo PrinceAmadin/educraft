@@ -3,15 +3,18 @@ import Link from "next/link";
 import { Logo } from "@/components/shared/Logo";
 import { SetPasswordForm } from "@/app/(auth)/login/set-password/set-password-form";
 import { realEmail } from "@/lib/client-email";
+import { getHqContact } from "@/lib/services/hq-contact";
 
 export const metadata: Metadata = {
   title: "Set your password",
   robots: { index: false, follow: false },
 };
+export const dynamic = "force-dynamic";
 
-export default function SetPasswordPage({ searchParams }: { searchParams: { email?: string } }) {
+export default async function SetPasswordPage({ searchParams }: { searchParams: { email?: string } }) {
   // The client sign-in page hands over an email that turned out to be a worker's or ambassador's.
   const initialIdentifier = realEmail(searchParams.email) ?? "";
+  const hq = await getHqContact();
   return (
     <div className="w-full max-w-[400px]">
       <div className="mb-9">
@@ -25,7 +28,7 @@ export default function SetPasswordPage({ searchParams }: { searchParams: { emai
         </p>
       </div>
 
-      <SetPasswordForm initialIdentifier={initialIdentifier} />
+      <SetPasswordForm initialIdentifier={initialIdentifier} whatsappUrl={hq.whatsappUrl} />
 
       <p className="mt-9 text-sm text-muted-foreground">
         Already set one?{" "}

@@ -8,7 +8,7 @@ import { LuCircleAlert, LuInfo, LuLoaderCircle, LuMailCheck } from "react-icons/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EDUCRAFT_WHATSAPP_URL, formatWait, type CodeAccount, type CodeRequestResult } from "@/lib/code-request";
+import { formatWait, type CodeAccount, type CodeRequestResult } from "@/lib/code-request";
 
 const RESEND_SECONDS = 60;
 const PASSWORD_MIN = 8;
@@ -17,16 +17,18 @@ type Alert = { tone: "error" | "info"; body: React.ReactNode };
 
 const inlineLink = "font-medium underline underline-offset-4";
 
-const contactUs = (
-  <a href={EDUCRAFT_WHATSAPP_URL} target="_blank" rel="noopener noreferrer" className={inlineLink}>
+/** "message EduCraft on WhatsApp", opening EduCraft's line (the HQ contact settings, passed in by the page). */
+const contactLink = (whatsappUrl: string) => (
+  <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className={inlineLink}>
     message EduCraft on WhatsApp
   </a>
 );
 
 /** What to tell someone when no code went out. `typed` is what they entered: an email or an ID. */
-function refusal(result: CodeRequestResult, typed: string): Alert {
+function refusal(result: CodeRequestResult, typed: string, whatsappUrl: string): Alert {
   const isEmail = typed.includes("@");
   const shown = <strong className="font-medium [overflow-wrap:anywhere]">{typed}</strong>;
+  const contactUs = contactLink(whatsappUrl);
   switch (result.status) {
     case "invalid":
       return { tone: "error", body: "Enter the email address you registered with." };
@@ -69,7 +71,14 @@ function refusal(result: CodeRequestResult, typed: string): Alert {
  * the email is not registered (or under review, or suspended) instead of "if
  * that matches an account…".
  */
-export function SetPasswordForm({ initialIdentifier = "" }: { initialIdentifier?: string }) {
+export function SetPasswordForm({
+  initialIdentifier = "",
+  whatsappUrl,
+}: {
+  initialIdentifier?: string;
+  /** EduCraft's WhatsApp chat link (HQ contact settings). */
+  whatsappUrl: string;
+}) {
   const router = useRouter();
   const [step, setStep] = React.useState<"request" | "setup">("request");
   const [identifier, setIdentifier] = React.useState(initialIdentifier);
@@ -125,7 +134,7 @@ export function SetPasswordForm({ initialIdentifier = "" }: { initialIdentifier?
       } else {
         // Back to the email field, so the message sits next to what they typed.
         setStep("request");
-        setAlert(refusal(result, id));
+        setAlert(refusal(result, id, whatsappUrl));
       }
     } catch {
       fail("Something went wrong. Please try again.");

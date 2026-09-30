@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireClient, serverError } from "@/lib/api";
 import { getInvoiceData } from "@/lib/services/client-portal";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { buildReceiptPdf } from "@/lib/receipts";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: { code: strin
   try {
     const invoice = await getInvoiceData(guard.scope, params.code, params.paymentId);
     if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
-    const pdf = buildReceiptPdf(invoice, { variant: "invoice" });
+    const pdf = buildReceiptPdf(invoice, { variant: "invoice", hq: await getHqContact() });
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",

@@ -10,8 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
-import { percentLabel, subTeamThresholdLabel, tierLabel } from "@/lib/ambassadors/tier-utils";
-import { COMMISSION_RATES } from "@/lib/finance/commission-config";
+import { tierLabel } from "@/lib/ambassadors/tier-utils";
 import type { DirectoryDetail } from "@/lib/services/ambassador-platform/directory";
 import type { AmbassadorTier } from "@prisma/client";
 
@@ -27,7 +26,29 @@ export interface SubCandidate {
  * Add Sub-ambassador picker (existing solo ambassadors), remove per row,
  * and the slots left out of ten. A Bronze Core sees why the button is off.
  */
-export function SubTeam({ coreId, coreName, coreTier, subTeam, canHaveSubs, slotsLeft, candidates }: { coreId: string; coreName: string; coreTier: AmbassadorTier; subTeam: DirectoryDetail["subTeam"]; canHaveSubs: boolean; slotsLeft: number; candidates: SubCandidate[] }) {
+export function SubTeam({
+  coreId,
+  coreName,
+  coreTier,
+  subTeam,
+  canHaveSubs,
+  slotsLeft,
+  candidates,
+  ambassadorTotalLabel,
+  subTeamThreshold,
+}: {
+  coreId: string;
+  coreName: string;
+  coreTier: AmbassadorTier;
+  subTeam: DirectoryDetail["subTeam"];
+  canHaveSubs: boolean;
+  slotsLeft: number;
+  candidates: SubCandidate[];
+  /** "15%": what EduCraft pays ambassadors in total, from the cashflow structure. */
+  ambassadorTotalLabel: string;
+  /** "Silver (6 conversions)": the first tier that may lead a sub-team. */
+  subTeamThreshold: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -90,10 +111,10 @@ export function SubTeam({ coreId, coreName, coreTier, subTeam, canHaveSubs, slot
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {!canHaveSubs
-          ? `${tierLabel(coreTier)} cannot lead a team yet — a Core activates their sub-team at ${subTeamThresholdLabel()}.`
+          ? `${tierLabel(coreTier)} cannot lead a team yet — a Core activates their sub-team at ${subTeamThreshold}.`
           : slotsLeft === 0
             ? `Team is full — the maximum is ${MAX_SUB_AMBASSADORS}.`
-            : `${slotsLeft} slot${slotsLeft === 1 ? "" : "s"} remaining — max ${MAX_SUB_AMBASSADORS}. EduCraft pays ${percentLabel(COMMISSION_RATES.ambassador)} in total: the Sub earns their tier rate, the Core the rest.`}
+            : `${slotsLeft} slot${slotsLeft === 1 ? "" : "s"} remaining — max ${MAX_SUB_AMBASSADORS}. EduCraft pays ${ambassadorTotalLabel} in total: the Sub earns their tier rate, the Core the rest.`}
       </p>
       {error ? (
         <p className="mt-2 flex items-center gap-1.5 text-sm text-danger" role="alert">

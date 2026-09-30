@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { TIER_LADDER } from "@/lib/ambassador";
+import { TIER_KEYS, TIER_LABELS } from "@/lib/finance/cashflow-types";
 import { formatNaira } from "@/lib/utils";
 
 /** "Generate WhatsApp update": the month's earnings message, editable, copy to clipboard. */
@@ -106,9 +106,9 @@ export function HistoryFilters() {
         <span className="mb-1 block meta-label">Tier</span>
         <Select value={searchParams.get("tier") ?? ""} onChange={(e) => commit({ tier: e.target.value || null })} className="h-11 text-sm" aria-label="Tier">
           <option value="">All tiers</option>
-          {TIER_LADDER.map((t) => (
-            <option key={t.tier} value={t.tier}>
-              {t.label}
+          {TIER_KEYS.map((t) => (
+            <option key={t} value={t}>
+              {TIER_LABELS[t]}
             </option>
           ))}
         </Select>

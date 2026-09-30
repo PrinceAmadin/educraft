@@ -5,7 +5,6 @@ import { StatusBadge } from "@/components/projects/StatusBadge";
 import { DaysInStatus } from "@/components/operations/DaysInStatus";
 import { PIPELINE_STAGES, statusAge, type ExpectedHours } from "@/lib/operations/pipeline-stages";
 import { CLOSED_STATUSES } from "@/lib/status";
-import { COMMISSION_RATES } from "@/lib/finance/commission-config";
 import { MAX_CORRECTION_ROUNDS } from "@/lib/operations/corrections";
 import { toWaNumber, waLink, greetingName } from "@/lib/whatsapp";
 import { cn, deadlineInfo, formatDate, formatDateTime, formatNaira } from "@/lib/utils";
@@ -42,6 +41,7 @@ export function OpsOverview({
   expected,
   actions,
   timeline,
+  hogLeg,
   now = new Date(),
 }: {
   project: ProjectDetail;
@@ -49,6 +49,8 @@ export function OpsOverview({
   expected: ExpectedHours;
   actions: React.ReactNode;
   timeline: React.ReactNode;
+  /** The HOG's commission on this project under its cashflow version (null on a direct or pro bono job). */
+  hogLeg: { amount: number; ratePercent: number } | null;
   now?: Date;
 }) {
   const client = project.client;
@@ -61,7 +63,6 @@ export function OpsOverview({
   const bal = paymentLine(project.balanceStatus, project.balanceAmount, project.balanceDate);
   const closed = (CLOSED_STATUSES as readonly string[]).includes(project.status);
   const currentStageIndex = PIPELINE_STAGES.findIndex((s) => s.statuses.includes(project.status));
-  const hogCommission = project.ambassadorId && !project.isProBono ? Math.round(project.price * COMMISSION_RATES.hog) : null;
   const rounds = ops.rounds;
   const latestRound = rounds[rounds.length - 1];
 
@@ -112,7 +113,7 @@ export function OpsOverview({
                 {project.ambassador.fullName} ({tierLabel(project.ambassador.tier)}) · <span className="font-mono text-[13px]">{project.ambassador.ambassadorId}</span>
                 <span className="block text-[13px] text-muted-foreground">
                   Ambassador commission: {project.ambassadorCommission != null ? `${formatNaira(project.ambassadorCommission)} (${project.ambassadorCommRate ?? "—"}%)` : "—"}
-                  {hogCommission != null ? ` · HOG commission: ${formatNaira(hogCommission)} (${COMMISSION_RATES.hog * 100}%)` : ""}
+                  {hogLeg ? ` · HOG commission: ${formatNaira(hogLeg.amount)} (${hogLeg.ratePercent}%)` : ""}
                 </span>
               </>
             ) : (

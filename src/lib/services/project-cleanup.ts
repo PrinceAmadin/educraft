@@ -7,6 +7,7 @@ import { recountAmbassador } from "@/lib/services/ambassador-platform/conversion
 import { loadExecIndex } from "@/lib/services/executives";
 import { execForRecord } from "@/lib/executive-identity";
 import { ambassadorTier } from "@/lib/ambassadors/tier-utils";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { quarterKeyOf } from "@/lib/command-center/derive";
 import { revalidateCommandCenter } from "@/lib/services/command-center/cache";
 import { notifyFinance, notifyRole } from "@/lib/services/notifications";
@@ -391,15 +392,16 @@ export async function previewDeletion(codes: string[], now: Date = new Date()): 
   }
   const tierDrops = new Map<string, { name: string; from: string; to: string }>();
   if (lostConversions.size) {
-    const [ambassadors, execIndex] = await Promise.all([
+    const [ambassadors, execIndex, active] = await Promise.all([
       db.ambassador.findMany({
         where: { id: { in: [...lostConversions.keys()] } },
         select: { id: true, fullName: true, tier: true, lifetimeConversions: true, email: true, user: { select: { email: true, role: true } } },
       }),
       loadExecIndex(),
+      getActiveCashflow(),
     ]);
     for (const a of ambassadors) {
-      const after = ambassadorTier(Math.max(0, a.lifetimeConversions - (lostConversions.get(a.id) ?? 0)), execForRecord(execIndex, a) != null);
+      const after = ambassadorTier(Math.max(0, a.lifetimeConversions - (lostConversions.get(a.id) ?? 0)), execForRecord(execIndex, a) != null, active.structure.tiers);
       if (after !== a.tier) tierDrops.set(a.id, { name: a.fullName, from: tierName(a.tier), to: tierName(after) });
     }
   }

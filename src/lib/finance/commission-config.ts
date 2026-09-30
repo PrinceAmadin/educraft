@@ -1,112 +1,84 @@
 /**
- * EduCraft's money rules — the ONE place every rate lives (Phase 2 spec:
- * "no rate appears hardcoded in any component or API route"). Pure: no
- * database, no Node APIs, so client components, the finance services and
- * `npm run check:finance` all read the same numbers.
+ * EduCraft's money maths. Every rate comes from a published cashflow
+ * structure (`CashflowStructure`, the JSON on a `CashflowVersion` row): no
+ * percentage lives in this file. Pure — no database, no Node APIs — so client
+ * components, the finance services and the check scripts share the same
+ * functions, each handed the structure it should compute under (a project's
+ * own version, or the active one).
  *
- * Money is whole naira, like everywhere else in HQ (pricing.ts, commission.ts):
- * `nairaPercent` rounds with Math.round, and every split gives its remainder
- * to the last leg so the parts always add up to the whole.
- *
- * Tier percentages here are the shipped defaults; Settings > General can
- * override the four tier rates live (getCommissionRates), and a job's own
- * legs are frozen on the Project the moment it is allocated.
+ * Money is whole naira, like everywhere else in HQ: `nairaPercent` rounds
+ * with Math.round, and every split gives its remainder to one row so the
+ * parts always add up to the whole.
  */
-import type { BucketType } from "@prisma/client";
-
-export const COMMISSION_RATES = {
-  // Direct from project revenue
-  workers: 0.4, // 40% — paid to the specialist who wrote the report
-  ambassador: 0.15, // 15% — EduCraft always pays exactly 15% total per referred project
-  //                   (split between Core and Sub if applicable — see calculateAmbassadorSplit)
-  hog: 0.025, // 2.5% — Head of Growth, on all ambassador-driven projects
-  coo: 0.025, // 2.5% — COO, on all delivered projects
-
-  // EduCraft retains 40% on the standard referred project (100 − 40 − 15 − 2.5 − 2.5).
-  // When a Growth Associate is active: retains 38% (2% redirected from the retained share).
-  growthAssociate: 0.02, // Year 2, currently inactive
-
-  // Bucket allocations — % of EduCraft's RETAINED SHARE, not of total revenue.
-  buckets: {
-    operationsReserve: 0.375, // 37.5% of retained = 15% of total revenue
-    growthFund: 0.175, // 17.5% of retained = 7% of total revenue
-    reinvestmentFund: 0.175, // 17.5% of retained = 7% of total revenue
-    founderDistribution: 0.275, // 27.5% of retained = 11% of total revenue
-  },
-
-  // Founder draw tiers — monthly, 50/50 between CEO and CFO, paid from the Founder Distribution bucket.
-  founderDrawTiers: [
-    { minRevenue: 0, maxRevenue: 499_999, drawEach: 0 },
-    { minRevenue: 500_000, maxRevenue: 999_999, drawEach: 25_000 },
-    { minRevenue: 1_000_000, maxRevenue: 2_499_999, drawEach: 75_000 },
-    { minRevenue: 2_500_000, maxRevenue: 4_999_999, drawEach: 150_000 },
-    { minRevenue: 5_000_000, maxRevenue: 9_999_999, drawEach: 300_000 },
-    { minRevenue: 10_000_000, maxRevenue: Infinity, drawEach: 500_000 },
-  ],
-} as const;
-
-/** What EduCraft keeps on the standard referred project — the sanity check the spec asks for. */
-export const STANDARD_RETAINED_RATE = 1 - COMMISSION_RATES.workers - COMMISSION_RATES.ambassador - COMMISSION_RATES.hog - COMMISSION_RATES.coo;
-
-// ── Ambassador tiers ─────────────────────────────────────────────────────
-
-/** Lifetime conversions = paying clients referred (a referred client whose downpayment was verified). */
-export const AMBASSADOR_TIERS = [
-  { name: "BRONZE", label: "Bronze", minConversions: 0, maxConversions: 5, rate: 0.1 },
-  { name: "SILVER", label: "Silver", minConversions: 6, maxConversions: 15, rate: 0.12 },
-  { name: "GOLD", label: "Gold", minConversions: 16, maxConversions: 30, rate: 0.15 },
-  { name: "PLATINUM", label: "Platinum", minConversions: 31, maxConversions: Infinity, rate: 0.15 },
-] as const;
-
-export type TierName = (typeof AMBASSADOR_TIERS)[number]["name"];
-
-/** ₦3,000 per client referred in the quarter, for Platinum ambassadors. */
-export const PLATINUM_QUARTERLY_BONUS_PER_CLIENT = 3000;
-
-/** The quarterly challenge (Phase 3): refer this many paying clients in the quarter for a flat bonus. Any tier. */
-export const QUARTERLY_CHALLENGE = { target: 10, bonus: 35_000, extensionDays: 7 } as const;
-
-/** The tier earned by a lifetime count of paying clients. */
-export function tierFor(payingClients: number): TierName {
-  const n = Math.max(0, Math.floor(payingClients));
-  const tier = AMBASSADOR_TIERS.find((t) => n >= t.minConversions && n <= t.maxConversions) ?? AMBASSADOR_TIERS[0];
-  return tier.name;
-}
-
-/** The commission fraction for a lifetime count of paying clients. */
-export function tierRateFor(payingClients: number): number {
-  const name = tierFor(payingClients);
-  return AMBASSADOR_TIERS.find((t) => t.name === name)?.rate ?? AMBASSADOR_TIERS[0].rate;
-}
-
-/** Rate fraction of a tier by name (BRONZE → 0.10). */
-export function rateForTier(name: string): number {
-  return AMBASSADOR_TIERS.find((t) => t.name === name)?.rate ?? AMBASSADOR_TIERS[0].rate;
-}
+import type { AmbassadorTier, BucketType } from "@prisma/client";
+import {
+  BUCKET_KEYS,
+  LEVEL1,
+  isActiveRow,
+  level1Row,
+  potsOf,
+  recipientsPercent,
+  retainedFraction,
+  tierRule,
+  type CashflowStructure,
+  type PersonTrigger,
+  type TierRule,
+} from "@/lib/finance/cashflow-types";
 
 /** Fractions are kept to four decimals so 0.15 − 0.12 is 0.03, not 0.030000000000000002. */
 export function roundRate(rate: number): number {
   return Math.round(rate * 10_000) / 10_000;
 }
 
-/**
- * Core/Sub override — EduCraft's total is always 15%. The Sub keeps their tier
- * rate; the Core gets the rest: Bronze sub → 10% + 5%, Silver sub → 12% + 3%,
- * Gold/Platinum sub → 15% + 0%.
- */
-export function calculateAmbassadorSplit(subTierRate: number): { subRate: number; coreOverride: number } {
-  const subRate = roundRate(subTierRate);
-  return { subRate, coreOverride: roundRate(Math.max(0, COMMISSION_RATES.ambassador - subRate)) };
-}
-
-// ── Money helpers ────────────────────────────────────────────────────────
-
 /** Whole-naira share of an amount. Negative amounts (true-up deltas) round the same way. */
 export function nairaPercent(amount: number, rate: number): number {
   return Math.round(amount * rate);
 }
 
-export const BUCKET_TYPES: readonly BucketType[] = ["OPERATIONS_RESERVE", "GROWTH_FUND", "REINVESTMENT_FUND", "FOUNDER_DISTRIBUTION"];
+// ── Tiers ────────────────────────────────────────────────────────────────
+
+/** The tier a lifetime count of paying clients earns under the ladder. */
+export function tierFor(payingClients: number, tiers: readonly TierRule[]): AmbassadorTier {
+  const n = Math.max(0, Math.floor(payingClients));
+  let tier: AmbassadorTier = "BRONZE";
+  for (const t of [...tiers].sort((a, b) => a.minConversions - b.minConversions)) if (n >= t.minConversions) tier = t.key;
+  return tier;
+}
+
+/** Commission fraction of a tier (BRONZE → 0.10). */
+export function rateForTier(tier: AmbassadorTier, tiers: readonly TierRule[]): number {
+  const t = tiers.find((x) => x.key === tier) ?? [...tiers].sort((a, b) => a.minConversions - b.minConversions)[0];
+  return t ? roundRate(t.ratePercent / 100) : 0;
+}
+
+/** Commission fraction for a lifetime count of paying clients. */
+export function tierRateFor(payingClients: number, tiers: readonly TierRule[]): number {
+  return rateForTier(tierFor(payingClients, tiers), tiers);
+}
+
+/** A tier's rate as a whole-percent figure with two decimals (BRONZE → 10), the form the project columns store. */
+export function ratePercentForTier(tier: AmbassadorTier, tiers: readonly TierRule[]): number {
+  return Math.round(rateForTier(tier, tiers) * 10_000) / 100;
+}
+
+/** The ambassador total EduCraft pays on a referred job, as a fraction (0.15). */
+export function ambassadorTotalRate(s: CashflowStructure): number {
+  return roundRate(recipientsPercent(s, "ambassadors") / 100);
+}
+
+/**
+ * Core/Sub override — EduCraft's total is fixed by the Ambassador row. The Sub
+ * keeps their tier rate; the Core gets the rest: Bronze sub → 10% + 5%,
+ * Silver sub → 12% + 3%, Gold/Platinum sub → 15% + 0%.
+ */
+export function calculateAmbassadorSplit(subTierRate: number, s: CashflowStructure): { subRate: number; coreOverride: number } {
+  const subRate = roundRate(subTierRate);
+  return { subRate, coreOverride: roundRate(Math.max(0, ambassadorTotalRate(s) - subRate)) };
+}
+
+// ── Buckets ──────────────────────────────────────────────────────────────
+
+export const BUCKET_TYPES: readonly BucketType[] = BUCKET_KEYS;
 
 export interface BucketAmounts {
   operationsReserve: number;
@@ -122,45 +94,64 @@ export const BUCKET_KEY: Record<BucketType, keyof BucketAmounts> = {
   FOUNDER_DISTRIBUTION: "founderDistribution",
 };
 
-export const BUCKET_META: Record<BucketType, { label: string; purpose: string; shareOfRetained: number }> = {
-  OPERATIONS_RESERVE: {
-    label: "Operations Reserve",
-    purpose: "Platform costs, Claude API, software, emergencies",
-    shareOfRetained: COMMISSION_RATES.buckets.operationsReserve,
-  },
-  GROWTH_FUND: {
-    label: "Growth Fund",
-    purpose: "Ambassador bonuses, sponsorships, school entry",
-    shareOfRetained: COMMISSION_RATES.buckets.growthFund,
-  },
-  REINVESTMENT_FUND: {
-    label: "Reinvestment Fund",
-    purpose: "Platform development, new services, equipment, legal",
-    shareOfRetained: COMMISSION_RATES.buckets.reinvestmentFund,
-  },
-  FOUNDER_DISTRIBUTION: {
-    label: "Founder Distribution",
-    purpose: "CEO and Co-CEO/CFO monthly draws and bonuses",
-    shareOfRetained: COMMISSION_RATES.buckets.founderDistribution,
-  },
+/** Shipped labels and purposes for the four bucket enum values; a published structure may relabel them. */
+export const BUCKET_META: Record<BucketType, { label: string; purpose: string }> = {
+  OPERATIONS_RESERVE: { label: "Operations Reserve", purpose: "Platform costs, Claude API, software, emergencies" },
+  GROWTH_FUND: { label: "Growth Fund", purpose: "Ambassador bonuses, sponsorships, school entry" },
+  REINVESTMENT_FUND: { label: "Reinvestment Fund", purpose: "Platform development, new services, equipment, legal" },
+  FOUNDER_DISTRIBUTION: { label: "Founder Distribution", purpose: "CEO and Co-CEO/CFO monthly draws and bonuses" },
 };
 
+export function bucketLabel(bucket: BucketType, s?: CashflowStructure | null): string {
+  return s?.level2.find((b) => b.key === bucket)?.label ?? BUCKET_META[bucket].label;
+}
+
+/** A bucket's share of the retained share, as a fraction (0.375). */
+export function bucketShareOfRetained(bucket: BucketType, s: CashflowStructure): number {
+  const row = s.level2.find((b) => b.key === bucket);
+  return row ? roundRate(row.percentage / 100) : 0;
+}
+
 /** Share of TOTAL revenue a bucket gets on the standard referred project (37.5% of 40% = 15%). */
-export function bucketShareOfRevenue(bucket: BucketType): number {
-  return roundRate(BUCKET_META[bucket].shareOfRetained * STANDARD_RETAINED_RATE);
+export function bucketShareOfRevenue(bucket: BucketType, s: CashflowStructure): number {
+  return roundRate(bucketShareOfRetained(bucket, s) * retainedFraction(s));
 }
 
 /**
- * Split a retained amount into the four buckets. Each is rounded to whole
- * naira and Founder Distribution takes the remainder, so the four always sum
- * to exactly the amount split — for negative deltas too.
+ * Split an amount across rows by their percentages, whole naira each, with
+ * the remainder on the absorber row (else the last row) so the parts always
+ * sum to exactly the amount — for negative deltas too.
  */
-export function bucketSplit(retained: number): BucketAmounts {
-  const operationsReserve = nairaPercent(retained, COMMISSION_RATES.buckets.operationsReserve);
-  const growthFund = nairaPercent(retained, COMMISSION_RATES.buckets.growthFund);
-  const reinvestmentFund = nairaPercent(retained, COMMISSION_RATES.buckets.reinvestmentFund);
-  const founderDistribution = retained - operationsReserve - growthFund - reinvestmentFund;
-  return { operationsReserve, growthFund, reinvestmentFund, founderDistribution };
+export function splitByRows<T extends { key: string; percentage: number; isAbsorber?: boolean; active?: boolean }>(amount: number, rows: readonly T[]): Map<string, number> {
+  const live = rows.filter(isActiveRow);
+  const out = new Map<string, number>();
+  if (live.length === 0) return out;
+  const remainderRow = live.find((r) => r.isAbsorber) ?? live[live.length - 1];
+  let used = 0;
+  for (const r of live) {
+    if (r === remainderRow) continue;
+    const part = nairaPercent(amount, r.percentage / 100);
+    out.set(r.key, part);
+    used += part;
+  }
+  out.set(remainderRow.key, Math.round(amount) - used);
+  return out;
+}
+
+/** Split a retained amount into the four buckets under the structure. */
+export function bucketSplit(retained: number, s: CashflowStructure): BucketAmounts {
+  const parts = splitByRows(retained, s.level2);
+  return {
+    operationsReserve: parts.get("OPERATIONS_RESERVE") ?? 0,
+    growthFund: parts.get("GROWTH_FUND") ?? 0,
+    reinvestmentFund: parts.get("REINVESTMENT_FUND") ?? 0,
+    founderDistribution: parts.get("FOUNDER_DISTRIBUTION") ?? 0,
+  };
+}
+
+/** Split a bucket's delta across its tracked pots (empty when the bucket has none). */
+export function potSplit(bucketDelta: number, parentKey: BucketType, s: CashflowStructure): Map<string, number> {
+  return splitByRows(bucketDelta, potsOf(s, parentKey).filter((p) => p.isTrackedAsPot));
 }
 
 // ── Per-project legs ─────────────────────────────────────────────────────
@@ -176,19 +167,59 @@ export interface ProjectLegs {
   isProBono?: boolean;
 }
 
-export function workerLeg(p: ProjectLegs): number {
+export function workerLeg(p: ProjectLegs, s: CashflowStructure): number {
   if (p.isProBono) return 0;
   if (p.workerPayout != null) return p.workerPayout;
-  const rate = p.workerPayoutRate != null ? p.workerPayoutRate / 100 : COMMISSION_RATES.workers;
+  const rate = p.workerPayoutRate != null ? p.workerPayoutRate / 100 : recipientsPercent(s, "workers") / 100;
   return nairaPercent(p.price, rate);
 }
 
-/** HOG earns only on ambassador-driven projects; the COO on every delivered one. */
-export function executiveLegs(p: ProjectLegs): { hog: number; coo: number } {
-  if (p.isProBono || p.price <= 0) return { hog: 0, coo: 0 };
+export interface PersonLeg {
+  key: string;
+  label: string;
+  /** HOG / COO, or null for a row that pays one named login. */
+  role: "HOG" | "COO" | null;
+  assignedUserId: string | null;
+  ratePercent: number;
+  amount: number;
+  trigger: PersonTrigger;
+}
+
+/**
+ * The single-recipient people rows a project owes — the HOG (ambassador-driven
+ * jobs only), the COO, and any person the founder added — each a share of the
+ * price. Workers and ambassadors are not here: their legs are frozen on the
+ * project at allocation.
+ */
+export function personLegs(p: ProjectLegs, s: CashflowStructure): PersonLeg[] {
+  if (p.isProBono || p.price <= 0) return [];
+  const out: PersonLeg[] = [];
+  for (const row of s.level1) {
+    if (row.kind !== "person" || !isActiveRow(row)) continue;
+    if (row.recipients !== "role" && row.recipients !== "user") continue;
+    if (row.condition === "ambassador_driven" && !p.ambassadorId) continue;
+    if (row.recipients === "user" && !row.assignedUserId) continue;
+    const amount = nairaPercent(p.price, row.percentage / 100);
+    if (amount <= 0) continue;
+    out.push({
+      key: row.key,
+      label: row.label,
+      role: row.recipients === "role" ? (row.role ?? null) : null,
+      assignedUserId: row.recipients === "user" ? (row.assignedUserId ?? null) : null,
+      ratePercent: row.percentage,
+      amount,
+      trigger: row.trigger ?? "completion",
+    });
+  }
+  return out;
+}
+
+/** The HOG and COO legs by role (0 when the structure has no such row or the condition fails). */
+export function executiveLegs(p: ProjectLegs, s: CashflowStructure): { hog: number; coo: number } {
+  const legs = personLegs(p, s);
   return {
-    hog: p.ambassadorId ? nairaPercent(p.price, COMMISSION_RATES.hog) : 0,
-    coo: nairaPercent(p.price, COMMISSION_RATES.coo),
+    hog: legs.filter((l) => l.role === "HOG").reduce((sum, l) => sum + l.amount, 0),
+    coo: legs.filter((l) => l.role === "COO").reduce((sum, l) => sum + l.amount, 0),
   };
 }
 
@@ -197,16 +228,16 @@ export function executiveLegs(p: ProjectLegs): { hog: number; coo: number } {
  * out. 40% of the standard referred job (worker 40, ambassador 15, HOG 2.5,
  * COO 2.5); 57.5% of a direct job (no ambassador, no HOG leg). Never below 0.
  */
-export function retainedForProject(p: ProjectLegs): number {
+export function retainedForProject(p: ProjectLegs, s: CashflowStructure): number {
   if (p.isProBono || p.price <= 0) return 0;
-  const { hog, coo } = executiveLegs(p);
-  const retained = p.price - workerLeg(p) - (p.ambassadorCommission ?? 0) - (p.parentCommission ?? 0) - hog - coo;
+  const people = personLegs(p, s).reduce((sum, l) => sum + l.amount, 0);
+  const retained = p.price - workerLeg(p, s) - (p.ambassadorCommission ?? 0) - (p.parentCommission ?? 0) - people;
   return Math.max(0, Math.round(retained));
 }
 
 /** retained ÷ price, to four decimals (0.4 on the standard job). */
-export function retainedRateFor(p: ProjectLegs): number {
-  return p.price > 0 ? roundRate(retainedForProject(p) / p.price) : 0;
+export function retainedRateFor(p: ProjectLegs, s: CashflowStructure): number {
+  return p.price > 0 ? roundRate(retainedForProject(p, s) / p.price) : 0;
 }
 
 /**
@@ -214,11 +245,16 @@ export function retainedRateFor(p: ProjectLegs): number {
  * money actually in (confirmed inflows less refunds): the whole share when
  * fully paid, the proportional part after the downpayment. Whole naira.
  */
-export function expectedAllocation(p: ProjectLegs, netInflow: number): number {
+export function expectedAllocation(p: ProjectLegs, netInflow: number, s: CashflowStructure): number {
   if (p.price <= 0 || netInflow <= 0) return 0;
-  const retained = retainedForProject(p);
+  const retained = retainedForProject(p, s);
   if (netInflow >= p.price) return retained;
   return Math.round((retained * netInflow) / p.price);
+}
+
+/** The same, per bucket: what each bucket should hold for the project now. */
+export function expectedBucketAllocation(p: ProjectLegs, netInflow: number, s: CashflowStructure): BucketAmounts {
+  return bucketSplit(expectedAllocation(p, netInflow, s), s);
 }
 
 // ── Founder draws ────────────────────────────────────────────────────────
@@ -229,10 +265,18 @@ export interface FounderDrawTier {
   drawEach: number;
 }
 
+/** The structure's draw brackets in the engine's shape (an open top bracket reads as Infinity). */
+export function founderDrawTiers(s: CashflowStructure): FounderDrawTier[] {
+  return [...s.founderDrawTiers]
+    .sort((a, b) => a.minRevenueNgn - b.minRevenueNgn)
+    .map((t) => ({ minRevenue: t.minRevenueNgn, maxRevenue: t.maxRevenueNgn ?? Infinity, drawEach: t.drawPerFounderNgn }));
+}
+
 /** The tier a month's confirmed revenue falls in. */
-export function founderDrawFor(monthRevenue: number): FounderDrawTier {
+export function founderDrawFor(monthRevenue: number, s: CashflowStructure): FounderDrawTier {
+  const tiers = founderDrawTiers(s);
   const r = Math.max(0, monthRevenue);
-  return COMMISSION_RATES.founderDrawTiers.find((t) => r >= t.minRevenue && r <= t.maxRevenue) ?? COMMISSION_RATES.founderDrawTiers[0];
+  return tiers.find((t) => r >= t.minRevenue && r <= t.maxRevenue) ?? tiers[0] ?? { minRevenue: 0, maxRevenue: Infinity, drawEach: 0 };
 }
 
 export interface SemesterSurplusInput {
@@ -301,7 +345,7 @@ export interface BucketHealth {
   rule: string;
 }
 
-/** Shipped defaults for the two Settings the health rules read. */
+/** Shipped defaults for the Settings the health rules read, and the approval threshold. */
 export const FINANCE_DEFAULTS = {
   /** ₦ per month of operating cost until real data exists (spec baseline). */
   operatingCostMonthlyBaseline: 150_000,
@@ -317,22 +361,24 @@ export const FINANCE_DEFAULTS = {
  * Operations Reserve is judged the way the spec says — months of operating
  * cost (≥ 3 healthy, ≥ 1 monitor, else attention). The other three are small
  * by design (7–11% of revenue), so they are judged against their own target:
- * their share of the retained 40% on a reference month's revenue (≥ 75%
+ * their share of the retained share on a reference month's revenue (≥ 75%
  * healthy, ≥ 33% monitor).
  */
 export function bucketHealth(
   bucket: BucketType,
   balance: number,
-  settings: { operatingBaseline: number; referenceRevenue: number }
+  settings: { operatingBaseline: number; referenceRevenue: number },
+  s: CashflowStructure
 ): BucketHealth {
   if (bucket === "OPERATIONS_RESERVE") {
     const target = settings.operatingBaseline * 3;
     const level: BucketHealthLevel = balance >= target ? "healthy" : balance >= settings.operatingBaseline ? "monitor" : "attention";
     return { level, percent: percentOf(balance, target), target, rule: "3 months of operating cost" };
   }
-  const target = Math.round(settings.referenceRevenue * bucketShareOfRevenue(bucket));
+  const share = bucketShareOfRevenue(bucket, s);
+  const target = Math.round(settings.referenceRevenue * share);
   const level: BucketHealthLevel = balance >= target * 0.75 ? "healthy" : balance >= target / 3 ? "monitor" : "attention";
-  return { level, percent: percentOf(balance, target), target, rule: `${Math.round(bucketShareOfRevenue(bucket) * 1000) / 10}% of a reference month` };
+  return { level, percent: percentOf(balance, target), target, rule: `${Math.round(share * 1000) / 10}% of a reference month` };
 }
 
 function percentOf(balance: number, target: number): number {
@@ -353,3 +399,15 @@ export function agingBand(days: number): "normal" | "follow_up" | "escalate" {
 export function expenseNeedsApproval(amount: number, loggedByRole: string): boolean {
   return amount > FINANCE_DEFAULTS.expenseApprovalThreshold && loggedByRole !== "SUPER_ADMIN";
 }
+
+/** The tier rule for a name, for callers that hold the whole structure. */
+export function tierRuleOf(s: CashflowStructure, tier: AmbassadorTier): TierRule | undefined {
+  return tierRule(s, tier);
+}
+
+/** The workers row's percentage (40) — what a new project freezes as its workerPayoutRate. */
+export function workersPercent(s: CashflowStructure): number {
+  return recipientsPercent(s, "workers");
+}
+
+export { LEVEL1, level1Row };

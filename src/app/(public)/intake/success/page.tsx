@@ -6,6 +6,7 @@ import { PayWithPaystackButton } from "@/components/track/PayWithPaystackButton"
 import { IntakeFinalizing } from "@/components/intake/IntakeFinalizing";
 import { db } from "@/lib/db";
 import { getCompanyBankDetails } from "@/lib/settings";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { formatNaira } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Project submitted" };
@@ -18,11 +19,12 @@ export default async function IntakeSuccessPage({
 }) {
   const projectId = searchParams.p?.trim();
   const reference = searchParams.ref?.trim();
+  const hq = await getHqContact();
 
   // Pay-first flow: Paystack's redirect can beat the webhook here — poll
   // until the project actually exists instead of assuming ?p= is already set.
   if (!projectId && reference) {
-    return <IntakeFinalizing reference={reference} />;
+    return <IntakeFinalizing reference={reference} phone={hq.phone} />;
   }
 
   const [project, bank] = await Promise.all([
@@ -136,8 +138,8 @@ export default async function IntakeSuccessPage({
             ) : null}
 
             <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
-              After payment, your project is assigned to a specialist within 24 hours. Message us on
-              07063421088 if you have questions.
+              After payment, your project is assigned to a specialist within 24 hours. Message us on{" "}
+              {hq.phone} if you have questions.
             </p>
           </div>
 

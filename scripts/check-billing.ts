@@ -35,15 +35,18 @@ const sample: ReceiptData = {
   remaining: 49_500,
 };
 
+/** The footer's contact line comes from the HQ contact settings; a made-up one here. */
+const hq = { phone: "0800 000 0000", email: "hq@example.com" };
+
 // ─── Receipt variant (default) ─────────────────────────────────────────────
-const receipt = buildReceiptPdf(sample);
+const receipt = buildReceiptPdf(sample, { hq });
 check("receipt renders as a Buffer", Buffer.isBuffer(receipt));
 check("receipt has PDF magic bytes", receipt.slice(0, 4).toString("ascii") === "%PDF");
 check("receipt is non-empty", receipt.byteLength > 512);
 check("receipt fits well under the receipt purpose's max bytes", receipt.byteLength < maxBytesFor("receipt"));
 
 // ─── Invoice variant ───────────────────────────────────────────────────────
-const invoice = buildReceiptPdf(sample, { variant: "invoice" });
+const invoice = buildReceiptPdf(sample, { variant: "invoice", hq });
 check("invoice renders as a Buffer", Buffer.isBuffer(invoice));
 check("invoice has PDF magic bytes", invoice.slice(0, 4).toString("ascii") === "%PDF");
 check("invoice differs from receipt (different content)", invoice.toString("binary") !== receipt.toString("binary"));
@@ -52,7 +55,7 @@ check("invoice differs from receipt (different content)", invoice.toString("bina
 const variants: ReceiptVariant[] = ["receipt", "invoice"];
 check("ReceiptVariant enumerates receipt and invoice", variants.length === 2);
 for (const v of variants) {
-  const pdf = buildReceiptPdf(sample, { variant: v });
+  const pdf = buildReceiptPdf(sample, { variant: v, hq });
   check(`variant ${v} produces PDF magic bytes`, pdf.slice(0, 4).toString("ascii") === "%PDF");
 }
 

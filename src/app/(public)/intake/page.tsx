@@ -3,6 +3,8 @@ import { LuInbox } from "react-icons/lu";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ServiceGrid } from "@/components/intake/ServiceGrid";
 import { getActiveServices } from "@/lib/services/intake";
+import { publicDownpaymentPercent } from "@/lib/services/cashflow";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { db } from "@/lib/db";
 
 export const metadata: Metadata = {
@@ -18,7 +20,7 @@ export default async function IntakePage({
 }) {
   const ref = searchParams.ref?.trim();
 
-  const [services, referrer] = await Promise.all([
+  const [services, referrer, downpaymentPercent, hq] = await Promise.all([
     getActiveServices(),
     ref
       ? db.ambassador.findUnique({
@@ -26,6 +28,8 @@ export default async function IntakePage({
           select: { fullName: true, status: true },
         })
       : Promise.resolve(null),
+    publicDownpaymentPercent(),
+    getHqContact(),
   ]);
 
   const validRef =
@@ -39,7 +43,7 @@ export default async function IntakePage({
         </h1>
         <p className="mt-2 max-w-prose text-muted-foreground">
           Pick the service you need. You&apos;ll fill in a short form, we confirm the details, and
-          work begins once your 45% downpayment lands.
+          work begins once your {downpaymentPercent}% downpayment lands.
         </p>
         {validRef ? (
           <p className="mt-3 inline-flex rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
@@ -52,7 +56,7 @@ export default async function IntakePage({
         <EmptyState
           icon={LuInbox}
           title="No services available right now"
-          description="Please check back shortly, or reach us on WhatsApp at 07063421088."
+          description={`Please check back shortly, or reach us on WhatsApp at ${hq.phone}.`}
         />
       ) : (
         <ServiceGrid services={services} referralCode={validRef} />

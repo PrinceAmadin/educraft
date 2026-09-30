@@ -19,9 +19,19 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { expectedAllocation } from "../src/lib/finance/commission-config";
+import { cashflowStructureSchema, toStructure } from "../src/lib/validations/cashflow";
+import type { CashflowStructure } from "../src/lib/finance/cashflow-types";
 
 const db = new PrismaClient();
 const apply = process.argv.includes("--apply");
+
+/** Every published version by id, plus the earliest one for projects stamped with none. */
+async function loadStructures(): Promise<{ byId: Map<string, CashflowStructure>; first: CashflowStructure }> {
+  const rows = await db.cashflowVersion.findMany({ orderBy: { versionNumber: "asc" } });
+  if (rows.length === 0) throw new Error("No cashflow version has been published. Run `npm run cashflow:seed -- --apply` first.");
+  const byId = new Map(rows.map((r) => [r.id, toStructure(cashflowStructureSchema.parse(r.structure))]));
+  return { byId, first: byId.get(rows[0].id)! };
+}
 
 function monthKeyOf(date: Date): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -57,6 +67,7 @@ async function main() {
       parentCommission: true,
       ambassadorId: true,
       isProBono: true,
+      cashflowVersionId: true,
       payments: {
         where: { status: "Confirmed", OR: [{ direction: "INFLOW", type: { in: ["CLIENT_DOWNPAYMENT", "CLIENT_BALANCE"] } }, { direction: "OUTFLOW", type: "REFUND" }] },
         orderBy: { date: "asc" },
@@ -68,6 +79,7 @@ async function main() {
   });
   console.log(`\n2. Buckets: ${projects.length} project(s) with confirmed money`);
 
+  const structures = await loadStructures();
   const { syncProjectBuckets } = await import("../src/lib/services/finance/buckets");
   let written = 0;
   let totalDelta = 0;
@@ -84,7 +96,8 @@ async function main() {
     for (const pay of p.payments) {
       running += pay.direction === "INFLOW" ? pay.amount : -pay.amount;
       if (pay.direction !== "INFLOW" || pay.bucketAllocation) continue;
-      const expected = expectedAllocation(p, Math.round(running));
+      const structure = (p.cashflowVersionId && structures.byId.get(p.cashflowVersionId)) || structures.first;
+      const expected = expectedAllocation(p, Math.round(running), structure);
       const delta = expected - soFar;
       if (delta === 0) continue;
       plan.push({ paymentId: pay.id, month: monthKeyOf(pay.date), delta, asOf: pay.date });

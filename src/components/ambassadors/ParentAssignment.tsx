@@ -224,8 +224,8 @@ export function ParentAssignment({
                   </span>
                 </div>
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  Leave blank to use the default ({defaultRate}%, set in Settings). 0% links them without
-                  paying a commission.
+                  Leave blank to use the default ({defaultRate}%: the ambassador total less their tier rate, from
+                  Settings &gt; EduCraft Cashflow). 0% links them without paying a commission.
                 </p>
               </div>
             ) : null}

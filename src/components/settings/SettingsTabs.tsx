@@ -6,6 +6,7 @@ const TABS = [
   { key: "general", href: "/admin/settings", label: "General" },
   { key: "services", href: "/admin/settings/services", label: "Services" },
   { key: "team", href: "/admin/settings/team", label: "Team & roles" },
+  { key: "cashflow", href: "/admin/settings/cashflow", label: "EduCraft Cashflow" },
   { key: "cleanup", href: "/admin/settings/cleanup", label: "Test data" },
   { key: "bank", href: "/admin/settings/bank", label: "Bank details" },
 ] as const;

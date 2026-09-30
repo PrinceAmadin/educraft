@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { ambassadorTier, TOP_TIER, TOP_TIER_MIN_CONVERSIONS } from "@/lib/ambassadors/tier-utils";
+import { ambassadorTier, TOP_TIER, topTierMinConversions, type TierLadder } from "@/lib/ambassadors/tier-utils";
 import { execForRecord } from "@/lib/executive-identity";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { emailEquals, loadExecIndex } from "@/lib/services/executives";
 
 /**
@@ -9,7 +10,8 @@ import { emailEquals, loadExecIndex } from "@/lib/services/executives";
  * records. `recountAmbassador` recomputes them from the rows — so every
  * path that changes a referral, a payout or a link calls it, and a replay
  * can never double-count. The tier is derived here and nowhere else: by
- * count, except that an executive's record is always Platinum.
+ * count against the ladder of the cashflow structure in force, except that
+ * an executive's record is always Platinum.
  */
 
 type Db = Prisma.TransactionClient | typeof db;
@@ -23,25 +25,27 @@ export interface RecountResult {
   tierChanged: boolean;
 }
 
-export async function recountAmbassador(tx: Db, ambassadorId: string): Promise<RecountResult | null> {
+/** Recount one ambassador; pass `tiers` when the caller already holds the ladder (one read fewer inside a transaction). */
+export async function recountAmbassador(tx: Db, ambassadorId: string, tiers?: TierLadder): Promise<RecountResult | null> {
   const ambassador = await tx.ambassador.findUnique({
     where: { id: ambassadorId },
     select: { id: true, tier: true, email: true, user: { select: { email: true, role: true } } },
   });
   if (!ambassador) return null;
 
-  // The executive lookup runs alongside the counts, so it adds no round trip
-  // to the downpayment confirmations that call this inside their transaction.
-  const [referrals, converted, lastConversion, lastReferral, earnings, execIndex] = await Promise.all([
+  // The executive lookup and the ladder run alongside the counts, so they add
+  // no round trip to the downpayment confirmations that call this inside their transaction.
+  const [referrals, converted, lastConversion, lastReferral, earnings, execIndex, ladder] = await Promise.all([
     tx.ambassadorReferral.count({ where: { ambassadorId, status: { not: "CANCELLED" } } }),
     tx.ambassadorReferral.count({ where: { ambassadorId, status: "CONVERTED" } }),
     tx.ambassadorReferral.findFirst({ where: { ambassadorId, status: "CONVERTED" }, orderBy: { convertedAt: "desc" }, select: { convertedAt: true } }),
     tx.ambassadorReferral.findFirst({ where: { ambassadorId, status: { not: "CANCELLED" } }, orderBy: { submittedAt: "desc" }, select: { submittedAt: true } }),
     tx.payoutRecord.aggregate({ where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { not: "CANCELLED" } }, _sum: { amount: true } }),
     loadExecIndex(tx),
+    tiers ? Promise.resolve(tiers) : getActiveCashflow().then((v) => v.structure.tiers),
   ]);
 
-  const tier = ambassadorTier(converted, execForRecord(execIndex, ambassador) != null);
+  const tier = ambassadorTier(converted, execForRecord(execIndex, ambassador) != null, ladder);
   const tierChanged = tier !== ambassador.tier;
   await tx.ambassador.update({
     where: { id: ambassadorId },
@@ -67,12 +71,13 @@ export async function recountAmbassador(tx: Db, ambassadorId: string): Promise<R
  * their count). Called after Team & roles edits; each recount is idempotent.
  */
 export async function refreshExecutiveTiers(): Promise<{ checked: number; changed: { ambassadorId: string; from: string; to: string }[] }> {
-  const index = await loadExecIndex();
+  const [index, active] = await Promise.all([loadExecIndex(), getActiveCashflow()]);
+  const tiers = active.structure.tiers;
   const match = emailEquals([...index.keys()]);
   const candidates = await db.ambassador.findMany({
     where: {
       OR: [
-        { tier: TOP_TIER, lifetimeConversions: { lt: TOP_TIER_MIN_CONVERSIONS } },
+        { tier: TOP_TIER, lifetimeConversions: { lt: topTierMinConversions(tiers) } },
         ...match.map((email) => ({ user: { email } })),
         ...match.map((email) => ({ userId: null, email })),
       ],
@@ -81,10 +86,26 @@ export async function refreshExecutiveTiers(): Promise<{ checked: number; change
   });
   const changed: { ambassadorId: string; from: string; to: string }[] = [];
   for (const a of candidates) {
-    const r = await recountAmbassador(db, a.id);
+    const r = await recountAmbassador(db, a.id, tiers);
     if (r?.tierChanged) changed.push({ ambassadorId: a.ambassadorId, from: r.previousTier, to: r.tier });
   }
   return { checked: candidates.length, changed };
+}
+
+/**
+ * Re-derive EVERY ambassador's tier under the ladder in force — after a
+ * cashflow version with new thresholds is published. Each recount is
+ * idempotent and logs its own tier change.
+ */
+export async function refreshAllTiers(): Promise<{ checked: number; changed: { ambassadorId: string; from: string; to: string }[] }> {
+  const tiers = (await getActiveCashflow()).structure.tiers;
+  const all = await db.ambassador.findMany({ select: { id: true, ambassadorId: true }, orderBy: { createdAt: "asc" } });
+  const changed: { ambassadorId: string; from: string; to: string }[] = [];
+  for (const a of all) {
+    const r = await recountAmbassador(db, a.id, tiers);
+    if (r?.tierChanged) changed.push({ ambassadorId: a.ambassadorId, from: r.previousTier, to: r.tier });
+  }
+  return { checked: all.length, changed };
 }
 
 /**

@@ -12,10 +12,13 @@ import { formatDate, formatNaira } from "@/lib/utils";
 export function ClientPaymentsPanel({
   project,
   payments,
+  whatsapp,
   preview = false,
 }: {
   project: ClientProjectView;
   payments: ClientPaymentRow[];
+  /** EduCraft's WhatsApp line, international digits (HQ contact settings). */
+  whatsapp: string;
   /** Admin preview: shows the same page with nothing to click. */
   preview?: boolean;
 }) {
@@ -34,7 +37,7 @@ export function ClientPaymentsPanel({
   const paid = payments.filter((p) => p.status === "Confirmed").reduce((sum, p) => sum + p.amount, 0);
   const due = Math.max(0, project.price - paid);
   const pending = payments.some((p) => p.status === "Pending");
-  const bankLink = educraftWaLink(`Hi EduCraft, I'd like to pay for ${project.code} by bank transfer.`);
+  const bankLink = educraftWaLink(whatsapp, `Hi EduCraft, I'd like to pay for ${project.code} by bank transfer.`);
 
   return (
     <div className="space-y-10">

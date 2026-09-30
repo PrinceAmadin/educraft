@@ -1,22 +1,10 @@
 import type { AmbassadorTier } from "@prisma/client";
-import { TIER_COMMISSION_RATE } from "@/lib/constants";
 
 /**
- * Ambassador tier ladder. Thresholds count paying clients — a referred client
- * who has paid the downpayment on at least one order. Nothing an ambassador
- * reads calls that a "conversion": see `src/lib/ambassador-copy.ts`.
+ * Ambassador constants that need no server. The tier ladder itself (the
+ * thresholds and rates) lives in the published cashflow structure; see
+ * `ambassadors/tier-utils.ts` for everything that reads it.
  */
-export const TIER_LADDER: {
-  tier: AmbassadorTier;
-  label: string;
-  minPayingClients: number;
-  rate: number;
-}[] = [
-  { tier: "BRONZE", label: "Bronze", minPayingClients: 0, rate: TIER_COMMISSION_RATE.BRONZE },
-  { tier: "SILVER", label: "Silver", minPayingClients: 6, rate: TIER_COMMISSION_RATE.SILVER },
-  { tier: "GOLD", label: "Gold", minPayingClients: 16, rate: TIER_COMMISSION_RATE.GOLD },
-  { tier: "PLATINUM", label: "Platinum", minPayingClients: 31, rate: TIER_COMMISSION_RATE.PLATINUM },
-];
 
 /**
  * How long a newly approved ambassador holds their slot before they have to
@@ -61,56 +49,6 @@ export const TIER_BADGE: Record<AmbassadorTier, string> = {
   GOLD: "border-transparent bg-gold/15 text-gold",
   PLATINUM: "border-transparent bg-purple/15 text-purple",
 };
-
-export interface TierProgress {
-  current: AmbassadorTier;
-  currentLabel: string;
-  next: AmbassadorTier | null;
-  nextLabel: string | null;
-  /** Referred clients who have paid a downpayment on at least one order. */
-  payingClients: number;
-  /** Paying clients still needed to reach `next`; 0 when already at the top. */
-  toNext: number;
-  /** 0–100 progress through the current tier band. */
-  percent: number;
-  /** True when the paying-client count already earns a higher tier than stored. */
-  eligibleForPromotion: boolean;
-}
-
-export function tierByPayingClients(payingClients: number): AmbassadorTier {
-  let earned: AmbassadorTier = "BRONZE";
-  for (const step of TIER_LADDER) {
-    if (payingClients >= step.minPayingClients) earned = step.tier;
-  }
-  return earned;
-}
-
-export function tierProgress(stored: AmbassadorTier, payingClients: number): TierProgress {
-  const idx = TIER_LADDER.findIndex((t) => t.tier === stored);
-  const current = TIER_LADDER[Math.max(0, idx)];
-  const next = TIER_LADDER[idx + 1] ?? null;
-
-  const bandStart = current.minPayingClients;
-  const bandEnd = next?.minPayingClients ?? current.minPayingClients;
-  const span = bandEnd - bandStart;
-
-  const percent =
-    next == null
-      ? 100
-      : Math.min(100, Math.max(0, Math.round(((payingClients - bandStart) / Math.max(1, span)) * 100)));
-
-  return {
-    current: current.tier,
-    currentLabel: current.label,
-    next: next?.tier ?? null,
-    nextLabel: next?.label ?? null,
-    payingClients,
-    toNext: next ? Math.max(0, next.minPayingClients - payingClients) : 0,
-    percent,
-    eligibleForPromotion:
-      TIER_LADDER.findIndex((t) => t.tier === tierByPayingClients(payingClients)) > Math.max(0, idx),
-  };
-}
 
 /** Public referral link for a code, given the site origin. */
 export function referralLink(origin: string, code: string): string {

@@ -14,6 +14,8 @@ import { cn, formatDate, formatNaira } from "@/lib/utils";
 /** One recipient's row, as the page prepares it from the engine's groups. */
 export interface PayoutGroupView {
   recipientId: string;
+  /** When a section mixes recipient types (executives by role and people the founder named), the row's own. */
+  recipientType?: RecipientType;
   name: string;
   code: string;
   href: string | null;
@@ -67,7 +69,7 @@ export function PayoutSection({
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState<Set<string>>(new Set());
-  const [paying, setPaying] = React.useState<{ recipientId: string | null; label: string; amount: number } | null>(null);
+  const [paying, setPaying] = React.useState<{ recipientId: string | null; recipientType?: RecipientType; label: string; amount: number } | null>(null);
   const [notice, setNotice] = React.useState<{ ok: boolean; text: string } | null>(null);
 
   const toggle = (id: string) =>
@@ -132,7 +134,7 @@ export function PayoutSection({
                       </span>
                     </span>
                     {canMarkPaid && g.unpaid > 0 ? (
-                      <Button size="sm" onClick={() => setPaying({ recipientId: g.recipientId, label: g.name, amount: g.unpaid })}>
+                      <Button size="sm" onClick={() => setPaying({ recipientId: g.recipientId, recipientType: g.recipientType, label: g.name, amount: g.unpaid })}>
                         <LuCheck className="size-4" aria-hidden />
                         Mark paid
                       </Button>
@@ -201,7 +203,7 @@ export function PayoutSection({
       <ConfirmPayDialog
         target={paying}
         month={month}
-        recipientType={recipientType}
+        recipientType={paying?.recipientType ?? recipientType}
         onClose={() => setPaying(null)}
         onDone={(text) => {
           setNotice({ ok: true, text });

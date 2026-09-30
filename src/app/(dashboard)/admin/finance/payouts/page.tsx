@@ -7,6 +7,7 @@ import { PayoutSection, type PayoutGroupView } from "@/components/finance/payout
 import { BonusPanel } from "@/components/finance/payouts/BonusPanel";
 import { CooPayoutPanel } from "@/components/finance/payouts/CooPayoutPanel";
 import { calculateMonthlyPayouts, getCooPayoutView, getPayoutMonth, type Bank } from "@/lib/services/finance/payouts-engine";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { currentMonthKey } from "@/lib/services/finance/surplus";
 import { payoutsQuerySchema } from "@/lib/validations/finance-payouts";
 import { cn, formatDateTime, formatNaira } from "@/lib/utils";
@@ -53,7 +54,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Reco
     );
   }
 
-  const data = await getPayoutMonth(month);
+  const [data, active] = await Promise.all([getPayoutMonth(month), getActiveCashflow()]);
   const canMarkPaid = canMarkPayoutsPaid(role);
   const exportHref = `/api/admin/finance/payouts/export?month=${month}`;
 
@@ -91,8 +92,9 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Reco
   }));
   const executives: PayoutGroupView[] = data.executives.map((g) => ({
     recipientId: g.recipientId,
+    recipientType: g.recipientType,
     name: g.name,
-    code: g.recipientId,
+    code: g.recipientType === "EXECUTIVE" ? g.recipientId : g.label,
     href: null,
     chip: `${g.rate}%`,
     details: [g.recipientId === "HOG" ? `${g.projectCount} ambassador-driven project${g.projectCount === 1 ? "" : "s"}` : `${g.projectCount} project${g.projectCount === 1 ? "" : "s"} delivered`],
@@ -180,7 +182,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Reco
         emptyLabel="No executive commissions this month."
       />
 
-      <BonusPanel month={month} metrics={data.metrics} bonuses={data.bonuses} canAct={canMarkPaid} />
+      <BonusPanel month={month} metrics={data.metrics} bonuses={data.bonuses} bonusRules={active.structure.bonuses} canAct={canMarkPaid} />
     </div>
   );
 }

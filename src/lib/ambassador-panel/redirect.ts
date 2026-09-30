@@ -3,7 +3,8 @@ import { waitUntil } from "@vercel/functions";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
 import { recordClick } from "@/lib/click-tracking/record-click";
 import { db } from "@/lib/db";
-import { EDUCRAFT_WHATSAPP, waLink } from "@/lib/whatsapp";
+import { waLink } from "@/lib/whatsapp";
+import { getHqContact } from "@/lib/services/hq-contact";
 
 /**
  * Referral links → WhatsApp, exactly as the original `api/redirect.ts`:
@@ -54,20 +55,23 @@ function esc(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-function errorPage(title: string, body: string, status: number) {
+function errorPageWith(title: string, body: string, status: number, whatsappUrl: string) {
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>EduCraft</title>
 <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Inter,'Segoe UI',system-ui,sans-serif;background:#F8F9FA;color:#0F172A;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
 main{max-width:420px;text-align:center}h1{font-size:1.25rem;margin-bottom:10px}p{color:#475569;line-height:1.6;font-size:.95rem}
 a{display:inline-block;margin-top:22px;color:#0D9488;font-weight:600;text-decoration:none}.brand{margin-top:28px;font-size:.75rem;color:#64748B}</style></head>
-<body><main><h1>${esc(title)}</h1><p>${esc(body)}</p><a href="https://wa.me/2347063421088">Message EduCraft on WhatsApp</a><p class="brand">EduCraft — Academic &amp; Technical Documentation Experts</p></main></body></html>`;
+<body><main><h1>${esc(title)}</h1><p>${esc(body)}</p><a href="${esc(whatsappUrl)}">Message EduCraft on WhatsApp</a><p class="brand">EduCraft — Academic &amp; Technical Documentation Experts</p></main></body></html>`;
   return new NextResponse(html, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
 export async function referralResponse(kind: ReferralKind, rawId: string, req: Request) {
   const id = decodeURIComponent(rawId ?? "").trim();
+  // EduCraft's line, from the HQ contact settings: every ambassador link opens this number.
+  const hq = await getHqContact();
+  const errorPage = (title: string, body: string, status: number) => errorPageWith(title, body, status, hq.whatsappUrl);
   if (!id) return errorPage("Invalid link", "No ambassador ID was provided.", 400);
 
-  const number = EDUCRAFT_WHATSAPP;
+  const number = hq.whatsapp;
 
   if (kind === "ecca") {
     const code = id.toUpperCase();

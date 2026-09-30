@@ -21,6 +21,7 @@ import { db } from "@/lib/db";
 import { buildReceiptPath } from "@/lib/files/paths";
 import { deleteStoredFile, putPrivateFile, readFile } from "@/lib/files/storage";
 import { buildReceiptPdf, type ReceiptVariant } from "@/lib/receipts";
+import { getHqContact } from "@/lib/services/hq-contact";
 import type { ReceiptData } from "@/lib/services/client-portal";
 
 const TAG = "[billing]";
@@ -108,7 +109,7 @@ export async function storeReceipt(paymentDbId: string): Promise<StoredReceipt |
     }
     const data = await serverReceiptData(paymentDbId);
     if (!data || !existing?.project) return null;
-    const pdf = buildReceiptPdf(data);
+    const pdf = buildReceiptPdf(data, { hq: await getHqContact() });
     const path = buildReceiptPath({
       projectDbId: existing.project.id,
       paymentDbId,

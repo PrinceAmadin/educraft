@@ -10,7 +10,10 @@ import { SuspendControl } from "@/components/ambassadors/platform/SuspendControl
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { AmbassadorNotes } from "@/components/ambassadors/platform/AmbassadorNotes";
 import { LuLink, LuUserPlus } from "react-icons/lu";
-import { getDefaultParentCommissionRate } from "@/lib/services/settings";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { coreOverrideFor } from "@/lib/finance/cashflow-rules";
+import { ambassadorTotalRate, ratePercentForTier } from "@/lib/finance/commission-config";
+import { percentLabel, subTeamThresholdLabel } from "@/lib/ambassadors/tier-utils";
 import { getLinkedWorker } from "@/lib/services/linked-profiles";
 import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
 import { RoleChip } from "@/components/layout/RoleChip";
@@ -54,9 +57,9 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, defaultParentRate, linkedWorker, session, universities, platform, subCandidates, execRole] = await Promise.all([
+  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole] = await Promise.all([
     listParentCandidates(ambassador.id),
-    getDefaultParentCommissionRate(),
+    getActiveCashflow(),
     getLinkedWorker(ambassador.userId),
     auth(),
     db.university.findMany({
@@ -69,6 +72,10 @@ export default async function AmbassadorDetailPage({
   ]);
   if (!platform) notFound();
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  // What a Core earns on this ambassador's jobs by default: the ambassador total less their tier rate.
+  const defaultParentRate = coreOverrideFor(ratePercentForTier(ambassador.tier, active.structure.tiers), active.structure);
+  const ambassadorTotalLabel = percentLabel(ambassadorTotalRate(active.structure));
+  const subTeamThreshold = subTeamThresholdLabel(active.structure.tiers);
 
   return (
     <div className="space-y-5">
@@ -247,7 +254,7 @@ export default async function AmbassadorDetailPage({
         candidates={parentCandidates}
         defaultRate={defaultParentRate}
       />
-      <DirectoryProfile detail={platform} subCandidates={subCandidates} />
+      <DirectoryProfile detail={platform} subCandidates={subCandidates} ambassadorTotalLabel={ambassadorTotalLabel} subTeamThreshold={subTeamThreshold} />
 
       {/* Legacy commission ledger (job allocations) + bank details */}
       <section className="surface p-4">

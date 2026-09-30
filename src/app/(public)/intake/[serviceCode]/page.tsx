@@ -8,6 +8,7 @@ import { resolveTemplate } from "@/lib/intake-templates";
 import { IntakeForm } from "@/components/intake/IntakeForm";
 import { formatNaira } from "@/lib/utils";
 import { isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { getHqContact } from "@/lib/services/hq-contact";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function IntakeServicePage({
   params: { serviceCode: string };
   searchParams: { ref?: string; chapters?: string; option?: string };
 }) {
-  const service = await getServiceByCode(params.serviceCode);
+  const [service, hq] = await Promise.all([getServiceByCode(params.serviceCode), getHqContact()]);
   if (!service) notFound();
 
   const template = resolveTemplate(service.intakeFormTemplate);
@@ -103,8 +104,8 @@ export default async function IntakeServicePage({
         <div className="rounded-2xl bg-zone p-6 text-sm">
           <p className="font-medium text-foreground">This one we handle over WhatsApp</p>
           <p className="mt-1 text-muted-foreground">
-            The online form for this service isn&apos;t ready yet. Message us on 07063421088 or
-            educraft611@gmail.com with your requirements and we&apos;ll take it from there.
+            The online form for this service isn&apos;t ready yet. Message us on {hq.phone} or{" "}
+            {hq.email} with your requirements and we&apos;ll take it from there.
           </p>
           <Link
             href="/intake"

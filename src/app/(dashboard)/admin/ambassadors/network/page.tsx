@@ -6,7 +6,8 @@ import { AmbassadorTabs } from "@/components/ambassadors/AmbassadorTabs";
 import { NetworkTree } from "@/components/ambassadors/platform/NetworkTree";
 import { db } from "@/lib/db";
 import { getNetworkMap } from "@/lib/services/ambassador-platform/network";
-import { COMMISSION_RATES } from "@/lib/finance/commission-config";
+import { ambassadorTotalRate } from "@/lib/finance/commission-config";
+import { getActiveCashflow } from "@/lib/services/cashflow";
 import { percentLabel } from "@/lib/ambassadors/tier-utils";
 
 export const metadata: Metadata = { title: "Ambassador network" };
@@ -14,13 +15,13 @@ export const dynamic = "force-dynamic";
 
 /** Phase 3 Section 3 — the Network Map: every Core with their Sub-team, and the solo ambassadors. */
 export default async function NetworkPage() {
-  const [data, pendingApplications] = await Promise.all([getNetworkMap(), db.ambassadorApplication.count({ where: { status: "PENDING" } })]);
+  const [data, pendingApplications, active] = await Promise.all([getNetworkMap(), db.ambassadorApplication.count({ where: { status: "PENDING" } }), getActiveCashflow()]);
   const { stats } = data;
   return (
     <div className="space-y-7">
       <PageHeader
         title="Ambassador network"
-        description={`${stats.ambassadors} ambassador${stats.ambassadors === 1 ? "" : "s"} in ${stats.clusters} Core cluster${stats.clusters === 1 ? "" : "s"}. A Core earns an override on their Sub-team's clients; EduCraft always pays ${percentLabel(COMMISSION_RATES.ambassador)} in total.`}
+        description={`${stats.ambassadors} ambassador${stats.ambassadors === 1 ? "" : "s"} in ${stats.clusters} Core cluster${stats.clusters === 1 ? "" : "s"}. A Core earns an override on their Sub-team's clients; EduCraft always pays ${percentLabel(ambassadorTotalRate(active.structure))} in total.`}
       />
       <AmbassadorTabs active="network" pendingApplications={pendingApplications} />
 

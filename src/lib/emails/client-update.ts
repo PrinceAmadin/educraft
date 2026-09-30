@@ -11,6 +11,8 @@ export function clientUpdateEmail(input: {
   lines: string[];
   ctaLabel: string;
   ctaUrl: string;
+  /** EduCraft's WhatsApp line for the footer (HQ contact settings). */
+  hq: { phone: string };
 }): { subject: string; html: string; text: string } {
   const first = input.fullName.trim().split(/\s+/)[0] || "there";
   const subject = `${input.heading} · ${input.projectCode}`;
@@ -23,7 +25,7 @@ export function clientUpdateEmail(input: {
     "",
     `${input.ctaLabel}: ${input.ctaUrl}`,
     "",
-    "Sign in with your Client ID or email. Questions? Reply on WhatsApp: 07063421088.",
+    `Sign in with your Client ID or email. Questions? Reply on WhatsApp: ${input.hq.phone}.`,
     "EduCraft, Academic & Technical Documentation Experts",
   ].join("\n");
 
@@ -39,7 +41,7 @@ export function clientUpdateEmail(input: {
     <p style="margin:0 0 14px;font-size:15px;line-height:1.7;color:#475569">Hi ${escapeHtml(first)},</p>
     ${paragraphs}
     <p style="margin:24px 0 28px"><a href="${escapeHtml(input.ctaUrl)}" style="display:inline-block;background:#0D9488;color:#FFFFFF;text-decoration:none;font-weight:600;font-size:15px;padding:13px 22px;border-radius:10px">${escapeHtml(input.ctaLabel)}</a></p>
-    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.6;color:#64748B">Sign in with your Client ID or email. Questions? WhatsApp us on 07063421088.<br/>EduCraft, Academic &amp; Technical Documentation Experts.</p>
+    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.6;color:#64748B">Sign in with your Client ID or email. Questions? WhatsApp us on ${escapeHtml(input.hq.phone)}.<br/>EduCraft, Academic &amp; Technical Documentation Experts.</p>
   </div>
 </body></html>`;
 

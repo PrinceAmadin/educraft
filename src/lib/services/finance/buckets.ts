@@ -5,12 +5,15 @@ import {
   BUCKET_META,
   BUCKET_TYPES,
   bucketHealth,
-  bucketSplit,
-  expectedAllocation,
+  bucketLabel,
+  bucketShareOfRetained,
+  bucketShareOfRevenue,
+  expectedBucketAllocation,
   retainedRateFor,
   type BucketAmounts,
   type BucketHealth,
 } from "@/lib/finance/commission-config";
+import { cashflowForProject, getActiveCashflow } from "@/lib/services/cashflow";
 import { getFinanceSettings } from "@/lib/services/finance/settings";
 
 /**
@@ -81,13 +84,17 @@ const LEGS_SELECT = {
   parentCommission: true,
   ambassadorId: true,
   isProBono: true,
+  createdAt: true,
+  cashflowVersionId: true,
 } satisfies Prisma.ProjectSelect;
 
 /**
  * Bring a project's bucket allocation in line with EduCraft's retained share
- * of the money in. Delta-based: a second call with nothing changed writes
- * nothing. Call it inside the transaction that confirmed the payment or
- * changed the project's legs.
+ * of the money in, under the cashflow structure the project was created
+ * under. Delta-based PER BUCKET: what each bucket should hold now less what
+ * its column of the log already holds, so rounding never drifts and a second
+ * call with nothing changed writes nothing. Call it inside the transaction
+ * that confirmed the payment or changed the project's legs.
  */
 export async function syncProjectBuckets(tx: Tx, projectDbId: string, opts: SyncOptions): Promise<SyncResult> {
   const project = await tx.project.findUnique({ where: { id: projectDbId }, select: LEGS_SELECT });
@@ -99,13 +106,22 @@ export async function syncProjectBuckets(tx: Tx, projectDbId: string, opts: Sync
     if (already) return { delta: 0, amounts: null };
   }
 
+  const s = await cashflowForProject(project);
   const netInflow = await projectNetInflow(tx, projectDbId, opts.asOf);
-  const expected = expectedAllocation(project, netInflow);
-  const logged = await tx.bucketAllocationLog.aggregate({ where: { projectId: projectDbId }, _sum: { retainedAmount: true } });
-  const delta = expected - Math.round(logged._sum.retainedAmount ?? 0);
-  if (delta === 0) return { delta: 0, amounts: null };
+  const expected = expectedBucketAllocation(project, netInflow, s);
+  const logged = await tx.bucketAllocationLog.aggregate({
+    where: { projectId: projectDbId },
+    _sum: { operationsReserve: true, growthFund: true, reinvestmentFund: true, founderDistribution: true },
+  });
+  const amounts: BucketAmounts = {
+    operationsReserve: expected.operationsReserve - Math.round(logged._sum.operationsReserve ?? 0),
+    growthFund: expected.growthFund - Math.round(logged._sum.growthFund ?? 0),
+    reinvestmentFund: expected.reinvestmentFund - Math.round(logged._sum.reinvestmentFund ?? 0),
+    founderDistribution: expected.founderDistribution - Math.round(logged._sum.founderDistribution ?? 0),
+  };
+  const delta = amounts.operationsReserve + amounts.growthFund + amounts.reinvestmentFund + amounts.founderDistribution;
+  if (Object.values(amounts).every((v) => v === 0)) return { delta: 0, amounts: null };
 
-  const amounts = bucketSplit(delta);
   const month = opts.month ?? monthKeyOf(new Date());
   const inflowLike = delta > 0 && (opts.reason === "PAYMENT" || opts.reason === "BACKFILL");
   const description =
@@ -125,7 +141,7 @@ export async function syncProjectBuckets(tx: Tx, projectDbId: string, opts: Sync
       reason: opts.reason,
       month,
       retainedAmount: delta,
-      retainedRate: retainedRateFor(project),
+      retainedRate: retainedRateFor(project, s),
       ...amounts,
       note: opts.note ?? null,
       recordedById: opts.recordedById ?? null,
@@ -205,26 +221,33 @@ export interface BucketCard {
   bucket: BucketType;
   label: string;
   purpose: string;
+  /** Fraction of the retained share (0.375) under the structure in force. */
   shareOfRetained: number;
+  /** Fraction of project revenue (0.15) on the standard referred job. */
+  shareOfRevenue: number;
   balance: number;
   month: BucketMonthFlow;
   health: BucketHealth;
 }
 
-/** The four bucket cards for a month, balances all-time. */
+/** The four bucket cards for a month, balances all-time, shares from the structure in force. */
 export async function getBucketCards(month: string): Promise<BucketCard[]> {
-  const [balances, flows, settings] = await Promise.all([getBucketBalances(), getBucketMonthFlows(month), getFinanceSettings()]);
+  const [balances, flows, settings, active] = await Promise.all([getBucketBalances(), getBucketMonthFlows(month), getFinanceSettings(), getActiveCashflow()]);
+  const s = active.structure;
   return BUCKET_TYPES.map((bucket) => ({
     bucket,
-    label: BUCKET_META[bucket].label,
-    purpose: BUCKET_META[bucket].purpose,
-    shareOfRetained: BUCKET_META[bucket].shareOfRetained,
+    label: bucketLabel(bucket, s),
+    purpose: s.level2.find((b) => b.key === bucket)?.purpose ?? BUCKET_META[bucket].purpose,
+    shareOfRetained: bucketShareOfRetained(bucket, s),
+    shareOfRevenue: bucketShareOfRevenue(bucket, s),
     balance: balances[BUCKET_KEY[bucket]],
     month: flows[bucket],
-    health: bucketHealth(bucket, balances[BUCKET_KEY[bucket]], {
-      operatingBaseline: settings.operatingCostMonthlyBaseline,
-      referenceRevenue: settings.bucketReferenceRevenue,
-    }),
+    health: bucketHealth(
+      bucket,
+      balances[BUCKET_KEY[bucket]],
+      { operatingBaseline: settings.operatingCostMonthlyBaseline, referenceRevenue: settings.bucketReferenceRevenue },
+      s
+    ),
   }));
 }
 

@@ -23,7 +23,13 @@ const day = (d: Date) =>
 
 export type ReceiptVariant = "receipt" | "invoice";
 
-export function buildReceiptPdf(r: ReceiptData, opts: { variant?: ReceiptVariant } = {}): Buffer {
+export interface ReceiptOptions {
+  variant?: ReceiptVariant;
+  /** EduCraft's phone and mailbox for the footer (HQ contact settings). */
+  hq: { phone: string; email: string };
+}
+
+export function buildReceiptPdf(r: ReceiptData, opts: ReceiptOptions): Buffer {
   const variant: ReceiptVariant = opts.variant ?? "receipt";
   const title = variant === "invoice" ? "INVOICE" : "RECEIPT";
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -151,7 +157,7 @@ export function buildReceiptPdf(r: ReceiptData, opts: { variant?: ReceiptVariant
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
   doc.text(variant === "invoice" ? "Payment terms: due on receipt. This invoice is issued for the amount above." : "Thank you for choosing EduCraft.", left, 788);
-  doc.text("07063421088  |  educraft611@gmail.com", right, 788, { align: "right" });
+  doc.text(`${opts.hq.phone}  |  ${opts.hq.email}`, right, 788, { align: "right" });
 
   // PENDING watermark for the invoice variant. Faint, diagonal, behind the footer line height.
   if (variant === "invoice") {

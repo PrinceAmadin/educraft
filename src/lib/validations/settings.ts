@@ -37,20 +37,21 @@ export const generalSettingsSchema = z.object({
   companyName: z.string().trim().min(1, "Required").max(120).optional(),
   companyPhone: phoneSchema.optional(),
   companyEmail: z.string().trim().email("Enter a valid email").max(160).optional(),
+  /** The WhatsApp line every ambassador link and "message us" link opens. Blank = the contact phone. */
+  hqWhatsapp: phoneSchema.optional().or(blank),
+  /** Telegram username, with or without the @. Blank = none. */
+  hqTelegram: z
+    .string()
+    .trim()
+    .max(60)
+    .transform((raw) => raw.replace(/^@/, ""))
+    .refine((raw) => raw === "" || /^[A-Za-z0-9_]{5,32}$/.test(raw), "A Telegram username is 5–32 letters, digits or underscores")
+    .optional(),
+  /** A postal address for the footer. Blank = none. */
+  hqAddress: text(200),
   bankName: text(120),
   accountNumber: text(20),
   accountName: text(120),
-  downpaymentPercentage: pct.optional(),
-  commissionRates: z
-    .object({
-      BRONZE: pct.optional(),
-      SILVER: pct.optional(),
-      GOLD: pct.optional(),
-      PLATINUM: pct.optional(),
-    })
-    .optional(),
-  /** Default rate a parent (Core) ambassador earns from a sub's job. */
-  parentCommissionRate: pct.optional(),
   /** Who gets the new-application and paid-order emails. Super Admin only. */
   alertEmails: emailList.optional(),
   /** Margin on top of the auto-fetched ₦/$ rate, in percent (0–20). Super Admin only. */

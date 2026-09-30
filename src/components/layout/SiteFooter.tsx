@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { LogoLockup } from "@/components/shared/Logo";
 import { BRAND_NAME } from "@/lib/constants";
+import type { HqContact } from "@/lib/services/hq-contact";
 
 /**
  * Footer.
@@ -9,42 +10,45 @@ import { BRAND_NAME } from "@/lib/constants";
  * A quiet zone one step off the page in either theme — light grey in light
  * mode, a deeper surface in dark — so it reads as the end of the page without
  * a dark slab or a boxed panel. Link groups are plain lists under sentence-case
- * headings.
+ * headings. The contact group comes from the HQ contact settings.
  */
 
-const GROUPS = [
-  {
-    heading: "Services",
-    links: [
-      { label: "Final year projects", href: "/services" },
-      { label: "Reports & papers", href: "/services" },
-      { label: "Presentations", href: "/services" },
-      { label: "Letters & essays", href: "/services" },
-      { label: "Editing & formatting", href: "/services" },
-    ],
-  },
-  {
-    heading: "Company",
-    links: [
-      { label: "How it works", href: "/#how-it-works" },
-      { label: "Become an ambassador", href: "/apply" },
-      { label: "Work with us", href: "/apply/worker" },
-      { label: "Client sign in", href: "/client/login" },
-      { label: "Sign in", href: "/login" },
-    ],
-  },
-  {
-    heading: "Contact",
-    links: [
-      { label: "07063421088", href: "tel:+2347063421088" },
-      { label: "WhatsApp us", href: "https://wa.me/2347063421088" },
-      { label: "educraft611@gmail.com", href: "mailto:educraft611@gmail.com" },
-      { label: "Start a project", href: "/intake" },
-    ],
-  },
-];
+function groups(hq: HqContact) {
+  return [
+    {
+      heading: "Services",
+      links: [
+        { label: "Final year projects", href: "/services" },
+        { label: "Reports & papers", href: "/services" },
+        { label: "Presentations", href: "/services" },
+        { label: "Letters & essays", href: "/services" },
+        { label: "Editing & formatting", href: "/services" },
+      ],
+    },
+    {
+      heading: "Company",
+      links: [
+        { label: "How it works", href: "/#how-it-works" },
+        { label: "Become an ambassador", href: "/apply" },
+        { label: "Work with us", href: "/apply/worker" },
+        { label: "Client sign in", href: "/client/login" },
+        { label: "Sign in", href: "/login" },
+      ],
+    },
+    {
+      heading: "Contact",
+      links: [
+        { label: hq.phone, href: `tel:+${hq.whatsapp}` },
+        { label: "WhatsApp us", href: hq.whatsappUrl },
+        { label: hq.email, href: `mailto:${hq.email}` },
+        ...(hq.telegram ? [{ label: `Telegram @${hq.telegram}`, href: `https://t.me/${hq.telegram}` }] : []),
+        { label: "Start a project", href: "/intake" },
+      ],
+    },
+  ];
+}
 
-export function SiteFooter() {
+export function SiteFooter({ hq }: { hq: HqContact }) {
   return (
     <footer className="bg-zone">
       <div className="shell">
@@ -54,10 +58,11 @@ export function SiteFooter() {
             <p className="mt-5 max-w-[34ch] text-[15px] leading-relaxed text-muted-foreground">
               EduCraft — Providing Affordable Academic Services
             </p>
+            {hq.address ? <p className="mt-3 max-w-[34ch] text-[13px] leading-relaxed text-muted-foreground">{hq.address}</p> : null}
           </div>
 
           <div className="col-span-4 grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 md:col-span-7">
-            {GROUPS.map((group) => (
+            {groups(hq).map((group) => (
               <nav
                 key={group.heading}
                 aria-label={group.heading}

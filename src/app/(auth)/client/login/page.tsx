@@ -7,6 +7,7 @@ import { auth, ROLE_LABELS } from "@/lib/auth";
 import { isClientSessionExpired } from "@/lib/roles";
 import { normalizeClientIdInput } from "@/lib/id-format";
 import { realEmail } from "@/lib/client-email";
+import { getHqContact } from "@/lib/services/hq-contact";
 
 export const metadata: Metadata = {
   title: "Client sign in",
@@ -31,7 +32,7 @@ export default async function ClientLoginPage({
   const initialId = normalizeClientIdInput(searchParams.id ?? "") ?? realEmail(searchParams.id) ?? "";
   // Already signed in (as anyone): say so ABOVE the form, never instead of it, so a
   // stale session can always be signed over.
-  const session = await auth();
+  const [session, hq] = await Promise.all([auth(), getHqContact()]);
   const signedIn =
     session?.user && !isClientSessionExpired(session.user) ? { email: session.user.email ?? "", role: session.user.role } : null;
   return (
@@ -48,7 +49,7 @@ export default async function ClientLoginPage({
       </div>
 
       {signedIn ? <SignedInNotice email={signedIn.email} roleLabel={ROLE_LABELS[signedIn.role] ?? "Member"} /> : null}
-      <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} />
+      <ClientLoginForm initialId={initialId} callbackUrl={safeClientPath(searchParams.callbackUrl)} whatsappUrl={hq.whatsappUrl} />
 
       <p className="mt-9 text-sm text-muted-foreground">
         Also a specialist or ambassador with EduCraft? One login opens all your dashboards.{" "}

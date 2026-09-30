@@ -10,18 +10,20 @@ import { firstName } from "@/lib/utils";
  * List-Unsubscribe header (that is the weekly summary's business).
  */
 
-const FOOTER =
-  "EduCraft, Academic &amp; Technical Documentation Experts. Questions? Message us on WhatsApp at 07063421088.";
-const FOOTER_TEXT =
-  "EduCraft, Academic & Technical Documentation Experts. Questions? Message us on WhatsApp at 07063421088.";
+/** EduCraft's WhatsApp line for the footer (HQ contact settings). */
+interface HqFooter {
+  phone: string;
+}
 
-function shell(eyebrow: string, body: string): string {
+const footerText = (hq: HqFooter) => `EduCraft, Academic & Technical Documentation Experts. Questions? Message us on WhatsApp at ${hq.phone}.`;
+
+function shell(eyebrow: string, body: string, hq: HqFooter): string {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
 <body style="margin:0;padding:32px 16px;background:#F8F9FA;font-family:Inter,'Segoe UI',Arial,sans-serif;color:#0F172A">
   <div style="max-width:520px;margin:0 auto;background:#FFFFFF;border-radius:16px;padding:36px 32px;box-shadow:0 12px 40px rgba(15,23,42,0.06)">
     <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#0D9488">${escapeHtml(eyebrow)}</p>
     ${body}
-    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.5;color:#64748B">${FOOTER}</p>
+    <p style="margin:0;padding-top:18px;border-top:1px solid #E8EAED;font-size:12px;line-height:1.5;color:#64748B">${escapeHtml(footerText(hq))}</p>
   </div>
 </body></html>`;
 }
@@ -43,6 +45,7 @@ export function provisionalReminderEmail(input: {
   daysLeft: number;
   referralLink: string;
   dashboardUrl: string;
+  hq: HqFooter;
 }): { subject: string; html: string; text: string } {
   const first = firstName(input.fullName, input.fullName);
   const days = input.daysLeft === 1 ? "1 day" : `${input.daysLeft} days`;
@@ -61,7 +64,7 @@ export function provisionalReminderEmail(input: {
     "",
     "If nothing comes through before the deadline, the slot goes back on the board for another applicant. You are welcome to apply again.",
     "",
-    FOOTER_TEXT,
+    footerText(input.hq),
   ];
 
   const html = shell(
@@ -80,7 +83,8 @@ export function provisionalReminderEmail(input: {
       "Share it with a final-year student who needs help with a project, seminar report, term paper or IT report. When they open it, WhatsApp opens with a message that already says you referred them."
     )}
     ${button(input.dashboardUrl, "Open my dashboard")}
-    ${p("If nothing comes through before the deadline, the slot goes back on the board for another applicant. You are welcome to apply again.")}`
+    ${p("If nothing comes through before the deadline, the slot goes back on the board for another applicant. You are welcome to apply again.")}`,
+    input.hq
   );
 
   return { subject, html, text: lines.join("\n") };
@@ -91,6 +95,7 @@ export function provisionalReminderEmail(input: {
 export function provisionalLapsedEmail(input: {
   fullName: string;
   applyUrl: string;
+  hq: HqFooter;
 }): { subject: string; html: string; text: string } {
   const first = firstName(input.fullName, input.fullName);
   const subject = "Your EduCraft ambassador slot has been released";
@@ -104,7 +109,7 @@ export function provisionalLapsedEmail(input: {
     "",
     `If you want another go, apply again here: ${input.applyUrl}`,
     "",
-    FOOTER_TEXT,
+    footerText(input.hq),
   ];
 
   const html = shell(
@@ -115,7 +120,8 @@ export function provisionalLapsedEmail(input: {
       "#0F172A"
     )}
     ${p("There is nothing wrong on your side and no hard feelings — the slots are limited, so they go to whoever is actively using them.")}
-    ${button(input.applyUrl, "Apply again")}`
+    ${button(input.applyUrl, "Apply again")}`,
+    input.hq
   );
 
   return { subject, html, text: lines.join("\n") };

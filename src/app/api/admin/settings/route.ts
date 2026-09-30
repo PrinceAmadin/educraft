@@ -17,27 +17,22 @@ export async function PATCH(req: NextRequest) {
   const parsed = generalSettingsSchema.safeParse(body);
   if (!parsed.success) return badRequest("Please check the form", parsed.error.flatten());
 
-  // OPS_MANAGER can update company/bank info but never pricing — enforced
-  // here regardless of what the client sent (CLAUDE.md: "no pricing changes").
+  // Only the founder changes the HQ contact (the number every ambassador link
+  // opens, the mailbox in every footer), where the alerts go and the ₦/$ rate.
+  // Any other staff login that reaches this route may only touch the bank
+  // details — enforced here regardless of what the client sent.
   const data =
     guard.session.role === "SUPER_ADMIN"
       ? parsed.data
       : {
-          companyName: parsed.data.companyName,
-          companyPhone: parsed.data.companyPhone,
-          companyEmail: parsed.data.companyEmail,
           bankName: parsed.data.bankName,
           accountNumber: parsed.data.accountNumber,
           accountName: parsed.data.accountName,
         };
-  // parentCommissionRate is omitted from that object like commissionRates —
-  // pricing, so OPS_MANAGER can't touch it. alertEmails is omitted too: where
-  // the founder's alerts go is the founder's call. The FX rate fields are
-  // pricing too (they set the ledger's ₦/$ rate), so only Super Admin.
 
   try {
-    await updateGeneralSettings(data);
-    return NextResponse.json({ ok: true });
+    const { contactChanges } = await updateGeneralSettings(data, { userId: guard.session.userId });
+    return NextResponse.json({ ok: true, contactChanges });
   } catch (error) {
     return serverError("PATCH /api/admin/settings", error);
   }

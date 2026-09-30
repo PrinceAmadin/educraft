@@ -49,8 +49,6 @@ export interface CodeRequestResult {
   codeStillValid?: boolean;
 }
 
-export const EDUCRAFT_WHATSAPP_URL = "https://wa.me/2347063421088";
-
 /** "amadinprince26@gmail.com" -> "am•••6@gmail.com". Shown when someone typed an ID, so they know which inbox to open. */
 export function maskEmail(email: string): string {
   const at = email.lastIndexOf("@");

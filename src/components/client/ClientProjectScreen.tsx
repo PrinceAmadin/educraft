@@ -13,6 +13,7 @@ import { ClientDocumentsTab } from "@/components/client/ClientDocumentsTab";
 import { ClientSupervisorTab } from "@/components/client/ClientSupervisorTab";
 import { ClientDataPauseBanner } from "@/components/client/ClientDataPauseBanner";
 import { getClientPauseView } from "@/lib/services/client-data-pause";
+import { getHqContact } from "@/lib/services/hq-contact";
 import { db } from "@/lib/db";
 import { siteUrl } from "@/lib/site-url";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
@@ -183,7 +184,7 @@ async function PaymentsTab({
   preview: boolean;
   returnedFromPaystack: boolean;
 }) {
-  const payments = await getClientPayments(view.id);
+  const [payments, hq] = await Promise.all([getClientPayments(view.id), getHqContact()]);
   const pending = payments.some((p) => p.status === "Pending");
   return (
     <div className="space-y-6">
@@ -201,7 +202,7 @@ async function PaymentsTab({
           </p>
         )
       ) : null}
-      <ClientPaymentsPanel project={view} payments={payments} preview={preview} />
+      <ClientPaymentsPanel project={view} payments={payments} whatsapp={hq.whatsapp} preview={preview} />
     </div>
   );
 }
