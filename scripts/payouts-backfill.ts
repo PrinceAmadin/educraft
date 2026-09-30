@@ -17,10 +17,47 @@
  */
 import { PrismaClient } from "@prisma/client";
 import type { CashflowStructure, PersonTrigger } from "../src/lib/finance/cashflow-types";
-import { cashflowForProject, getActiveCashflow } from "../src/lib/services/cashflow";
+import { cashflowStructureSchema, toStructure } from "../src/lib/validations/cashflow";
 
 const db = new PrismaClient();
 const apply = process.argv.includes("--apply");
+
+/**
+ * The published cashflow versions, read straight from the table (a script has
+ * no Next.js request cache, so it cannot use the unstable_cache-wrapped
+ * services/cashflow readers). Mirrors `cashflowForProject`: a project uses its
+ * stamped version, else the version in force when it was created.
+ */
+interface LoadedVersions {
+  active: CashflowStructure;
+  byId: Map<string, CashflowStructure>;
+  windows: { from: Date; to: Date | null; structure: CashflowStructure }[];
+}
+
+async function loadVersions(): Promise<LoadedVersions> {
+  const rows = await db.cashflowVersion.findMany({
+    orderBy: { versionNumber: "asc" },
+    select: { id: true, structure: true, effectiveFrom: true, effectiveTo: true },
+  });
+  if (rows.length === 0) throw new Error("No cashflow version has been published. Run `npm run cashflow:seed -- --apply`");
+  const parse = (raw: unknown) => toStructure(cashflowStructureSchema.parse(raw));
+  const byId = new Map<string, CashflowStructure>();
+  const windows: LoadedVersions["windows"] = [];
+  let active: CashflowStructure | null = null;
+  for (const r of rows) {
+    const s = parse(r.structure);
+    byId.set(r.id, s);
+    windows.push({ from: r.effectiveFrom, to: r.effectiveTo, structure: s });
+    if (r.effectiveTo === null) active = s;
+  }
+  active = active ?? windows[windows.length - 1].structure;
+  return { active, byId, windows };
+}
+
+function structureAt(v: LoadedVersions, date: Date): CashflowStructure {
+  const hit = v.windows.find((w) => w.from <= date && (w.to === null || w.to > date));
+  return hit?.structure ?? v.windows[0].structure;
+}
 
 const RULE_KEY: Record<string, string | null> = { WORKER: "workers", AMBASSADOR: "ambassador", PARENT: "ambassador", HOG: "hog", COO: "coo", BONUS: null };
 
@@ -53,8 +90,8 @@ function rateFromBasis(basis: string): number | null {
 async function main() {
   console.log(apply ? "APPLY — writing changes" : "DRY RUN — nothing is written (add -- --apply to write)");
 
-  // The active version must exist (the readers, and this script, need it).
-  await getActiveCashflow();
+  // The published versions (a script cannot use the request-cached readers).
+  const versions = await loadVersions();
 
   // 1. The honest picture: how many rows of each status per leg (a human checks the migration's PENDING → ACCRUED ran).
   const grouped = await db.payoutRecord.groupBy({ by: ["leg", "status"], _count: { _all: true }, _sum: { amount: true } });
@@ -87,15 +124,8 @@ async function main() {
   const needsWork = rows.filter((r) => r.leg !== "BONUS");
   console.log(`\n2. Rows missing an audit column: ${rows.length} (${needsWork.length} non-bonus rows to fill, ${rows.length - needsWork.length} bonus rows left as-is)`);
 
-  const structureCache = new Map<string, CashflowStructure>();
-  async function structureFor(project: { cashflowVersionId: string | null; createdAt: Date }): Promise<CashflowStructure> {
-    const key = project.cashflowVersionId ?? "active";
-    const hit = structureCache.get(key);
-    if (hit) return hit;
-    const s = await cashflowForProject(project);
-    structureCache.set(key, s);
-    return s;
-  }
+  const structureFor = (project: { cashflowVersionId: string | null; createdAt: Date }): CashflowStructure =>
+    (project.cashflowVersionId ? versions.byId.get(project.cashflowVersionId) : undefined) ?? structureAt(versions, project.createdAt);
 
   let filled = 0;
   for (const r of needsWork) {
@@ -105,7 +135,7 @@ async function main() {
     let cashflowVersionId = r.cashflowVersionId ?? r.project?.cashflowVersionId ?? null;
 
     if (r.project) {
-      const s = await structureFor(r.project);
+      const s = structureFor(r.project);
       if (triggerEventKey == null) triggerEventKey = triggerForLeg(r.leg, ruleKey, s);
       if (ratePercent == null) {
         ratePercent =
@@ -119,7 +149,7 @@ async function main() {
       }
     }
     if (ratePercent == null) ratePercent = rateFromBasis(r.basis);
-    if (triggerEventKey == null) triggerEventKey = triggerForLeg(r.leg, ruleKey, (await getActiveCashflow()).structure);
+    if (triggerEventKey == null) triggerEventKey = triggerForLeg(r.leg, ruleKey, versions.active);
 
     const data = {
       ...(r.ruleKey == null && ruleKey != null ? { ruleKey } : {}),
