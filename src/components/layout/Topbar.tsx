@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowLeftRight, BellOff, BellRing, Download, LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
+import { ArrowLeftRight, BellOff, BellRing, Download, FlaskConical, LogOut, RefreshCw, Repeat2, Search, Settings, User } from "lucide-react";
 import { usePwa } from "@/components/pwa/PwaProvider";
 import { usePush } from "@/hooks/use-push";
 import { signOutAndClear, switchAccountSilent } from "@/lib/pwa/sign-out";
@@ -11,6 +11,7 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { AiBalanceIndicator } from "@/components/layout/AiBalanceIndicator";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { RoleChip } from "@/components/layout/RoleChip";
+import { FlagByCodeDialog } from "@/components/cleanup/FlagByCodeDialog";
 import { canAccessRoute, showsAiBalance } from "@/lib/rbac";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -40,6 +41,8 @@ interface TopbarProps {
   /** Set on an executive's other-email login (a worker/ambassador login): their chip still shows. */
   linkedExecRole?: string | null;
   switchAccounts?: SwitchAccount[];
+  /** The COO, or someone the founder appointed, can flag a project as a test from here. */
+  canFlagTestProjects?: boolean;
   /** Dashboards this login can open; a switcher shows when there is more than one. */
   portals?: NavRole[];
   name: string;
@@ -79,7 +82,7 @@ const PORTAL_LABELS: Record<string, string> = {
   client: "Client dashboard",
 };
 
-export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts = [], portals = [], name, email, roleLabel }: TopbarProps) {
+export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts = [], canFlagTestProjects = false, portals = [], name, email, roleLabel }: TopbarProps) {
   const { home } = navForRole(role, userRole);
   // The chip names the executive: their own login's role, or the one this login belongs to.
   const chipRole = linkedExecRole ?? userRole;
@@ -89,6 +92,7 @@ export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts =
   // Which switch item is mid-swap — the menu item goes disabled + says "Switching…" so a
   // double-click can't fire two swaps.
   const [switchingTo, setSwitchingTo] = React.useState<string | null>(null);
+  const [flagOpen, setFlagOpen] = React.useState(false);
   // The project search lands on /admin/projects, so only roles who own that page get it.
   const canSearchProjects = role === "admin" && canAccessRoute(userRole, "/admin/projects");
 
@@ -210,6 +214,13 @@ export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts =
                 </span>
               </DropdownMenuItem>
             ))}
+            {canFlagTestProjects ? (
+              // Opened once the menu has closed, so the menu's focus return can't fight the dialog's.
+              <DropdownMenuItem onSelect={() => window.setTimeout(() => setFlagOpen(true), 0)}>
+                <FlaskConical />
+                Flag a test project
+              </DropdownMenuItem>
+            ) : null}
             {canInstall ? (
               <DropdownMenuItem onClick={() => void promptInstall()}>
                 <Download />
@@ -244,6 +255,7 @@ export function Topbar({ role, userRole, linkedExecRole = null, switchAccounts =
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {canFlagTestProjects ? <FlagByCodeDialog open={flagOpen} onOpenChange={setFlagOpen} /> : null}
       </div>
     </header>
   );

@@ -486,19 +486,23 @@ export async function getPerProjectCosts(period: UsagePeriod = "month"): Promise
   }
   const ids = [...byId.keys()];
   if (ids.length === 0) return [];
-  const [projects, modes] = await Promise.all([
+  const [projects, modes, deleted] = await Promise.all([
     db.project.findMany({ where: { id: { in: ids } }, select: { id: true, projectId: true, projectTitle: true, deliveryDate: true } }),
     db.researchMode.findMany({ where: { projectId: { in: ids } }, select: { projectId: true, modeNumber: true } }),
+    // A test project the founder deleted keeps its AI spend (real money); name it by its old code.
+    db.deletedProject.findMany({ where: { projectDbId: { in: ids } }, select: { projectDbId: true, projectCode: true, title: true } }),
   ]);
   const modeByProject = new Map(modes.map((m) => [m.projectId, m.modeNumber]));
   const meta = new Map(projects.map((p) => [p.id, p]));
+  const gone = new Map(deleted.map((d) => [d.projectDbId, d]));
   return ids
     .map((id) => {
       const b = byId.get(id)!;
       const p = meta.get(id);
+      const d = gone.get(id);
       return {
-        code: p?.projectId ?? id,
-        title: p?.projectTitle ?? "",
+        code: p?.projectId ?? (d ? `${d.projectCode} (deleted)` : id),
+        title: p?.projectTitle ?? d?.title ?? "",
         mode: modeByProject.get(id) ?? null,
         inputTokens: b.input,
         outputTokens: b.output,

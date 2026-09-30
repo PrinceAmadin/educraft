@@ -293,12 +293,39 @@ async function creditReference(reference: string): Promise<CreditReferenceResult
   return creditProjectPayment(reference, verified);
 }
 
+/**
+ * Money that arrives for a project the founder deleted as test data (an old
+ * checkout paid late) is never credited to anything: finance is told to
+ * refund it from the Paystack dashboard.
+ */
+async function alertIfDeletedProject(reference: string, verified: PaystackTransactionData): Promise<void> {
+  if (verified.status !== "success") return;
+  const code = projectCodeFromReference(reference);
+  const projectDbId = typeof verified.metadata?.projectDbId === "string" ? verified.metadata.projectDbId : null;
+  const match: Prisma.DeletedProjectWhereInput[] = [];
+  if (code) match.push({ projectCode: code });
+  if (projectDbId) match.push({ projectDbId });
+  if (match.length === 0) return;
+  const deleted = await db.deletedProject.findFirst({ where: { OR: match }, select: { projectCode: true } });
+  if (!deleted) return;
+  console.warn(`[paystack] ${reference}: paid for ${deleted.projectCode}, a deleted test project; nothing credited`);
+  await notifyFinance({
+    title: "Payment for a deleted project",
+    message: `Paystack confirmed ${formatNaira(verified.amount / 100)} (${reference}) for ${deleted.projectCode}, which was deleted as a test project. Nothing was credited: refund it from the Paystack dashboard.`,
+    type: "urgent",
+    link: "/admin/finance/reconciliation",
+  });
+}
+
 async function creditProjectPayment(
   reference: string,
   verified: PaystackTransactionData
 ): Promise<CreditReferenceResult> {
   const payment = await db.payment.findFirst({ where: { reference } });
-  if (!payment) return { status: "no_local_record" };
+  if (!payment) {
+    await alertIfDeletedProject(reference, verified);
+    return { status: "no_local_record" };
+  }
   // Already handled, whatever the outcome was: confirmed, held as a duplicate,
   // refunded, or refused. Nothing here ever moves a row out of those.
   if (SETTLED_STATUSES.has(payment.status)) return { status: "already_confirmed" };

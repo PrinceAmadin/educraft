@@ -19,7 +19,7 @@ const DEADLINE_TEXT = {
  * the three facts that matter most (client, worker, deadline) in one quiet zone
  * beneath. No card around any of it.
  */
-export function ProjectDetailHeader({ project }: { project: ProjectDetail }) {
+export function ProjectDetailHeader({ project, testControls }: { project: ProjectDetail; testControls?: React.ReactNode }) {
   const deadline = project.internalDeadline ?? project.clientDeadline;
   const info = deadlineInfo(deadline);
   const client = project.client;
@@ -29,12 +29,15 @@ export function ProjectDetailHeader({ project }: { project: ProjectDetail }) {
       <div className="flex items-center justify-between gap-3">
         <Link
           href="/admin/projects"
-          className="-ml-1 inline-flex min-h-9 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="-ml-1 inline-flex min-h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <LuArrowLeft className="size-4" aria-hidden />
           All projects
         </Link>
-        <ProjectHoldControl projectCode={project.projectId} status={project.status} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {testControls}
+          <ProjectHoldControl projectCode={project.projectId} status={project.status} />
+        </div>
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">

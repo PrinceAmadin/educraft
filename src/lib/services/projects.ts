@@ -177,6 +177,8 @@ const listSelect = {
   internalDeadline: true,
   createdAt: true,
   atRisk: true,
+  // Flagged as a test (Settings > Test data): a quiet marker on the row.
+  testFlaggedAt: true,
   revisionCount: true,
   client: { select: { id: true, fullName: true, department: true, university: { select: { abbreviation: true } } } },
   service: { select: { serviceName: true } },
@@ -1673,6 +1675,12 @@ const ID_SOURCE: Record<IdKind, { table: string; column: string; pattern: string
   PAYMENT: { table: "Payment", column: "paymentId", pattern: "^EC-PAY-([0-9]+)$" },
 };
 
+/** Where the codes of deleted test projects are kept (Settings > Test data). */
+const TOMBSTONE_SOURCE: Partial<Record<IdKind, { column: string; onlyClientDeleted: boolean }>> = {
+  PROJECT: { column: "projectCode", onlyClientDeleted: false },
+  CLIENT: { column: "clientCode", onlyClientDeleted: true },
+};
+
 async function idTaken(kind: IdKind, id: string): Promise<boolean> {
   switch (kind) {
     case "PROJECT":
@@ -1705,7 +1713,18 @@ export async function nextId(kind: IdKind): Promise<string> {
     Prisma.sql`SELECT MAX(CAST(substring(${Prisma.raw(`"${column}"`)} FROM ${pattern}::text) AS INTEGER)) AS max
                FROM ${sqlTable(table)}`
   );
-  const highest = rows[0]?.max ?? 0;
+  let highest = rows[0]?.max ?? 0;
+  // A deleted test project's code (and its client's, when that went too) is never handed out again:
+  // emails, receipts and the client's own notes may still quote it.
+  const tombstone = TOMBSTONE_SOURCE[kind];
+  if (tombstone) {
+    const deleted = await db.$queryRaw<{ max: number | null }[]>(
+      Prisma.sql`SELECT MAX(CAST(substring(${Prisma.raw(`"${tombstone.column}"`)} FROM ${pattern}::text) AS INTEGER)) AS max
+                 FROM ${sqlTable("DeletedProject")}
+                 WHERE ${tombstone.onlyClientDeleted ? Prisma.sql`"clientDeleted" = true` : Prisma.sql`TRUE`}`
+    );
+    highest = Math.max(highest, deleted[0]?.max ?? 0);
+  }
 
   for (let attempt = 1; attempt <= 5; attempt++) {
     const candidate = formatId(kind, highest + attempt);

@@ -5,6 +5,7 @@ import { isPersonRole, isStaffRole } from "@/lib/roles";
 import { linkClientOrders } from "@/lib/services/account-links";
 import { execForLoginEmail, linkedAccountsFor, type LinkedPortal } from "@/lib/services/executives";
 import { DashboardShell } from "@/components/layout/DashboardShell";
+import { mayFlagTestProjects } from "@/lib/project-cleanup";
 import type { SwitchAccount } from "@/components/layout/Topbar";
 import type { NavRole } from "@/lib/constants";
 
@@ -34,15 +35,18 @@ export default async function DashboardLayout({
   // switching between them is a sign-out and a sign-in, never shared access.
   let switchAccounts: SwitchAccount[] = [];
   let linkedExecRole: string | null = null;
+  // Flagging a test project: the COO by role, anyone else the founder appointed (read fresh every load).
+  let appointedFlagger = false;
   if (isStaffRole(session.user.role)) {
     // An executive who is also an ambassador or worker keeps that dashboard.
     const [profiles, linked] = await Promise.all([
       db.user.findUnique({
         where: { id: session.user.id },
-        select: { workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
+        select: { canFlagTestProjects: true, workerProfile: { select: { status: true } }, ambassadorProfile: { select: { status: true } } },
       }),
       linkedAccountsFor(session.user.id),
     ]);
+    appointedFlagger = profiles?.canFlagTestProjects ?? false;
     switchAccounts = linked.map((a) => ({ email: a.email, label: linkedAccountLabel(a.holds) }));
     const extra = portalsForUser(session.user.role, {
       worker: profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
@@ -62,11 +66,13 @@ export default async function DashboardLayout({
     const profiles = await db.user.findUnique({
       where: { id: session.user.id },
       select: {
+        canFlagTestProjects: true,
         workerProfile: { select: { status: true } },
         ambassadorProfile: { select: { status: true } },
         _count: { select: { clientProfiles: true } },
       },
     });
+    appointedFlagger = profiles?.canFlagTestProjects ?? false;
     const found = portalsForUser(session.user.role, {
       worker: profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
       ambassador: profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false,
@@ -82,6 +88,7 @@ export default async function DashboardLayout({
       userRole={session.user.role}
       linkedExecRole={linkedExecRole}
       switchAccounts={switchAccounts}
+      canFlagTestProjects={session.user.role !== "SUPER_ADMIN" && mayFlagTestProjects(session.user.role, appointedFlagger)}
       name={name}
       email={session.user.email ?? ""}
       roleLabel={ROLE_LABELS[session.user.role] ?? "Member"}

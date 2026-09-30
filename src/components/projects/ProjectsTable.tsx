@@ -59,6 +59,16 @@ function canQuickAssign(row: ProjectListRow): boolean {
   return row.status === "REQUIREMENTS_CONFIRMED" && !row.worker;
 }
 
+/** Flagged as a test project: waiting for the founder on Settings > Test data. */
+function TestMark({ flagged }: { flagged: boolean }) {
+  if (!flagged) return null;
+  return (
+    <span className="rounded-full bg-gold/10 px-1.5 py-px font-sans text-[11px] font-medium text-gold" title="Flagged as a test project">
+      Test?
+    </span>
+  );
+}
+
 /**
  * Projects list. On desktop the table is the content — no container around
  * it, a clean header row and faint dividers. On phones each project becomes a
@@ -92,6 +102,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRowWithAge[] }) {
                     <AccentDot accent={accent} />
                     {row.projectId}
                     {row.atRisk ? <LuFlag className="size-3.5 text-danger" aria-label="At risk" /> : null}
+                    <TestMark flagged={Boolean(row.testFlaggedAt)} />
                   </span>
                   <StatusBadge status={row.status} short />
                 </div>
@@ -165,6 +176,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRowWithAge[] }) {
                           {row.projectId}
                         </Link>
                         {row.atRisk ? <LuFlag className="size-3.5 text-danger" aria-label="At risk" /> : null}
+                        <TestMark flagged={Boolean(row.testFlaggedAt)} />
                       </span>
                       {row.projectTitle ? <div className="mt-0.5 max-w-[22ch] truncate pl-3.5 text-xs text-muted-foreground">{row.projectTitle}</div> : null}
                     </TableCell>

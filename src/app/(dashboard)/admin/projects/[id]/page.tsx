@@ -5,6 +5,9 @@ import { canVerifyPayments } from "@/lib/rbac";
 import { getProjectDetail } from "@/lib/services/projects";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
+import { ProjectTestControls } from "@/components/cleanup/ProjectTestControls";
+import { displayNameOf } from "@/lib/services/project-cleanup";
+import { mayFlagTestProjects, mayUnflag } from "@/lib/project-cleanup";
 import { ProjectActions } from "@/components/projects/ProjectActions";
 import { allowedTransitions, toCandidate } from "@/lib/pipeline";
 import { ProjectTabs, type ProjectTab } from "@/components/projects/ProjectTabs";
@@ -96,6 +99,7 @@ export default async function ProjectDetailPage({
   // An AI draft waits for the specialist, not for the COO: only people's uploads count here.
   const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED" && !v.aiDraft)).length;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  const flaggedByName = project.testFlaggedAt ? await displayNameOf(project.testFlaggedById) : null;
   // Chapter review: which chapters are approved (the Report tab's working copy), and which a person has
   // reviewed (the quality panel returns those to the specialist instead of re-generating them).
   const reviewChapters = deliverables.filter((d) => d.review && !d.archived && d.chapter != null);
@@ -223,7 +227,18 @@ export default async function ProjectDetailPage({
 
   return (
     <div className="space-y-8">
-      <ProjectDetailHeader project={project} />
+      <ProjectDetailHeader
+        project={project}
+        testControls={
+          <ProjectTestControls
+            code={project.projectId}
+            flag={project.testFlaggedAt ? { at: project.testFlaggedAt.toISOString(), byName: flaggedByName, note: project.testFlagNote } : null}
+            canFlag={mayFlagTestProjects(session?.user?.role, false)}
+            canUnflag={Boolean(session?.user) && mayUnflag(session?.user?.role, session!.user.id, project.testFlaggedById)}
+            canDelete={isSuperAdmin}
+          />
+        }
+      />
 
       <ProjectActions
         project={{ code: project.projectId, candidate }}

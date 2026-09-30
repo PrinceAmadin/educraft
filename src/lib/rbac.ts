@@ -89,6 +89,8 @@ export const ROUTE_PERMISSIONS: readonly RoutePermission[] = [
   { prefix: "/admin/reports", roles: ALL_EXECS },
   { prefix: "/admin/settings/team", roles: ["SUPER_ADMIN"] },
   { prefix: "/admin/settings/services", roles: ["SUPER_ADMIN"] },
+  // Deleting test projects is the founder's alone (the COO and anyone he appoints only flag them).
+  { prefix: "/admin/settings/cleanup", roles: ["SUPER_ADMIN"] },
   { prefix: "/admin/settings/bank", roles: ALL_EXECS },
   { prefix: "/admin", roles: ["SUPER_ADMIN"] },
 ];
@@ -132,6 +134,8 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   // Every executive reads their own notifications.
   { prefix: "/api/admin/notifications", roles: ALL_EXECS },
   { prefix: "/api/admin/probono", roles: ["SUPER_ADMIN"] },
+  // Test data: the delete lives here, not under /api/admin/projects (which the COO may call with any method).
+  { prefix: "/api/admin/cleanup", roles: ["SUPER_ADMIN"] },
   { prefix: "/api/admin/clients", roles: ["SUPER_ADMIN"], readOnly: ["CO_CEO_CFO", "COO"] },
 ];
 

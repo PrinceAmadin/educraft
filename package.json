@@ -51,6 +51,7 @@
     "check:token-usage": "tsx scripts/check-token-usage.ts",
     "check:prelim": "tsx scripts/check-preliminary-pages.ts",
     "check:billing": "tsx scripts/check-billing.ts",
+    "check:cleanup": "tsx scripts/check-cleanup.ts",
     "orchestrator:schedule": "dotenv -e .env.local -- tsx scripts/setup-orchestrator-schedule.ts"
   },
   "prisma": {

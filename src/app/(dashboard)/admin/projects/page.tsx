@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuFolderKanban, LuGift, LuPlus, LuSearchX } from "react-icons/lu";
+import { LuFlaskConical, LuFolderKanban, LuGift, LuPlus, LuSearchX } from "react-icons/lu";
+import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { ProjectsFilterBar } from "@/components/projects/ProjectsFilterBar";
@@ -38,7 +39,8 @@ export default async function ProjectsListPage({ searchParams }: { searchParams:
   const now = new Date();
   const session = await auth();
 
-  const [{ rows, total, page, pageCount }, facets, overview] = await Promise.all([
+  const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  const [{ rows, total, page, pageCount }, facets, overview, flaggedTests] = await Promise.all([
     listProjects(
       {
         status: parsed.status,
@@ -59,6 +61,7 @@ export default async function ProjectsListPage({ searchParams }: { searchParams:
     ),
     getFilterFacets(),
     getOperationsOverview(now),
+    isSuperAdmin ? db.project.count({ where: { testFlaggedAt: { not: null } } }) : Promise.resolve(0),
   ]);
 
   const enriched: ProjectListRowWithAge[] = rows.map((row) => ({
@@ -77,7 +80,15 @@ export default async function ProjectsListPage({ searchParams }: { searchParams:
         description="Every project between payment and completion. The bar shows where the work sits; the list below is what needs a hand."
         actions={
           <div className="flex flex-wrap gap-2">
-            {session?.user?.role === "SUPER_ADMIN" ? (
+            {isSuperAdmin ? (
+              <Button asChild size="sm" variant="outline">
+                <Link href="/admin/settings/cleanup">
+                  <LuFlaskConical className="size-4" aria-hidden />
+                  Test data{flaggedTests ? ` (${flaggedTests} flagged)` : ""}
+                </Link>
+              </Button>
+            ) : null}
+            {isSuperAdmin ? (
               <Button asChild size="sm" variant="outline">
                 <Link href="/admin/projects/probono">
                   <LuGift className="size-4" aria-hidden />

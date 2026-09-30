@@ -63,6 +63,11 @@ model User {
   /// Last successful password sign-in. Null means they have never signed in:
   /// Team & Roles lists an invited executive as pending until this is set.
   lastSignInAt DateTime?
+  /// The founder appointed this login to flag test projects (Settings > Test
+  /// data). The COO may by role; only the founder deletes.
+  canFlagTestProjects Boolean   @default(false)
+  flagAppointedAt     DateTime?
+  flagAppointedById   String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -518,6 +523,13 @@ model Project {
   parentProject   Project?  @relation("ProjectLineage", fields: [parentProjectId], references: [id])
   childProjects   Project[] @relation("ProjectLineage")
 
+  // ── Test data ──
+  /// Flagged as a test project by the COO or someone the founder appointed.
+  /// Nothing changes until the founder deletes it from Settings > Test data.
+  testFlaggedAt   DateTime?
+  testFlaggedById String?
+  testFlagNote    String?
+
   // ── Delivery ──
   deliveryDate                DateTime?
   clientFeedback              String?
@@ -595,6 +607,39 @@ model Project {
   @@index([createdAt])
   @@index([atRisk])
   @@index([parentProjectId])
+}
+
+/// A project the founder deleted as test data (Settings > Test data). The
+/// project and its whole footprint (payments, buckets, payouts, commissions,
+/// referral, files) are gone; this row records what was removed, by whom and
+/// why, and keeps its code, and its client's code when the client went too,
+/// from ever being handed out again. AI spend is never removed.
+model DeletedProject {
+  id               String   @id @default(cuid())
+  projectCode      String   @unique
+  projectDbId      String   @unique
+  title            String?
+  serviceCode      String?
+  status           String
+  price            Float
+  isProBono        Boolean  @default(false)
+  clientCode       String?
+  clientName       String?
+  clientEmail      String?
+  clientDeleted    Boolean  @default(false)
+  loginDeleted     Boolean  @default(false)
+  projectCreatedAt DateTime
+  flaggedById      String?
+  flaggedByName    String?
+  flagNote         String?
+  reason           String
+  /// `DeletionSummary` in src/lib/project-cleanup.ts: every row removed, with amounts.
+  summary          Json
+  deletedById      String
+  deletedByName    String
+  deletedAt        DateTime @default(now())
+
+  @@index([deletedAt])
 }
 
 enum FileStorage {

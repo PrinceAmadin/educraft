@@ -20,6 +20,8 @@ interface DashboardShellProps {
   linkedExecRole?: string | null;
   /** Other logins of the same executive, reached by signing out and in again. */
   switchAccounts?: SwitchAccount[];
+  /** The COO, or someone the founder appointed: "Flag a test project" in the account menu. */
+  canFlagTestProjects?: boolean;
   name: string;
   email: string;
   roleLabel: string;
@@ -33,7 +35,7 @@ const PORTAL_ROLE_LABELS: Partial<Record<NavRole, string>> = { worker: "Worker",
  * Chooses the sidebar and nav from the URL, so one login can move between its
  * worker, ambassador and client dashboards (the account menu switches).
  */
-export function DashboardShell({ defaultRole, portals, userRole, linkedExecRole = null, switchAccounts = [], name, email, roleLabel, children }: DashboardShellProps) {
+export function DashboardShell({ defaultRole, portals, userRole, linkedExecRole = null, switchAccounts = [], canFlagTestProjects = false, name, email, roleLabel, children }: DashboardShellProps) {
   const pathname = usePathname();
   const role = portals.find((p) => pathname === `/${p}` || pathname.startsWith(`/${p}/`)) ?? defaultRole;
   // With more than one dashboard, the badge names the one on screen.
@@ -44,7 +46,7 @@ export function DashboardShell({ defaultRole, portals, userRole, linkedExecRole 
       <Sidebar role={role} userRole={userRole} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar role={role} userRole={userRole} linkedExecRole={linkedExecRole} switchAccounts={switchAccounts} portals={portals} name={name} email={email} roleLabel={label} />
+        <Topbar role={role} userRole={userRole} linkedExecRole={linkedExecRole} switchAccounts={switchAccounts} canFlagTestProjects={canFlagTestProjects} portals={portals} name={name} email={email} roleLabel={label} />
 
         {/* pb-24 clears the fixed mobile bottom nav */}
         <main className="flex-1 px-4 pb-24 pt-6 md:px-6 md:pb-10 lg:px-8">

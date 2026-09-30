@@ -134,6 +134,12 @@ expect("COO may not touch ambassadors", canCallAdminApi("COO", "/api/admin/ambas
 expect("HOG may not touch projects", canCallAdminApi("HOG", "/api/admin/projects/x/transition", "POST"), false);
 expect("only SUPER_ADMIN manages the team", EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/team", "POST")), [true, false, false, false]);
 expect("everyone saves their own bank details", EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/settings/bank", "PATCH")), [true, true, true, true]);
+for (const method of ["GET", "POST", "DELETE"]) {
+  expect(`only SUPER_ADMIN deletes test projects (${method})`, EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cleanup/projects", method)), [true, false, false, false]);
+  expect(`only SUPER_ADMIN appoints flaggers (${method})`, EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cleanup/flaggers", method)), [true, false, false, false]);
+}
+expect("a person role never reaches the cleanup api", ["WORKER", "AMBASSADOR", "CLIENT"].map((r) => canCallAdminApi(r, "/api/admin/cleanup/projects", "POST")), [false, false, false]);
+expect("only SUPER_ADMIN opens Test data", EXEC_ROLES.map((r) => canAccessRoute(r, "/admin/settings/cleanup")), [true, false, false, false]);
 expect("unlisted api fails closed", EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/new-thing", "GET")), [true, false, false, false]);
 expect("a person role never calls /api/admin", canCallAdminApi("WORKER", "/api/admin/clients", "GET"), false);
 
