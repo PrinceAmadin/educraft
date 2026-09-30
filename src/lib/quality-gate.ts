@@ -11,9 +11,6 @@
  * pays only for the chapters that changed.
  */
 
-import crypto from "node:crypto";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { callClaudeForJson } from "@/lib/anthropic";
@@ -34,8 +31,8 @@ import { projectReviewState } from "@/lib/services/chapter-review";
 import { CHAPTER_REVIEW_TEXT } from "@/lib/chapter-review";
 import { transitionProject, TransitionError } from "@/lib/services/projects";
 import { SECONDARY_DATA_CATEGORY } from "@/lib/services/secondary-data";
-import { validateAiVoiceFindings, VOICE_TOOL, type VoiceFinding } from "@/lib/quality/voice-scan";
-import { noAbstract, readSupportVerdicts, supportPairs, SUPPORT_TOOL, ABSTRACT_CHARS, type GateReference, type SupportResult } from "@/lib/quality/citation-check";
+import type { GateReference } from "@/lib/quality/citation-check";
+import { AI_CACHE_VERSION, CHAPTER_CHECK_STEPS, QUALITY_SUBSYSTEM, aiResultsFrom, chapterAiTasks, pool, sha32, type AiByChapter, type StoredSupportSet, type StoredVoice } from "@/lib/quality/chapter-ai";
 import { readTraceability, TRACE_TOOL, type TraceabilityResult } from "@/lib/quality/structural-checks";
 import { finishReport, prepareReport } from "@/lib/quality/evaluate";
 import { plainText } from "@/lib/quality/prose";
@@ -50,9 +47,7 @@ export { KNOWN_COMMON_CITATIONS, knownCommonCitation, type KnownCitation } from 
 
 // ─── Errors and shapes ───────────────────────────────────────────────────────
 
-export const QUALITY_SUBSYSTEM = "quality_gate";
-/** Bump when an AI prompt or tool changes, so cached AI results are not reused across the change. */
-const AI_CACHE_VERSION = "d8-1";
+export { QUALITY_SUBSYSTEM, CHAPTER_CHECK_STEPS };
 const RUN_LEASE_MS = 5 * 60_000;
 const AI_CONCURRENCY = 4;
 const HISTORY_KEPT = 10;
@@ -75,16 +70,6 @@ export interface QualityActor {
   role: string;
 }
 
-interface StoredSupport {
-  index: number;
-  chapter: number;
-  paragraph: number | null;
-  sentence: string;
-  refId: string;
-  verdict: SupportResult["verdict"];
-  reason: string;
-}
-
 interface StoredReport {
   version: 1;
   ranAt: string;
@@ -93,12 +78,7 @@ interface StoredReport {
   warnings: QualityItem[];
   notes: string[];
   costNaira: number;
-  ai: {
-    voice: Record<string, { hash: string; findings: VoiceFinding[]; readsHuman: boolean | null; note: string | null; dropped: number }>;
-    support: Record<string, { hash: string; results: StoredSupport[]; checked: number; total: number }>;
-    trace: { hash: string; result: TraceabilityResult } | null;
-    errors: string[];
-  };
+  ai: AiByChapter & { trace: { hash: string; result: TraceabilityResult } | null };
   history: { at: string; score: number; passed: boolean; autoSubmitted: boolean; by: string; regenerated?: number }[];
 }
 
@@ -130,32 +110,7 @@ export interface QualityRunResponse {
   history: StoredReport["history"];
 }
 
-const sha = (s: string) => crypto.createHash("sha256").update(s).digest("hex").slice(0, 32);
 const WAT = (d: Date) => d.toLocaleTimeString("en-GB", { timeZone: "Africa/Lagos", hour: "2-digit", minute: "2-digit" });
-
-/** Runs `tasks` at most `limit` at a time. */
-async function pool<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
-  const out: T[] = new Array(tasks.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < tasks.length) {
-      const i = next++;
-      out[i] = await tasks[i]();
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
-  return out;
-}
-
-let rulesText: Promise<string> | null = null;
-/** The two rule files the generator was given, read once per process (prompts/shared, traced into the function bundle). */
-function voiceRules(): Promise<string> {
-  rulesText ??= Promise.all(
-    ["anti_ai_rules.md", "voice_rules.md"].map((f) => readFile(path.join(process.cwd(), "prompts", "shared", f), "utf8").then((t) => t.replace(/\r\n/g, "\n").trim())),
-  ).then(([anti, voice]) => `=== ANTI-AI RULES (prompts/shared/anti_ai_rules.md) ===\n${anti}\n\n=== VOICE RULES (prompts/shared/voice_rules.md) ===\n${voice}`);
-  rulesText.catch(() => (rulesText = null));
-  return rulesText;
-}
 
 function readStored(json: Prisma.JsonValue | null | undefined): StoredReport | null {
   const r = json as unknown as StoredReport | null;
@@ -215,7 +170,7 @@ async function runLocked(
     const pages = await runPreliminaryPagesAgent(project.id);
     if (pages) input = { ...input, preliminary: { acknowledgement: pages.acknowledgement, abstract: pages.abstract, abbreviations: pages.abbreviations, needsReview: pages.needsReview } };
   }
-  const [settings, brief, refRows, checkpoints, review] = await Promise.all([
+  const [settings, brief, refRows, checkpoints, review, chapterChecks] = await Promise.all([
     getApprovedModeSettings(project.id).catch(() => null),
     getApprovedBrief(db, project.id).catch(() => null),
     db.reference.findMany({
@@ -224,6 +179,8 @@ async function runLocked(
     }),
     db.generationCheckpoint.findMany({ where: { projectId: project.id }, select: { chapterNumber: true, plan: true } }),
     db.qaReview.findUnique({ where: { projectId: project.id }, select: { qualityReport: true } }),
+    // The chapter gate's AI results: a chapter it already checked costs this run nothing.
+    db.chapterCheck.findMany({ where: { projectId: project.id, NOT: { ai: { equals: Prisma.DbNull } } }, select: { ai: true } }),
   ]);
   const previous = readStored(review?.qualityReport);
   const references: GateReference[] = refRows.map((r) => ({ ...r, classification: r.classification ?? null }));
@@ -239,88 +196,34 @@ async function runLocked(
   // ── The AI calls, per chapter, reusing what an unchanged chapter already has ──
   const ai: StoredReport["ai"] = { voice: {}, support: {}, trace: null, errors: [] };
   const usage = (step: string, chapterNumber?: number) => ({ projectId: project.id, subsystem: QUALITY_SUBSYSTEM, step, ...(chapterNumber ? { chapterNumber } : {}) });
+  const knownVoice = new Map<string, StoredVoice>();
+  const knownSupport = new Map<string, StoredSupportSet>();
+  for (const row of chapterChecks) {
+    const a = row.ai as { voice?: StoredVoice | null; support?: StoredSupportSet | null } | null;
+    if (a?.voice?.hash) knownVoice.set(a.voice.hash, a.voice);
+    if (a?.support?.hash) knownSupport.set(a.support.hash, a.support);
+  }
+  for (const v of Object.values(previous?.ai.voice ?? {})) knownVoice.set(v.hash, v);
+  for (const v of Object.values(previous?.ai.support ?? {})) knownSupport.set(v.hash, v);
   const tasks: (() => Promise<void>)[] = [];
 
   for (const ch of input.chapters) {
-    const key = String(ch.number);
-    const voiceHash = sha(`${AI_CACHE_VERSION}|voice|${ch.text}`);
-    const cachedVoice = previous?.ai.voice[key];
-    if (cachedVoice?.hash === voiceHash) ai.voice[key] = cachedVoice;
-    else {
-      tasks.push(async () => {
-        const chapterParas = paragraphs.filter((p) => p.chapter === ch.number);
-        if (!chapterParas.length) return;
-        try {
-          const raw = await callClaudeForJson<unknown>({
-            system: `${QUALITY_TEXT.voiceSystem}\n\n${await voiceRules()}`,
-            cacheSystem: true,
-            user: QUALITY_TEXT.voiceUser({
-              title,
-              department,
-              chapter: ch.number,
-              paragraphs: formatParagraphs(chapterParas),
-              flagged: scan.filter((f) => f.chapter === ch.number).map((f) => `- ¶${f.paragraph} "${f.quote}" (${f.rule})`).join("\n"),
-            }),
-            toolName: VOICE_TOOL.name,
-            toolDescription: VOICE_TOOL.description,
-            inputSchema: VOICE_TOOL.input_schema as unknown as Record<string, unknown>,
-            maxTokens: 4096,
-            usage: usage("voice", ch.number),
-          });
-          const v = validateAiVoiceFindings(raw, ch.number, paragraphs);
-          if (v.dropped) console.warn(`[quality] ${project.projectId} ch${ch.number}: ${v.dropped} voice finding(s) dropped (quote not in the paragraph)`);
-          ai.voice[key] = { hash: voiceHash, ...v };
-        } catch (error) {
-          ai.errors.push(`Voice review of Chapter ${ch.number} failed: ${(error as Error).message}`);
-        }
-      });
-    }
-
-    const { pairs, total } = supportPairs(match, ch.number);
-    const supportHash = sha(`${AI_CACHE_VERSION}|support|${ch.text}|${pairs.map((p) => `${p.ref.id}:${p.ref.abstract?.length ?? 0}`).join(",")}`);
-    const cachedSupport = previous?.ai.support[key];
-    if (cachedSupport?.hash === supportHash) ai.support[key] = cachedSupport;
-    else if (pairs.length) {
-      tasks.push(async () => {
-        const toAsk = pairs.filter((p) => !noAbstract(p));
-        const results: SupportResult[] = pairs.filter(noAbstract).map((p) => ({ ...p, verdict: "CANNOT_DETERMINE", reason: "No abstract on record." }));
-        try {
-          if (toAsk.length) {
-            const raw = await callClaudeForJson<unknown>({
-              system: QUALITY_TEXT.supportSystem,
-              user: QUALITY_TEXT.supportUser({
-                title,
-                chapter: ch.number,
-                items: toAsk
-                  .map((p) =>
-                    QUALITY_TEXT.supportItem({
-                      index: p.index,
-                      sentence: p.sentence,
-                      ref: `${p.ref.authors ?? "Unknown"} (${p.ref.year ?? "n.d."}). ${p.ref.title ?? p.ref.proposedTitle}.${p.ref.journal ? ` ${p.ref.journal}.` : ""}`,
-                      abstract: (p.ref.abstract ?? "").replace(/\s+/g, " ").slice(0, ABSTRACT_CHARS),
-                    }),
-                  )
-                  .join("\n\n"),
-              }),
-              toolName: SUPPORT_TOOL.name,
-              toolDescription: SUPPORT_TOOL.description,
-              inputSchema: SUPPORT_TOOL.input_schema as unknown as Record<string, unknown>,
-              maxTokens: 4096,
-              usage: usage("citation_support", ch.number),
-            });
-            results.push(...readSupportVerdicts(raw, toAsk));
-          }
-          ai.support[key] = {
-            hash: supportHash,
-            checked: pairs.length,
-            total,
-            results: results.sort((a, b) => a.index - b.index).map((r) => ({ index: r.index, chapter: r.chapter, paragraph: r.paragraph, sentence: r.sentence, refId: r.ref.id, verdict: r.verdict, reason: r.reason })),
-          };
-        } catch (error) {
-          ai.errors.push(`Citation support check of Chapter ${ch.number} failed: ${(error as Error).message}`);
-        }
-      });
-    }
+    tasks.push(
+      ...chapterAiTasks({
+        projectDbId: project.id,
+        projectCode: project.projectId,
+        title,
+        department,
+        chapter: ch,
+        paragraphs,
+        scan,
+        match,
+        reuseVoice: (hash) => knownVoice.get(hash) ?? null,
+        reuseSupport: (hash) => knownSupport.get(hash) ?? null,
+        out: ai,
+        usage: { subsystem: QUALITY_SUBSYSTEM, voiceStep: "voice", supportStep: "citation_support" },
+      }),
+    );
   }
 
   // ST9: objective traceability, one call over the results chapter(s) and Chapter Five.
@@ -329,7 +232,7 @@ async function runLocked(
   if (objectives.length > 0 && conclusion && resultsChapters.length === (template === "B" ? 2 : 1)) {
     const resultsText = resultsChapters.map((c) => plainText(c.text)).join("\n\n").slice(0, 60_000);
     const conclusionText = plainText(conclusion.text).slice(0, 30_000);
-    const traceHash = sha(`${AI_CACHE_VERSION}|trace|${objectives.join("|")}|${resultsText}|${conclusionText}`);
+    const traceHash = sha32(`${AI_CACHE_VERSION}|trace|${objectives.join("|")}|${resultsText}|${conclusionText}`);
     if (previous?.ai.trace?.hash === traceHash) ai.trace = previous.ai.trace;
     else {
       tasks.push(async () => {
@@ -360,26 +263,9 @@ async function runLocked(
   await pool(tasks, AI_CONCURRENCY);
 
   // ── Score all 89 ──
-  const byId = new Map(references.map((r) => [r.id, r]));
-  const supportResults: SupportResult[] = Object.values(ai.support).flatMap((s) =>
-    s.results.flatMap((r) => {
-      const ref = byId.get(r.refId);
-      return ref ? [{ index: r.index, chapter: r.chapter, paragraph: r.paragraph, sentence: r.sentence, ref, verdict: r.verdict, reason: r.reason }] : [];
-    }),
-  );
   const { checks, score } = finishReport(
     prepared,
-    {
-      voice: Object.values(ai.voice).flatMap((v) => v.findings),
-      voiceNotes: Object.entries(ai.voice).map(([k, v]) => ({ chapter: Number(k), readsHuman: v.readsHuman, note: v.note })),
-      support: {
-        results: supportResults,
-        checked: Object.values(ai.support).reduce((n, s) => n + s.checked, 0),
-        total: Object.values(ai.support).reduce((n, s) => n + s.total, 0),
-      },
-      traceability: ai.trace?.result ?? null,
-      errors: ai.errors,
-    },
+    { ...aiResultsFrom(ai, references), traceability: ai.trace?.result ?? null, errors: ai.errors },
     {
       objectives,
       pureScience: Boolean(entry?.pureScience),
@@ -388,7 +274,7 @@ async function runLocked(
     },
   );
   const cost = await db.aiUsageLog
-    .aggregate({ where: { projectId: project.id, subsystem: QUALITY_SUBSYSTEM, createdAt: { gte: started } }, _sum: { costNaira: true } })
+    .aggregate({ where: { projectId: project.id, subsystem: QUALITY_SUBSYSTEM, step: { notIn: Object.values(CHAPTER_CHECK_STEPS) }, createdAt: { gte: started } }, _sum: { costNaira: true } })
     .then((r) => Math.round((r._sum.costNaira ?? 0) * 100) / 100)
     .catch(() => 0);
 
@@ -448,20 +334,6 @@ async function runLocked(
     }
   }
   return getQualityReport(project.id, { autoSubmitError, includeCost: actor.role !== "WORKER" });
-}
-
-/** "[2.1 Background of the Study]\n¶1 …" for the voice review. */
-function formatParagraphs(paras: { index: number; section: string | null; text: string }[]): string {
-  const lines: string[] = [];
-  let section: string | null | undefined;
-  for (const p of paras) {
-    if (p.section !== section) {
-      section = p.section;
-      if (section) lines.push("", `[${section}]`);
-    }
-    lines.push(`¶${p.index} ${p.text}`);
-  }
-  return lines.join("\n").trim();
 }
 
 function planOf(json: Prisma.JsonValue | null | undefined): { targetWords: number; sections: { number: string; heading: string }[] } | null {

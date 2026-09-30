@@ -27,6 +27,7 @@ import { ACCESS_LABELS, DELIVERABLE_ACCESS } from "@/lib/validations/deliverable
 import { documentReadyMessage, greetingName, waLink } from "@/lib/whatsapp";
 import { CHAPTER_REVIEW_TEXT, type ChapterReviewState } from "@/lib/chapter-review";
 import { ReadbackSummary } from "@/components/projects/documents/ReadbackSummary";
+import { ChapterCheckResult } from "@/components/projects/documents/ChapterCheckResult";
 import { cn, formatDate } from "@/lib/utils";
 
 export interface ClientContact {
@@ -89,7 +90,13 @@ export function DeliverableReviewCard({
   const code = encodeURIComponent(projectCode);
   const pending = d.versions.find((v) => v.status === "SUBMITTED") ?? null;
   const released = d.versions.filter((v) => v.releaseNo != null).sort((a, b) => (b.releaseNo ?? 0) - (a.releaseNo ?? 0));
-  const status = d.review ? { label: CHAPTER_REVIEW_TEXT.state[d.review.state], tone: REVIEW_TONE[d.review.state] } : STATUS[d.status];
+  // Chapter gate: a chapter whose AI text is being checked (or written again after its check) says so first.
+  const gateStage = d.review && d.aiText && d.aiText.stage !== "settled" && (d.review.state === "WRITING" || d.review.state === "DRAFT_READY" || d.review.state === "RETURNED") ? d.aiText.stage : null;
+  const status = gateStage
+    ? { label: gateStage === "checking" ? CHAPTER_REVIEW_TEXT.check.chip.RUNNING : "Being rewritten", tone: "bg-zone text-muted-foreground" }
+    : d.review
+      ? { label: CHAPTER_REVIEW_TEXT.state[d.review.state], tone: REVIEW_TONE[d.review.state] }
+      : STATUS[d.status];
   const isFinal = d.kind === "FINAL";
   const stale = isFinal && pending ? pending.staleChapters : [];
   const releaseBlocked = (isFinal && !canReleaseFinal) || stale.length > 0;
@@ -155,7 +162,11 @@ export function DeliverableReviewCard({
             <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", status.tone)}>{status.label}</span>
             {isFinal ? <span className="text-xs text-muted-foreground">Complete document</span> : null}
           </div>
-          {d.review ? <p className="mt-1 text-[13px] text-foreground">{CHAPTER_REVIEW_TEXT.staffLine[d.review.state]}</p> : null}
+          {d.review ? (
+            <p className="mt-1 text-[13px] text-foreground">
+              {gateStage === "checking" ? CHAPTER_REVIEW_TEXT.check.staffChecking(d.chapter ?? 0) : gateStage === "rewriting" ? CHAPTER_REVIEW_TEXT.check.beingRewritten(d.chapter ?? 0) : CHAPTER_REVIEW_TEXT.staffLine[d.review.state]}
+            </p>
+          ) : null}
           <p className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
             {d.gate.state === "locked" ? <LuLock className="size-3.5" aria-hidden /> : null}
             {clientSees(d)} · {ACCESS_LABELS[d.access].toLowerCase()}
@@ -186,7 +197,7 @@ export function DeliverableReviewCard({
       </header>
 
       {d.review ? (
-        <ChapterReviewPanel projectCode={projectCode} deliverable={d} pending={pending} onApproved={(url) => setWaUrl(url)} />
+        <ChapterReviewPanel projectCode={projectCode} deliverable={d} pending={pending} isSuperAdmin={isSuperAdmin} onApproved={(url) => setWaUrl(url)} />
       ) : pending ? (
         <div className="space-y-3 rounded-2xl bg-zone p-4">
           <a
@@ -284,15 +295,21 @@ export function DeliverableReviewCard({
             {released.map((v) => (
               <li key={v.id}>
                 <a
-                  href={`/api/admin/projects/${code}/files/${v.fileId}`}
+                  href={`/api/admin/projects/${code}/files/${v.formattedFile?.id ?? v.fileId}`}
                   className="flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-elevated"
                 >
                   <LuDownload className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-foreground">
-                    Version {v.releaseNo} · {v.fileName}
+                    Version {v.releaseNo} · {v.formattedFile ? `${CHAPTER_REVIEW_TEXT.check.formattedCopy} · ` : ""}
+                    {v.fileName}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">{formatDate(v.releasedAt)}</span>
                 </a>
+                {v.formattedFile ? (
+                  <a href={`/api/admin/projects/${code}/files/${v.fileId}`} className="ml-9 inline-flex min-h-8 items-center text-xs text-muted-foreground hover:underline">
+                    {CHAPTER_REVIEW_TEXT.check.specialistFile}
+                  </a>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -466,11 +483,13 @@ function ChapterReviewPanel({
   projectCode,
   deliverable: d,
   pending,
+  isSuperAdmin,
   onApproved,
 }: {
   projectCode: string;
   deliverable: DeliverableView;
   pending: VersionView | null;
+  isSuperAdmin: boolean;
   onApproved: (whatsappUrl: string | null) => void;
 }) {
   const router = useRouter();
@@ -478,8 +497,9 @@ function ChapterReviewPanel({
   const state = d.review!.state;
   const draft = d.versions.find((v) => v.aiDraft && v.status !== "SUPERSEDED") ?? d.versions.find((v) => v.aiDraft) ?? null;
   const upload = pending && !pending.aiDraft ? pending : null;
-  const [mode, setMode] = React.useState<"none" | "confirm" | "notes">("none");
+  const [mode, setMode] = React.useState<"none" | "confirm" | "notes" | "override">("none");
   const [note, setNote] = React.useState("");
+  const [overrideReason, setOverrideReason] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
   const [problems, setProblems] = React.useState<string[]>([]);
 
@@ -487,6 +507,13 @@ function ChapterReviewPanel({
   const blocked = Boolean(readback && (readback.blocking.length || readback.summary?.placeholders.length));
   const canNote = state !== "WRITING" && state !== "RETURNED";
   const chapter = d.chapter ?? 0;
+  // Chapter gate: an upload is approved once its check passed (the founder may approve a failed one, with a reason).
+  const uploadCheck = upload?.check ?? null;
+  const uploadChecking = Boolean(upload && readback && !readback.blocking.length && (!uploadCheck || uploadCheck.status === "RUNNING"));
+  const checkPassed = uploadCheck?.status === "PASSED";
+  const checkFailed = uploadCheck?.status === "FAILED";
+  const checkUrl = `/api/admin/projects/${code}/chapters/${chapter}/check`;
+  const aiChecking = Boolean(d.aiText && d.aiText.stage !== "settled");
 
   async function post(label: string, url: string, body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     setBusy(label);
@@ -508,11 +535,16 @@ function ChapterReviewPanel({
     }
   }
 
-  async function approve() {
+  async function approve(override?: string) {
     if (!upload) return;
-    const data = await post("approve", `/api/admin/projects/${code}/deliverables/versions/${upload.id}`, { decision: "approve", readbackHash: readback?.hash });
+    const data = await post("approve", `/api/admin/projects/${code}/deliverables/versions/${upload.id}`, {
+      decision: "approve",
+      readbackHash: readback?.hash,
+      ...(override ? { overrideReason: override } : {}),
+    });
     if (!data) return;
     setMode("none");
+    setOverrideReason("");
     onApproved(typeof data.whatsappUrl === "string" ? data.whatsappUrl : null);
   }
 
@@ -558,7 +590,35 @@ function ChapterReviewPanel({
             </p>
           ) : null}
           <ReadbackSummary readback={readback} audience="staff" />
+          {readback && !readback.blocking.length ? (
+            <ChapterCheckResult
+              check={uploadCheck}
+              checking={uploadChecking}
+              label="Quality check of this version"
+              audience="staff"
+              checkUrl={checkUrl}
+              checkBody={{ subject: "UPLOAD", versionId: upload.id }}
+            />
+          ) : null}
+          {upload.formattedFile ? (
+            <a href={`/api/admin/projects/${code}/files/${upload.formattedFile.id}`} className="flex items-center gap-3 text-sm text-foreground hover:underline">
+              <LuDownload className="size-4 shrink-0 text-primary" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{CHAPTER_REVIEW_TEXT.check.formattedCopy}</span>
+                <span className="block text-xs text-muted-foreground">The checked Word file the client and the specialist get once you approve it</span>
+              </span>
+            </a>
+          ) : null}
         </div>
+      ) : aiChecking && (!draft || state === "WRITING") ? (
+        <ChapterCheckResult
+          check={d.aiText?.check ?? null}
+          checking={d.aiText?.stage === "checking"}
+          label={d.aiText?.stage === "rewriting" ? "Being written again after its check" : "Quality check of the AI text"}
+          audience="staff"
+          checkUrl={d.aiText?.stage === "checking" && !d.aiText.check ? checkUrl : null}
+          checkBody={{ subject: "AI_TEXT" }}
+        />
       ) : draft && (state === "DRAFT_READY" || state === "RETURNED" || state === "WRITING") ? (
         <div className="space-y-2">
           <a href={`/api/admin/projects/${code}/files/${draft.fileId}`} className="flex items-center gap-3 text-sm text-foreground hover:underline">
@@ -568,7 +628,20 @@ function ChapterReviewPanel({
               <span className="block text-xs text-muted-foreground">AI draft · {formatDate(draft.createdAt)} · with the specialist for review</span>
             </span>
           </a>
-          {draft.workerNote ? <p className="whitespace-pre-wrap text-[13px] text-muted-foreground">{draft.workerNote}</p> : null}
+          {d.aiText?.check ? (
+            <ChapterCheckResult
+              check={d.aiText.check}
+              checking={aiChecking && d.aiText.stage === "checking"}
+              label={aiChecking ? "A new quality check of the AI text" : "Quality check of the AI draft"}
+              audience="staff"
+              checkUrl={checkUrl}
+              checkBody={{ subject: "AI_TEXT" }}
+            />
+          ) : aiChecking ? (
+            <ChapterCheckResult check={null} checking label="This draft was made before the chapter check; a checked draft replaces it" audience="staff" />
+          ) : draft.workerNote ? (
+            <p className="whitespace-pre-wrap text-[13px] text-muted-foreground">{draft.workerNote}</p>
+          ) : null}
           {draft.reviewNote ? (
             <p className="whitespace-pre-wrap text-sm text-foreground">
               <span className="meta-label mr-1.5">Your notes</span>
@@ -578,7 +651,23 @@ function ChapterReviewPanel({
         </div>
       ) : null}
 
-      {mode === "confirm" && upload ? (
+      {mode === "override" && upload ? (
+        <div className="space-y-2 rounded-xl bg-card p-3 shadow-soft" role="group" aria-label={`Approve ${d.title} without a passed check`}>
+          <label htmlFor={`override-${d.id}`} className="meta-label">
+            {CHAPTER_REVIEW_TEXT.check.overrideHint}
+          </label>
+          <Textarea id={`override-${d.id}`} rows={3} value={overrideReason} maxLength={1000} onChange={(e) => setOverrideReason(e.target.value)} />
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="destructive" disabled={overrideReason.trim().length < 10 || busy !== null} onClick={() => void approve(overrideReason.trim())}>
+              {busy === "approve" ? <LuLoaderCircle className="animate-spin" aria-hidden /> : <LuCircleCheck aria-hidden />}
+              Approve anyway
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setMode("none")}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : mode === "confirm" && upload ? (
         <div className="space-y-3 rounded-xl bg-card p-3 shadow-soft" role="group" aria-label={`Confirm approving ${d.title}`}>
           <p className="text-sm text-foreground">{CHAPTER_REVIEW_TEXT.approveConfirm(chapter, !d.clientHidden && (d.access === "DOWNPAYMENT" || d.access === "ALWAYS"))}</p>
           <div className="flex flex-wrap gap-2">
@@ -611,9 +700,14 @@ function ChapterReviewPanel({
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           {upload ? (
-            <Button type="button" size="sm" disabled={busy !== null || blocked} onClick={() => setMode("confirm")} className="min-h-10">
+            <Button type="button" size="sm" disabled={busy !== null || blocked || !checkPassed} onClick={() => setMode("confirm")} className="min-h-10">
               <LuCircleCheck aria-hidden />
               Approve
+            </Button>
+          ) : null}
+          {upload && checkFailed && isSuperAdmin && !blocked ? (
+            <Button type="button" size="sm" variant="ghost" disabled={busy !== null} onClick={() => setMode("override")} className="min-h-10">
+              Approve anyway
             </Button>
           ) : null}
           {canNote ? (
@@ -622,6 +716,8 @@ function ChapterReviewPanel({
             </Button>
           ) : null}
           {upload && blocked ? <span className="text-xs text-muted-foreground">Approve once the problems above are fixed.</span> : null}
+          {upload && !blocked && uploadChecking ? <span className="text-xs text-muted-foreground">Approve once its quality check has passed.</span> : null}
+          {upload && !blocked && checkFailed ? <span className="text-xs text-muted-foreground">It did not pass its check: return it with the points above.</span> : null}
         </div>
       )}
 

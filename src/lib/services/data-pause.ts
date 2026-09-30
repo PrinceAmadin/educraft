@@ -55,6 +55,7 @@ import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { notifyClient } from "@/lib/services/client-notify";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { DATA_PAUSE_CLIENT_TEXT } from "@/lib/client-updates";
+import { chapterTextHash } from "@/lib/quality/chapter-hash";
 
 export { MAX_ATTACHED_BYTES, MAX_IMAGE_BYTES, MAX_PDF_PAGES } from "@/lib/generation/dynamic-data-form";
 
@@ -637,7 +638,7 @@ export async function verifyDataPause(
         const old = before.find((b) => b.number === ch.number)!.text;
         const wrote = await tx.generationCheckpoint.updateMany({
           where: { projectId: projectDbId, chapterNumber: ch.number, status: "COMPLETED", fullOutput: old },
-          data: { fullOutput: ch.text, partialOutput: ch.text },
+          data: { fullOutput: ch.text, partialOutput: ch.text, outputHash: chapterTextHash(ch.text) },
         });
         if (wrote.count === 0) throw new DataPauseError(COUNT_VALUE_TEXT.changed(ch.number));
       }

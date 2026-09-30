@@ -25,6 +25,8 @@ import { documentReadyMessage, toWaNumber, waLink } from "@/lib/whatsapp";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyClient, clientProjectPath } from "@/lib/services/client-notify";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
+import { chapterGateStep, checkView, failureLines, gateFactFrom, rewritePolicy, rewritesAllowed, REWRITES_SETTING, type AiTextView, type CheckView } from "@/lib/quality/chapter-gate";
+import type { QualityItem } from "@/lib/quality/types";
 import { deliverIfFinalReleased, transitionProject } from "@/lib/services/projects";
 
 /** A stored file becomes the deliverable's next version (older unreviewed ones are superseded); the deliverable goes IN_REVIEW. */
@@ -218,6 +220,7 @@ const versionSelect = {
   readback: true,
   builtFrom: true,
   file: { select: { id: true, fileName: true, fileSize: true, hiddenFromWorkerAt: true } },
+  formattedFile: { select: { id: true, fileName: true, deletedAt: true } },
 } satisfies Prisma.DeliverableVersionSelect;
 
 export interface VersionView {
@@ -240,6 +243,10 @@ export interface VersionView {
   /** A complete document built from approved chapters: which chapters are no longer the approved ones. */
   staleChapters: number[];
   builtFromApproved: boolean;
+  /** Chapter gate: the checked Word file of a reviewed upload (what is downloaded once it is approved). */
+  formattedFile: { id: string; fileName: string } | null;
+  /** Chapter gate: the quality check of this upload's text (null = not checked yet, or not a reviewed chapter). */
+  check: CheckView | null;
 }
 
 export interface DeliverableView {
@@ -258,9 +265,11 @@ export interface DeliverableView {
   gate: Gate;
   /** Chapter review (a report the pipeline writes): where this chapter stands, and the COO's notes on an approved one. */
   review: { state: ChapterReviewState; changeNote: string | null; changeNoteAt: string | null } | null;
+  /** Chapter gate: where the chapter's AI text stands (checked before its draft goes to the specialist). */
+  aiText: AiTextView | null;
 }
 
-function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof versionSelect }>, approvals: Map<number, string> | null): VersionView {
+function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof versionSelect }>, approvals: Map<number, string> | null, checks?: Map<string, CheckView>): VersionView {
   const staleChapters = v.builtFrom && approvals ? builtFromIsStale(v.builtFrom, approvals) : [];
   return {
     id: v.id,
@@ -279,7 +288,67 @@ function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof v
     readback: readStoredReadback(v.readback),
     staleChapters,
     builtFromApproved: v.builtFrom != null,
+    formattedFile: v.formattedFile && !v.formattedFile.deletedAt ? { id: v.formattedFile.id, fileName: v.formattedFile.fileName } : null,
+    check: checks?.get(v.id) ?? null,
   };
+}
+
+/**
+ * Chapter gate: each reviewed upload's latest check, and where each chapter's AI text stands
+ * (the same rule as the orchestrator and the draft: services/chapter-gate.ts).
+ */
+async function chapterGateViews(projectDbId: string, rows: LoadedDeliverable[], withCost: boolean): Promise<{ uploads: Map<string, CheckView>; aiText: Map<number, AiTextView> }> {
+  const uploadIds = rows.filter((d) => d.kind === "CHAPTER").flatMap((d) => d.versions.filter((v) => !isAiDraft(v)).map((v) => v.id));
+  const [uploadRows, checkpoints, aiRows, project, setting] = await Promise.all([
+    uploadIds.length
+      ? db.chapterCheck.findMany({ where: { projectId: projectDbId, subject: "UPLOAD", versionId: { in: uploadIds } }, orderBy: { createdAt: "desc" } })
+      : Promise.resolve([]),
+    db.generationCheckpoint.findMany({ where: { projectId: projectDbId }, select: { chapterNumber: true, status: true, outputHash: true, gateRewriteNo: true } }),
+    db.chapterCheck.findMany({ where: { projectId: projectDbId, subject: "AI_TEXT" } }),
+    db.project.findUnique({
+      where: { id: projectDbId },
+      select: {
+        status: true,
+        orchestratorRun: { select: { status: true } },
+        researchMode: { select: { modeNumber: true, isLocked: true } },
+        pauses: { select: { afterChapter: true, status: true } },
+        _count: { select: { files: { where: { category: "secondary_data", deletedAt: null } } } },
+      },
+    }),
+    db.setting.findUnique({ where: { key: REWRITES_SETTING }, select: { value: true } }).catch(() => null),
+  ]);
+  const uploads = new Map<string, CheckView>();
+  for (const r of uploadRows) if (r.versionId && !uploads.has(r.versionId)) uploads.set(r.versionId, checkView(r, withCost));
+
+  const aiText = new Map<number, AiTextView>();
+  if (!project) return { uploads, aiText };
+  const now = new Date();
+  const policy = rewritePolicy(project.orchestratorRun, project.status);
+  const maxRewrites = rewritesAllowed(setting?.value);
+  for (const cp of checkpoints) {
+    if (cp.status === "PENDING" || cp.status === "OUTLINING" || cp.status === "WRITING") {
+      if (cp.gateRewriteNo > 0) aiText.set(cp.chapterNumber, { stage: "rewriting", rewritesUsed: cp.gateRewriteNo, check: null });
+      continue;
+    }
+    if (cp.status !== "COMPLETED") continue;
+    const row = cp.outputHash ? (aiRows.find((k) => k.chapterNumber === cp.chapterNumber && k.textHash === cp.outputHash) ?? null) : null;
+    const fact = gateFactFrom({
+      chapter: cp.chapterNumber,
+      outputHash: cp.outputHash,
+      gateRewriteNo: cp.gateRewriteNo,
+      check: row,
+      mode: project.researchMode?.isLocked ? project.researchMode.modeNumber : null,
+      pauses: project.pauses,
+      hasDataset: project._count.files > 0,
+    });
+    const step = chapterGateStep(fact, { now, maxRewrites, policy });
+    aiText.set(cp.chapterNumber, {
+      stage: step.kind === "handover" ? "settled" : step.kind === "rewrite" ? "rewriting" : "checking",
+      rewritesUsed: cp.gateRewriteNo,
+      check: row && row.status !== "RUNNING" ? checkView(row, withCost) : null,
+    });
+  }
+  return { uploads, aiText };
 }
 
 type LoadedDeliverable = Awaited<ReturnType<typeof loadDeliverables>>[number];
@@ -322,6 +391,7 @@ export async function listDeliverablesForAdmin(projectDbId: string): Promise<Del
   ]);
   if (!project) return [];
   const approvals = applies && rows.some((d) => d.versions.some((v) => v.builtFrom != null)) ? await currentApprovals(projectDbId) : null;
+  const gate = applies ? await chapterGateViews(projectDbId, rows, true) : null;
   return rows.map((d) => ({
     id: d.id,
     key: d.key,
@@ -332,7 +402,7 @@ export async function listDeliverablesForAdmin(projectDbId: string): Promise<Del
     access: d.access,
     archived: d.archivedAt != null,
     clientHidden: d.clientHidden,
-    versions: d.versions.map((v) => toVersionView(v, approvals)),
+    versions: d.versions.map((v) => toVersionView(v, approvals, gate?.uploads)),
     gate: d.clientHidden
       ? { state: "hidden" }
       : deliverableGate(
@@ -341,12 +411,15 @@ export async function listDeliverablesForAdmin(projectDbId: string): Promise<Del
           project
         ),
     review: reviewOf(d, applies),
+    aiText: d.kind === "CHAPTER" && d.chapter != null ? (gate?.aiText.get(d.chapter) ?? null) : null,
   }));
 }
 
 /** The worker's view: their uploads, admin copies they may see, return notes. No access or payment state. */
 export async function listDeliverablesForWorker(projectDbId: string): Promise<Omit<DeliverableView, "gate" | "access">[]> {
   const [rows, applies] = await Promise.all([loadDeliverables(projectDbId, { forWorker: true }), chapterReviewApplies(projectDbId)]);
+  // The specialist never sees what a check cost.
+  const gate = applies ? await chapterGateViews(projectDbId, rows, false) : null;
   return rows.map((d) => ({
     id: d.id,
     key: d.key,
@@ -356,8 +429,9 @@ export async function listDeliverablesForWorker(projectDbId: string): Promise<Om
     status: d.status,
     archived: false,
     clientHidden: d.clientHidden,
-    versions: d.versions.map((v) => toVersionView(v, null)),
+    versions: d.versions.map((v) => toVersionView(v, null, gate?.uploads)),
     review: reviewOf(d, applies),
+    aiText: d.kind === "CHAPTER" && d.chapter != null ? (gate?.aiText.get(d.chapter) ?? null) : null,
   }));
 }
 
@@ -418,12 +492,19 @@ export async function submitVersion(input: {
       return null;
     });
     const blocking = read?.readback.blocking.length ?? 0;
-    await notifyOperations({
-      title: `${deliverable.title} ready for approval`,
-      message: `${project.projectId}: the specialist uploaded their reviewed ${deliverable.title}.${blocking ? ` ${blocking} problem${blocking === 1 ? "" : "s"} must be fixed before it can be approved.` : " Check it and approve it, or return it with notes."}`,
-      type: "info",
-      link: `/admin/projects/${project.projectId}?tab=documents`,
-    });
+    if (blocking) {
+      // A file the reader cannot carry is not checked: the specialist and the COO see why on the card.
+      await notifyOperations({
+        title: `${deliverable.title} uploaded`,
+        message: `${project.projectId}: the specialist uploaded their reviewed ${deliverable.title}. ${blocking} problem${blocking === 1 ? "" : "s"} must be fixed before it can be approved.`,
+        type: "info",
+        link: `/admin/projects/${project.projectId}?tab=documents`,
+      });
+    } else if (deliverable.chapter) {
+      // Chapter gate: the upload is checked before the COO may approve it; the check tells the COO (or the
+      // specialist) how it went.
+      await import("@/lib/services/chapter-gate").then((m) => m.requestChapterCheck(project.id, deliverable.chapter as number, "UPLOAD", { versionId }));
+    }
     return { versionId, movedToQa: false };
   }
 
@@ -441,6 +522,25 @@ export async function submitVersion(input: {
     });
   }
   return { versionId, movedToQa };
+}
+
+/**
+ * Chapter gate: the check of an upload's current text, as approval reads it (null = not checked yet).
+ * The text is the read-back's, so a file read again with a newer reader is checked again.
+ */
+async function uploadCheck(projectDbId: string, chapter: number | null, versionId: string): Promise<{ status: "RUNNING" | "PASSED" | "FAILED" | "ERROR"; lines: string[] } | null> {
+  if (!chapter) return null;
+  const row = await db.chapterCheck.findFirst({
+    where: { projectId: projectDbId, chapterNumber: chapter, subject: "UPLOAD", versionId },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, failures: true, textHash: true },
+  });
+  if (!row) return null;
+  const { chapterGateCurrentUploadHash } = await import("@/lib/services/chapter-gate");
+  const current = await chapterGateCurrentUploadHash(projectDbId, chapter, versionId);
+  if (current && current !== row.textHash) return null;
+  const failures = Array.isArray(row.failures) ? (row.failures as unknown as QualityItem[]) : [];
+  return { status: row.status, lines: failureLines(failures, 8) };
 }
 
 /** Where the gate stores the assembled report: a deliverable path with a 12-byte random name, like an upload's. */
@@ -542,6 +642,10 @@ export async function reviewVersion(input: {
   adminUserId: string;
   /** The read-back the COO looked at (chapter review): approval is refused if the file was read again since. */
   readbackHash?: string | null;
+  /** Chapter gate: the founder approves a chapter whose check failed, with this written reason. */
+  overrideReason?: string | null;
+  /** The reviewer is the super admin (the only one who may give an override). */
+  isSuperAdmin?: boolean;
 }): Promise<ReviewResult> {
   const version = await db.deliverableVersion.findFirst({
     where: {
@@ -618,13 +722,24 @@ export async function reviewVersion(input: {
   const approving = underReview && deliverable.kind === "CHAPTER";
   if (approving) {
     const readback = isAiDraft(version) ? null : (await ensureReadback(version.id)).readback;
+    const override = input.overrideReason?.trim() || null;
+    if (override && !input.isSuperAdmin) throw new DeliverableError(CHAPTER_REVIEW_TEXT.check.refuse.overrideFounderOnly, 403, "OVERRIDE_FOUNDER_ONLY");
+    const check = isAiDraft(version) ? null : await uploadCheck(project.id, deliverable.chapter, version.id);
     const refusals = approvalRefusals({
       version: { status: version.status, submittedByRole: version.submittedByRole, fileName: version.file.fileName },
       projectStatus: project.status,
       readback: readbackFacts(readback),
       seenHash: input.readbackHash ?? null,
+      check,
+      override: Boolean(override),
     });
     if (refusals.length) throw new DeliverableError(refusals[0], 409, "APPROVAL_REFUSED", { refusals });
+    if (override && check?.status === "FAILED") {
+      // Kept with the chapter and on the project's timeline: the chapter reached the report without passing its check.
+      await db.projectNote.create({
+        data: { projectId: project.id, kind: "QA", content: `${deliverable.title} approved without passing its quality check. Reason: ${override}`, authorType: "EXEC", authorId: input.adminUserId, authorName: "Founder" },
+      }).catch((error) => console.warn("[chapter gate] the override was not noted", error instanceof Error ? error.message : error));
+    }
   }
   // A complete document built from approved chapters is out of date once a chapter is approved again.
   if (deliverable.kind === "FINAL" && version.builtFrom) {
@@ -772,8 +887,17 @@ export async function adminUploadVersion(input: {
     },
     { timeout: 15_000, maxWait: 10_000 }
   );
-  // A reviewed chapter is read back before anyone can approve it.
-  if (underReview && deliverable.kind === "CHAPTER") await readBackVersion(versionId);
+  // A reviewed chapter is read back, and checked (chapter gate), before anyone can approve it.
+  if (underReview && deliverable.kind === "CHAPTER") {
+    const read = await readBackVersion(versionId);
+    const chapter = (await db.projectDeliverable.findUnique({ where: { id: deliverable.id }, select: { chapter: true } }))?.chapter ?? null;
+    if (chapter && read.readback.blocking.length === 0) {
+      const gate = await import("@/lib/services/chapter-gate");
+      // "Approve it now" waits for the check (about a minute); otherwise it runs on its own.
+      if (input.release) await gate.runChapterCheck(deliverable.projectId, chapter, "UPLOAD", { versionId });
+      else await gate.requestChapterCheck(deliverable.projectId, chapter, "UPLOAD", { versionId });
+    }
+  }
 
   if (!input.release) return { released: false, whatsappUrl: null };
   return reviewVersion({

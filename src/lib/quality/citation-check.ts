@@ -260,8 +260,11 @@ export const CANNOT_DETERMINE_LIMIT = 0.15;
 const cite = (u: CitationUse) => u.raw.startsWith("(") ? u.raw : `${u.author} (${u.year})`;
 const refLabel = (r: GateReference) => `${(r.authors ?? "").split(";")[0]?.split(",")[0] ?? "?"} (${r.year ?? "n.d."})`;
 
-/** The one reference check. */
-export function referenceCheck(match: CitationMatch, support: { results: SupportResult[]; checked: number; total: number }): CheckResult {
+/**
+ * The one reference check. `minAgainst`: the chapter gate judges a few sentences at a time, so one
+ * "does not support" in five must not fail a chapter; it also needs at least this many.
+ */
+export function referenceCheck(match: CitationMatch, support: { results: SupportResult[]; checked: number; total: number }, opts: { minAgainst?: number } = {}): CheckResult {
   const issues: QualityIssue[] = [];
   for (const u of match.unmatched) {
     issues.push({
@@ -290,7 +293,7 @@ export function referenceCheck(match: CitationMatch, support: { results: Support
   const judged = support.results.filter((r) => r.verdict !== "CANNOT_DETERMINE");
   const against = support.results.filter((r) => r.verdict === "DOES_NOT_SUPPORT");
   const unsure = support.results.filter((r) => r.verdict === "CANNOT_DETERMINE");
-  const tooMany = support.checked > 0 && against.length / support.checked > DOES_NOT_SUPPORT_LIMIT;
+  const tooMany = support.checked > 0 && against.length / support.checked > DOES_NOT_SUPPORT_LIMIT && against.length >= (opts.minAgainst ?? 1);
   for (const r of against) {
     issues.push({
       level: tooMany ? "FAIL" : "WARN",

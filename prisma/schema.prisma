@@ -578,6 +578,7 @@ model Project {
   // Phase D (report production)
   generationCheckpoints GenerationCheckpoint[]
   orchestratorRun       OrchestratorRun?
+  chapterChecks         ChapterCheck[]
   researchMode          ResearchMode?
   brief                 ProjectBrief?
   sources               ProjectSource[]
@@ -630,7 +631,9 @@ model ProjectFile {
   deliverable   ProjectDeliverable? @relation(fields: [deliverableId], references: [id])
   messageId     String?
   message       ProjectMessage?     @relation(fields: [messageId], references: [id])
-  version       DeliverableVersion?
+  version       DeliverableVersion? @relation("VersionFile")
+  /// Chapter gate: this file is the formatted copy of that version.
+  formattedFor  DeliverableVersion? @relation("VersionFormattedCopy")
   /// D3c/D4: a data file sent at a pipeline pause (category data_upload; uploaderRole says who sent it), and its slot if any.
   pauseId       String?
   pause         PipelinePause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
@@ -721,7 +724,11 @@ model DeliverableVersion {
   /// Set on release: the client's "version 1, 2".
   releaseNo       Int?
   fileId          String             @unique
-  file            ProjectFile        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  file            ProjectFile        @relation("VersionFile", fields: [fileId], references: [id], onDelete: Cascade)
+  /// Chapter gate: the formatted copy of an upload (rebuilt from its read-back and checked). What the client and
+  /// the specialist download once the chapter is approved; staff see both.
+  formattedFileId String?            @unique
+  formattedFile   ProjectFile?       @relation("VersionFormattedCopy", fields: [formattedFileId], references: [id], onDelete: SetNull)
   status          VersionStatus      @default(SUBMITTED)
   submittedById   String
   submittedByRole String // WORKER or ADMIN
@@ -1567,6 +1574,58 @@ model ProjectSource {
   @@index([briefId])
 }
 
+/// Chapter gate (30 Sept 2026): one chapter's quality check, for one text. AI_TEXT = the generator's chapter
+/// (checked before the specialist gets the AI draft), UPLOAD = a person's upload read back (must pass before the
+/// COO approves it). Keyed by the text's hash, so the same text is never checked twice.
+enum ChapterCheckSubject {
+  AI_TEXT
+  UPLOAD
+}
+
+enum ChapterCheckStatus {
+  RUNNING
+  PASSED
+  FAILED
+  ERROR
+}
+
+model ChapterCheck {
+  id            String              @id @default(cuid())
+  projectId     String
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapterNumber Int
+  subject       ChapterCheckSubject
+  /// The upload's DeliverableVersion (information only; the text hash is the key).
+  versionId     String?
+  /// chapterTextHash(text): the gate version and the exact text checked.
+  textHash      String
+  status        ChapterCheckStatus  @default(RUNNING)
+  /// The run's lease; a RUNNING row whose lease has lapsed can be taken again.
+  lockedUntil   DateTime?
+  /// Runs that ended in ERROR (3 = give up and hand the draft over).
+  attempts      Int                 @default(0)
+  /// Checks that apply to one chapter, and how many of them passed.
+  applicable    Int?
+  passedCount   Int?
+  /// QualityItem[]: failures, then warnings.
+  failures      Json?
+  warnings      Json?
+  /// Every failure is one a rewrite of the text can fix (false = a formatting defect of our own, told to the founder).
+  rewritable    Boolean?
+  /// Notes for the COO (the builder's notes, AI calls that failed).
+  notes         Json?
+  /// The AI results under the report gate's own hashes ({ voice, support }), which the report gate reuses.
+  ai            Json?
+  costNaira     Float?
+  error         String?
+  settledAt     DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@unique([projectId, chapterNumber, subject, textHash])
+  @@index([projectId, chapterNumber])
+}
+
 model GenerationCheckpoint {
   id            String           @id @default(cuid())
   projectId     String
@@ -1603,6 +1662,12 @@ model GenerationCheckpoint {
   draftText     String? @db.Text
   /// The whole chapter, once every part is written.
   fullOutput    String? @db.Text
+  /// Chapter gate: the hash of fullOutput (chapterTextHash), written with it (at completion and when a data pause
+  /// fills its blanks), so the orchestrator can tell which text a chapter check belongs to without reading it.
+  outputHash    String?
+  /// Chapter gate: how many automatic rewrites led to this text (0 = the first text). Carried +1 when a rewrite
+  /// re-creates the row; a rewrite asked for by a person starts again at 0.
+  gateRewriteNo Int     @default(0)
 
   // Totals over every Claude call of this run, failed attempts included.
   inputTokens      Int   @default(0)

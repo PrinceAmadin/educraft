@@ -196,6 +196,13 @@ export interface ApprovalFacts {
   readback: { blocking: string[]; placeholders: string[]; hash: string } | null;
   /** The read-back the COO was looking at, when the screen sent it. */
   seenHash?: string | null;
+  /**
+   * Chapter gate (30 Sept 2026): the chapter check of this upload's text; null = not run yet. Left out
+   * (undefined) where the gate does not apply.
+   */
+  check?: { status: "RUNNING" | "PASSED" | "FAILED" | "ERROR"; lines: string[] } | null;
+  /** The founder approves a failed check anyway, with a written reason. */
+  override?: boolean;
 }
 
 /** Why the COO cannot approve this version (empty = they can). */
@@ -211,6 +218,14 @@ export function approvalRefusals(f: ApprovalFacts): string[] {
     out.push(...f.readback.blocking);
     if (f.readback.placeholders.length) out.push(t.placeholders(f.readback.placeholders));
     if (f.seenHash && f.seenHash !== f.readback.hash) out.push(t.changed);
+    // Only a file read back cleanly is checked; the check must have passed (or the founder overrides a failure).
+    if (f.readback.blocking.length === 0 && f.check !== undefined) {
+      const c = CHAPTER_REVIEW_TEXT.check.refuse;
+      if (f.check === null) out.push(c.notChecked);
+      else if (f.check.status === "RUNNING") out.push(c.running);
+      else if (f.check.status === "ERROR") out.push(c.error);
+      else if (f.check.status === "FAILED" && !f.override) out.push(c.failed(f.check.lines));
+    }
   }
   return out;
 }
@@ -273,4 +288,39 @@ export const CHAPTER_REVIEW_TEXT = {
   humanVersionExists: (chapter: number) =>
     `Chapter ${chapter} has been reviewed by the specialist, so it is not written again by the AI: that would discard their work. Return it to the specialist with the notes instead.`,
   notAllApproved: (pending: readonly number[]) => `The complete report is built from the approved chapters. Still to approve: ${CHAPTERS(pending)}.`,
+  /** Chapter gate (30 Sept 2026): every chapter is checked on its own before it is downloaded or approved. */
+  check: {
+    chip: { RUNNING: "Being checked", PASSED: "Check passed", FAILED: "Check failed", ERROR: "Check did not run", NONE: "Not checked yet" },
+    passedNote: (passed: number, applicable: number) => `Quality check passed: ${passed} of ${applicable} checks that apply to this chapter.`,
+    failedNote: (rewrites: number) =>
+      `Quality check: this chapter did not pass${rewrites ? ` after ${rewrites} rewrite${rewrites === 1 ? "" : "s"}` : ""}. Fix these before you upload your version:`,
+    uncheckedNote: "The quality check could not run on this chapter. Read it through with care; the COO has been told.",
+    warningsIntro: "Also look at:",
+    beingChecked: (chapter: number) => `Chapter ${chapter} is written and is being checked before it comes to you.`,
+    beingRewritten: (chapter: number) => `Chapter ${chapter} did not pass its check and is being written again.`,
+    staffChecking: (chapter: number) => `Chapter ${chapter} is written and is being checked. The specialist gets the draft once it passes (or after two rewrites).`,
+    uploadChecking: "Your version is being checked. It goes to the COO for approval once it passes.",
+    uploadFailed: "Your version did not pass the chapter's quality check. Fix these and upload it again:",
+    uploadPassed: (passed: number, applicable: number) => `Your version passed the quality check (${passed} of ${applicable}). It is waiting for the COO's approval.`,
+    uploadPassedMessage: (code: string, chapter: number, passed: number, applicable: number) =>
+      `${code}: the specialist's Chapter ${chapter} passed its quality check (${passed} of ${applicable}) and is ready for your approval.`,
+    uploadFailedMessage: (code: string, chapter: number, failures: number) =>
+      `${code}: your Chapter ${chapter} did not pass its quality check (${failures} point${failures === 1 ? "" : "s"} to fix). The details are on the Documents tab; upload the corrected version.`,
+    draftFailedTitle: (code: string, chapter: number) => `${code}: Chapter ${chapter} went to the specialist without passing its check`,
+    draftFailedMessage: (code: string, chapter: number, why: string) => `${code}: Chapter ${chapter} ${why} Its failures are listed on the draft for the specialist to fix.`,
+    whyFailed: (rewrites: number) => (rewrites ? `still failed its quality check after ${rewrites} rewrite${rewrites === 1 ? "" : "s"}.` : "failed its quality check and could not be rewritten."),
+    whyUnchecked: "could not be checked (the check failed to run three times).",
+    refuse: {
+      notChecked: "This version has not been checked yet. Refresh in a minute.",
+      running: "The chapter's quality check is still running. Refresh in a minute.",
+      error: "The chapter's quality check could not run. Press Check again.",
+      failed: (lines: readonly string[]) =>
+        `This version did not pass the chapter's quality check${lines.length ? `: ${lines.slice(0, 3).join(" ")}${lines.length > 3 ? ` (and ${lines.length - 3} more)` : ""}` : ""}. Return it to the specialist with these points.`,
+      overrideNeedsReason: "Say why this chapter may be approved without passing its check.",
+      overrideFounderOnly: "Only the founder can approve a chapter that did not pass its check.",
+    },
+    overrideHint: "Approve anyway: say why this chapter may be approved without passing its check. The reason is kept with the chapter.",
+    formattedCopy: "Formatted copy",
+    specialistFile: "Specialist's file",
+  },
 } as const;

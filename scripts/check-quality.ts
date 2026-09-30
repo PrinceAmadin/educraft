@@ -520,6 +520,23 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
     check("endnotes: MODE C (page footnotes) keeps its own checks", !/distinct endnotes/.test(byId(modeC.r.checks, "ST12").summary ?? ""));
   }
 
+  // ── Thin paragraphs: a numbered objective or a defined term is not a thin paragraph (EC-00002, 30 Sept 2026) ──
+  {
+    const para = (index: number, text: string) => ({ chapter: 1, index, section: "1.3 Objectives of the Study", text, firstInSection: index === 1 });
+    const thinOf = (texts: string[]) => scanVoice(texts.map((t, i) => para(i + 1, t))).filter((f) => f.rule === "thin");
+    eq(
+      "thin: numbered objectives, hypotheses and defined terms are not thin paragraphs",
+      thinOf([
+        "1. To assess the level of cybersecurity awareness among SME owners in Lagos State.",
+        "(ii) To identify the prevention strategies SMEs adopt against phishing attacks.",
+        "H01: There is no significant relationship between awareness and incident frequency.",
+        "Cybersecurity: the practice of protecting systems, networks and data from digital attacks.",
+      ]).length,
+      0,
+    );
+    eq("thin: a real one-sentence paragraph is still flagged", thinOf(["The study focused on registered small businesses in the Lagos metropolis during the period."]).length, 1);
+  }
+
   if (failures.length) {
     console.error(`check:quality — ${failures.length} failed, ${passed} passed:`);
     for (const f of failures) console.error(`  ✗ ${f}`);

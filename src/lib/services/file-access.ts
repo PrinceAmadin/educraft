@@ -87,6 +87,15 @@ export async function fileForClient(scope: ClientScope, code: string, fileId: st
       version: {
         select: {
           releaseNo: true,
+          formattedFileId: true,
+          deliverable: { select: { title: true, access: true, archivedAt: true, clientHidden: true } },
+        },
+      },
+      // Chapter gate: the formatted copy of a reviewed chapter, under the same rules as the version it copies.
+      formattedFor: {
+        select: {
+          releaseNo: true,
+          formattedFileId: true,
           deliverable: { select: { title: true, access: true, archivedAt: true, clientHidden: true } },
         },
       },
@@ -100,8 +109,10 @@ export async function fileForClient(scope: ClientScope, code: string, fileId: st
   }
 
   // A released chapter or document (never an item kept off the client's list, such as a one-chapter order's chapter).
-  const v = file.version;
+  const v = file.version ?? file.formattedFor;
   if (!v || v.releaseNo == null || v.deliverable.archivedAt || v.deliverable.clientHidden) return { kind: "missing" };
+  // Once a formatted copy exists, the client gets that and never the specialist's own file.
+  if (file.version && file.version.formattedFileId) return { kind: "missing" };
   const gate = deliverableGate(true, v.deliverable.access, file.project);
   if (gate.state === "locked") return { kind: "locked", reason: gate.reason };
   if (gate.state !== "open") return { kind: "missing" };

@@ -56,6 +56,8 @@ import {
   type StartFacts,
 } from "../src/lib/generation/orchestrator-rules";
 import { MAX_CONCURRENT_GENERATIONS } from "../src/lib/generation/generation-queue";
+import { gateReason, gateReasonChapter } from "../src/lib/generation/orchestrator-rules";
+import type { ChapterGateFact } from "../src/lib/quality/chapter-gate";
 import { expectedChapters, runsFromChapterOne } from "../src/lib/deliverables";
 import { readChapterOneStatements, statementsUnreadable } from "../src/lib/generation/chapter-one-statements";
 
@@ -681,9 +683,94 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
   check("wording: the status has a label", ORCHESTRATOR_TEXT.status.WAITING_FOR_APPROVAL === "Waiting for approval");
 }
 
+// ─── Chapter gate: every chapter checked on its own before its draft goes out (30 Sept 2026) ─
+{
+  const lease = (m: number) => at(m);
+  const gate = (n: number, over: Partial<ChapterGateFact> = {}, check: ChapterGateFact["check"] = null): ChapterGateFact => ({
+    chapter: n,
+    outputHash: `h${n}`,
+    rewritesUsed: 0,
+    check,
+    barred: null,
+    ...over,
+  });
+  const passed: ChapterGateFact["check"] = { status: "PASSED", lockedUntil: null, attempts: 0, rewritable: true, lines: [] };
+  const failed: ChapterGateFact["check"] = { status: "FAILED", lockedUntil: null, attempts: 0, rewritable: true, lines: ["[REF] X (2020) is cited but is not among the verified references."] };
+  const running = (until: number): ChapterGateFact["check"] => ({ status: "RUNNING", lockedUntil: lease(until), attempts: 0, rewritable: null, lines: [] });
+
+  // Chapter One: checked before its statements are read, rewritten before them too.
+  const one = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1)] }));
+  check("gate: a written Chapter One is checked before anything else", one.kind === "CHECK_CHAPTER" && one.chapter === 1, one);
+  check("gate: asking for a check changes no status", statusAfter(one, "GENERATING") === null && statusAfter(one, "NEEDS_ATTENTION") === null);
+  const oneRunning = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1, {}, running(24))] }));
+  check("gate: while the check runs, nothing moves on", oneRunning.kind === "CHECKING_CHAPTER" && oneRunning.chapter === 1, oneRunning);
+  const oneLapsed = decide(facts({ mode: 2, checkpoints: written(1), now: at(30), chapterGate: [gate(1, {}, running(24))] }));
+  check("gate: a check whose lease lapsed is asked for again", oneLapsed.kind === "CHECK_CHAPTER", oneLapsed);
+  const oneFailed = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1, {}, failed)] }));
+  check("gate: a failed Chapter One is rewritten before its statements are read", oneFailed.kind === "REWRITE_CHAPTER" && oneFailed.chapter === 1 && oneFailed.checkpointId === "cp-1" && oneFailed.lines.length === 1, oneFailed);
+  check("gate: a rewrite keeps a writing run's slot", statusAfter(oneFailed, "GENERATING") === "GENERATING");
+  check("gate: a parked run queues for a slot to rewrite", statusAfter(oneFailed, "NEEDS_ATTENTION") === "QUEUED" && statusAfter(oneFailed, "WAITING_FOR_APPROVAL") === "QUEUED");
+  const onePassed = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1, {}, passed)] }));
+  check("gate: a passed Chapter One lets its statements be read", onePassed.kind === "READ_STATEMENTS", onePassed);
+  const twoRewrites = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1, { rewritesUsed: 2 }, failed)] }));
+  check("gate: after two rewrites the draft goes over and the report moves on", twoRewrites.kind === "READ_STATEMENTS", twoRewrites);
+  const settingOff = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1, {}, failed)], maxRewrites: 0 }));
+  check("gate: the Setting at 0 switches rewrites off", settingOff.kind === "READ_STATEMENTS", settingOff);
+  const builder = decide(facts({ mode: 2, checkpoints: written(1), now: at(20), chapterGate: [gate(1, {}, { ...failed!, rewritable: false })] }));
+  check("gate: a failure a rewrite cannot fix (our Word file) is never rewritten", builder.kind === "READ_STATEMENTS", builder);
+
+  // Before a data pause, and before the Mode 5 dataset.
+  const three = written(1, 2, 3);
+  const beforePause = decide(facts({ mode: 2, checkpoints: three, run: READ, now: at(40), chapterGate: [gate(1, {}, passed), gate(2, {}, passed), gate(3, {}, failed)] }));
+  check("gate: Chapter Three is rewritten before its data request is drafted", beforePause.kind === "REWRITE_CHAPTER" && beforePause.chapter === 3, beforePause);
+  const barredByPause = decide(facts({ mode: 2, checkpoints: three, run: READ, now: at(40), pauses: [pause(3, "OPEN")], chapterGate: [gate(1, {}, passed), gate(2, {}, passed), gate(3, { barred: "a data request after Chapter 3 already exists" }, failed)] }));
+  check("gate: once its data request exists, Chapter Three is not rewritten (its blanks would come back)", barredByPause.kind === "WAIT_FOR_DATA", barredByPause);
+  const mode5 = decide(facts({ mode: 5, checkpoints: three, run: READ, now: at(40), chapterGate: [gate(1, {}, passed), gate(2, {}, passed), gate(3, {}, failed)] }));
+  check("gate: Mode 5 Chapter Three is rewritten before the dataset is fetched", mode5.kind === "REWRITE_CHAPTER" && mode5.chapter === 3, mode5);
+  const mode5Barred = decide(facts({ mode: 5, checkpoints: three, run: READ, now: at(40), hasDataset: true, chapterGate: [gate(1, {}, passed), gate(2, {}, passed), gate(3, { barred: "the Mode 5 dataset was built from this chapter" }, failed)] }));
+  check("gate: with its dataset stored, Mode 5 Chapter Three is handed over, and Chapter Four comes next", mode5Barred.kind === "NEED_SLOT" && mode5Barred.chapter === 4, mode5Barred);
+
+  // Stopped and held runs: checks still happen, rewrites do not.
+  const stoppedCheck = decide(facts({ mode: 2, checkpoints: written(1, 2), run: { ...READ, status: "STOPPED" }, now: at(30), chapterGate: [gate(1, {}, passed), gate(2)] }));
+  check("gate: a stopped run still has its chapters checked (their drafts must not wait)", stoppedCheck.kind === "CHECK_CHAPTER" && stoppedCheck.chapter === 2, stoppedCheck);
+  const stoppedFailed = decide(facts({ mode: 2, checkpoints: written(1, 2), run: { ...READ, status: "STOPPED" }, now: at(30), chapterGate: [gate(1, {}, passed), gate(2, {}, failed)] }));
+  check("gate: a stopped run never rewrites (the draft goes over)", stoppedFailed.kind === "WAIT", stoppedFailed);
+  const heldFailed = decide(facts({ mode: 2, checkpoints: written(1, 2), run: READ, project: { status: "ON_HOLD", hasSpecialist: true }, now: at(30), chapterGate: [gate(1, {}, passed), gate(2, {}, failed)] }));
+  check("gate: a held project rewrites once it is back (the hold comes first)", heldFailed.kind === "HOLD", heldFailed);
+  const heldCheck = decide(facts({ mode: 2, checkpoints: written(1, 2), run: READ, project: { status: "ON_HOLD", hasSpecialist: true }, now: at(30), chapterGate: [gate(1, {}, passed), gate(2)] }));
+  check("gate: a held project still has its chapters checked", heldCheck.kind === "CHECK_CHAPTER" && heldCheck.chapter === 2, heldCheck);
+
+  // Every chapter written: the report's own gate only once every chapter is settled; lowest chapter first.
+  const all = written(1, 2, 3, 4, 5);
+  const allSettled = [1, 2, 3, 4, 5].map((n) => gate(n, {}, passed));
+  const lastRunning = decide(facts({ mode: 1, checkpoints: all, run: READ, now: at(90), review: { pending: [], approvedAt: {} }, chapterGate: [...allSettled.slice(0, 4), gate(5, {}, running(95))] }));
+  check("gate: the report's quality check waits for the last chapter's check", lastRunning.kind === "CHECKING_CHAPTER" && lastRunning.chapter === 5, lastRunning);
+  const lowestFirst = decide(facts({ mode: 1, checkpoints: all, run: READ, now: at(90), chapterGate: [gate(4), gate(2)] }));
+  check("gate: chapters are settled lowest first", lowestFirst.kind === "CHECK_CHAPTER" && lowestFirst.chapter === 2, lowestFirst);
+  const settled = decide(facts({ mode: 1, checkpoints: all, run: READ, now: at(90), review: { pending: [], approvedAt: {} }, chapterGate: allSettled }));
+  check("gate: every chapter settled, the report's check is asked for", settled.kind === "REQUEST_GATE", settled);
+  const legacyNoHash = decide(facts({ mode: 1, checkpoints: all, run: READ, now: at(90), chapterGate: [gate(1, { outputHash: null })] }));
+  check("gate: a chapter written before the gate (no hash) is checked", legacyNoHash.kind === "CHECK_CHAPTER" && legacyNoHash.chapter === 1, legacyNoHash);
+  const errors = decide(facts({ mode: 1, checkpoints: written(1), run: READ, now: at(90), chapterGate: [gate(1, {}, { status: "ERROR", lockedUntil: null, attempts: 3, rewritable: null, lines: [] })] }));
+  check("gate: a check that failed to run three times hands the draft over", errors.kind === "NEED_SLOT" && errors.chapter === 2, errors);
+  const oneError = decide(facts({ mode: 1, checkpoints: written(1), run: READ, now: at(90), chapterGate: [gate(1, {}, { status: "ERROR", lockedUntil: null, attempts: 1, rewritable: null, lines: [] })] }));
+  check("gate: a check that failed to run is asked for again", oneError.kind === "CHECK_CHAPTER", oneError);
+  const noFacts = decide(facts({ mode: 1, checkpoints: written(1), run: READ, now: at(90) }));
+  check("gate: a report written before the gate (no facts) runs as before", noFacts.kind === "NEED_SLOT" && noFacts.chapter === 2, noFacts);
+
+  // Wording.
+  const checking = runLine({ status: "GENERATING", currentChapter: 2, reason: gateReason("CHECKING", 2) }, { score: null, total: null });
+  check("wording: a checking run says which chapter", checking.includes("Chapter Two") && checking.includes("checked"), checking);
+  const rewriting = runLine({ status: "GENERATING", currentChapter: 3, reason: gateReason("REWRITING", 3) }, { score: null, total: null });
+  check("wording: a rewriting run says so", rewriting.includes("Chapter Three") && rewriting.includes("written again"), rewriting);
+  const queued = runLine({ status: "QUEUED", currentChapter: 3, reason: gateReason("REWRITING", 3) }, { score: null, total: null });
+  check("wording: a rewrite waiting for a slot says so", queued.includes("slot"), queued);
+  check("wording: the reason round-trips", gateReasonChapter(gateReason("CHECKING", 4), "CHECKING") === 4 && gateReasonChapter("NO_REFERENCES", "CHECKING") === null);
+}
+
 // ─── Result ──────────────────────────────────────────────────────────────────
-const actionKinds: Action["kind"][] = ["WAIT", "STOP", "HOLD", "WRITING", "KICK", "STALL", "ATTENTION", "READ_STATEMENTS", "OPEN_PAUSE", "WAIT_FOR_DATA", "FETCH_DATA", "NEED_SLOT", "WAIT_FOR_APPROVAL", "REQUEST_GATE", "GATE_RUNNING", "PASS", "FAIL"];
-check("every action has a status rule", actionKinds.length === 17);
+const actionKinds: Action["kind"][] = ["WAIT", "STOP", "HOLD", "WRITING", "KICK", "STALL", "ATTENTION", "READ_STATEMENTS", "OPEN_PAUSE", "WAIT_FOR_DATA", "FETCH_DATA", "NEED_SLOT", "CHECK_CHAPTER", "CHECKING_CHAPTER", "REWRITE_CHAPTER", "WAIT_FOR_APPROVAL", "REQUEST_GATE", "GATE_RUNNING", "PASS", "FAIL"];
+check("every action has a status rule", actionKinds.length === 20);
 
 if (failures.length) {
   console.error(`check:orchestrator — ${failures.length} failed, ${passed} passed`);

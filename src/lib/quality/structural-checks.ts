@@ -49,6 +49,25 @@ export interface StructuralInput {
   citations: CitationMatch;
   /** ST9's AI result; null when the gate could not run it. */
   traceability: TraceabilityResult | null;
+  /** The chapter gate: one chapter checked on its own (null for the whole report). */
+  scope?: ChapterScope | null;
+}
+
+/**
+ * The chapter gate (30 Sept 2026): one chapter checked on its own, before anyone
+ * downloads or approves it. What needs the whole report (the reference count,
+ * the other chapters' tables) is left to the report gate; what needs one other
+ * chapter is given here (Chapter One's hypotheses and questions, the works the
+ * earlier chapters cite).
+ */
+export interface ChapterScope {
+  chapter: number;
+  /** The generator's text, or a person's upload read back. */
+  subject: "AI_TEXT" | "UPLOAD";
+  /** Chapter One's current text, when the chapter under check is a later one. */
+  chapterOneText: string | null;
+  /** Verified references the chapters before this one cite (Chapter Five adds no new source). */
+  earlierCitedIds: string[];
 }
 
 export const STRUCTURAL_CHECKS: readonly { id: string; title: string; severity: Severity }[] = [
@@ -195,13 +214,15 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   }
 
   // ── ST3–ST7 required sections ────────────────────────────────────────────
-  const hypothesesInCh1 = hypothesesOf(byNumber.get(1));
+  // A chapter checked on its own reads Chapter One's statements from Chapter One's own text.
+  const chapterOne = byNumber.get(1) ?? (input.scope?.chapterOneText ? parse([{ number: 1, text: input.scope.chapterOneText, plan: null }])[0] : undefined);
+  const hypothesesInCh1 = hypothesesOf(chapterOne);
   sectionCtx.hasHypotheses = hypothesesInCh1.length > 0;
   for (let n = 1; n <= 5; n++) {
     const id = `ST${n + 2}`;
     const c = byNumber.get(n);
     if (!c) {
-      push(id, [], { pass: "", na: `Chapter ${WORDS[n]} is not part of this order.` }, { na: true });
+      push(id, [], { pass: "", na: input.scope ? `Chapter ${WORDS[n]} is checked on its own.` : `Chapter ${WORDS[n]} is not part of this order.` }, { na: true });
       continue;
     }
     const issues: QualityIssue[] = [];
@@ -284,7 +305,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
 
   // ── ST10 research questions and hypotheses answered ──────────────────────
   {
-    const c1 = byNumber.get(1);
+    const c1 = chapterOne;
     const c4 = byNumber.get(4);
     const questions = researchQuestionsOf(c1);
     const hypotheses = hypothesesInCh1;
@@ -312,7 +333,8 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
       const words = countWords(c.text);
       const ratio = words / c.plan.targetWords;
       if (ratio < 1 - BALANCE_TOLERANCE || ratio > 1 + BALANCE_TOLERANCE) {
-        issues.push({ level: "FAIL", message: `Chapter ${WORDS[c.number]} has ${words.toLocaleString("en-US")} words against a plan of ${c.plan.targetWords.toLocaleString("en-US")} (${Math.round(ratio * 100)}%).`, chapter: c.number, fix: ratio < 1 ? "Develop the thin sections to the planned length." : "Cut repetition and padding back to the planned length." });
+        // The plan is the generator's own target: a person's upload is told, not held to it.
+        issues.push({ level: input.scope?.subject === "UPLOAD" ? "WARN" : "FAIL", message: `Chapter ${WORDS[c.number]} has ${words.toLocaleString("en-US")} words against a plan of ${c.plan.targetWords.toLocaleString("en-US")} (${Math.round(ratio * 100)}%).`, chapter: c.number, fix: ratio < 1 ? "Develop the thin sections to the planned length." : "Cut repetition and padding back to the planned length." });
       }
     }
     if (input.template === "B") {
@@ -354,8 +376,9 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     }
     push(
       "ST12",
-      n >= min ? [] : [{ level: "FAIL", message: `The chapters carry ${n} ${howCounted}; ${input.chapterBased ? "a chapter-based order" : "a full report"} needs at least ${min}.`, fix: input.citations.noteStyle ? "Add more endnote entries where sources are used." : "Cite more of the verified references where they support the text." }],
-      `${n} ${howCounted} (at least ${min}).`,
+      input.scope ? [] : n >= min ? [] : [{ level: "FAIL", message: `The chapters carry ${n} ${howCounted}; ${input.chapterBased ? "a chapter-based order" : "a full report"} needs at least ${min}.`, fix: input.citations.noteStyle ? "Add more endnote entries where sources are used." : "Cite more of the verified references where they support the text." }],
+      { pass: `${n} ${howCounted} (at least ${min}).`, na: "The reference count is judged on the whole report." },
+      { na: Boolean(input.scope) },
     );
   }
 
@@ -425,9 +448,9 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
       if (most && most.k > two) issues.push({ level: "FAIL", message: `Chapter ${WORDS[most.n]} cites more works (${most.k}) than the literature review (${two}).`, chapter: 2, fix: "The literature review should carry the most sources." });
     }
     if (byNumber.has(5)) {
-      const earlier = new Set([1, 2, 3, 4].flatMap((n) => [...refsIn(n)]));
+      const earlier = new Set([...[1, 2, 3, 4].flatMap((n) => [...refsIn(n)]), ...(input.scope?.earlierCitedIds ?? [])]);
       const fresh = input.citations.matched.filter((m) => m.use.chapter === 5 && m.refs.some((r) => !earlier.has(r.id)));
-      if (fresh.length && [1, 2, 3, 4].some((n) => byNumber.has(n))) {
+      if (fresh.length && ([1, 2, 3, 4].some((n) => byNumber.has(n)) || (input.scope?.earlierCitedIds.length ?? 0) > 0)) {
         for (const m of fresh.slice(0, 5)) issues.push({ level: "FAIL", message: "Chapter Five cites a source the earlier chapters never used.", chapter: 5, paragraph: m.use.paragraph, quote: shortQuote(m.use.sentence, 160), fix: "Chapter Five introduces no new sources: move the point to the review or drop the citation." });
       }
     }
@@ -459,6 +482,8 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     for (const p of prose) {
       for (const m of p.text.matchAll(/\b(Table|Figure|Fig\.)\s+(\d+\.\d+)\b/g)) {
         const key = `${m[1] === "Table" ? "Table" : "Figure"} ${m[2]}`;
+        // Checked on its own, a chapter may point to another chapter's table ("as Table 4.1 showed").
+        if (input.scope && Number(m[2].split(".")[0]) !== input.scope.chapter) continue;
         if (!captions.has(key)) issues.push({ level: "FAIL", message: `The text refers to ${key}, which does not exist.`, chapter: p.n, fix: `Add ${key} or correct the reference.` });
       }
     }
@@ -500,7 +525,17 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
       const review = found.filter((p) => /COO TO REVIEW|CASE TO BE SUPPLIED|ARCHIVE TO BE SUPPLIED|REFERENCE TO BE SUPPLIED|OBJECTIVE NOT MET|N_DISTRIBUTED|N_RETURNED|N_USABLE|RESPONSE_RATE|POPULATION_SIZE|SAMPLE_SIZE|FIELDWORK_PERIOD/.test(p));
       const tasks = found.filter((p) => !review.includes(p));
       const count = (list: string[]) => [...new Set(list)].map((p) => `${p}${list.filter((x) => x === p).length > 1 ? ` (${list.filter((x) => x === p).length})` : ""}`).join(", ");
-      if (review.length) issues.push({ level: "FAIL", message: `Chapter ${WORDS[c.number]} still carries ${count(review)}.`, chapter: c.number, fix: "Resolve every review placeholder: supply the data, case or source, or rewrite the passage." });
+      // In the generator's own text these are left on purpose (the figures come after a data pause, a source
+      // or case nobody could find): only a person can fill them, so the chapter gate tells the specialist.
+      if (review.length) {
+        const aiText = input.scope?.subject === "AI_TEXT";
+        issues.push({
+          level: aiText ? "WARN" : "FAIL",
+          message: `Chapter ${WORDS[c.number]} ${aiText ? "carries" : "still carries"} ${count(review)}.`,
+          chapter: c.number,
+          fix: aiText ? "Fill these in your version before you upload it." : "Resolve every review placeholder: supply the data, case or source, or rewrite the passage.",
+        });
+      }
       if (tasks.length) issues.push({ level: "WARN", message: `Chapter ${WORDS[c.number]} has specialist tasks: ${count(tasks)}.`, chapter: c.number, fix: "Insert the figures and page numbers before delivery." });
     }
     push("ST16", issues, "No review placeholder is left in the chapters.");

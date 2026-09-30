@@ -385,6 +385,22 @@ function firstAuthor(names: string): string | null {
   return first.replace(/[.,]+$/, "");
 }
 
+/**
+ * A sentence often opens with a word and a comma before the authors ("However,
+ * Smith, Jones and Brown (2020)", "In Nigeria, Adeyemi and Bello (2019)"): that
+ * lead word is not an author.
+ */
+const LEAD_NOT_AN_AUTHOR =
+  /^(?:However|Moreover|Furthermore|Additionally|Similarly|Likewise|Consequently|Therefore|Thus|Hence|Specifically|Notably|Conversely|Nevertheless|Nonetheless|Indeed|Recently|Earlier|Later|Accordingly|Again|Also|Finally|First|Firstly|Second|Secondly|Third|Thirdly|Overall|Here|There|Meanwhile|Elsewhere|Globally|Locally|Regionally|Nationally|Internationally|Interestingly|Importantly|Crucially|Surprisingly|Alternatively|Instead|Still|Yet|Then|Now|Today|Historically|Traditionally|Empirically|Theoretically|Conceptually|Practically|Critically|Collectively|Together|Taken|In|On|At|By|For|From|With|Within|Among|Across|Beyond|Unlike|Like|Following|According|Building|Drawing|Using|Based|Against|Despite|During|After|Before|Since|Although|While|Whereas|When|Where|As|The|A|An|This|These|That|Those|Such|Other|Several|Many|Some|Both|Each|Prior)$/;
+
+/** The first author of a narrative name list ("A, B, and C" gives A), after any lead word. */
+function listLead(names: string): string {
+  if (!names.includes(",")) return names;
+  const items = names.split(/\s*,\s*|\s+(?:and|&)\s+/u).map((x) => x.trim()).filter(Boolean);
+  while (items.length > 1 && LEAD_NOT_AN_AUTHOR.test(items[0].split(/\s+/)[0])) items.shift();
+  return items[0] ?? names;
+}
+
 const SOURCE_NOT_A_WORK = /^(?:field ?(?:survey|work|data)|researcher(?:['’]s)?(?:\s+\w+)?|author(?:['’]s)?(?:\s+\w+)?|laboratory(?:\s+\w+)?|lab(?:\s+\w+)?|spss(?:\s+\w+)?|eviews(?:\s+\w+)?|stata(?:\s+\w+)?|pilot (?:study|test)|survey(?:\s+data)?|market associations?|computed|computation|adapted|source|own computation)$/i;
 
 /**
@@ -407,12 +423,14 @@ export function citationsIn(text: string): Citation[] {
   }
   // Names with accents and hyphens (Demirgüç-Kunt, Konté, Al-Alwan): Unicode letters throughout.
   const NAME = "\\p{Lu}[\\p{L}'’\\-‐]+";
-  const narrative = new RegExp(
-    `(?<!\\p{L})((?:${NAME}\\s+){0,2}${NAME}(?:\\s+(?:et\\.?\\s+al\\.?|(?:and|&)\\s+${NAME}))?)\\s+\\((${YEAR.source})(?:[,;][^)]*)?\\)`,
-    "gu",
-  );
+  // A comma-separated author list, "Chidukwani, Zander, and Koutsakis (2022)" or "A, B and C (2022)",
+  // is tried first, so the citation is its FIRST author, not the name next to the year (30 Sept 2026).
+  const ITEM = `${NAME}(?:\\s+${NAME})?`;
+  const LIST = `(?:${ITEM},\\s+){1,6}${ITEM},?\\s+(?:and|&)\\s+${ITEM}`;
+  const SIMPLE = `(?:${NAME}\\s+){0,2}${NAME}(?:\\s+(?:et\\.?\\s+al\\.?|(?:and|&)\\s+${NAME}))?`;
+  const narrative = new RegExp(`(?<!\\p{L})(${LIST}|${SIMPLE})\\s+\\((${YEAR.source})(?:[,;][^)]*)?\\)`, "gu");
   for (const m of plain.matchAll(narrative)) {
-    const author = firstAuthor(m[1].replace(/^(?:The|A|An|In|As|According to)\s+/, ""));
+    const author = firstAuthor(listLead(m[1]).replace(/^(?:The|A|An|In|As|According to)\s+/, ""));
     if (!author) continue;
     // "Table 4.1 (2020)" style false positives have no letters left once stripped of known words.
     if (/^(?:Table|Figure|Equation|Chapter|Section|Appendix|Source)$/i.test(author)) continue;

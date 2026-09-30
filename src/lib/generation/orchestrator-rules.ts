@@ -16,6 +16,7 @@
 import type { DataFormStatus, DataPauseStatus, GenerationStatus, OrchestratorStatus, ProjectStatus } from "@prisma/client";
 import { pausePointsFor, pausesBeforeChapter } from "./pause-points";
 import { MAX_CONCURRENT_GENERATIONS, orderQueue, type QueueMember } from "./generation-queue";
+import { MAX_GATE_REWRITES, nextGateStep, type ChapterGateFact, type RewritePolicy } from "@/lib/quality/chapter-gate";
 
 // ─── The numbers ─────────────────────────────────────────────────────────────
 
@@ -138,6 +139,13 @@ export interface OrchestratorFacts {
    * has approved every chapter as the specialist reviewed it. Null for a report written before it.
    */
   review?: ReviewFact | null;
+  /**
+   * Chapter gate (30 Sept 2026): every written chapter nobody has uploaded a version of yet, with the check of
+   * its current text. Null or absent for the check script's older cases.
+   */
+  chapterGate?: ChapterGateFact[] | null;
+  /** Automatic rewrites allowed per chapter (the Setting `chapter_check_rewrites`, 2 at most). */
+  maxRewrites?: number;
 }
 
 export interface ReviewFact {
@@ -168,6 +176,12 @@ export type Action =
   | { kind: "FETCH_DATA" }
   /** The next chapter is ready to be written and needs one of the slots. */
   | { kind: "NEED_SLOT"; chapter: number }
+  /** Chapter gate: a written chapter's text has not been checked yet: ask for its check (no slot). */
+  | { kind: "CHECK_CHAPTER"; chapter: number }
+  /** Chapter gate: a chapter's check is running; nothing moves on until it is settled. */
+  | { kind: "CHECKING_CHAPTER"; chapter: number }
+  /** Chapter gate: the check failed; write the chapter again with its failures in the brief (needs a slot). */
+  | { kind: "REWRITE_CHAPTER"; chapter: number; checkpointId: string; lines: string[] }
   /** Every chapter is written; the COO has still to approve these (as reviewed by the specialist). No slot. */
   | { kind: "WAIT_FOR_APPROVAL"; pending: number[] }
   | { kind: "REQUEST_GATE" }
@@ -228,6 +242,15 @@ export function decide(f: OrchestratorFacts): Action {
     if (verdict === "KICK") return { kind: "KICK", chapter: c.chapter, checkpointId: c.id };
     return { kind: "WRITING", chapter: c.chapter, checkpointId: c.id };
   }
+
+  // Chapter gate (30 Sept 2026): each written chapter is checked on its own before its AI draft goes to
+  // the specialist, and nothing moves on until it is settled. A stopped or held run still has its chapters
+  // checked (their drafts must not wait for ever); only a live run rewrites.
+  const policy: RewritePolicy = f.run.status === "STOPPED" ? "never" : holdFor(f.project.status) ? "later" : "now";
+  const gate = f.chapterGate?.length ? nextGateStep(f.chapterGate, { now: f.now, maxRewrites: f.maxRewrites ?? MAX_GATE_REWRITES, policy }) : null;
+  if (gate?.step.kind === "check") return { kind: "CHECK_CHAPTER", chapter: gate.chapter };
+  if (gate?.step.kind === "wait" && policy === "now") return { kind: "CHECKING_CHAPTER", chapter: gate.chapter };
+
   if (f.run.status === "STOPPED") return { kind: "WAIT", why: "stopped" };
 
   // B. A chapter that stopped needs a person.
@@ -245,6 +268,13 @@ export function decide(f: OrchestratorFacts): Action {
   const done = new Map(mine.filter((c) => c.status === "COMPLETED").map((c) => [c.chapter, c]));
   const next = f.chapters.find((n) => !done.has(n));
   const hold = holdFor(f.project.status);
+
+  // The chapter's check failed and a rewrite is due: before Chapter One's statements are read, before a data
+  // request is drafted from the chapter, before the dataset or the next chapter, and before the report's own gate.
+  if (gate?.step.kind === "rewrite" && !hold) {
+    const cp = done.get(gate.chapter);
+    if (cp) return { kind: "REWRITE_CHAPTER", chapter: gate.chapter, checkpointId: cp.id, lines: gate.step.lines };
+  }
 
   // C. Chapters still to write.
   if (next !== undefined) {
@@ -345,7 +375,11 @@ export function statusAfter(action: Action, current: RunStatus): RunStatus | nul
     case "FETCH_DATA":
       return "FETCHING_DATA";
     case "NEED_SLOT":
+    case "REWRITE_CHAPTER":
       return holdsSlot(current) ? "GENERATING" : "QUEUED";
+    case "CHECK_CHAPTER":
+    case "CHECKING_CHAPTER":
+      return null;
     case "WAIT_FOR_APPROVAL":
       return "WAITING_FOR_APPROVAL";
     case "REQUEST_GATE":
@@ -560,6 +594,10 @@ export const ORCHESTRATOR_TEXT = {
     notStarted: "The research mode is approved. Press Start to write the report.",
     QUEUED: (chapter: number | null) => `${chapterName(chapter)} starts as soon as a slot is free.`,
     GENERATING: (chapter: number | null) => `${chapterName(chapter)} is being written.`,
+    /** Chapter gate: the run's reason says which chapter is being checked or rewritten. */
+    checking: (chapter: number | null) => `${chapterName(chapter)} is written and is being checked before it goes to the specialist.`,
+    rewriting: (chapter: number | null) => `${chapterName(chapter)} did not pass its check and is being written again with its failures in the brief.`,
+    rewriteQueued: (chapter: number | null) => `${chapterName(chapter)} did not pass its check. It is written again as soon as a slot is free.`,
     WAITING_FOR_DATA: (after: number | null) => `${chapterName(after)} is written. The report carries on once the data is verified.`,
     FETCHING_DATA: "Chapter Three is written. The dataset for Chapter Four is being fetched.",
     WAITING_FOR_APPROVAL: (pending: readonly number[]) =>
@@ -646,6 +684,12 @@ export const ORCHESTRATOR_TEXT = {
 
 /** A run waiting for approvals keeps the chapters it waits for in its `reason`: "APPROVALS:1,3". */
 export const approvalReason = (pending: readonly number[]) => `APPROVALS:${pending.join(",")}`;
+/** Chapter gate: "CHECKING:3" / "REWRITING:3" on a writing or queued run. */
+export const gateReason = (kind: "CHECKING" | "REWRITING", chapter: number) => `${kind}:${chapter}`;
+export function gateReasonChapter(reason: string | null, kind: "CHECKING" | "REWRITING"): number | null {
+  const m = reason ? new RegExp(`^${kind}:(\\d+)$`).exec(reason) : null;
+  return m ? Number(m[1]) : null;
+}
 export function pendingFromReason(reason: string | null): number[] {
   const m = /^APPROVALS:([\d,]*)$/.exec(reason ?? "");
   return m ? m[1].split(",").filter(Boolean).map(Number) : [];
@@ -656,9 +700,13 @@ export function runLine(run: { status: RunStatus; currentChapter: number | null;
   const t = ORCHESTRATOR_TEXT;
   switch (run.status) {
     case "QUEUED":
-      return t.line.QUEUED(run.currentChapter);
-    case "GENERATING":
-      return t.line.GENERATING(run.currentChapter);
+      return gateReasonChapter(run.reason, "REWRITING") !== null ? t.line.rewriteQueued(gateReasonChapter(run.reason, "REWRITING")) : t.line.QUEUED(run.currentChapter);
+    case "GENERATING": {
+      const checking = gateReasonChapter(run.reason, "CHECKING");
+      if (checking !== null) return t.line.checking(checking);
+      const rewriting = gateReasonChapter(run.reason, "REWRITING");
+      return rewriting !== null ? t.line.rewriting(rewriting) : t.line.GENERATING(run.currentChapter);
+    }
     case "WAITING_FOR_DATA":
       return t.line.WAITING_FOR_DATA(run.currentChapter);
     case "FETCHING_DATA":

@@ -109,7 +109,13 @@ export default async function WorkerAssignmentPage({
       closedReason = CHAPTER_REVIEW_TEXT.finalByHandRefused;
     } else if (d.review?.state === "WRITING") {
       open = false;
-      closedReason = CHAPTER_REVIEW_TEXT.specialistLine.WRITING;
+      // Chapter gate: written, and being checked (or written again after its check) before the draft comes.
+      closedReason =
+        d.aiText?.stage === "checking" && d.chapter
+          ? CHAPTER_REVIEW_TEXT.check.beingChecked(d.chapter)
+          : d.aiText?.stage === "rewriting" && d.chapter
+            ? CHAPTER_REVIEW_TEXT.check.beingRewritten(d.chapter)
+            : CHAPTER_REVIEW_TEXT.specialistLine.WRITING;
     }
     return {
       id: d.id,
@@ -121,6 +127,8 @@ export default async function WorkerAssignmentPage({
       closedReason,
       goesToQa: !chapterReview && d.kind === "FINAL" && (project.status === "IN_PROGRESS" || project.status === "REVISION_NEEDED"),
       review: d.review,
+      chapter: d.chapter,
+      aiText: d.aiText,
     };
   });
   // The complete report opens for the specialist once every chapter has an approved version.

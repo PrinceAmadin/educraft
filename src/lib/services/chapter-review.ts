@@ -4,16 +4,16 @@
  * which applies the chapter-review rules there.
  *
  *   ensureChapterDraft   a finished chapter becomes its AI draft: the chapter as its own Word
- *                        file (stamped), checked by the gate's free, no-AI checks, stored as a
- *                        SYSTEM version for the specialist. One draft per text; never once a person
- *                        has uploaded their version.
+ *                        file (stamped), once the chapter gate has checked it (services/chapter-gate.ts:
+ *                        passed, or failed with no rewrite left), stored as a SYSTEM version for the
+ *                        specialist with the check's result in its note. One draft per text; never once
+ *                        a person has uploaded their version.
  *   returnChapter        the COO's correction notes: on the upload waiting for approval, on an
  *                        approved chapter (it stays in use until the correction is approved), or
  *                        on the AI draft before the specialist uploads.
  *   projectReviewState   every chapter's review state, for the screens, the gate and the orchestrator.
  */
 
-import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
@@ -32,65 +32,31 @@ import {
   type ChapterReviewState,
   type ReportReview,
 } from "@/lib/chapter-review";
-import { lookupDepartment } from "@/lib/generation/department-map";
 import { putPrivateFile, deleteStoredFile } from "@/lib/files/storage";
-import { finishReport, prepareReport } from "@/lib/quality/evaluate";
-import { knownCommonCitation } from "@/lib/quality/known-citations";
-import type { QualityItem } from "@/lib/quality/types";
-import { getApprovedBrief } from "@/lib/research/source-stage-actions";
+import { findingLines } from "@/lib/quality/chapter-gate";
+import { draftSourceHash } from "@/lib/quality/chapter-hash";
 import { readBackVersion } from "@/lib/services/chapter-readback";
+import { aiTextStep, requestChapterCheck, type ChapterCheckRow } from "@/lib/services/chapter-gate";
 import { chapterReviewItems } from "@/lib/services/chapter-texts";
 import { DeliverableError, ensureDeliverables, generatedReportPath, reviewVersion } from "@/lib/services/deliverables";
-import { notifyUsers } from "@/lib/services/notifications";
-import { getApprovedModeSettings } from "@/lib/services/research-mode";
+import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const TAG = "[chapter review]";
 
-export const sourceHashOf = (text: string) => crypto.createHash("sha256").update(text).digest("hex").slice(0, 32);
+/** The AI draft's identity: its build and the text (services/chapter-gate.ts stamps the checked file the same way). */
+export const sourceHashOf = draftSourceHash;
 
-/** The free checks' findings for one chapter, the specialist's first to-do list (never AI-judged). */
-const CHAPTER_CHECKS = new Set(["voice", "reference", "structural"]);
-const REPORT_WIDE = new Set(["ST1", "ST2", "ST9", "ST10", "ST12"]);
-
-export function draftFindingLines(failures: QualityItem[], warnings: QualityItem[], chapter: number): string[] {
-  const mine = (f: QualityItem) => CHAPTER_CHECKS.has(f.layer) && !REPORT_WIDE.has(f.id) && (f.chapter === chapter || f.locations.some((l) => l.chapter === chapter));
-  const line = (f: QualityItem) => {
-    const quote = f.locations.find((l) => l.chapter === chapter && l.quote)?.quote;
-    return `${f.status === "WARN" ? "Check" : "Fix"}: ${f.message}${quote ? ` ("${quote.slice(0, 120)}")` : ""}${f.fix ? ` ${f.fix}` : ""}`;
-  };
-  return [...failures.filter(mine).map(line), ...warnings.filter(mine).map(line)].slice(0, 25);
+/** The draft's note: the chapter check's result, in the specialist's words. */
+function draftNote(check: ChapterCheckRow | null, outcome: "passed" | "failed" | "unchecked", rewrites: number): string {
+  const t = CHAPTER_REVIEW_TEXT.check;
+  const warnings = check?.warnings.length ? [t.warningsIntro, ...findingLines(check.warnings, "check", 12)] : [];
+  if (outcome === "passed" && check) return [t.passedNote(check.passedCount ?? 0, check.applicable ?? 0), ...warnings].join("\n");
+  if (outcome === "failed" && check) return [t.failedNote(rewrites), ...findingLines(check.failures, "fix"), ...warnings].join("\n");
+  return t.uncheckedNote;
 }
 
-/** Runs the gate's free layers on one chapter alone. Returns the lines for the specialist. */
-async function freeChecks(projectDbId: string, input: Awaited<ReturnType<typeof loadAssemblyInput>>, chapter: number): Promise<string[]> {
-  const [settings, brief, refRows, checkpoints, project] = await Promise.all([
-    getApprovedModeSettings(projectDbId).catch(() => null),
-    getApprovedBrief(db, projectDbId).catch(() => null),
-    db.reference.findMany({
-      where: { projectId: projectDbId, status: "KEPT" },
-      select: { id: true, title: true, proposedTitle: true, authors: true, year: true, journal: true, abstract: true, classification: true },
-    }),
-    db.generationCheckpoint.findMany({ where: { projectId: projectDbId, chapterNumber: chapter }, select: { chapterNumber: true, plan: true } }),
-    db.project.findUnique({ where: { id: projectDbId }, select: { departmentOutline: true } }),
-  ]);
-  const references = refRows.map((r) => ({ ...r, classification: r.classification ?? null }));
-  const prepared = await prepareReport({ input: { ...input, includePrelims: false }, references, knownCommon: knownCommonCitation, primarySources: brief?.sources });
-  const plan = checkpoints[0]?.plan as { targetWords?: number; sections?: { number: string; heading: string }[] } | null;
-  const { score } = finishReport(
-    prepared,
-    { voice: [], voiceNotes: [], support: { results: [], checked: 0, total: 0 }, traceability: null, errors: [] },
-    {
-      objectives: brief?.objectives ?? [],
-      pureScience: Boolean(lookupDepartment(settings?.department ?? input.department)?.pureScience),
-      supervisorToc: Boolean(project?.departmentOutline?.trim()),
-      plans: new Map([[chapter, plan && typeof plan.targetWords === "number" ? { targetWords: plan.targetWords, sections: plan.sections ?? [] } : null]]),
-    },
-  );
-  return draftFindingLines(score.failures, score.warnings, chapter);
-}
-
-export type DraftOutcome = "created" | "exists" | "reviewed" | "not-written" | "no-item";
+export type DraftOutcome = "created" | "exists" | "reviewed" | "not-written" | "no-item" | "checking";
 
 /**
  * Makes the chapter's AI draft for the specialist, once per generated text. Safe to call
@@ -113,6 +79,15 @@ export async function ensureChapterDraft(projectDbId: string, chapter: number): 
   if (item.versions.some((v) => !isAiDraft(v))) return "reviewed";
   if (item.versions.some((v) => v.sourceHash === sourceHash)) return "exists";
 
+  // Chapter gate: the draft waits for the chapter's quality check (and any rewrite it leads to).
+  const gate = await aiTextStep(projectDbId, chapter);
+  if (!gate) return "not-written";
+  if (gate.step.kind !== "handover") {
+    if (gate.step.kind === "check") await requestChapterCheck(projectDbId, chapter, "AI_TEXT");
+    return "checking";
+  }
+  const outcome = gate.step.outcome;
+
   let input;
   try {
     input = await loadAssemblyInput(projectDbId, { source: "ai", only: [chapter] });
@@ -121,13 +96,7 @@ export async function ensureChapterDraft(projectDbId: string, chapter: number): 
     throw error;
   }
   const { buffer } = await packChapter(input, chapter, { sourceHash });
-  const findings = await freeChecks(projectDbId, input, chapter).catch((error) => {
-    console.warn(`${TAG} ${input.projectCode} ch${chapter}: the free checks did not run`, error instanceof Error ? error.message : error);
-    return [] as string[];
-  });
-  const note = findings.length
-    ? `Automated check (no AI): ${findings.length} point${findings.length === 1 ? "" : "s"} to look at.\n${findings.join("\n")}`
-    : "Automated check (no AI): nothing found. Read it through all the same.";
+  const note = draftNote(gate.check, outcome, gate.rewritesUsed);
 
   const pathname = generatedReportPath(projectDbId, item.id);
   const { url } = await putPrivateFile(pathname, buffer, DOCX);
@@ -181,9 +150,22 @@ export async function ensureChapterDraft(projectDbId: string, chapter: number): 
   if (project?.worker?.userId) {
     await notifyUsers([project.worker.userId], {
       title: `Chapter ${chapter} AI draft ready`,
-      message: `${project.projectId}: review Chapter ${chapter} in Word, correct it and upload your version for the COO's approval.`,
-      type: "info",
+      message:
+        outcome === "passed"
+          ? `${project.projectId}: Chapter ${chapter} passed its quality check. Review it in Word, correct it and upload your version for the COO's approval.`
+          : `${project.projectId}: Chapter ${chapter} did not pass its quality check. The points to fix are on the draft; correct them in Word and upload your version for the COO's approval.`,
+      type: outcome === "passed" ? "info" : "warning",
       link: `/worker/projects/${project.projectId}?tab=documents`,
+    }).catch(() => undefined);
+  }
+  // A draft handed over without passing is told to the founder and the COO once (this draft is made once).
+  if (outcome !== "passed" && project) {
+    const t = CHAPTER_REVIEW_TEXT.check;
+    await notifyOperations({
+      title: t.draftFailedTitle(project.projectId, chapter),
+      message: t.draftFailedMessage(project.projectId, chapter, outcome === "failed" ? t.whyFailed(gate.rewritesUsed) : t.whyUnchecked),
+      type: "warning",
+      link: `/admin/projects/${project.projectId}?tab=documents`,
     }).catch(() => undefined);
   }
   return "created";
@@ -194,17 +176,26 @@ export async function ensureChapterDraft(projectDbId: string, chapter: number): 
  * Cheap when there is nothing to do: it compares timestamps before reading any chapter text.
  */
 export async function ensureChapterDrafts(projectDbId: string): Promise<void> {
-  const runs = await db.generationCheckpoint.findMany({ where: { projectId: projectDbId, status: "COMPLETED" }, select: { chapterNumber: true, completedAt: true } });
+  const runs = await db.generationCheckpoint.findMany({ where: { projectId: projectDbId, status: "COMPLETED" }, select: { chapterNumber: true, completedAt: true, outputHash: true } });
   if (!runs.length) return;
-  const items = await db.projectDeliverable.findMany({
-    where: { projectId: projectDbId, kind: "CHAPTER", archivedAt: null },
-    select: { chapter: true, versions: { where: { file: { deletedAt: null } }, select: { submittedByRole: true, createdAt: true } } },
-  });
+  const [items, checks] = await Promise.all([
+    db.projectDeliverable.findMany({
+      where: { projectId: projectDbId, kind: "CHAPTER", archivedAt: null },
+      select: { chapter: true, versions: { where: { file: { deletedAt: null } }, select: { submittedByRole: true, createdAt: true } } },
+    }),
+    db.chapterCheck.findMany({ where: { projectId: projectDbId, subject: "AI_TEXT" }, select: { chapterNumber: true, textHash: true, settledAt: true, status: true, lockedUntil: true } }),
+  ]);
   for (const r of runs) {
     const item = items.find((i) => i.chapter === r.chapterNumber);
     if (item?.versions.some((v) => !isAiDraft(v))) continue;
+    // Settled: the current text's check is finished and the draft was made after it. Anything else asks again
+    // (a chapter written before the chapter gate has no check yet, so its draft is made anew once it is checked).
+    const check = r.outputHash ? checks.find((c) => c.chapterNumber === r.chapterNumber && c.textHash === r.outputHash) : null;
     const latestDraft = Math.max(0, ...(item?.versions ?? []).map((v) => v.createdAt.getTime()));
-    if (item && latestDraft >= (r.completedAt?.getTime() ?? 0)) continue;
+    const settledAt = check?.status === "RUNNING" ? null : check?.settledAt?.getTime() ?? null;
+    if (item && settledAt !== null && latestDraft >= Math.max(settledAt, r.completedAt?.getTime() ?? 0)) continue;
+    // A check that is running hands the draft over itself when it ends.
+    if (check?.status === "RUNNING" && check.lockedUntil && check.lockedUntil > new Date()) continue;
     await ensureChapterDraft(projectDbId, r.chapterNumber).catch((error) => console.warn(`${TAG} draft for chapter ${r.chapterNumber} not made`, error instanceof Error ? error.message : error));
   }
 }

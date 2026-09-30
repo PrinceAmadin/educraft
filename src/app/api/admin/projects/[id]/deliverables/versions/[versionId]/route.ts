@@ -13,6 +13,8 @@ export const dynamic = "force-dynamic";
  * (chapter review): 409 APPROVAL_REFUSED with `refusals` for an AI draft, a file that is not
  * .docx, a read-back with problems or blanks, a file read again since `readbackHash`, or a
  * report in QA; a complete document built before a newer approval is 409 BUILT_FROM_STALE.
+ * Chapter gate: approval also needs the upload's chapter check to have passed; the founder alone
+ * may approve a failed check with `overrideReason` (403 OVERRIDE_FOUNDER_ONLY for anyone else).
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string; versionId: string } }) {
   const guard = await requireAdmin();
@@ -29,6 +31,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
       note: parsed.data.note,
       adminUserId: guard.session.userId,
       readbackHash: parsed.data.readbackHash ?? null,
+      overrideReason: parsed.data.overrideReason ?? null,
+      isSuperAdmin: guard.session.role === "SUPER_ADMIN",
     });
     return NextResponse.json(result);
   } catch (error) {

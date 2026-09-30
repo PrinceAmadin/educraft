@@ -22,6 +22,7 @@ import { join } from "node:path";
 import JSZip from "jszip";
 import { DOMParser } from "@xmldom/xmldom";
 import { buildReportDocument, packChapter, packReport, type AssemblyInput } from "../src/lib/assembly/assemble";
+import { defaultParagraphStyle } from "../src/lib/assembly/finalize-docx";
 import { linearText, parseEquation, toOmml } from "../src/lib/assembly/equation-omml";
 import { ommlToLinear } from "../src/lib/assembly/omml-to-linear";
 import { IMAGE_LINE, parseChapter } from "../src/lib/assembly/parse-chapter";
@@ -118,6 +119,9 @@ async function roundTrips() {
       const { buffer: b1 } = await packChapter(input, ch.number, { sourceHash: "fixture" });
       const r1 = await read(b1, input, ch.number);
       eq(`${label}: nothing blocks the builder's own file`, r1.blocking, []);
+      // The chapter file WPS opens: a real default paragraph style, double spaced and justified (30 Sept 2026).
+      const normal = defaultParagraphStyle(await (await JSZip.loadAsync(b1)).file("word/styles.xml")!.async("string")) ?? "";
+      check(`${label}: the chapter file has a default paragraph style, 2.0 and justified`, /w:line="480"/.test(normal) && /w:lineRule="auto"/.test(normal) && /<w:jc w:val="both"\/>/.test(normal), normal.slice(0, 80));
       const input2 = withChapter(input, ch.number, r1.markup);
       const { buffer: b2 } = await packChapter(input2, ch.number, { sourceHash: "fixture" });
       const r2 = await read(b2, input2, ch.number);

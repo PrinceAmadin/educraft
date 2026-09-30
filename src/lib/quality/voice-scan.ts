@@ -140,6 +140,11 @@ function finding(p: ProseParagraph, quote: string, rule: VoiceRule, severity: "M
   return { chapter: p.chapter, paragraph: p.index, section: p.section, quote: shortQuote(quote, 200), rule, severity, fix: VOICE_FIX[rule], source: "scan" };
 }
 
+/** A numbered, lettered or bulleted line: "1. To assess", "(ii) The", "a) ", "• ", "H01:". */
+const LIST_ITEM = /^\s*(?:\(?(?:\d{1,2}|[ivxlc]{1,6}|[a-h])[.)]|[•▪◦\-–*]|H[oO]?\d{1,2}[a-z]?\s*:|(?:RQ|Q)\d{1,2}\s*:|Objective\s+\d{1,2}\s*:)\s+/i;
+/** "Cybersecurity: the practice of …" in a Definition of Terms section. */
+const TERM_DEFINITION = /^\s*\*{0,2}\p{Lu}[\p{L}\p{N}'’()\-]*(?:\s+[\p{L}\p{N}'’()\-]+){0,5}\*{0,2}\s*:\s+\S/u;
+
 export function scanVoice(paragraphs: ProseParagraph[]): VoiceFinding[] {
   const out: VoiceFinding[] = [];
   const byChapter = new Map<number, ProseParagraph[]>();
@@ -177,8 +182,10 @@ export function scanVoice(paragraphs: ProseParagraph[]): VoiceFinding[] {
       // More than one section cross-reference in a paragraph (a chapter's opening and outline paragraphs may point ahead).
       const refs = p.text.match(CROSS_REF) ?? [];
       if (refs.length > 1 && i > 0 && !OUTLINE_SECTION.test(p.section ?? "")) out.push(finding(p, `${refs.join("; ")} (${refs.length} references in one paragraph)`, "cross_reference", "MAJOR"));
-      // Thin: one or two sentences of prose (list lead-ins ending in a colon are not paragraphs).
-      if (sentences.length <= 2 && !/:\s*$/.test(p.text) && p.text.split(/\s+/).length >= 6 && !/^\[[^\]]*\]$/.test(p.text)) thin.push(p);
+      // Thin: one or two sentences of prose. Not paragraphs: list lead-ins ending in a colon, a numbered or
+      // bulleted line ("1. To assess …", "(ii) …", "• …") and a "Term: definition" line (30 Sept 2026).
+      const listLike = LIST_ITEM.test(p.text) || TERM_DEFINITION.test(p.text);
+      if (sentences.length <= 2 && !/:\s*$/.test(p.text) && !listLike && p.text.split(/\s+/).length >= 6 && !/^\[[^\]]*\]$/.test(p.text)) thin.push(p);
     });
     const distinct = new Set(ordinals.map((o) => o.s.split(/\s/)[0]));
     if (distinct.size >= 2) out.push(finding(ordinals[1].p, ordinals.map((o) => o.s.split(/[,\s]/)[0]).join("… "), "transition", "MAJOR"));

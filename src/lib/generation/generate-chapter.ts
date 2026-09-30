@@ -39,6 +39,7 @@ import { pausesBeforeChapter } from "./dynamic-data-form";
 import { attachmentRefs, loadDataAttachments, pauseDataForChapter, type AttachmentRef } from "@/lib/services/data-pause";
 import { secondaryDataForChapter } from "@/lib/services/secondary-data";
 import { CHAPTER_REVIEW_TEXT } from "@/lib/chapter-review";
+import { chapterTextHash } from "@/lib/quality/chapter-hash";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -173,6 +174,8 @@ export interface StartChapterInput {
   replace?: boolean;
   /** D8: the quality gate's failures in the chapter's previous version, frozen into the new brief. */
   qualityFailures?: string[];
+  /** Chapter gate: an automatic rewrite after a failed chapter check (counts towards the chapter's limit). */
+  gateRewrite?: boolean;
 }
 
 /**
@@ -281,7 +284,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
 
       const existing = await tx.generationCheckpoint.findUnique({
         where: { projectId_chapterNumber: { projectId: project.id, chapterNumber: chapter } },
-        select: { id: true, status: true, lockedUntil: true },
+        select: { id: true, status: true, lockedUntil: true, gateRewriteNo: true },
       });
       if (existing) {
         const running = ACTIVE_STATUSES.includes(existing.status) && existing.lockedUntil && existing.lockedUntil > new Date();
@@ -313,6 +316,8 @@ export async function startChapterGeneration(input: StartChapterInput) {
           options: (input.options ?? {}) as Prisma.InputJsonValue,
           requestedById: input.requestedById ?? null,
           lastProgressAt: new Date(),
+          // Chapter gate: an automatic rewrite counts on from the text it replaces; anything a person asks for starts again at 0.
+          gateRewriteNo: input.gateRewrite ? (existing?.gateRewriteNo ?? 0) + 1 : 0,
           ...(attachments.length ? { attachments: attachments as unknown as Prisma.InputJsonValue } : {}),
         },
         select: SNAPSHOT_SELECT,
@@ -570,7 +575,7 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
       lastStepAt: now,
       lastProgressAt: now,
       ...(last
-        ? { status: "COMPLETED" as const, fullOutput: partialOutput, progressPercent: 100, completedAt: now, errorMessage: null, lastError: null }
+        ? { status: "COMPLETED" as const, fullOutput: partialOutput, outputHash: chapterTextHash(partialOutput), progressPercent: 100, completedAt: now, errorMessage: null, lastError: null }
         : { progressPercent: computeProgress({ status: "WRITING", previous: progress, targetWords: plan.targetWords, wordsWritten: wordsBefore + words }) }),
     },
   }));

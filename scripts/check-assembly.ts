@@ -27,6 +27,7 @@ import {
 import { linearText, parseEquation } from "../src/lib/assembly/equation-omml";
 import { detectEquationLine, parseChapter, parsePipeTable } from "../src/lib/assembly/parse-chapter";
 import { packReport, reportFileName, type AssemblyInput } from "../src/lib/assembly/assemble";
+import { defaultParagraphStyle, withDefaultParagraphStyle } from "../src/lib/assembly/finalize-docx";
 import { analyseChapterNotes, collectEndnotes, entryFor, resolveNotes } from "../src/lib/assembly/endnotes";
 import { referencesForNote, superscriptNotes } from "../src/lib/assembly/text-rules";
 import { E_EXTRA, E_OBJECTIVES, E_REFERENCES, E_THEMATIC, E_TITLE, endnotesChapters } from "./fixtures/endnotes-fixture";
@@ -122,6 +123,31 @@ eq(
   "accented and hyphenated names; & in brackets; sources are not works",
   citationsIn("Demirgüç-Kunt et al. (2019) and Konté and Tetteh (2022) agree (Najib & Fahma, 2020). Figure 4.1 (Field Survey, 2026); Table 2.1 (Researcher's compilation, 2026)").map((c) => `${c.author}|${c.year}`).sort(),
   ["Demirgüç-Kunt|2019", "Konté|2022", "Najib|2020"],
+);
+// EC-00002 Chapter 3 (30 Sept 2026): a comma-separated author list is cited by its FIRST author.
+eq(
+  "narrative author lists give the first author",
+  citationsIn(
+    "Chidukwani, Zander, and Koutsakis (2022) found gaps. Ključnikov, Mura, and Sklenár (2019) similarly identified controls. Omrani, Rejeb, Maâlaoui, Dabić, and Kraus (2022) applied it. Adeyemi, Bello and Musa (2019) agree.",
+  ).map((c) => `${c.author}|${c.year}`),
+  ["Chidukwani|2022", "Ključnikov|2019", "Omrani|2022", "Adeyemi|2019"],
+);
+eq(
+  "a sentence's lead word before the authors is not an author",
+  citationsIn("However, Smith, Jones and Brown (2020) disagree. In Nigeria, Adeyemi and Bello (2019) found the same. Similarly, Okafor et al. (2021) and Eze and Obi (2018) agree.").map((c) => `${c.author}|${c.year}`),
+  ["Smith|2020", "Adeyemi|2019", "Okafor|2021", "Eze|2018"],
+);
+eq(
+  "…and those citations find their references",
+  citedReferences(
+    [
+      { authors: "Chidukwani, A.; Zander, S.; Koutsakis, P.", year: 2022 },
+      { authors: "Ključnikov, A.; Mura, L.; Sklenár, D.", year: 2019 },
+      { authors: "Omrani, N.; Rejeb, N.; Maalaoui, A.; Dabić, M.; Kraus, S.", year: 2022 },
+    ],
+    ["Chidukwani, Zander, and Koutsakis (2022); Ključnikov, Mura, and Sklenár (2019); Omrani, Rejeb, Maâlaoui, Dabić, and Kraus (2022)"],
+  ).unmatched,
+  [],
 );
 const accented = citedReferences([{ authors: "Demirgüç‐Kunt, A.; Klapper, L. F.", year: 2019 }, { authors: "Najib, M.; Fahma, F.", year: 2020 }], ["Demirgüç-Kunt et al. (2019) and (Najib & Fahma, 2020)"]);
 eq("…and they match their references", [accented.cited.length, accented.unmatched], [2, []]);
@@ -243,6 +269,9 @@ async function checkReport(engineering: boolean, outDir: string | null) {
   const docDefaults = /<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(styles)?.[0] ?? "";
   const double = (xml: string) => /<w:spacing [^>]*w:line="480"/.test(xml) && /w:lineRule="auto"/.test(xml) && /w:before="0"/.test(xml) && /w:after="0"/.test(xml);
   check(`${label} S1/S5 document default 2.0 and 0 before/after`, double(docDefaults));
+  // WPS ignores the document defaults when there is no default paragraph style (30 Sept 2026).
+  const normal = defaultParagraphStyle(styles) ?? "";
+  check(`${label} S1 a default paragraph style (Normal) exists, 2.0 and justified, TNR 12`, double(normal) && /<w:jc w:val="both"\/>/.test(normal) && /w:ascii="Times New Roman"/.test(normal) && /<w:sz w:val="24"\/>/.test(normal) && !/<w:(?:b|i|outlineLvl|numPr)[ />]/.test(normal), normal.slice(0, 120));
   check(`${label} S2-S4 headings 2.0, 0 before/after`, ["Heading1", "Heading2", "Heading3", "TOC1", "TOC2", "TOC3", "TableCaption", "FigureCaption", "Reference"].every((id) => double(styleBlock(styles, id))));
   const outsideTables = doc.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, "");
   const spacings = [...outsideTables.matchAll(/<w:spacing [^>]*\/>/g)].map((m) => m[0]);
@@ -468,6 +497,19 @@ function endnotesInput(over: Partial<AssemblyInput>): AssemblyInput {
   };
 }
 
+/** finalizeDocx's styles.xml rule: a default paragraph style is added once, never twice, and a Word file's own is kept. */
+function checkDefaultStyle() {
+  const bare = '<w:styles xmlns:w="x"><w:docDefaults><w:rPrDefault/></w:docDefaults><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>';
+  const added = withDefaultParagraphStyle(bare);
+  check("default style: added after the document defaults when missing", /<\/w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal">/.test(added));
+  check("default style: adding it again changes nothing", withDefaultParagraphStyle(added) === added);
+  const named = '<w:styles><w:docDefaults/><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>';
+  check("default style: an existing Normal is made the default, not duplicated", (withDefaultParagraphStyle(named).match(/w:styleId="Normal"/g) ?? []).length === 1 && defaultParagraphStyle(withDefaultParagraphStyle(named)) !== null);
+  const word = '<w:styles><w:docDefaults/><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:style></w:styles>';
+  check("default style: a Word file's own default style is left alone", withDefaultParagraphStyle(word) === word);
+  check("default style: a character style marked default is not a paragraph default", defaultParagraphStyle('<w:styles><w:style w:type="character" w:default="1" w:styleId="DefaultParagraphFont"/></w:styles>') === null);
+}
+
 async function documentXml(input: AssemblyInput): Promise<string> {
   const { buffer } = await packReport(input);
   return (await JSZip.loadAsync(buffer)).file("word/document.xml")!.async("string");
@@ -480,6 +522,7 @@ async function documentXml(input: AssemblyInput): Promise<string> {
   await checkReport(false, outDir);
   await checkReport(true, outDir);
   await checkEndnotes(outDir);
+  checkDefaultStyle();
   if (failures.length) {
     console.error(`check:assembly — ${failures.length} failed, ${passed} passed:`);
     for (const f of failures) console.error(`  ✗ ${f}`);

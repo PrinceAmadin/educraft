@@ -18,6 +18,8 @@ export const reviewVersionSchema = z.object({
   note: z.string().trim().max(2000).optional().or(z.literal("")),
   /** The read-back the COO looked at: approval is refused when the file was read again since. */
   readbackHash: z.string().trim().max(64).optional(),
+  /** Chapter gate: the founder approves a chapter whose check failed, with a written reason. */
+  overrideReason: z.string().trim().min(10, "Say why, in a sentence.").max(1000).optional(),
 });
 
 /** The COO's correction notes on an approved chapter (or on the AI draft before the specialist uploads). */

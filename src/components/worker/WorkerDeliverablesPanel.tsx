@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { PrivateFilePicker } from "@/components/files/PrivateFilePicker";
 import { ReadbackSummary } from "@/components/projects/documents/ReadbackSummary";
+import { ChapterCheckResult } from "@/components/projects/documents/ChapterCheckResult";
+import type { AiTextView, CheckView } from "@/lib/quality/chapter-gate";
 import type { UploadedRef } from "@/lib/files/upload-client";
 import { humanSize } from "@/lib/files/upload-client";
 import { CHAPTER_REVIEW_TEXT, type ChapterReviewState } from "@/lib/chapter-review";
@@ -28,6 +30,10 @@ export interface WorkerVersion {
   fileName: string;
   fileSize: number | null;
   readback: StoredReadback | null;
+  /** Chapter gate: the check of this upload's text. */
+  check: CheckView | null;
+  /** Chapter gate: the checked Word file (what is downloaded once approved). */
+  formattedFile: { id: string; fileName: string } | null;
 }
 
 export interface WorkerDeliverable {
@@ -42,6 +48,9 @@ export interface WorkerDeliverable {
   goesToQa: boolean;
   /** Chapter review: where the chapter stands, and the COO's notes on an approved chapter. */
   review: { state: ChapterReviewState; changeNote: string | null; changeNoteAt: string | null } | null;
+  chapter: number | null;
+  /** Chapter gate: the chapter's AI text is being checked or written again before its draft comes. */
+  aiText: AiTextView | null;
 }
 
 const REVIEW_TONE: Record<ChapterReviewState, string> = {
@@ -116,7 +125,13 @@ function DeliverableRow({ projectCode, deliverable: d }: { projectCode: string; 
   const latest = d.versions[0];
   const returned = latest?.status === "RETURNED" ? latest : null;
   const review = d.review;
-  const status = review ? { label: CHAPTER_REVIEW_TEXT.state[review.state], tone: REVIEW_TONE[review.state] } : STATUS[d.status];
+  const t = CHAPTER_REVIEW_TEXT.check;
+  const gateStage = review && d.aiText && d.aiText.stage !== "settled" && (review.state === "WRITING" || review.state === "DRAFT_READY" || review.state === "RETURNED") ? d.aiText.stage : null;
+  const status = gateStage
+    ? { label: gateStage === "checking" ? t.chip.RUNNING : "Being rewritten", tone: "bg-zone text-muted-foreground" }
+    : review
+      ? { label: CHAPTER_REVIEW_TEXT.state[review.state], tone: REVIEW_TONE[review.state] }
+      : STATUS[d.status];
   const code = encodeURIComponent(projectCode);
   // Chapter review: the AI draft to work from, the COO's notes, and the specialist's own latest upload.
   const draft = review ? (d.versions.find((v) => v.aiDraft && v.status !== "SUPERSEDED") ?? d.versions.find((v) => v.aiDraft) ?? null) : null;
@@ -154,7 +169,11 @@ function DeliverableRow({ projectCode, deliverable: d }: { projectCode: string; 
         <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", status.tone)}>{status.label}</span>
         {d.goesToQa ? <span className="text-xs text-muted-foreground">Goes to the quality check</span> : null}
       </div>
-      {review ? <p className="text-[13px] text-muted-foreground">{CHAPTER_REVIEW_TEXT.specialistLine[review.state]}</p> : null}
+      {review ? (
+        <p className="text-[13px] text-muted-foreground">
+          {gateStage === "checking" ? t.beingChecked(d.chapter ?? 0) : gateStage === "rewriting" ? t.beingRewritten(d.chapter ?? 0) : CHAPTER_REVIEW_TEXT.specialistLine[review.state]}
+        </p>
+      ) : null}
 
       {cooNote ? (
         <div className="rounded-xl bg-danger/10 p-3.5">
@@ -176,23 +195,40 @@ function DeliverableRow({ projectCode, deliverable: d }: { projectCode: string; 
             <LuFileCheck className="size-4 shrink-0 text-primary" aria-hidden />
             Download the AI draft of {d.title} (.docx)
           </a>
-          {draft.workerNote ? <p className="whitespace-pre-wrap text-[13px] text-muted-foreground">{draft.workerNote}</p> : null}
+          {gateStage ? (
+            <ChapterCheckResult check={null} checking label="This draft was made before the chapter check; a checked draft replaces it" audience="specialist" />
+          ) : d.aiText?.check ? (
+            <ChapterCheckResult check={d.aiText.check} checking={false} label="Quality check of the AI draft" audience="specialist" />
+          ) : draft.workerNote ? (
+            <p className="whitespace-pre-wrap text-[13px] text-muted-foreground">{draft.workerNote}</p>
+          ) : null}
         </div>
       ) : null}
 
       {mine && (mine.status === "SUBMITTED" || mine.status === "RETURNED") ? <ReadbackSummary readback={mine.readback} audience="specialist" /> : null}
+      {mine && mine.status === "SUBMITTED" && mine.readback && !mine.readback.blocking.length ? (
+        <div className="space-y-1.5">
+          {mine.check?.status === "FAILED" ? <p className="text-sm font-medium text-danger">{t.uploadFailed}</p> : null}
+          {mine.check?.status === "PASSED" ? <p className="text-sm text-success">{t.uploadPassed(mine.check.passedCount ?? 0, mine.check.applicable ?? 0)}</p> : null}
+          {!mine.check || mine.check.status === "RUNNING" ? <p className="text-sm text-muted-foreground">{t.uploadChecking}</p> : null}
+          <ChapterCheckResult check={mine.check} checking={!mine.check || mine.check.status === "RUNNING"} label="Quality check of your version" audience="specialist" />
+        </div>
+      ) : null}
 
       {d.versions.length > 0 ? (
         <ul className="space-y-1">
           {d.versions.slice(0, 4).map((v) => (
             <li key={v.id}>
               <a
-                href={`/api/worker/projects/${code}/files/${v.fileId}`}
+                href={`/api/worker/projects/${code}/files/${v.status === "RELEASED" && v.formattedFile ? v.formattedFile.id : v.fileId}`}
                 className="flex items-center gap-3 rounded-lg px-2 py-2 text-sm transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
               >
                 <LuDownload className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-foreground">{v.fileName}</span>
+                  <span className="block truncate text-foreground">
+                    {v.status === "RELEASED" && v.formattedFile ? `${t.formattedCopy} · ` : ""}
+                    {v.fileName}
+                  </span>
                   <span className="block text-xs text-muted-foreground">
                     {v.aiDraft ? "AI draft" : `Upload ${v.version}`}
                     {v.submittedByRole === "ADMIN" ? " (by EduCraft)" : ""} · {formatDate(v.createdAt)}

@@ -13,6 +13,7 @@
 import JSZip from "jszip";
 import type { AssemblyInput, AssemblyProfile, AssemblyReport } from "@/lib/assembly/assemble";
 import { parseChapter } from "@/lib/assembly/parse-chapter";
+import { defaultParagraphStyle } from "@/lib/assembly/finalize-docx";
 import { citationsIn, citedReferences, nameKey, properNounsFrom, referencesForCitation, sentenceCase, titleCase } from "@/lib/assembly/text-rules";
 import { result, shortQuote, type CheckResult, type QualityIssue, type Severity } from "./types";
 
@@ -146,6 +147,8 @@ export interface FormattingContext {
   profile: AssemblyProfile;
   /** A standard source cited by habit (Davis 1989, Yamane 1967): a WARN when missing from the list, never a failure. */
   knownCommon?: (author: string, year: string) => { work: string } | null;
+  /** The chapter gate: one chapter's own Word file (a chapter that cites nothing has no References page). */
+  chapterScope?: boolean;
 }
 
 type RuleDef = { id: string; title: string; severity: Severity };
@@ -392,6 +395,14 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
     const dd = spacingOf(docDefaults);
     const issues: QualityIssue[] = [];
     if (num(dd, "line") !== 480 || !/w:lineRule="auto"/.test(dd)) issues.push(fail("S1", "The document's default line spacing is not Double (2.0)."));
+    // Unstyled body text follows the default paragraph style. Without one, WPS Office shows it single spaced
+    // whatever the document defaults say (30 Sept 2026), so the style must exist and must not override the 2.0.
+    const normal = defaultParagraphStyle(styles);
+    if (!normal) issues.push(fail("S1", "The document has no default paragraph style (Normal), so some word processors show the body single spaced."));
+    else {
+      const ns = spacingOf(normal);
+      if (ns && /w:line=/.test(ns) && (num(ns, "line") !== 480 || !/w:lineRule="auto"/.test(ns))) issues.push(fail("S1", "The default paragraph style (Normal) is not double spaced."));
+    }
     for (const id of usedStyles) {
       const s = spacingOf(styleBlock(styles, id));
       if (s && /w:line=/.test(s) && num(s, "line") !== 480) issues.push(fail("S1", `The ${id} style is not double spaced.`));
@@ -450,6 +461,8 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
   {
     const issues: QualityIssue[] = [];
     if (!/<w:jc w:val="both"\/>/.test(docDefaults)) issues.push(fail("AL1", "Body text is not justified by default."));
+    const normalJc = /<w:jc w:val="([^"]+)"/.exec(defaultParagraphStyle(styles) ?? "")?.[1];
+    if (normalJc && normalJc !== "both") issues.push(fail("AL1", "The default paragraph style (Normal) is not justified."));
     for (const p of bodyProse) {
       const jc = jcOf(p.xml);
       if (jc && jc !== "both") issues.push(fail("AL1", `A paragraph is aligned ${jc === "center" ? "centre" : jc}.`, locate(p)));
@@ -871,7 +884,12 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
 
   // ── R1–R6 references ─────────────────────────────────────────────────────
   const refHeading = doc.outside.find((p) => p.style === "Heading1" && /^(?:REFERENCES|BIBLIOGRAPHY|WORKS CITED)$/.test(p.text.trim()));
-  push("R1", refHeading && refParas.length ? [] : [fail("R1", refHeading ? "The References section has no entries." : "There is no References section.")], `References section with ${refParas.length} entr${refParas.length === 1 ? "y" : "ies"}.`);
+  push(
+    "R1",
+    refHeading && refParas.length ? [] : [fail("R1", refHeading ? "The References section has no entries." : "There is no References section.")],
+    { pass: `References section with ${refParas.length} entr${refParas.length === 1 ? "y" : "ies"}.`, na: "This chapter cites no work, so it has no References page." },
+    { na: Boolean(ctx.chapterScope) && !refHeading && refParas.length === 0 },
+  );
   {
     const ieee = ctx.report.references.listedAs === "IEEE";
     const keys = refParas.map((p) => nameKey(p.text.split(/[,.]/)[0] ?? ""));
@@ -899,9 +917,18 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
   {
     const journals = [...new Set(ctx.input.references.map((r) => r.journal?.trim()).filter((j): j is string => !!j && j.length > 3))];
     const issues: QualityIssue[] = [];
+    // Each entry is judged by ITS OWN journal (found by its title): a title that happens to contain another
+    // work's journal name ("Information security in SMEs" beside the journal Information) is not a journal.
+    // A work with no journal (a conference paper, a book) has nothing to italicise here.
+    const titled = ctx.input.references
+      .map((r) => ({ journal: r.journal?.trim() ?? "", title: (r.title ?? r.proposedTitle ?? "").trim().toLowerCase().slice(0, 40) }))
+      .filter((r) => r.title.length >= 12);
     for (const p of refParas) {
-      const j = journals.find((name) => p.text.includes(name));
-      if (!j) continue;
+      const lower = p.text.toLowerCase();
+      const own = titled.find((r) => lower.includes(r.title));
+      if (own && own.journal.length <= 3) continue;
+      const j = own ? own.journal : journals.filter((name) => p.text.includes(name)).sort((a, b) => b.length - a.length)[0];
+      if (!j || !p.text.includes(j)) continue;
       const italic = runsOf(p.xml).filter((r) => r.italic).map((r) => r.text).join("");
       if (!italic.includes(j.slice(0, Math.min(j.length, 20)))) issues.push(fail("R4", `The journal name "${j}" is not italic.`, { quote: p.text }));
     }

@@ -5,7 +5,7 @@
  * run exactly this.
  */
 
-import { packReport, profileFor, type AssemblyInput, type AssemblyReport } from "@/lib/assembly/assemble";
+import { packChapter, packReport, profileFor, type AssemblyInput, type AssemblyReport } from "@/lib/assembly/assemble";
 import type { SectionKey } from "@/lib/generation/department-map";
 import { matchCitations, referenceCheck, type CitationMatch, type GateReference, type PrimarySourceRef, type SupportResult } from "./citation-check";
 import { readDoc, readDocxParts, runFormattingChecks, type DocxParts } from "./formatting-checks";
@@ -13,7 +13,7 @@ import { prelimProse, proseParagraphs, type ProseParagraph } from "./prose";
 import { writtenBlanks } from "@/lib/assembly/text-rules";
 import { countWords } from "@/lib/generation/chapter-plan";
 import { scoreQuality, type QualityScore } from "./score";
-import { runStructuralChecks, type TraceabilityResult } from "./structural-checks";
+import { runStructuralChecks, type ChapterScope, type TraceabilityResult } from "./structural-checks";
 import type { CheckResult, QualityIssue } from "./types";
 import { mergeVoiceFindings, scanVoice, voiceCheck, type VoiceFinding } from "./voice-scan";
 
@@ -34,21 +34,35 @@ export async function prepareReport(args: {
   references: GateReference[];
   knownCommon: (author: string, year: string) => { work: string } | null;
   primarySources?: PrimarySourceRef[];
+  /**
+   * The chapter gate: build and check ONE chapter's own Word file (the file the specialist and the
+   * client download) instead of the whole report. The input must hold that chapter only, without
+   * preliminary pages.
+   */
+  chapter?: { number: number; sourceHash: string };
 }): Promise<PreparedReport> {
   const { input } = args;
-  const { buffer, report } = await packReport(input);
+  if (args.chapter && (input.includePrelims || input.chapters.length !== 1 || input.chapters[0].number !== args.chapter.number)) {
+    throw new Error("The chapter gate checks one chapter, without preliminary pages.");
+  }
+  const { buffer, report } = args.chapter ? await packChapter(input, args.chapter.number, { sourceHash: args.chapter.sourceHash }) : await packReport(input);
   const parts = await readDocxParts(buffer);
-  const formatting = runFormattingChecks(parts, { input, report, profile: profileFor(input), knownCommon: args.knownCommon });
+  const formatting = runFormattingChecks(parts, { input, report, profile: profileFor(input), knownCommon: args.knownCommon, chapterScope: Boolean(args.chapter) });
   const template: "A" | "B" = templateFor(input.section);
   // Every Template B report uses a note-style placement (MODE_B or MODE_C); Template A uses in-text
   // (Author, Year), except Chicago notes-bibliography which the intake sets to MODE_C. The gate reads
   // it from the assembled report to stay in step with what the assembler actually produced.
-  const noteStyle = template === "B" || (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C");
+  const noteStyle = noteStyleFor(input);
   const match = matchCitations({ chapters: input.chapters, references: args.references, mode: input.mode, knownCommon: args.knownCommon, primarySources: args.primarySources, noteStyle, placement: input.citationPlacement });
   const paragraphs = proseParagraphs(input.chapters);
   // D7b: the phrase scan also reads the acknowledgement and the abstract (the AI voice review stays per chapter).
   const prelimScan = input.includePrelims ? prelimProse(input.preliminary).flatMap((page) => scanVoice(page).filter((f) => f.rule !== "thin")) : [];
   return { input, buffer, report, parts, formatting, match, paragraphs, scan: [...scanVoice(paragraphs), ...prelimScan], template };
+}
+
+/** The report cites by note (Template B, or a MODE_A/B/C placement), not by (Author, Year). */
+export function noteStyleFor(input: Pick<AssemblyInput, "section" | "citationPlacement">): boolean {
+  return templateFor(input.section) === "B" || input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C";
 }
 
 /** Template B (thematic chapters): Humanities and doctrinal Law. */
@@ -73,6 +87,8 @@ export function finishReport(
     pureScience: boolean;
     supervisorToc: boolean;
     plans: Map<number, { targetWords: number; sections: { number: string; heading: string }[] } | null>;
+    /** The chapter gate: the one chapter under check (null or absent for the whole report). */
+    scope?: ChapterScope | null;
   },
 ): { checks: CheckResult[]; score: QualityScore } {
   const { input, match, report, parts } = prepared;
@@ -80,7 +96,7 @@ export function finishReport(
 
   const voice = voiceCheck(mergeVoiceFindings(prepared.scan, ai.voice), ai.voiceNotes);
   voice.issues.push(...ai.errors.filter((e) => e.startsWith("Voice")).map((e) => warn(`${e} The phrase scan still ran.`)));
-  const reference = referenceCheck(match, ai.support);
+  const reference = referenceCheck(match, ai.support, { minAgainst: context.scope ? 2 : 1 });
   reference.issues.push(...ai.errors.filter((e) => e.startsWith("Citation")).map((e) => warn(`${e} Citation matching still ran.`)));
   for (const c of [voice, reference]) if (c.status === "PASS" && c.issues.some((i) => i.level === "WARN")) c.status = "WARN";
 
@@ -113,6 +129,7 @@ export function finishReport(
     },
     citations: match,
     traceability: ai.traceability,
+    scope: context.scope ?? null,
   });
   const checks = [...prepared.formatting, voice, reference, ...structural];
   return { checks, score: scoreQuality(checks) };

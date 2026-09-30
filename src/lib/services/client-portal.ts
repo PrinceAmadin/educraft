@@ -513,7 +513,7 @@ export async function getClientDocuments(projectDbId: string): Promise<ClientDoc
           versions: {
             where: { releaseNo: { not: null }, file: { deletedAt: null } },
             orderBy: { releaseNo: "desc" },
-            select: { releaseNo: true, releasedAt: true, fileId: true },
+            select: { releaseNo: true, releasedAt: true, fileId: true, formattedFile: { select: { id: true, deletedAt: true } } },
           },
         },
       },
@@ -522,7 +522,8 @@ export async function getClientDocuments(projectDbId: string): Promise<ClientDoc
   if (!project) return [];
   return project.deliverables.map((d) => {
     const versions = d.versions.map((v) => ({
-      fileId: v.fileId,
+      // A reviewed chapter is downloaded as its formatted copy (the file its quality check read).
+      fileId: v.formattedFile && !v.formattedFile.deletedAt ? v.formattedFile.id : v.fileId,
       releaseNo: v.releaseNo ?? 0,
       releasedAt: (v.releasedAt ?? new Date(0)).toISOString(),
     }));

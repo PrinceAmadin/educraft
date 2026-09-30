@@ -59,6 +59,7 @@ import { parseChapter, type Block } from "./parse-chapter";
 import { analyseChapterNotes, collectEndnotes, resolveNotes, type CollectedEndnotes } from "./endnotes";
 import { CHAPTER_STAMP, type ImageType } from "./read-chapter-docx";
 import { AssemblyError } from "./errors";
+import { finalizeDocx } from "./finalize-docx";
 import { parseEquation, type MathNode } from "./equation-omml";
 import {
   chapterWord,
@@ -236,7 +237,15 @@ export function isChapterBasedOrder(serviceCode: string, additionalData: unknown
  *              the COO's working copy, and what the quality gate scores
  *   ai         the AI text only (reports written before chapter review, and the check scripts)
  */
-export async function loadAssemblyInput(projectDbId: string, opts: { source?: ChapterTextSource; only?: number[] } = {}): Promise<AssemblyInput> {
+export async function loadAssemblyInput(
+  projectDbId: string,
+  opts: {
+    source?: ChapterTextSource;
+    only?: number[];
+    /** The chapter gate: this one chapter's text (and pictures) instead of any stored text. */
+    chapterText?: { number: number; text: string; media?: AssemblyInput["media"] };
+  } = {},
+): Promise<AssemblyInput> {
   const project = await db.project.findUnique({
     where: { id: projectDbId },
     select: {
@@ -266,8 +275,11 @@ export async function loadAssemblyInput(projectDbId: string, opts: { source?: Ch
   // `only`: one chapter on its own (the AI draft the specialist reviews).
   const expected = opts.only ? all.filter((n) => opts.only!.includes(n)) : all;
 
+  const given = opts.chapterText;
   const [texts, references, settings, preliminaryRow] = await Promise.all([
-    loadChapterTexts(project.id, expected, opts.source ?? "canonical"),
+    given
+      ? Promise.resolve({ chapters: [{ number: given.number, text: given.text }], media: given.media ?? new Map(), builtFrom: null, source: "working-copy" as const })
+      : loadChapterTexts(project.id, expected, opts.source ?? "canonical"),
     db.reference.findMany({
       where: { projectId: project.id, status: "KEPT" },
       select: { title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true },
@@ -729,7 +741,12 @@ function listStyleFor(key: string): { style: ListStyle; note: string | null } {
   }
 }
 
-function referencesPages(input: AssemblyInput, ctx: Ctx, citedInNotes: ReadonlySet<DocReference> = new Set()): Paragraph[] {
+function referencesPages(
+  input: AssemblyInput,
+  ctx: Ctx,
+  citedInNotes: ReadonlySet<DocReference> = new Set(),
+  opts: { omitWhenEmpty?: boolean } = {},
+): Paragraph[] {
   const { style, note } = listStyleFor(input.referencingStyle);
   if (note) ctx.report.notes.push(note);
   const numbered = style === "IEEE";
@@ -750,6 +767,8 @@ function referencesPages(input: AssemblyInput, ctx: Ctx, citedInNotes: ReadonlyS
     leftOut: uncited.length,
     unmatchedCitations: unmatched,
   };
+  // A single chapter that cites nothing gets no empty References page (R1 would fail it for having no entries).
+  if (opts.omitWhenEmpty && entries.length === 0) return [];
   return [
     new Paragraph({ heading: HeadingLevel.HEADING_1, pageBreakBefore: true, children: [plain(PAGE_TITLES.references, { bold: true })] }),
     ...entries.map(({ segs }) => {
@@ -1133,7 +1152,7 @@ export function buildChapterDocument(input: AssemblyInput, chapterNumber: number
   if (notePlacement) {
     for (const [, refs] of resolveNotes(analyseChapterNotes(text), input.references)) if (refs !== "comment") refs.forEach((r) => citedInNotes.add(r));
   }
-  const body = [...chapterContent({ number: chapterNumber, text }, true, ctx), ...referencesPages({ ...input, chapters: [{ number: chapterNumber, text }] }, ctx, citedInNotes)];
+  const body = [...chapterContent({ number: chapterNumber, text }, true, ctx), ...referencesPages({ ...input, chapters: [{ number: chapterNumber, text }] }, ctx, citedInNotes, { omitWhenEmpty: true })];
   const doc = new Document({
     creator: "EduCraft",
     title: `${input.title}: Chapter ${chapterNumber}`,
@@ -1157,7 +1176,7 @@ export function buildChapterDocument(input: AssemblyInput, chapterNumber: number
 
 export async function packChapter(input: AssemblyInput, chapterNumber: number, stamp: { sourceHash: string }): Promise<{ buffer: Buffer; report: AssemblyReport }> {
   const { doc, report } = buildChapterDocument(input, chapterNumber, stamp);
-  return { buffer: await Packer.toBuffer(doc), report };
+  return { buffer: await finalizeDocx(await Packer.toBuffer(doc)), report };
 }
 
 /** "<project title> Chapter 2.docx". */
@@ -1177,7 +1196,7 @@ export async function assembleReport(
 ): Promise<{ buffer: Buffer; fileName: string; report: AssemblyReport; source: AssemblyInput["source"] }> {
   const input = await loadAssemblyInput(projectDbId, opts);
   const { doc, report } = buildReportDocument(input);
-  const buffer = await Packer.toBuffer(doc);
+  const buffer = await finalizeDocx(await Packer.toBuffer(doc));
   const workingCopy = input.source === "working-copy";
   return { buffer, fileName: workingCopy ? downloadName([input.title?.trim() || input.projectCode, "(working copy)"], "docx") : reportFileName(input.title, input.projectCode), report, source: input.source };
 }
@@ -1185,5 +1204,5 @@ export async function assembleReport(
 /** For the check script: the same document as a buffer, from fixture input. */
 export async function packReport(input: AssemblyInput): Promise<{ buffer: Buffer; report: AssemblyReport }> {
   const { doc, report } = buildReportDocument(input);
-  return { buffer: await Packer.toBuffer(doc), report };
+  return { buffer: await finalizeDocx(await Packer.toBuffer(doc)), report };
 }

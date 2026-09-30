@@ -38,6 +38,9 @@ import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { alertReportReady, alertReportStopped } from "@/lib/services/team-alerts";
 import { openDataPause } from "@/lib/services/data-pause";
 import { runSecondaryDataFetch, SecondaryDataError, summarizeSecondaryDataFailure } from "@/lib/services/secondary-data";
+import { maxRewritesSetting, requestChapterCheck } from "@/lib/services/chapter-gate";
+import { gateFactFrom } from "@/lib/quality/chapter-gate";
+import { isAiDraft } from "@/lib/chapter-review";
 import { ModeNotApprovedError } from "@/lib/services/mode-errors";
 import { approvedChapterInput } from "./approved-inputs";
 import { readChapterOneStatements, statementsUnreadable } from "./chapter-one-statements";
@@ -65,6 +68,7 @@ import {
   approvalReason,
   attentionLine,
   decide,
+  gateReason,
   holdsSlot,
   isNewNotice,
   kicksSinceProgress,
@@ -197,7 +201,12 @@ const PROJECT_FACTS = {
   researchJob: { select: { status: true } },
   qaReview: { select: { qualityRunAt: true, qualityRunLockedUntil: true, qualityPassed: true, qualityScore: true, qualityTotal: true, autoSubmittedAt: true } },
   generationCheckpoints: {
-    select: { id: true, chapterNumber: true, status: true, lockedUntil: true, lastStepAt: true, lastProgressAt: true, createdAt: true, startedAt: true, completedAt: true, errorMessage: true },
+    select: { id: true, chapterNumber: true, status: true, lockedUntil: true, lastStepAt: true, lastProgressAt: true, createdAt: true, startedAt: true, completedAt: true, errorMessage: true, outputHash: true, gateRewriteNo: true },
+  },
+  // Chapter gate: the check of each chapter's AI text.
+  chapterChecks: {
+    where: { subject: "AI_TEXT" as const },
+    select: { chapterNumber: true, textHash: true, status: true, lockedUntil: true, attempts: true, rewritable: true, failures: true },
   },
   pauses: { select: { id: true, afterChapter: true, status: true, formStatus: true, formError: true } },
   // Chapter review: each chapter's versions, for the COO's approvals.
@@ -219,12 +228,29 @@ const PROJECT_FACTS = {
 
 type ProjectFacts = Prisma.ProjectGetPayload<{ select: typeof PROJECT_FACTS }>;
 
-function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): OrchestratorFacts {
+function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date, maxRewrites?: number): OrchestratorFacts {
   const chapters = expectedChapters({ serviceCode: p.service.serviceCode, additionalData: p.additionalData, chapterCount: p.chapterCount });
   const review = reportReview(
     p.deliverables.map((d) => ({ kind: d.kind, chapter: d.chapter, archived: d.archivedAt != null, changeNote: d.changeNote, versions: d.versions.map((v) => ({ ...v, fileName: v.file.fileName })) })),
     chapters,
   );
+  const mode = p.researchMode?.isLocked ? p.researchMode.modeNumber : null;
+  const hasDataset = p._count.files > 0;
+  // Chapter gate: every written chapter nobody has uploaded a version of yet, with the check of its current text.
+  const reviewed = new Set(p.deliverables.filter((d) => d.archivedAt == null && d.versions.some((v) => !isAiDraft(v))).map((d) => d.chapter));
+  const chapterGate = p.generationCheckpoints
+    .filter((c) => c.status === "COMPLETED" && chapters.includes(c.chapterNumber) && !reviewed.has(c.chapterNumber))
+    .map((c) =>
+      gateFactFrom({
+        chapter: c.chapterNumber,
+        outputHash: c.outputHash,
+        gateRewriteNo: c.gateRewriteNo,
+        check: c.outputHash ? (p.chapterChecks.find((k) => k.chapterNumber === c.chapterNumber && k.textHash === c.outputHash) ?? null) : null,
+        mode,
+        pauses: p.pauses,
+        hasDataset,
+      }),
+    );
   return {
     now,
     run: {
@@ -243,7 +269,7 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): Orchestrat
       lastKickAt: run.lastKickAt,
     },
     project: { status: p.status, hasSpecialist: Boolean(p.workerId) },
-    mode: p.researchMode?.isLocked ? p.researchMode.modeNumber : null,
+    mode,
     chapters,
     checkpoints: p.generationCheckpoints.map((c) => ({
       id: c.id,
@@ -258,7 +284,7 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): Orchestrat
       errorMessage: c.errorMessage,
     })),
     pauses: p.pauses,
-    hasDataset: p._count.files > 0,
+    hasDataset,
     research: { state: researchState(p.researchJob), kept: p._count.references },
     gate: {
       ranAt: p.qaReview?.qualityRunAt ?? null,
@@ -270,6 +296,8 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): Orchestrat
     },
     // Every report the orchestrator writes is under chapter review.
     review: { pending: review.pending, approvedAt: Object.fromEntries(review.approvedAt) },
+    chapterGate,
+    ...(maxRewrites !== undefined ? { maxRewrites } : {}),
   };
 }
 
@@ -381,6 +409,42 @@ async function startChapter(ctx: Pick<Ctx, "run" | "project" | "depth">, chapter
     console.error(`${TAG} ${project.projectId}: Chapter ${chapter} was refused`, error);
     await update(run.id, { status: "NEEDS_ATTENTION", reason: "START_REFUSED", reasonDetail: message.slice(0, 1000), currentChapter: chapter });
     await announceAttention(run.id, project, "START_REFUSED", chapter, message);
+  }
+}
+
+/**
+ * Chapter gate: writes a chapter again with its failed check's lines in the brief (an automatic rewrite, counted
+ * on the new run). A rewrite that is refused (a person uploaded their version meanwhile, the inputs moved)
+ * is not tried again: the draft goes to the specialist as it is, with its failures.
+ */
+async function rewriteChapter(ctx: Pick<Ctx, "run" | "project" | "depth">, action: Extract<Action, { kind: "REWRITE_CHAPTER" }>): Promise<void> {
+  const { run, project, depth } = ctx;
+  const chapter = action.chapter;
+  try {
+    const extracted = chapter > 1 ? { researchQuestions: run.researchQuestions, hypotheses: run.hypotheses } : {};
+    const input = await approvedChapterInput(project.id, chapter as ChapterNumber, extracted);
+    const created = await startChapterGeneration({ project: project.id, prompt: input, requestedById: null, replace: true, qualityFailures: action.lines, gateRewrite: true });
+    await update(run.id, { status: "GENERATING", currentChapter: chapter, startedAt: run.startedAt ?? new Date(), ...FRESH_CHAPTER, reason: gateReason("REWRITING", chapter) });
+    console.info(`${TAG} ${project.projectId}: Chapter ${chapter} is written again after its check`);
+    await scheduleGenerationStep(created.id, 0, depth + 1).catch((error) => {
+      console.warn(`${TAG} ${project.projectId}: Chapter ${chapter} was created but not handed to the runner yet`, error instanceof Error ? error.message : error);
+    });
+  } catch (error) {
+    if (isTransient(error)) {
+      console.warn(`${TAG} ${project.projectId}: Chapter ${chapter} could not be rewritten this time; it is tried again`, error instanceof Error ? error.message : error);
+      await update(run.id, { status: "QUEUED", currentChapter: chapter, reason: gateReason("REWRITING", chapter) }).catch(() => {});
+      return;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`${TAG} ${project.projectId}: Chapter ${chapter} was not rewritten`, message);
+    const hash = project.generationCheckpoints.find((c) => c.chapterNumber === chapter)?.outputHash ?? null;
+    if (hash) {
+      await db.chapterCheck.updateMany({
+        where: { projectId: project.id, chapterNumber: chapter, subject: "AI_TEXT", textHash: hash, status: "FAILED" },
+        data: { rewritable: false, error: `Not rewritten: ${message}`.slice(0, 1000) },
+      });
+    }
+    await import("@/lib/services/chapter-review").then((m) => m.ensureChapterDraft(project.id, chapter)).catch(() => undefined);
   }
 }
 
@@ -541,6 +605,26 @@ async function perform(ctx: Ctx, action: Action): Promise<Outcome> {
       }
       return { again: false };
 
+    case "CHECK_CHAPTER":
+    case "CHECKING_CHAPTER": {
+      // Chapter gate: the check runs in its own invocation; it wakes the run when it ends.
+      if (action.kind === "CHECK_CHAPTER") await requestChapterCheck(project.id, action.chapter, "AI_TEXT");
+      const reason = gateReason("CHECKING", action.chapter);
+      if ((run.status === "GENERATING" || run.status === "QUEUED") && run.reason !== reason) await update(run.id, { reason, reasonDetail: null });
+      return { again: false };
+    }
+
+    case "REWRITE_CHAPTER":
+      if (run.status === "STOPPED") return { again: false };
+      if (holdsSlot(run.status)) {
+        await rewriteChapter({ run, project, depth }, action);
+        return { again: false };
+      }
+      if (run.status !== "QUEUED" || run.currentChapter !== action.chapter) {
+        await update(run.id, { status: "QUEUED", currentChapter: action.chapter, reason: gateReason("REWRITING", action.chapter), reasonDetail: null });
+      }
+      return { again: false };
+
     case "WAIT_FOR_APPROVAL": {
       const reason = approvalReason(action.pending);
       if (run.status !== "WAITING_FOR_APPROVAL" || run.reason !== reason) {
@@ -639,6 +723,7 @@ async function processRun(runId: string, depth: number): Promise<string[]> {
   const done: string[] = [];
   let projectStatus: ProjectStatus | null = null;
   let watching = false;
+  const maxRewrites = await maxRewritesSetting();
   try {
     for (let step = 0; step < STEPS_PER_RUN; step++) {
       const run = await db.orchestratorRun.findUnique({ where: { id: runId } });
@@ -648,7 +733,7 @@ async function processRun(runId: string, depth: number): Promise<string[]> {
       projectStatus = project.status;
       // Taken after the reads: a chapter that finished while they ran must not look later than "now".
       const now = new Date();
-      const facts = factsFrom(run, project, now);
+      const facts = factsFrom(run, project, now, maxRewrites);
       const action = decide(facts);
       watching = action.kind === "WRITING" || action.kind === "KICK" || facts.checkpoints.some((c) => ACTIVE_STATUSES.includes(c.status));
       done.push(action.kind);
@@ -724,9 +809,11 @@ async function startClaimed(claim: { id: string; chapter: number }, depth: numbe
     const project = run ? await db.project.findUnique({ where: { id: run.projectId }, select: PROJECT_FACTS }) : null;
     if (!run || !project) return;
     // The facts may have moved since the run queued: the rules are asked once more before a credit is spent.
-    const action = decide(factsFrom(run, project, now));
+    const maxRewrites = await maxRewritesSetting();
+    const facts = factsFrom(run, project, now, maxRewrites);
+    const action = decide(facts);
     if (action.kind === "NEED_SLOT") await startChapter({ run, project, depth }, action.chapter);
-    else await perform({ run, project, facts: factsFrom(run, project, now), depth, now }, action);
+    else await perform({ run, project, facts, depth, now }, action);
   } finally {
     await db.orchestratorRun.updateMany({ where: { id: claim.id, lockedUntil: lease }, data: { lockedUntil: null, lastTickAt: new Date(), nextCheckAt: null } }).catch(() => {});
   }
