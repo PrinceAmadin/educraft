@@ -9,12 +9,13 @@
  * (`observed` lets a caller override them with measured values.)
  */
 
-export type PhaseKey = "search" | "pdfs" | "relevance" | "drive";
+export type PhaseKey = "search" | "pdfs" | "relevance" | "curating" | "drive";
 
 export const PHASES: { key: PhaseKey; label: string }[] = [
   { key: "search", label: "Searching academic databases" },
   { key: "pdfs", label: "Checking which papers have free PDFs" },
   { key: "relevance", label: "Checking relevance to the topic" },
+  { key: "curating", label: "Curating the reference set" },
   { key: "drive", label: "Saving the PDFs and building the reference list" },
 ];
 
@@ -22,11 +23,13 @@ export const PHASES: { key: PhaseKey; label: string }[] = [
  * Seconds per step, from a full run on the production deployment (100 papers,
  * 30 steps, 255s; the first round now fetches 150). Steps run back-to-back inside one invocation there, so
  * they're much faster than on a laptop.
+ * `curating` is a single Claude call over the whole kept set, ~10 s.
  */
 export const DEFAULT_STEP_SECONDS: Record<PhaseKey, number> = {
   search: 6,
   pdfs: 5,
   relevance: 20,
+  curating: 10,
   drive: 8,
 };
 
@@ -50,6 +53,8 @@ export function phaseForStatus(status: string): PhaseKey | null {
       return "pdfs";
     case "CLASSIFYING":
       return "relevance";
+    case "CURATING":
+      return "curating";
     case "UPLOADING_DRIVE":
       return "drive";
     default:
@@ -91,8 +96,12 @@ function remainingSeconds(job: EtaJob, phase: PhaseKey, sec: Record<PhaseKey, nu
   const resolveSteps = phase === "search" || phase === "pdfs" ? steps(toResolve, RESOLVE_BATCH) + 1 : 0;
 
   const unclassified = refs.filter((r) => r.status === "IMPORTED" && r.classification === null).length;
-  const toClassify = phase === "relevance" ? unclassified : unclassified + toResolve;
-  const classifySteps = phase === "drive" ? 0 : steps(toClassify, CLASSIFY_BATCH) + 1;
+  const toClassify = phase === "relevance" ? unclassified : phase === "curating" || phase === "drive" ? 0 : unclassified + toResolve;
+  const classifySteps = phase === "curating" || phase === "drive" ? 0 : steps(toClassify, CLASSIFY_BATCH) + 1;
+
+  // Curating is one Claude call over the whole kept set — counted while
+  // we're in it or ahead of it, zero once we've moved on.
+  const curatingSteps = phase === "drive" ? 0 : 1;
 
   const keptPdfsPending =
     phase === "drive"
@@ -101,7 +110,11 @@ function remainingSeconds(job: EtaJob, phase: PhaseKey, sec: Record<PhaseKey, nu
   const driveSteps = steps(keptPdfsPending, DRIVE_BATCH) + 1;
 
   return (
-    searchSteps * sec.search + resolveSteps * sec.pdfs + classifySteps * sec.relevance + driveSteps * sec.drive
+    searchSteps * sec.search +
+    resolveSteps * sec.pdfs +
+    classifySteps * sec.relevance +
+    curatingSteps * sec.curating +
+    driveSteps * sec.drive
   );
 }
 

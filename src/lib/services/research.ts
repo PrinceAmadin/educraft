@@ -528,6 +528,8 @@ export async function advanceResearchJob(jobId: string): Promise<AdvanceResult> 
       // REPLACING is a marker status only — the actual replacement work
       // happens by looping back through FINDING_CANDIDATES.
       return { job: await db.researchJob.update({ where: { id: job.id }, data: { status: "FINDING_CANDIDATES" } }), done: false };
+    case "CURATING":
+      return advanceCurating(job, ctx);
     case "UPLOADING_DRIVE":
       return advanceUploadingDrive(job, ctx);
     default:
@@ -878,7 +880,11 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
     db.researchJob.update({
       where: { id: job.id },
       data: {
-        status: "UPLOADING_DRIVE",
+        // The final kept set now runs through one global-reasoning curation
+        // call (advanceCurating) before Track A uploads — plagiarism-cluster,
+        // generic-methodology and broad-survey filler get demoted with the
+        // whole list in view. Pre-30-Sept jobs skip curation (no analysis).
+        status: "CURATING",
         corePercent: pct(core),
         closelyRelatedPercent: pct(closelyRelated),
         errorMessage: note,
@@ -895,6 +901,191 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
   }
   const updated = await db.researchJob.findUniqueOrThrow({ where: { id: job.id } });
   return { job: updated, done: false };
+}
+
+// ── Curation (global-reasoning demote pass over the final kept set) ─────────
+
+type CurationCategory = "cluster" | "guard" | "generic" | "broad";
+interface CurationDemote {
+  referenceId: string;
+  reason: string;
+  category: CurationCategory;
+}
+interface CurationResult {
+  demote: CurationDemote[];
+  gaps: string[];
+}
+
+const CATEGORY_PRIORITY: Record<CurationCategory, number> = { guard: 0, broad: 1, generic: 2, cluster: 3 };
+
+/**
+ * Global-reasoning pass over the whole kept set. Tier 2 classifies each
+ * paper in isolation, so keyword-adjacent clusters (six plagiarism papers on
+ * a topic-similarity project, three near-identical evaluation-metric
+ * surveys, one broad "AI in Education" review) all survive — each is
+ * defensibly CLOSELY_RELATED alone. Curation reads the whole list plus the
+ * project analysis and demotes redundant / over-represented /
+ * weakly-adjacent papers to REPLACED. Returns any subproblems no kept paper
+ * addresses (logged, not acted on).
+ */
+async function curateReferences(
+  ctx: ProjectContext,
+  analysis: ProjectAnalysis,
+  kept: { id: string; title: string | null; year: number | null; journal: string | null; abstract: string | null; classification: ReferenceClassification | null; classificationReason: string | null }[],
+): Promise<CurationResult> {
+  const system = `You are the FINAL curator of the reference list for a student project report at EduCraft. Tier 2 has already dropped clearly off-topic papers. Your job is to decide what a supervisor would actually accept, reading the whole set at once — the batch classifier judged each paper alone and cannot see cluster over-representation or redundancy.
+
+Read the PROJECT ANALYSIS carefully. Then read every kept reference below.
+
+Demote a paper to REPLACED when any of these apply. Give a one-line reason and the matching category.
+
+- cluster — 4+ kept papers cover the same narrow sub-technique. Keep the strongest 2–3 (the survey, the most cited, the most recent authoritative). Demote the rest.
+- guard — the paper matches one of the analysis's off-topic guards even weakly. Example, for a topic-similarity project: plagiarism-detection papers are adjacent method literature at best. Two or three are enough for context; more are redundant.
+- generic — a general evaluation-metrics, text-preprocessing, or classification-algorithm paper with no connection to a named component or subproblem. Keep one representative; demote the rest.
+- broad — a wide-field survey (e.g. "AI in Education 2010–2020") that doesn't address a named component or subproblem.
+
+Do NOT demote a paper only because it is not CORE — CLOSELY_RELATED papers that address a real subproblem are still valuable background.
+
+Also list any coverage gaps: subproblems from the analysis that NO kept paper addresses. These are logged for the operations team, not acted on this run.
+
+Be strict but conservative. Aim to demote maybe 5–15% of the set on a typical run; more when a specific cluster (e.g. 6 plagiarism papers) obviously needs trimming.`;
+
+  const user = [
+    `PROJECT TITLE: ${ctx.topic}`,
+    `DEPARTMENT: ${ctx.department}`,
+    "",
+    analysisBlock(analysis),
+    "",
+    `KEPT REFERENCES (${kept.length}):`,
+    ...kept.map((r) => {
+      const classifier = r.classification ? `[${r.classification}]` : "[?]";
+      const reason = r.classificationReason ? ` — Tier 2 said: ${r.classificationReason.slice(0, 200)}` : "";
+      return `[${r.id}] ${classifier} "${r.title ?? "(untitled)"}" (${r.year ?? "n.d."}${r.journal ? `, ${r.journal}` : ""})${reason}\n  Abstract: ${r.abstract ? r.abstract.slice(0, 500) : "No abstract available."}`;
+    }),
+  ].join("\n\n");
+
+  try {
+    const result = await callClaudeForJson<CurationResult>({
+      system,
+      user,
+      toolName: "curate_kept_references",
+      toolDescription: "List references to demote from the final kept set and subproblems left uncovered.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          demote: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                referenceId: { type: "string" },
+                reason: { type: "string" },
+                category: { type: "string", enum: ["cluster", "guard", "generic", "broad"] },
+              },
+              required: ["referenceId", "reason", "category"],
+            },
+          },
+          gaps: { type: "array", items: { type: "string" } },
+        },
+        required: ["demote", "gaps"],
+      },
+      maxTokens: 2048,
+      usage: { projectId: ctx.id, subsystem: "research_pipeline", step: "curate_references" },
+    });
+    return {
+      demote: (result.demote ?? []).filter((d) => d.referenceId && d.reason && d.category),
+      gaps: (result.gaps ?? []).map((g) => g.trim()).filter(Boolean),
+    };
+  } catch (error) {
+    if (error instanceof AnthropicError) throw new ResearchError(error.message);
+    throw error;
+  }
+}
+
+/**
+ * One-shot global curation over the final kept set. Runs once per job (never
+ * per round). Old jobs without a stored `projectAnalysis` skip curation and
+ * go straight to Track A.
+ */
+async function advanceCurating(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
+  const analysis = readAnalysis(job);
+  if (!analysis) {
+    const next = await db.researchJob.update({ where: { id: job.id }, data: { status: "UPLOADING_DRIVE" } });
+    return { job: next, done: false };
+  }
+
+  const kept = await db.reference.findMany({
+    where: { researchJobId: job.id, status: "KEPT" },
+    select: { id: true, title: true, year: true, journal: true, abstract: true, classification: true, classificationReason: true },
+  });
+  if (kept.length === 0) {
+    const next = await db.researchJob.update({ where: { id: job.id }, data: { status: "UPLOADING_DRIVE" } });
+    return { job: next, done: false };
+  }
+
+  const result = await curateReferences(ctx, analysis, kept);
+
+  const validIds = new Set(kept.map((r) => r.id));
+  const flagged = result.demote.filter((d) => validIds.has(d.referenceId));
+
+  // Safety cap: never drop below MIN_USABLE_REFERENCES. Demote greedily by
+  // category priority (guard > broad > generic > cluster) until the floor.
+  const room = Math.max(kept.length - MIN_USABLE_REFERENCES, 0);
+  const ordered = [...flagged].sort((a, b) => (CATEGORY_PRIORITY[a.category] - CATEGORY_PRIORITY[b.category]));
+  const toDemote = ordered.slice(0, room);
+  const skipped = ordered.slice(room);
+
+  if (toDemote.length > 0) {
+    await db.$transaction(
+      toDemote.map((d) =>
+        db.reference.update({
+          where: { id: d.referenceId },
+          data: { status: "REPLACED", classificationReason: `Curation (${d.category}): ${d.reason}`.slice(0, 500) },
+        })
+      )
+    );
+  }
+
+  // Recompute the CORE / CLOSELY_RELATED percentages after demotions.
+  const remaining = await db.reference.findMany({
+    where: { researchJobId: job.id, status: "KEPT" },
+    select: { classification: true },
+  });
+  const core = remaining.filter((r) => r.classification === "CORE").length;
+  const closelyRelated = remaining.length - core;
+  const pct = (n: number) => (remaining.length > 0 ? Math.round((n / remaining.length) * 1000) / 10 : 0);
+
+  const notes: string[] = [];
+  if (toDemote.length > 0) notes.push(`Curation demoted ${toDemote.length} reference(s) as redundant or weakly related.`);
+  if (skipped.length > 0) notes.push(`${skipped.length} further flag(s) held back to keep the set at the ${MIN_USABLE_REFERENCES}-reference floor.`);
+  if (result.gaps.length > 0) notes.push(`Coverage gaps: ${result.gaps.slice(0, 4).join("; ")}.`);
+  const existing = job.errorMessage ? job.errorMessage.trim() : "";
+  const combined = [existing, notes.join(" ")].filter(Boolean).join(" ") || null;
+
+  const next = await db.researchJob.update({
+    where: { id: job.id },
+    data: {
+      status: "UPLOADING_DRIVE",
+      corePercent: pct(core),
+      closelyRelatedPercent: pct(closelyRelated),
+      errorMessage: combined,
+    },
+  });
+
+  if (toDemote.length > 0) {
+    console.info(`[research] curation on ${ctx.projectId}: demoted ${toDemote.length}, held back ${skipped.length}, gaps ${result.gaps.length}`);
+  }
+  if (result.gaps.length > 0) {
+    // Non-blocking heads-up — the COO can see the gaps on the research
+    // request card and decide whether to re-run for more coverage.
+    await notifyOperations({
+      title: "Research curation flagged coverage gaps",
+      message: `${ctx.projectId}: subproblems left uncovered — ${result.gaps.slice(0, 3).join("; ")}`,
+      type: "info",
+      link: `/admin/projects/${ctx.projectId}`,
+    }).catch((error) => console.error("[research] notifyOperations gaps failed", error));
+  }
+  return { job: next, done: false };
 }
 
 /**

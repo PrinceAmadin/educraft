@@ -223,7 +223,7 @@ export interface ResearchProgress {
   totalReferences: number | null;
 }
 
-const ORDER = ["FINDING_CANDIDATES", "RESOLVING_PDFS", "CLASSIFYING", "UPLOADING_DRIVE", "PASSED"] as const;
+const ORDER = ["FINDING_CANDIDATES", "RESOLVING_PDFS", "CLASSIFYING", "CURATING", "UPLOADING_DRIVE", "PASSED"] as const;
 
 function stageIndex(status: string): number {
   switch (status) {
@@ -236,10 +236,12 @@ function stageIndex(status: string): number {
       return 1;
     case "CLASSIFYING":
       return 2;
-    case "UPLOADING_DRIVE":
+    case "CURATING":
       return 3;
-    case "PASSED":
+    case "UPLOADING_DRIVE":
       return 4;
+    case "PASSED":
+      return 5;
     default:
       return -1;
   }
@@ -335,7 +337,8 @@ export async function getResearchProgress(id: string): Promise<ResearchProgress>
       state: state(2),
       detail: stored ? `${counts.kept} kept` : `${counts.kept} kept · ${counts.core} core · ${counts.closelyRelated} closely related${job && job.replacementRound > 0 ? ` · replacement round ${job.replacementRound}` : ""}`,
     },
-    { key: "drive", label: "Save the PDFs and build the reference list", state: state(3), detail: `${counts.uploaded} PDFs saved` },
+    { key: "curate", label: "Curate the reference set (global-reasoning pass)", state: state(3), detail: stored ? "Finished" : "One Claude call trims redundant, over-represented and off-topic-guard papers." },
+    { key: "drive", label: "Save the PDFs and build the reference list", state: state(4), detail: `${counts.uploaded} PDFs saved` },
     {
       key: "final",
       label: "Verified references",

@@ -82,6 +82,7 @@ const STATUS_LABEL: Record<string, string> = {
   IMPORTING_ZOTERO: "Checking which papers have free PDFs…",
   CLASSIFYING: "Checking relevance to the topic…",
   REPLACING: "Finding replacements for off-topic papers…",
+  CURATING: "Curating the reference set…",
   UPLOADING_DRIVE: "Saving the PDFs and building the reference list…",
 };
 

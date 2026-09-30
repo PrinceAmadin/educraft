@@ -1122,6 +1122,7 @@ enum ResearchJobStatus {
   IMPORTING_ZOTERO // legacy: Zotero import, no longer a step (kept for old rows)
   CLASSIFYING // Tier 2 relevance pass (CORE/CLOSELY_RELATED/TANGENTIAL/IRRELEVANT)
   REPLACING // Tier 2 failed — fetching replacements for flagged refs
+  CURATING // final global-reasoning pass over the kept set: drop cluster over-representation, off-topic-guard matches, generic-methodology filler and broad-field surveys
   UPLOADING_DRIVE // uploading kept PDFs to Google Drive
   PASSED
   FAILED_NEEDS_REVIEW // 3 replacement rounds exhausted, still under threshold
