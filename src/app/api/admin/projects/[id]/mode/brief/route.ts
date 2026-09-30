@@ -14,8 +14,8 @@ import {
 import { briefActionSchema } from "@/lib/validations/source-stage";
 
 export const dynamic = "force-dynamic";
-// draft_aim and suggest_aim wait for one short Claude call.
-export const maxDuration = 120;
+// draft_aim and suggest_aim wait for the Claude Opus 5.5 aim call (usually 10–30 s; 140 s cap, one retry).
+export const maxDuration = 300;
 
 /**
  * POST { action }: D3b, the brief on the mode card. Founder and COO only.

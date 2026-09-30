@@ -1,7 +1,8 @@
 /**
  * The independent judge of a report's aim and objectives (founder, 30 Sept
- * 2026). Deliberately apart from the drafter (objectives-drafter.ts):
- *  - a different model: Claude Opus 5.5 judges, Sonnet 5 drafts;
+ * 2026). The same model as the drafter since the founder moved the drafting
+ * to Claude Opus 5.5 too (SUPERVISOR_FACING_MODEL), so its independence is the
+ * call itself, kept apart from the drafter (objectives-drafter.ts):
  *  - a fresh call with its own examiner prompt (OBJECTIVES_CHECK_TEXT in
  *    objectives-check-rules.ts): it never sees the drafter's instructions,
  *    steps or reasoning, and is not told the objectives were drafted by AI;
@@ -10,11 +11,11 @@
  * rules. About ₦50–100 a check.
  */
 
-import { callClaudeForJson } from "@/lib/anthropic";
+import { SUPERVISOR_FACING_MODEL, callClaudeForJson } from "@/lib/anthropic";
 import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { OBJECTIVES_CHECK_TEXT, checkUserPrompt, validateCheckReply, type CheckRow, type CheckScores, type ObjectivesCheckInput } from "@/lib/generation/objectives-check-rules";
 
-export const JUDGE_MODEL = "claude-opus-5-5";
+export const JUDGE_MODEL = SUPERVISOR_FACING_MODEL;
 export const JUDGE_STEP = "check_objectives";
 
 const SCORE = { type: "integer", description: "0 to 100, using the bands in the instructions." } as const;

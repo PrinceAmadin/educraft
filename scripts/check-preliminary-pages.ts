@@ -205,22 +205,43 @@ const values: PromptValues = {
 check("KNOWN_TOKENS has 23 entries", KNOWN_TOKENS.length === 23, KNOWN_TOKENS);
 check("KNOWN_TOKENS covers every field on PromptValues", (Object.keys(values) as string[]).every((k) => (KNOWN_TOKENS as readonly string[]).includes(k)));
 
-await checkAsync("loader assembles both call prompts without throwing", async () => {
+await checkAsync("loader assembles the acknowledgement, abstract and abbreviations prompts without throwing", async () => {
   _resetPreliminaryPagesCache();
   const p = await loadPreliminaryPagesPrompts(values);
-  return typeof p.callASystem === "string" && typeof p.callAUser === "string" && typeof p.callBSystem === "string" && typeof p.callBUser === "function";
+  return (
+    typeof p.ackSystem === "string" &&
+    typeof p.ackUser === "string" &&
+    typeof p.abstractSystem === "string" &&
+    typeof p.abstractUser === "string" &&
+    typeof p.abstractRetryUser === "string" &&
+    typeof p.callBSystem === "string" &&
+    typeof p.callBUser === "function"
+  );
 });
-await checkAsync("Call A prompt substitutes the project title", async () => {
+await checkAsync("both page prompts substitute the project title and the department", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
-  return p.callAUser.includes("The Effect of Mobile Money on Traders");
+  return [p.ackUser, p.abstractUser].every((u) => u.includes("The Effect of Mobile Money on Traders") && u.includes("Business Administration"));
 });
-await checkAsync("Call A prompt substitutes the department", async () => {
+await checkAsync("the acknowledgement prompt carries only the acknowledgement's rules", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
-  return p.callAUser.includes("Business Administration");
+  return p.ackUser.includes(LOADER_TEXT.ackHeading) && !p.ackUser.includes(LOADER_TEXT.abstractHeading) && !p.ackUser.includes(LOADER_TEXT.abstractBand);
 });
-await checkAsync("Call A retry prompt asks for the 260–290 band explicitly", async () => {
+await checkAsync("the abstract prompt (Opus) carries only the abstract's rules and band", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
-  return p.callARetryUser.includes(String(ABSTRACT_TARGET_LO)) && p.callARetryUser.includes(String(ABSTRACT_TARGET_HI));
+  return p.abstractUser.includes(LOADER_TEXT.abstractHeading) && p.abstractUser.includes(LOADER_TEXT.abstractBand) && !p.abstractUser.includes(LOADER_TEXT.ackHeading);
+});
+await checkAsync("the retry rewrites the abstract only, asking for the 260–290 band explicitly", async () => {
+  const p = await loadPreliminaryPagesPrompts(values);
+  return (
+    p.abstractRetryUser.includes(String(ABSTRACT_TARGET_LO)) &&
+    p.abstractRetryUser.includes(String(ABSTRACT_TARGET_HI)) &&
+    !p.abstractRetryUser.includes(LOADER_TEXT.ackHeading) &&
+    !/Acknowledgement/.test(LOADER_TEXT.abstractRetryIntro)
+  );
+});
+await checkAsync("each call names its own tool", async () => {
+  const p = await loadPreliminaryPagesPrompts(values);
+  return p.ackSystem.includes("record_acknowledgement") && p.abstractSystem.includes("record_abstract") && !p.abstractSystem.includes("record_acknowledgement");
 });
 await checkAsync("Call B prompt lists the tokens the scanner found", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
@@ -246,8 +267,9 @@ await checkAsync("unresolved {TOKEN} throws PreliminaryPagesPromptError", async 
 });
 
 // ─── LOADER_TEXT copy the founder should recognise ─────────────────────────
-check("Call A intro exists", LOADER_TEXT.callAIntro.length > 40);
-check("Call A retry intro exists", LOADER_TEXT.callARetryIntro.length > 40);
+check("Acknowledgement intro exists", LOADER_TEXT.ackIntro.length > 40);
+check("Abstract intro exists", LOADER_TEXT.abstractIntro.length > 40);
+check("Abstract retry intro exists", LOADER_TEXT.abstractRetryIntro.length > 40);
 check("Call B intro exists", LOADER_TEXT.callBIntro.length > 40);
 check("Ack rules headed as page 6", /PAGE\s+6/i.test(LOADER_TEXT.ackHeading));
 check("Abstract rules headed as page 7", /PAGE\s+7/i.test(LOADER_TEXT.abstractHeading));

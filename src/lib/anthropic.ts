@@ -30,6 +30,16 @@ import {
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-sonnet-5";
 
+/**
+ * The model for what a supervisor reads first (founder, 30 Sept 2026): the
+ * aim, the objectives and the abstract are written by Claude Opus 5.5, and the
+ * independent review of the aim and objectives uses it too. Everything else
+ * (chapters, the acknowledgement, abbreviations, research, the quality gate)
+ * stays on Sonnet 5. Change it here and the three texts and the review move
+ * together.
+ */
+export const SUPERVISOR_FACING_MODEL = "claude-opus-5-5";
+
 function apiKey(): string {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set");
@@ -72,7 +82,52 @@ const DEFAULT_JSON_TIMEOUT_MS = 240_000;
 const NO_FORCED_TOOL_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]);
 const REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
-export async function callClaudeForJson<T>({
+/** Keywords strict tool use does not accept ("numerical, string and complex array constraints"); our validators check them in code. */
+const UNSUPPORTED_STRICT_KEYWORDS = new Set(["minItems", "maxItems", "uniqueItems", "minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"]);
+
+/**
+ * A tool schema as strict tool use accepts it: every object closed with
+ * `additionalProperties: false`, and the constraints strict mode refuses
+ * removed (the callers' validators, e.g. validateObjectives, enforce them).
+ * Pure; returns a new object and leaves the input as it was.
+ */
+export function toStrictSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(toStrictSchema);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (UNSUPPORTED_STRICT_KEYWORDS.has(key)) continue;
+    if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+      out.properties = Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([name, sub]) => [name, toStrictSchema(sub)]));
+    } else if (key === "enum" || key === "const" || key === "required" || key === "description") {
+      out[key] = value;
+    } else {
+      out[key] = toStrictSchema(value);
+    }
+  }
+  const type = out.type;
+  if (type === "object" || (Array.isArray(type) && type.includes("object")) || "properties" in out) out.additionalProperties = false;
+  return out;
+}
+
+/** The reply had no tool call (possible with tool_choice "auto"): callClaudeForJson asks once more. */
+class NoToolCallError extends AnthropicError {}
+
+/**
+ * One structured reply through a tool call. Sonnet 5 is forced to call the
+ * tool; a model that refuses a forced choice (Opus 5.5) gets tool_choice
+ * "auto", a strict schema and one more try when it answers without the tool.
+ */
+export async function callClaudeForJson<T>(input: ClaudeToolCallInput<T>): Promise<T> {
+  try {
+    return await callClaudeForJsonOnce(input);
+  } catch (error) {
+    if (!(error instanceof NoToolCallError)) throw error;
+    return callClaudeForJsonOnce({ ...input, usage: input.usage ? { ...input.usage, step: `${input.usage.step}_notool` } : undefined });
+  }
+}
+
+async function callClaudeForJsonOnce<T>({
   system,
   user,
   toolName,
@@ -103,7 +158,7 @@ export async function callClaudeForJson<T>({
         max_tokens: maxTokens,
         system: cacheSystem ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system,
         messages: [{ role: "user", content: user }],
-        tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema, ...(unforced ? { strict: true } : {}) }],
+        tools: [{ name: toolName, description: toolDescription, input_schema: unforced ? toStrictSchema(inputSchema) : inputSchema, ...(unforced ? { strict: true } : {}) }],
         tool_choice: unforced ? { type: "auto" } : { type: "tool", name: toolName },
         ...(effort ? { output_config: { effort } } : {}),
         ...(unforced ? { fallbacks: "default" } : {}),
@@ -140,7 +195,10 @@ export async function callClaudeForJson<T>({
   }
 
   const block = (json?.content ?? []).find((c: any) => c.type === "tool_use" && c.name === toolName);
-  if (!block) throw new AnthropicError("Claude did not return the expected structured response");
+  if (!block) {
+    if (unforced) throw new NoToolCallError("Claude answered without calling the tool");
+    throw new AnthropicError("Claude did not return the expected structured response");
+  }
 
   return block.input as T;
 }

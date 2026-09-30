@@ -63,11 +63,14 @@ function extractPage(raw: string, pageNumber: number): string | null {
 }
 
 export const LOADER_TEXT = {
-  /** Introduces the whole prompt to the model. */
-  callAIntro:
-    "You are EduCraft's Preliminary Pages Agent. Read the project context and the rules below carefully, then return the Acknowledgement and the Abstract for this specific project through the record_preliminary_sections tool. Do not add any other text. Do not include page numbers, headings or the section labels: the tool captures each section as a plain paragraph of body text.",
-  callARetryIntro:
-    "The previous abstract was returned outside the 250–300 word range. Rewrite it to fall inside 260–290 words (aim for 275). Keep every rule in the ABSTRACT section below. Return both the Acknowledgement (unchanged if it already met the rules) and the corrected Abstract through the tool.",
+  /** The acknowledgement's call (Sonnet 5). */
+  ackIntro:
+    "You are EduCraft's Preliminary Pages Agent. Read the project context and the rules below carefully, then write only the ACKNOWLEDGEMENT page for this specific project and return it through the record_acknowledgement tool. Do not add any other text. Do not include page numbers, headings or the section label: the tool captures the page as plain paragraphs of body text.",
+  /** The abstract's call: Claude Opus 5.5 (SUPERVISOR_FACING_MODEL; founder, 30 Sept 2026: supervisors read the abstract first). */
+  abstractIntro:
+    "You are EduCraft's Preliminary Pages Agent. Read the project context and the rules below carefully, then write only the ABSTRACT page for this specific project and return it through the record_abstract tool. Do not add any other text. Do not include page numbers, headings or the section label: the tool captures the page as plain paragraphs of body text.",
+  abstractRetryIntro:
+    "The previous abstract was returned outside the 250–300 word range. Rewrite it to fall inside 260–290 words (aim for 275). Keep every rule in the ABSTRACT section below. Return the corrected Abstract through the tool.",
   callBIntro:
     "You are EduCraft's Preliminary Pages Agent. The token list below was scanned from the project's completed chapters. For each token, return its expansion through the expand_abbreviations tool. If you are not confident of an expansion, return null for that entry: an omitted entry is preferable to a guessed one. Do not add any other text.",
   contextHeading: "PROJECT CONTEXT",
@@ -119,12 +122,14 @@ function fill(text: string, values: PromptValues): string {
 }
 
 export interface PreliminaryPromptBlocks {
-  /** System prompt for Call A (Ack + Abstract). */
-  callASystem: string;
-  /** User prompt for Call A. */
-  callAUser: string;
-  /** System prompt for the abstract retry (leaves the ack instructions in). */
-  callARetryUser: string;
+  /** The acknowledgement's call (Sonnet 5): system and user prompts. */
+  ackSystem: string;
+  ackUser: string;
+  /** The abstract's call (Opus 5.5): system and user prompts. */
+  abstractSystem: string;
+  abstractUser: string;
+  /** The abstract's retry when the first came back outside the word band (the abstract only). */
+  abstractRetryUser: string;
   /** System prompt for Call B (abbreviations expansion). */
   callBSystem: string;
   /** Builds Call B's user prompt for a specific list of tokens. */
@@ -171,32 +176,19 @@ export async function loadPreliminaryPagesPrompts(values: PromptValues): Promise
     .filter((s) => s !== "")
     .join("\n");
 
-  const callAUser = [
-    fill(context, values),
-    "",
-    LOADER_TEXT.ackHeading,
-    fill(ackRules, values),
-    "",
-    LOADER_TEXT.abstractHeading,
-    fill(abstractRules, values),
-    "",
-    LOADER_TEXT.abstractBand,
-    LOADER_TEXT.ackBand,
-  ].join("\n");
+  const ackUser = [fill(context, values), "", LOADER_TEXT.ackHeading, fill(ackRules, values), "", LOADER_TEXT.ackBand].join("\n");
 
-  const callARetryUser = [
-    LOADER_TEXT.callARetryIntro,
+  const abstractUser = [fill(context, values), "", LOADER_TEXT.abstractHeading, fill(abstractRules, values), "", LOADER_TEXT.abstractBand].join("\n");
+
+  const abstractRetryUser = [
+    LOADER_TEXT.abstractRetryIntro,
     "",
     fill(context, values),
-    "",
-    LOADER_TEXT.ackHeading,
-    fill(ackRules, values),
     "",
     LOADER_TEXT.abstractHeading,
     fill(abstractRules, values),
     "",
     LOADER_TEXT.abstractBand,
-    LOADER_TEXT.ackBand,
   ].join("\n");
 
   const callBUser = (tokens: string[]) =>
@@ -210,9 +202,11 @@ export async function loadPreliminaryPagesPrompts(values: PromptValues): Promise
     ].join("\n");
 
   return {
-    callASystem: LOADER_TEXT.callAIntro,
-    callAUser,
-    callARetryUser,
+    ackSystem: LOADER_TEXT.ackIntro,
+    ackUser,
+    abstractSystem: LOADER_TEXT.abstractIntro,
+    abstractUser,
+    abstractRetryUser,
     callBSystem: LOADER_TEXT.callBIntro,
     callBUser,
   };

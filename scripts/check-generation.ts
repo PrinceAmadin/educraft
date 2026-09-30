@@ -52,7 +52,7 @@ import {
   isStructuralEmpty,
 } from "../src/lib/generation/generate-chapter";
 import type { ClaudeUsage } from "../src/lib/anthropic-stream";
-import type { ClaudeStreamResult } from "../src/lib/anthropic";
+import { SUPERVISOR_FACING_MODEL, toStrictSchema, type ClaudeStreamResult } from "../src/lib/anthropic";
 
 let passed = 0;
 const failures: string[] = [];
@@ -145,6 +145,43 @@ check("price: 1M cache writes = $2.50 (1.25x)", near(costUsd("claude-sonnet-5", 
 check("price: 1M cache reads = $0.20 (0.1x)", near(costUsd("claude-sonnet-5", 0, 0, 0, { readTokens: 1_000_000 }), 0.2));
 check("price: 1,000 web searches = $10", near(costUsd("claude-sonnet-5", 0, 0, 1000), 10));
 check("price: unknown model falls back to the Sonnet rate", near(costUsd("claude-unknown", 1_000_000, 0), 2));
+check("price: Opus 5.5 is $4 in / $20 out", near(costUsd("claude-opus-5-5", 1_000_000, 0), 4) && near(costUsd("claude-opus-5-5", 0, 1_000_000), 20));
+
+// ─── Strict tool schemas (Opus 5.5 writes the aim, objectives and abstract) ──
+{
+  const source = {
+    type: "object",
+    properties: {
+      aim: { type: "string", description: "One sentence.", maxLength: 300 },
+      objectives: { type: "array", minItems: 3, maxItems: 5, items: { type: "string", minLength: 10 } },
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            score: { type: "integer", minimum: 0, maximum: 100, multipleOf: 1 },
+            band: { type: "string", enum: ["Strong", "Fair", "Weak"] },
+            // A property that happens to be named like a keyword is still a property.
+            minItems: { type: "string" },
+          },
+          required: ["score", "band"],
+        },
+      },
+    },
+    required: ["aim", "objectives"],
+  };
+  const before = JSON.stringify(source);
+  const strict = toStrictSchema(source) as any;
+  const text = JSON.stringify(strict);
+  check("strict: the input object is left as it was", JSON.stringify(source) === before);
+  check("strict: every object is closed", strict.additionalProperties === false && strict.properties.rows.items.additionalProperties === false, strict);
+  check("strict: the limits strict mode refuses are gone", !/"(maxLength|minLength|maxItems|minimum|maximum|multipleOf)"/.test(text) && strict.properties.objectives.minItems === undefined, text);
+  check("strict: required, enum and description are kept", strict.required.join() === "aim,objectives" && strict.properties.rows.items.required.join() === "score,band" && strict.properties.rows.items.properties.band.enum.length === 3 && strict.properties.aim.description === "One sentence.");
+  check("strict: a property named minItems survives", strict.properties.rows.items.properties.minItems?.type === "string");
+  check("strict: arrays keep their item type", strict.properties.objectives.items.type === "string" && strict.properties.objectives.type === "array");
+  check("strict: a non-object is returned as it is", toStrictSchema("x") === "x" && toStrictSchema(null) === null);
+  check("strict: the supervisor-facing texts are written by Opus 5.5", SUPERVISOR_FACING_MODEL === "claude-opus-5-5");
+}
 
 // ─── The brief ──────────────────────────────────────────────────────────────
 const brief = buildChapterBrief({

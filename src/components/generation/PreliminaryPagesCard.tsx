@@ -127,8 +127,8 @@ export function PreliminaryPagesCard({
         <div className="space-y-3 rounded-xl bg-card p-3 shadow-soft" role="group" aria-label="Confirm writing the pages">
           <p className="text-sm text-foreground">
             {pages?.editedByHand
-              ? "This writes the acknowledgement, abstract and list of abbreviations again from the chapters and replaces the text edited by hand. It spends Claude credits (about ₦40)."
-              : "This writes the acknowledgement, abstract and list of abbreviations from the chapters. It spends Claude credits (about ₦40)."}
+              ? "This writes the acknowledgement, abstract and list of abbreviations again from the chapters and replaces the text edited by hand. It spends Claude credits (about ₦100)."
+              : "This writes the acknowledgement, abstract and list of abbreviations from the chapters. It spends Claude credits (about ₦100)."}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" onClick={() => void write()}>

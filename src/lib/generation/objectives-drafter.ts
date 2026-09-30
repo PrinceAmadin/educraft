@@ -17,9 +17,13 @@
  * then the client's own "Aim: …" line (extractClientStatedAim) or one short
  * draftAim call. Every sentence sent to Claude is in OBJECTIVES_TEXT for the
  * founder to review.
+ *
+ * Written by Claude Opus 5.5 (SUPERVISOR_FACING_MODEL, founder, 30 Sept 2026:
+ * the aim and objectives are what a supervisor reads first; Sonnet 5's drafts
+ * scored mostly Weak or Fair on "Strong" in the independent check).
  */
 
-import { callClaudeForJson } from "@/lib/anthropic";
+import { SUPERVISOR_FACING_MODEL, callClaudeForJson } from "@/lib/anthropic";
 import { listFrom } from "@/lib/research/source-policy";
 import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { MAX_AIM_CHARS, MAX_OBJECTIVE_CHARS, MAX_OBJECTIVES, MIN_OBJECTIVES, validateAim, validateObjectives } from "@/lib/generation/objectives-rules";
@@ -144,6 +148,9 @@ const AIM_SCHEMA = {
 
 export class ObjectivesDraftError extends Error {}
 
+/** Opus 5.5 at medium effort: room for its thinking before the tool call, and a cap inside the 300 s a function may run. */
+const OPUS_CALL = { model: SUPERVISOR_FACING_MODEL, effort: "medium", maxTokens: 16_000, timeoutMs: 140_000 } as const;
+
 /**
  * Drafts the aim and the objectives; one retry when the reply breaks the
  * rules. The fromClient path is handled by extractClientStatedObjectives in
@@ -159,7 +166,7 @@ export async function draftObjectives(ctx: ObjectivesContext, usage: AiUsageCont
       toolName: "record_objectives",
       toolDescription: OBJECTIVES_TEXT.tool,
       inputSchema: SCHEMA as unknown as Record<string, unknown>,
-      maxTokens: 1500,
+      ...OPUS_CALL,
       usage: { ...usage, step: attempt === 1 ? usage.step : `${usage.step}_retry` },
     });
     const check = validateObjectives(listFrom(reply.objectives, "objectives"));
@@ -186,7 +193,7 @@ export async function draftAim(ctx: ObjectivesContext, objectives: string[], usa
       toolName: "record_aim",
       toolDescription: OBJECTIVES_TEXT.aimTool,
       inputSchema: AIM_SCHEMA as unknown as Record<string, unknown>,
-      maxTokens: 600,
+      ...OPUS_CALL,
       usage: { ...usage, step: attempt === 1 ? usage.step : `${usage.step}_retry` },
     });
     const aim = validateAim(reply.aim);

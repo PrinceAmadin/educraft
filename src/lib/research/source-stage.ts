@@ -94,6 +94,8 @@ export function stepEstimateMs(status: SourceStageStatus, kind: "CASE" | "ARCHIV
     case "PENDING":
       return 1_000;
     case "DRAFTING_OBJECTIVES":
+      // Opus 5.5 writes the aim and objectives (thinking first): a draft takes 30–90 s, up to 140 s.
+      return 150_000;
     case "PLANNING_POINTS":
       return 45_000;
     case "SEARCHING":

@@ -1,8 +1,9 @@
 /**
  * The independent check of a report's aim and objectives (founder, 30 Sept
- * 2026): a different model from the drafter (Claude Opus 5.5 judges; Sonnet 5
- * drafts), in a fresh call that never sees the drafter's prompt or reasoning
- * and is not told the objectives were drafted by AI, scores them 0–100 on
+ * 2026): the same model as the drafter (Claude Opus 5.5 writes and reviews),
+ * in a fresh, blind call with its own examiner prompt that never sees the
+ * drafter's prompt or reasoning and is not told the objectives were drafted
+ * by AI, scores them 0–100 on
  * Related, Strong and Achievable. The card shows three teal rings; low scores
  * warn and never block approval.
  *

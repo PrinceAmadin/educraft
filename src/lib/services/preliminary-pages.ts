@@ -8,11 +8,13 @@
  * hand (kept by every later automatic run) or writes them again:
  *   GET | POST | PATCH /api/admin/projects/[id]/generation/preliminary-pages
  *
- * Two Claude calls:
- *   A. record_preliminary_sections → { acknowledgement, abstract }.
- *      Retried once if the abstract falls outside 240–320 words. If still
- *      out on the retry, the closest attempt is stored, needsReview flips to
- *      true (shown on the Report tab's Preliminary pages card), and delivery is NOT
+ * Three Claude calls:
+ *   A. record_acknowledgement → { acknowledgement } (Sonnet 5), side by side with
+ *   A2. record_abstract → { abstract } (Claude Opus 5.5, SUPERVISOR_FACING_MODEL:
+ *      founder, 30 Sept 2026, supervisors read the abstract first). The abstract
+ *      alone is retried once if it falls outside 240–320 words. If still out on
+ *      the retry, the closest attempt is stored, needsReview flips to true
+ *      (shown on the Report tab's Preliminary pages card), and delivery is NOT
  *      blocked.
  *   B. expand_abbreviations → [{ token, expansion|null }, …].
  *      The scanner walks the five chapters for capitalised tokens (2–10
@@ -21,12 +23,12 @@
  *      confidently return null; the row keeps only the confident ones,
  *      sorted A–Z.
  *
- * Cost: ~₦34 in the good path, ~₦56 with one abstract retry, capped by two
- * calls per run. Never spawns more.
+ * Cost: about ₦100 in the good path (measured 30 Sept 2026: ₦99, of which the Opus abstract ₦78),
+ * one abstract retry more when it is out of band. Never spawns more.
  */
 
 import crypto from "crypto";
-import { callClaudeForJson, AnthropicError } from "@/lib/anthropic";
+import { SUPERVISOR_FACING_MODEL, callClaudeForJson, AnthropicError } from "@/lib/anthropic";
 import { db } from "@/lib/db";
 import { countWords } from "@/lib/generation/chapter-plan";
 import { loadPreliminaryPagesPrompts, PreliminaryPagesPromptError, type PromptValues } from "@/lib/generation/preliminary-pages-loader";
@@ -200,40 +202,52 @@ export function extractChapterInputs(chapters: { number: number; text: string }[
   return { aim, objectives, method, findings, conclusion };
 }
 
-// ── Call A: Acknowledgement + Abstract ─────────────────────────
+// ── Call A: the Acknowledgement (Sonnet 5) ─────────────────────
 
-const PRELIMINARY_TOOL_NAME = "record_preliminary_sections";
-
-const PRELIMINARY_TOOL_SCHEMA = {
+const ACK_TOOL_SCHEMA = {
   type: "object" as const,
-  properties: {
-    acknowledgement: { type: "string", description: "The full Acknowledgement page body, 150–250 words." },
-    abstract: { type: "string", description: "The full Abstract body, aiming for 260–290 words, hard limits 240–320." },
-  },
-  required: ["acknowledgement", "abstract"],
+  properties: { acknowledgement: { type: "string", description: "The full Acknowledgement page body, 150–250 words." } },
+  required: ["acknowledgement"],
 };
 
-interface PreliminarySectionsPayload {
-  acknowledgement: string;
-  abstract: string;
-}
-
-async function callAckAndAbstract(
-  system: string,
-  user: string,
-  projectDbId: string,
-  step: string,
-): Promise<PreliminarySectionsPayload> {
-  return callClaudeForJson<PreliminarySectionsPayload>({
+async function callAcknowledgement(system: string, user: string, projectDbId: string): Promise<string> {
+  const reply = await callClaudeForJson<{ acknowledgement?: string }>({
     system,
     user,
-    toolName: PRELIMINARY_TOOL_NAME,
-    toolDescription: "Record the Acknowledgement page and the Abstract page for one final-year project.",
-    inputSchema: PRELIMINARY_TOOL_SCHEMA,
-    maxTokens: 2000,
-    cacheSystem: false,
+    toolName: "record_acknowledgement",
+    toolDescription: "Record the Acknowledgement page for one final-year project.",
+    inputSchema: ACK_TOOL_SCHEMA,
+    maxTokens: 1200,
+    usage: { subsystem: SUBSYSTEM, step: "acknowledgement", projectId: projectDbId },
+  });
+  return reply.acknowledgement ?? "";
+}
+
+// ── Call A2: the Abstract (Claude Opus 5.5) ────────────────────
+//
+// Founder, 30 Sept 2026: the abstract, the aim and the objectives are what a
+// supervisor reads first, so they are written by SUPERVISOR_FACING_MODEL.
+
+const ABSTRACT_TOOL_SCHEMA = {
+  type: "object" as const,
+  properties: { abstract: { type: "string", description: "The full Abstract body, aiming for 260–290 words, hard limits 240–320." } },
+  required: ["abstract"],
+};
+
+async function callAbstract(system: string, user: string, projectDbId: string, step: string): Promise<string> {
+  const reply = await callClaudeForJson<{ abstract?: string }>({
+    system,
+    user,
+    toolName: "record_abstract",
+    toolDescription: "Record the Abstract page for one final-year project.",
+    inputSchema: ABSTRACT_TOOL_SCHEMA,
+    model: SUPERVISOR_FACING_MODEL,
+    effort: "medium",
+    maxTokens: 16_000,
+    timeoutMs: 140_000,
     usage: { subsystem: SUBSYSTEM, step, projectId: projectDbId },
   });
+  return reply.abstract ?? "";
 }
 
 // ── Call B: Abbreviations expansion ────────────────────────────
@@ -425,23 +439,27 @@ export async function runPreliminaryPages(context: PreliminaryPagesContext): Pro
     throw new PreliminaryPagesPromptError(error instanceof Error ? error.message : String(error));
   }
 
-  // Call A + one retry when the abstract is out of band.
-  let first = await callAckAndAbstract(prompts.callASystem, prompts.callAUser, context.projectDbId, "ack_abstract");
-  let abstractCount = countWords(first.abstract ?? "");
-  let closest = { attempt: first, count: abstractCount };
+  // The acknowledgement (Sonnet) and the abstract (Opus) side by side; one retry of the abstract alone when it is out of band.
+  const [acknowledgement, firstAbstract] = await Promise.all([
+    callAcknowledgement(prompts.ackSystem, prompts.ackUser, context.projectDbId),
+    callAbstract(prompts.abstractSystem, prompts.abstractUser, context.projectDbId, "abstract"),
+  ]);
+  let abstract = firstAbstract;
+  let abstractCount = countWords(abstract);
   let retries = 0;
   if (abstractCount < ABSTRACT_MIN_WORDS || abstractCount > ABSTRACT_MAX_WORDS) {
     retries = 1;
     console.info(`${TAG} ${context.projectDbId}: abstract ${abstractCount} words; retrying inside ${ABSTRACT_TARGET_LO}–${ABSTRACT_TARGET_HI}.`);
     try {
-      const second = await callAckAndAbstract(prompts.callASystem, prompts.callARetryUser, context.projectDbId, "ack_abstract_retry");
-      const secondCount = countWords(second.abstract ?? "");
-      if (distanceFromBand(secondCount) < distanceFromBand(closest.count)) closest = { attempt: second, count: secondCount };
+      const second = await callAbstract(prompts.abstractSystem, prompts.abstractRetryUser, context.projectDbId, "abstract_retry");
+      const secondCount = countWords(second);
+      if (distanceFromBand(secondCount) < distanceFromBand(abstractCount)) {
+        abstract = second;
+        abstractCount = secondCount;
+      }
     } catch (error) {
       console.warn(`${TAG} abstract retry threw`, error instanceof Error ? error.message : error);
     }
-    first = closest.attempt;
-    abstractCount = closest.count;
   }
   const needsReview = abstractCount < ABSTRACT_MIN_WORDS || abstractCount > ABSTRACT_MAX_WORDS;
 
@@ -456,8 +474,8 @@ export async function runPreliminaryPages(context: PreliminaryPagesContext): Pro
   }
 
   return {
-    acknowledgement: (first.acknowledgement ?? "").trim(),
-    abstract: (first.abstract ?? "").trim(),
+    acknowledgement: acknowledgement.trim(),
+    abstract: abstract.trim(),
     abstractWordCount: abstractCount,
     abstractRetries: retries,
     abbreviations,

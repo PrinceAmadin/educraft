@@ -54,7 +54,7 @@ export function ObjectivesCheckPanel({
           <p className="text-xs text-muted-foreground">
             {check?.status === "done"
               ? `${MODEL_LABEL[check.model ?? ""] ?? check.model ?? "Claude"} · ${formatDateTime(check.checkedAt)} · ${formatNaira(check.costNaira)}`
-              : "A separate model scores how related, strong and achievable they are for this topic. It never sees how they were drafted."}
+              : "An independent review in a separate session scores how related, strong and achievable they are for this topic. It never sees how they were drafted."}
           </p>
         </div>
         {state !== "running" ? button : null}
