@@ -35,6 +35,7 @@ export function NeedsAttention({ alerts }: { alerts: DashboardAlerts }) {
     });
   }
   if (alerts.semesterBonusPending) lines.push({ tone: "info", text: "A semester bonus recommendation is waiting for the founder", href: "/admin/finance/founder-draws", cta: "Founder draws" });
+  if (alerts.claudePotUnsustainable) lines.push({ tone: "warn", text: "Claude API allocation percentage may need review in settings — pot is not self-sustaining at current revenue levels", href: "/admin/settings/cashflow", cta: "Cashflow" });
 
   return (
     <section aria-labelledby="attention-heading" className="rounded-2xl bg-zone p-5 sm:p-7">

@@ -54,7 +54,7 @@ export default async function BucketsPage({ searchParams }: { searchParams: Reco
           canAct ? (
             <>
               {isFounder ? <FinanceSettingsDialog settings={settings} /> : null}
-              <ManualAdjustmentDialog />
+              <ManualAdjustmentDialog potsByBucket={Object.fromEntries(cards.map((c) => [c.bucket, c.pots.map((p) => ({ key: p.key, label: p.label }))]))} />
             </>
           ) : null
         }

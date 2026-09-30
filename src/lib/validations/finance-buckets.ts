@@ -22,6 +22,8 @@ export const manualAdjustmentSchema = z.object({
     .refine((n) => n !== 0, "Enter an amount other than 0")
     .refine((n) => Math.abs(n) <= 100_000_000, "That amount is too large"),
   reason: z.string().trim().min(3, "Say why").max(500),
+  /** Earmark the adjustment to a tracked pot inside the bucket; "" / omitted = the bucket only. */
+  potKey: z.string().trim().max(40).optional().or(z.literal("")),
 });
 
 export const recommendBonusSchema = z.object({

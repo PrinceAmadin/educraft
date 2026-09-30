@@ -59,6 +59,7 @@
     "cashflow:seed": "dotenv -e .env.local -- tsx scripts/cashflow-seed.ts",
     "payouts:backfill": "dotenv -e .env.local -- tsx scripts/payouts-backfill.ts",
     "pots:backfill": "dotenv -e .env.local -- tsx scripts/pots-backfill.ts",
+    "pots:reset-claude": "dotenv -e .env.local -- tsx scripts/reset-claude-pot.ts",
     "orchestrator:schedule": "dotenv -e .env.local -- tsx scripts/setup-orchestrator-schedule.ts"
   },
   "prisma": {

@@ -14,6 +14,7 @@ import {
   type BucketAmounts,
   type BucketHealth,
 } from "@/lib/finance/commission-config";
+import { potsOf } from "@/lib/finance/cashflow-types";
 import { cashflowForProject, getActiveCashflow } from "@/lib/services/cashflow";
 import { getFinanceSettings } from "@/lib/services/finance/settings";
 import { getUsdToNairaRate } from "@/lib/fx-rate";
@@ -382,21 +383,60 @@ export async function getRetainedSeries(months: string[]): Promise<Record<string
 
 export class BucketError extends Error {}
 
-/** The CFO's manual correction (rare). Signed amount; a reason is required. */
-export async function manualAdjustment(input: { bucket: BucketType; amount: number; reason: string; recordedById: string }): Promise<{ id: string }> {
+/**
+ * The CFO's manual correction (rare). Signed amount; a reason is required.
+ * A `potKey` earmarks the same amount to a tracked pot inside the bucket
+ * (so the pot ledger stays in step and "general (unearmarked)" does not
+ * absorb the correction). Every adjustment is written to CashflowAuditLog.
+ */
+export async function manualAdjustment(input: {
+  bucket: BucketType;
+  amount: number;
+  reason: string;
+  recordedById: string;
+  /** Earmark the adjustment to this tracked pot inside the bucket (optional). */
+  potKey?: string | null;
+  /** A longer note for the audit log, when it should differ from the transaction reason. */
+  auditNote?: string;
+}): Promise<{ id: string }> {
   const amount = Math.round(input.amount);
   if (amount === 0) throw new BucketError("Enter an amount other than 0");
+  const potKey = input.potKey?.trim() || null;
+  if (potKey) {
+    const { structure } = await getActiveCashflow();
+    const ok = potsOf(structure, input.bucket).some((p) => p.key === potKey && p.isTrackedAsPot);
+    if (!ok) throw new BucketError("That pot is not part of the chosen bucket");
+  }
   const now = new Date();
-  return db.bucketTransaction.create({
-    data: {
-      bucketType: input.bucket,
-      type: "ADJUSTMENT",
-      amount,
-      description: `Manual adjustment: ${input.reason.trim()}`,
-      recordedById: input.recordedById,
-      month: monthKeyOf(now),
-    },
-    select: { id: true },
+  const month = monthKeyOf(now);
+  return db.$transaction(async (tx) => {
+    const row = await tx.bucketTransaction.create({
+      data: {
+        bucketType: input.bucket,
+        type: "ADJUSTMENT",
+        amount,
+        description: `Manual adjustment: ${input.reason.trim()}`,
+        recordedById: input.recordedById,
+        month,
+      },
+      select: { id: true },
+    });
+    if (potKey) {
+      await tx.potTransaction.create({
+        data: { potKey, bucketType: input.bucket, type: "ADJUSTMENT", amount, month, recordedById: input.recordedById, note: input.reason.trim() },
+      });
+    }
+    await tx.cashflowAuditLog.create({
+      data: {
+        actorUserId: input.recordedById,
+        action: "bucket_adjustment",
+        entityType: "BucketTransaction",
+        entityId: row.id,
+        afterJson: { bucket: input.bucket, amount, potKey } as unknown as Prisma.InputJsonValue,
+        reason: (input.auditNote ?? input.reason).trim() || null,
+      },
+    });
+    return row;
   });
 }
 

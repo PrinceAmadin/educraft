@@ -13,6 +13,7 @@ import { potSplit } from "../src/lib/finance/commission-config";
 import { potsOf, BUCKET_KEYS } from "../src/lib/finance/cashflow-types";
 import { DEFAULT_CASHFLOW } from "../src/lib/finance/cashflow-default";
 import { DEFAULT_POT_FOR_CATEGORY } from "../src/lib/validations/expenses";
+import { claudePotUnsustainable } from "../src/lib/finance/pot-health";
 
 const S = DEFAULT_CASHFLOW;
 let failures = 0;
@@ -72,6 +73,17 @@ expect("a negative pot (over-topped) never shows negative buyable credit", canTo
 expect("claude_api takes 40% of the Operations Reserve delta", potSplit(1000, OPS, S).get("claude_api"), 400);
 expect("claude_api is a tracked pot (it accrues from the allocation)", Boolean(potsOf(S, OPS).find((p) => p.key === "claude_api")?.isTrackedAsPot), true);
 expect("a top-up is the only category that debits claude_api", Object.entries(DEFAULT_POT_FOR_CATEGORY).filter(([, v]) => v === "claude_api").map(([k]) => k), ["API cost"]);
+
+// ── The Claude API pot sustainability signal (decision 1c) ──
+const NOW = new Date("2026-11-01T00:00:00.000Z");
+const daysAgo = (d: number) => new Date(NOW.getTime() - d * 24 * 60 * 60 * 1000);
+expect("no pot history -> not unsustainable", claudePotUnsustainable([], NOW), false);
+expect("freshly reset to 0 today -> not unsustainable", claudePotUnsustainable([{ amount: -19643, createdAt: NOW }, { amount: 19643, createdAt: NOW }], NOW), false);
+expect("negative for 20 days -> unsustainable", claudePotUnsustainable([{ amount: -1000, createdAt: daysAgo(20) }], NOW), true);
+expect("negative but only 3 days of history -> not unsustainable", claudePotUnsustainable([{ amount: -1000, createdAt: daysAgo(3) }], NOW), false);
+expect("negative 20 days ago but recovered positive now -> not unsustainable", claudePotUnsustainable([{ amount: -1000, createdAt: daysAgo(20) }, { amount: 2000, createdAt: daysAgo(1) }], NOW), false);
+expect("negative 20 days ago but back to exactly 0 now -> not unsustainable", claudePotUnsustainable([{ amount: -1000, createdAt: daysAgo(20) }, { amount: 1000, createdAt: daysAgo(2) }], NOW), false);
+expect("dipped negative only within the last week -> not unsustainable", claudePotUnsustainable([{ amount: 500, createdAt: daysAgo(20) }, { amount: -900, createdAt: daysAgo(3) }], NOW), false);
 
 if (failures) {
   console.log(`\n${failures} check(s) failed`);

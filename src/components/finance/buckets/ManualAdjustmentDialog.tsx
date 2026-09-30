@@ -12,14 +12,20 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { BUCKET_META, BUCKET_TYPES } from "@/lib/finance/commission-config";
 
 /** The CFO's manual correction to a bucket — rare, signed, always with a reason, always in the log. */
-export function ManualAdjustmentDialog() {
+export function ManualAdjustmentDialog({ potsByBucket = {} }: { potsByBucket?: Record<string, { key: string; label: string }[]> }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [bucket, setBucket] = React.useState<string>(BUCKET_TYPES[0]);
+  const [potKey, setPotKey] = React.useState("");
   const [amount, setAmount] = React.useState("");
   const [reason, setReason] = React.useState("");
+
+  const bucketPots = potsByBucket[bucket] ?? [];
+  React.useEffect(() => {
+    setPotKey("");
+  }, [bucket]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,7 +35,7 @@ export function ManualAdjustmentDialog() {
       const res = await fetch("/api/admin/finance/buckets/manual-adjustment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bucket, amount: Number(amount), reason: reason.trim() }),
+        body: JSON.stringify({ bucket, amount: Number(amount), reason: reason.trim(), potKey: potKey || undefined }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -70,6 +76,18 @@ export function ManualAdjustmentDialog() {
                 ))}
               </Select>
             </Field>
+            {bucketPots.length > 0 ? (
+              <Field label="Pot (optional)" htmlFor="ma-pot" hint="Earmark this correction to a pot inside the bucket. Leave as general otherwise.">
+                <Select id="ma-pot" value={potKey} onChange={(e) => setPotKey(e.target.value)}>
+                  <option value="">No pot — the bucket only</option>
+                  {bucketPots.map((p) => (
+                    <option key={p.key} value={p.key}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            ) : null}
             <Field label="Amount (naira, negative to remove)" htmlFor="ma-amount">
               <Input id="ma-amount" type="number" inputMode="numeric" step={1} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="-5000" required />
             </Field>

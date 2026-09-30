@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getUsdToNairaRate } from "@/lib/fx-rate";
+import { balanceAsOf, claudePotUnsustainable } from "@/lib/finance/pot-health";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import { getPotBalances } from "@/lib/services/finance/buckets";
 
@@ -71,6 +72,19 @@ export async function getClaudePot(): Promise<ClaudePot> {
   const [balances, usdRate] = await Promise.all([getPotBalances(), getUsdToNairaRate()]);
   const balanceNaira = balances.claude_api ?? 0;
   return { balanceNaira, usdRate, canTopUpUsd: usdRate > 0 ? Math.max(0, Math.round(balanceNaira / usdRate)) : 0 };
+}
+
+/**
+ * The Claude API pot's sustainability signal for the CFO dashboard (decision 1c).
+ * The rule itself is pure (`src/lib/finance/pot-health.ts`); this reads the rows.
+ */
+export async function getClaudePotHealth(now: Date = new Date()): Promise<{ unsustainable: boolean; balance: number }> {
+  const rows = await db.potTransaction.findMany({
+    where: { potKey: "claude_api" },
+    select: { amount: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return { unsustainable: claudePotUnsustainable(rows, now), balance: Math.round(balanceAsOf(rows, now)) };
 }
 
 export interface PotMovement {
