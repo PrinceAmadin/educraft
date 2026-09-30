@@ -97,33 +97,56 @@ function ReferenceCard({ token, r }: { token: string; r: SupervisorReference }) 
 }
 
 /**
- * Two flat sections — With PDF first, then Available through library.
- * Inside each section, CORE papers come before CLOSELY RELATED (the tier the
- * researcher classified as base literature reads first), and within a tier
- * the citation-count sort from the loader is preserved.
+ * A tier section — Core references OR Closely related. Papers with a
+ * downloadable PDF come first (the supervisor can click and read immediately),
+ * then the paywalled ones with DOI links to the publisher. Order within each
+ * sub-group preserves the loader's citation-count desc sort.
  */
-function Section({ title, intro, refs, token }: { title: string; intro: string; refs: SupervisorReference[]; token: string }) {
-  if (refs.length === 0) return null;
+function TierSection({
+  title,
+  intro,
+  withPdf,
+  paywalled,
+  token,
+}: {
+  title: string;
+  intro: string;
+  withPdf: SupervisorReference[];
+  paywalled: SupervisorReference[];
+  token: string;
+}) {
+  const total = withPdf.length + paywalled.length;
+  if (total === 0) return null;
   return (
     <section className="mt-10">
       <div className="border-b border-border/60 pb-2">
         <h2 className="text-xl font-semibold text-foreground">
-          {title} <span className="text-muted-foreground">({refs.length})</span>
+          {title} <span className="text-muted-foreground">({total})</span>
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">{intro}</p>
       </div>
-      <ul className="mt-4 space-y-2">
-        {refs.map((r) => (
-          <ReferenceCard key={r.id} token={token} r={r} />
-        ))}
-      </ul>
+      {withPdf.length > 0 ? (
+        <>
+          <p className="mt-6 text-sm font-medium text-foreground">With PDF ({withPdf.length})</p>
+          <ul className="mt-2 space-y-2">
+            {withPdf.map((r) => (
+              <ReferenceCard key={r.id} token={token} r={r} />
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {paywalled.length > 0 ? (
+        <>
+          <p className="mt-6 text-sm font-medium text-foreground">Available through your library ({paywalled.length})</p>
+          <ul className="mt-2 space-y-2">
+            {paywalled.map((r) => (
+              <ReferenceCard key={r.id} token={token} r={r} />
+            ))}
+          </ul>
+        </>
+      ) : null}
     </section>
   );
-}
-
-function coreFirst(a: SupervisorReference, b: SupervisorReference): number {
-  if (a.tier !== b.tier) return a.tier === "key" ? -1 : 1;
-  return 0; // preserve loader order (citations desc, then title)
 }
 
 export default async function SupervisorPage({ params }: { params: { token: string } }) {
@@ -190,16 +213,18 @@ export default async function SupervisorPage({ params }: { params: { token: stri
         ) : null}
       </header>
 
-      <Section
-        title="Downloadable"
-        intro="The papers we have full copies of on this page. Core references come first, then closely related supporting literature."
-        refs={[...pkg.key.withPdf, ...pkg.supporting.withPdf].sort(coreFirst)}
+      <TierSection
+        title="Core references"
+        intro="The base literature this project builds on."
+        withPdf={pkg.key.withPdf}
+        paywalled={pkg.key.paywalled}
         token={params.token}
       />
-      <Section
-        title="Available through your library"
-        intro="Papers we located but couldn't download. Open the DOI link — your university library's subscription usually gives full access. Core references come first, then closely related supporting literature."
-        refs={[...pkg.key.paywalled, ...pkg.supporting.paywalled].sort(coreFirst)}
+      <TierSection
+        title="Closely related"
+        intro="Papers that support the project's methods and background."
+        withPdf={pkg.supporting.withPdf}
+        paywalled={pkg.supporting.paywalled}
         token={params.token}
       />
 
