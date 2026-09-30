@@ -131,6 +131,8 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const [busy, setBusy] = React.useState<"approve" | "save" | "reopen" | BriefAction | "add" | "remove" | null>(null);
   const [problems, setProblems] = React.useState<string[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
+  // "Drafting… about a minute" says a run has started; it goes once the poll sees the run finish.
+  const runningNotice = React.useRef<string | null>(null);
   const [reopenOpen, setReopenOpen] = React.useState(false);
   const [reason, setReason] = React.useState("");
   /** A report approved without an aim: the aim being written for it (starts as the suggestion). */
@@ -210,6 +212,11 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
         draftRunning.current = Boolean(next.brief?.running);
         setCard(next);
         if (justDrafted && next.brief) setForm((f) => ({ ...f, ...briefForm(next) }));
+        if (!next.brief?.running && !next.brief?.checkRunning && runningNotice.current) {
+          const notice = runningNotice.current;
+          runningNotice.current = null;
+          setMessage((m) => (m === notice ? null : m));
+        }
       } catch {
         // offline for a moment: the next tick tries again
       }
@@ -287,6 +294,7 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
       if (kind === "suggest_aim") setLockedAim(next.brief?.draftedAim ?? "");
       // A saved aim on a locked card becomes the card's aim, so the check below compares against it.
       if (kind === "add_aim") setForm((f) => ({ ...f, aim: next.brief?.aim ?? f.aim }));
+      runningNotice.current = next.brief?.running || next.brief?.checkRunning ? done : null;
       setMessage(done);
       router.refresh();
       return true;
