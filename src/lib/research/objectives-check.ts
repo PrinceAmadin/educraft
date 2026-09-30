@@ -23,8 +23,8 @@ import { selfBaseUrl } from "@/lib/self-base-url";
 /** The source stage's AI usage subsystem (SOURCE_STAGE_SUBSYSTEM in source-stage.ts, not imported: that file imports this one), so the check counts in the card's cost. */
 const SOURCE_STAGE_SUBSYSTEM = "source_stage";
 
-/** Two judge attempts of at most 100 s each, plus the saves. */
-export const CHECK_LEASE_MS = 240_000;
+/** Two judge attempts of at most 140 s each, plus the saves (the internal route may run 300 s). */
+export const CHECK_LEASE_MS = 300_000;
 
 export class CheckRunningError extends Error {
   constructor() {

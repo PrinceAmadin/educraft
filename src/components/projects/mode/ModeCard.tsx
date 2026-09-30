@@ -285,6 +285,8 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
       if (kind === "add" || kind === "remove") setForm((f) => ({ ...f, selected: briefForm(next).selected }));
       else if (kind !== "check_objectives" && kind !== "suggest_aim" && kind !== "add_aim") setForm((f) => ({ ...f, ...briefForm(next) }));
       if (kind === "suggest_aim") setLockedAim(next.brief?.draftedAim ?? "");
+      // A saved aim on a locked card becomes the card's aim, so the check below compares against it.
+      if (kind === "add_aim") setForm((f) => ({ ...f, aim: next.brief?.aim ?? f.aim }));
       setMessage(done);
       router.refresh();
       return true;

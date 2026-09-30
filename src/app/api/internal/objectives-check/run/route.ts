@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { runObjectivesCheck, verifyCheckRequest } from "@/lib/research/objectives-check";
 
-// Two judge attempts of at most 100 s each.
+// Two judge attempts of at most 140 s each.
 export const maxDuration = 300;
 
 /**

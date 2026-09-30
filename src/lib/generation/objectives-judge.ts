@@ -77,7 +77,8 @@ export async function judgeObjectives(input: ObjectivesCheckInput, usage: AiUsag
       toolDescription: OBJECTIVES_CHECK_TEXT.tool,
       inputSchema: CHECK_SCHEMA as unknown as Record<string, unknown>,
       maxTokens: 16_000,
-      timeoutMs: 100_000,
+      // A check usually answers in 20–60 s; one on production took over 100 s (30 Sept), so allow 140 s.
+      timeoutMs: 140_000,
       usage: { ...usage, step: attempt === 1 ? usage.step : `${usage.step}_retry` },
     });
     const check = validateCheckReply(reply, input.objectives.length);
