@@ -3,7 +3,7 @@
 import * as React from "react";
 import { DisplayHeading, Eyebrow, Section } from "@/components/primitives/Section";
 import { Reveal } from "@/components/primitives/Reveal";
-import type { ProcessStep } from "@/lib/marketing";
+import { processSteps } from "@/lib/marketing";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,8 +21,13 @@ import { cn } from "@/lib/utils";
  *
  * Every stage is fully legible at all times. Only the marker and the stage
  * title change state; body copy never dims below its readable value.
+ *
+ * The page hands over only the downpayment percent (from the published
+ * cashflow structure): the steps carry icon components, which cannot cross the
+ * server-to-client boundary, so they are built here.
  */
-export function ProcessTimeline({ steps: PROCESS }: { steps: ProcessStep[] }) {
+export function ProcessTimeline({ downpaymentPercent }: { downpaymentPercent: number }) {
+  const PROCESS = React.useMemo(() => processSteps(downpaymentPercent), [downpaymentPercent]);
   const [active, setActive] = React.useState(0);
   const stageRefs = React.useRef<(HTMLLIElement | null)[]>([]);
 

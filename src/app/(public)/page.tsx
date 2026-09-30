@@ -6,7 +6,6 @@ import { ProcessTimeline } from "@/components/marketing/ProcessTimeline";
 import { QualityControl } from "@/components/marketing/QualityControl";
 import { ServiceBento } from "@/components/marketing/ServiceBento";
 import { TestimonialStage } from "@/components/marketing/TestimonialStage";
-import { processSteps } from "@/lib/marketing";
 import { publicDownpaymentPercent } from "@/lib/services/cashflow";
 
 /**
@@ -29,13 +28,14 @@ import { publicDownpaymentPercent } from "@/lib/services/cashflow";
  *   Closing     ink    immersive   full-bleed statement
  */
 export default async function LandingPage() {
-  const steps = processSteps(await publicDownpaymentPercent());
+  // Only the figure crosses to the client component; the steps (with their icons) are built there.
+  const downpaymentPercent = await publicDownpaymentPercent();
   return (
     <>
       <Hero />
       <Ledger />
       <ServiceBento />
-      <ProcessTimeline steps={steps} />
+      <ProcessTimeline downpaymentPercent={downpaymentPercent} />
       <Expertise />
       <QualityControl />
       <TestimonialStage />
