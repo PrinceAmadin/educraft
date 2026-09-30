@@ -121,7 +121,8 @@ export interface StoredObjectivesCheck {
 }
 
 export const MAX_REASON_CHARS = 240;
-const MAX_SUMMARY_CHARS = 400;
+// Opus often writes three sentences for the supervisor; 400 cut them mid-word on production.
+const MAX_SUMMARY_CHARS = 700;
 
 function score(v: unknown): number | null {
   const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
