@@ -29,6 +29,8 @@ export function buildClientResearchMessage(input: {
   clientId: string;
   /** The client's Documents tab. */
   documentsUrl: string;
+  /** Public supervisor page — the URL the client forwards to their supervisor. Optional for jobs without a shareToken. */
+  supervisorUrl?: string | null;
   summary: ResearchSummary;
   greeting: string;
 }): string {
@@ -65,8 +67,19 @@ export function buildClientResearchMessage(input: {
     `Everything is in the Documents tab of your dashboard, with the full reference list as a Word file to show your supervisor:`,
     input.documentsUrl,
     `Sign in with your Client ID ${input.clientId}.`,
+  );
+
+  if (input.supervisorUrl) {
+    lines.push(
+      "",
+      `You can share this link with your supervisor — no sign-in needed on their side:`,
+      input.supervisorUrl,
+    );
+  }
+
+  lines.push(
     "",
-    `I'll keep you posted on your project (${projectCode}) and share feedback regularly.`
+    `I'll keep you posted on your project (${projectCode}) and share feedback regularly.`,
   );
   return lines.join("\n");
 }

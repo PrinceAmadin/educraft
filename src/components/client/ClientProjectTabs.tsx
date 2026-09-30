@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LuActivity, LuFileText, LuMessageCircle, LuWallet } from "react-icons/lu";
+import { LuActivity, LuFileText, LuMessageCircle, LuUserRound, LuWallet } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 export const CLIENT_TABS = [
   { key: "progress", label: "Progress", icon: LuActivity },
   { key: "documents", label: "Documents", icon: LuFileText },
+  { key: "supervisor", label: "Supervisor", icon: LuUserRound },
   { key: "payments", label: "Payments", icon: LuWallet },
   { key: "messages", label: "Messages", icon: LuMessageCircle },
 ] as const satisfies readonly { key: string; label: string; icon: IconType }[];

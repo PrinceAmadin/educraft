@@ -10,8 +10,11 @@ import { ClientPaymentsPanel } from "@/components/client/ClientPaymentsPanel";
 import { ClientPayButton } from "@/components/client/ClientPayButton";
 import { MessageThread } from "@/components/messages/MessageThread";
 import { ClientDocumentsTab } from "@/components/client/ClientDocumentsTab";
+import { ClientSupervisorTab } from "@/components/client/ClientSupervisorTab";
 import { ClientDataPauseBanner } from "@/components/client/ClientDataPauseBanner";
 import { getClientPauseView } from "@/lib/services/client-data-pause";
+import { db } from "@/lib/db";
+import { siteUrl } from "@/lib/site-url";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 
 /**
@@ -54,9 +57,29 @@ export async function ClientProjectScreen({
 
       {tab === "progress" ? <ProgressTab view={view} preview={preview} /> : null}
       {tab === "documents" ? <ClientDocumentsTab view={view} basePath={basePath} preview={preview} /> : null}
+      {tab === "supervisor" ? <SupervisorTab view={view} preview={preview} /> : null}
       {tab === "payments" ? <PaymentsTab view={view} preview={preview} returnedFromPaystack={returnedFromPaystack} /> : null}
       {tab === "messages" ? <MessagesTab view={view} preview={preview} /> : null}
     </div>
+  );
+}
+
+async function SupervisorTab({ view, preview }: { view: ClientProjectView; preview: boolean }) {
+  const job = await db.researchJob.findUnique({
+    where: { projectId: view.id },
+    select: { status: true, shareToken: true, supervisorViews: true, supervisorFirstViewedAt: true },
+  });
+  const supervisorUrl =
+    job?.status === "PASSED" && job.shareToken ? `${siteUrl()}/research/${job.shareToken}` : null;
+  return (
+    <ClientSupervisorTab
+      projectCode={view.code}
+      projectTitle={view.title}
+      supervisorUrl={supervisorUrl}
+      supervisorViews={job?.supervisorViews ?? 0}
+      supervisorFirstViewedAt={job?.supervisorFirstViewedAt ? job.supervisorFirstViewedAt.toISOString() : null}
+      preview={preview}
+    />
   );
 }
 

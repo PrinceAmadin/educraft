@@ -32,7 +32,16 @@ export async function ClientMessagesTab({
   const [messages, updates, research] = await Promise.all([
     getThread(project.id, "ADMIN", { markRead: false }),
     listUpdates(project.id, { includeHidden: true, take: 60 }),
-    db.researchJob.findUnique({ where: { projectId: project.id }, select: { releasedToClientAt: true } }),
+    db.researchJob.findUnique({
+      where: { projectId: project.id },
+      select: {
+        releasedToClientAt: true,
+        shareToken: true,
+        supervisorViews: true,
+        supervisorFirstViewedAt: true,
+        supervisorLastViewedAt: true,
+      },
+    }),
   ]);
   const firstName = project.client.fullName.trim().split(/\s+/)[0] || "the client";
   const wa = toWaNumber(project.client.phone);
@@ -108,7 +117,12 @@ export async function ClientMessagesTab({
           clientFullName={project.client.fullName}
           projectCode={project.projectId}
           clientId={project.client.clientId}
+          clientPhone={project.client.phone}
           documentsUrl={`${siteUrl()}${clientProjectPath(project.projectId, "documents")}`}
+          supervisorUrl={research?.shareToken ? `${siteUrl()}/research/${research.shareToken}` : null}
+          supervisorViews={research?.supervisorViews ?? 0}
+          supervisorFirstViewedAt={research?.supervisorFirstViewedAt ? research.supervisorFirstViewedAt.toISOString() : null}
+          supervisorLastViewedAt={research?.supervisorLastViewedAt ? research.supervisorLastViewedAt.toISOString() : null}
           shared={Boolean(research?.releasedToClientAt)}
           summary={researchSummary}
         />

@@ -1173,6 +1173,17 @@ model ResearchJob {
   /// keywords in the title. Null on jobs run before 30 Sept 2026.
   projectAnalysis Json?
 
+  /// The token in the public supervisor URL `siteUrl()/research/{token}`.
+  /// Minted once at PASSED-time (or by the tokenize backfill for old rows).
+  /// The token is the credential — 32 hex chars, unguessable.
+  shareToken               String?   @unique
+  /// Supervisor access counters — updated by the public routes in `waitUntil`.
+  /// The first view fires one notifyOperations; after that only the counter bumps.
+  supervisorViews          Int       @default(0)
+  supervisorFirstViewedAt  DateTime?
+  supervisorLastViewedAt   DateTime?
+  supervisorPdfDownloads   Int       @default(0)
+
   /// Last-verified-by-CrossRef titles this job has already tried, so
   /// replacement rounds don't re-propose the same rejected candidates.
   triedTitles String[] @default([])

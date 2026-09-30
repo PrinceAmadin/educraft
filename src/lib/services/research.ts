@@ -1158,7 +1158,19 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
   // Research panel offers a "Paywalled references (N).docx" download that
   // renders from the DB on demand, always up to date.
 
-  const next = await db.researchJob.update({ where: { id: job.id }, data: { status: "PASSED" } });
+  // Every job that passes gets its public supervisor page URL minted right
+  // here — the token is the credential (32 hex, 128 bits of entropy), and the
+  // page opens on `siteUrl()/research/{token}` with no login. Doing it at
+  // PASSED-time means the link is always ready when the client update goes
+  // out; no "generate share link" button anywhere. Never rotated on this job
+  // (a research re-run deletes the whole job), so the URL is stable.
+  const next = await db.researchJob.update({
+    where: { id: job.id },
+    data: {
+      status: "PASSED",
+      ...(job.shareToken ? {} : { shareToken: crypto.randomBytes(16).toString("hex") }),
+    },
+  });
   await ledgerRunFinished(job.projectId, job.id, "COMPLETE");
   // D3b: a report project's objectives (and Law/History sources) come next; the next browser request starts them.
   await createPendingBrief(job.projectId).catch((error) => console.error("[research] could not queue the objectives stage", error));
