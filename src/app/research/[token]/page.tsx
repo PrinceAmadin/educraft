@@ -96,14 +96,21 @@ function ReferenceCard({ token, r }: { token: string; r: SupervisorReference }) 
   );
 }
 
-/** Subproblem-first grouping: each section shows the papers matched to one specific subproblem, in the analysis's order. */
-function SubproblemSection({ heading, description, refs, token }: { heading: string; description?: string; refs: SupervisorReference[]; token: string }) {
+/**
+ * Two flat sections — With PDF first, then Available through library.
+ * Inside each section, CORE papers come before CLOSELY RELATED (the tier the
+ * researcher classified as base literature reads first), and within a tier
+ * the citation-count sort from the loader is preserved.
+ */
+function Section({ title, intro, refs, token }: { title: string; intro: string; refs: SupervisorReference[]; token: string }) {
   if (refs.length === 0) return null;
   return (
     <section className="mt-10">
       <div className="border-b border-border/60 pb-2">
-        <h2 className="text-xl font-semibold text-foreground">{heading}</h2>
-        {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+        <h2 className="text-xl font-semibold text-foreground">
+          {title} <span className="text-muted-foreground">({refs.length})</span>
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">{intro}</p>
       </div>
       <ul className="mt-4 space-y-2">
         {refs.map((r) => (
@@ -114,49 +121,9 @@ function SubproblemSection({ heading, description, refs, token }: { heading: str
   );
 }
 
-/** Fallback tier grouping (used when the job has no `supervisorGrouping`). */
-function TierSection({
-  title,
-  intro,
-  withPdf,
-  paywalled,
-  token,
-}: {
-  title: string;
-  intro: string;
-  withPdf: SupervisorReference[];
-  paywalled: SupervisorReference[];
-  token: string;
-}) {
-  if (withPdf.length + paywalled.length === 0) return null;
-  return (
-    <section className="mt-10">
-      <div className="border-b border-border/60 pb-2">
-        <h2 className="text-xl font-semibold text-foreground">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{intro}</p>
-      </div>
-      {withPdf.length > 0 ? (
-        <>
-          <p className="mt-6 text-sm font-medium text-foreground">Downloadable ({withPdf.length})</p>
-          <ul className="mt-2 space-y-2">
-            {withPdf.map((r) => (
-              <ReferenceCard key={r.id} token={token} r={r} />
-            ))}
-          </ul>
-        </>
-      ) : null}
-      {paywalled.length > 0 ? (
-        <>
-          <p className="mt-6 text-sm font-medium text-foreground">Available through your library ({paywalled.length})</p>
-          <ul className="mt-2 space-y-2">
-            {paywalled.map((r) => (
-              <ReferenceCard key={r.id} token={token} r={r} />
-            ))}
-          </ul>
-        </>
-      ) : null}
-    </section>
-  );
+function coreFirst(a: SupervisorReference, b: SupervisorReference): number {
+  if (a.tier !== b.tier) return a.tier === "key" ? -1 : 1;
+  return 0; // preserve loader order (citations desc, then title)
 }
 
 export default async function SupervisorPage({ params }: { params: { token: string } }) {
@@ -183,8 +150,6 @@ export default async function SupervisorPage({ params }: { params: { token: stri
       : null,
     cs.downloadable > 0 ? `${cs.downloadable} downloadable PDFs on this page` : null,
   ].filter(Boolean);
-
-  const candidatesReviewed = pkg.candidateRounds * 150;
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-10 print:px-0 print:py-6">
@@ -216,13 +181,6 @@ export default async function SupervisorPage({ params }: { params: { token: stri
           <span>Prepared {formatDate(pkg.preparedAt)}</span>
         </div>
         <p className="mt-4 rounded-xl bg-zone px-4 py-3 text-sm text-foreground">{summaryBits}</p>
-        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          Our specialist ran targeted searches across OpenAlex (250 million-plus academic papers), reviewed more than{" "}
-          {candidatesReviewed.toLocaleString()} candidate papers, and kept the <strong>{pkg.totals.total}</strong> that most directly
-          address the goals of this project — <strong>{pkg.totals.withPdf}</strong> with a downloadable PDF and{" "}
-          <strong>{pkg.totals.paywalled}</strong> available through your university library. Every entry is a real published paper you
-          can verify through its DOI.
-        </p>
         {summaryStrip.length > 0 ? (
           <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {summaryStrip.map((bit, i) => (
@@ -232,44 +190,18 @@ export default async function SupervisorPage({ params }: { params: { token: stri
         ) : null}
       </header>
 
-      {pkg.bySubproblem && pkg.bySubproblem.groups.length > 0 ? (
-        <>
-          {pkg.bySubproblem.groups.map((g) => (
-            <SubproblemSection
-              key={g.subproblem}
-              heading={`On ${g.subproblem}`}
-              description={`${g.references.length} paper${g.references.length === 1 ? "" : "s"} matched to this component of the project.`}
-              refs={g.references}
-              token={params.token}
-            />
-          ))}
-          {pkg.bySubproblem.unassigned.length > 0 ? (
-            <SubproblemSection
-              heading="Other foundations"
-              description="Papers that support the project's methods and background without belonging to a single subproblem."
-              refs={pkg.bySubproblem.unassigned}
-              token={params.token}
-            />
-          ) : null}
-        </>
-      ) : (
-        <>
-          <TierSection
-            title="Key references"
-            intro="The base literature this project builds on."
-            withPdf={pkg.key.withPdf}
-            paywalled={pkg.key.paywalled}
-            token={params.token}
-          />
-          <TierSection
-            title="Supporting references"
-            intro="Papers that support the project's methods and background."
-            withPdf={pkg.supporting.withPdf}
-            paywalled={pkg.supporting.paywalled}
-            token={params.token}
-          />
-        </>
-      )}
+      <Section
+        title="Downloadable"
+        intro="The papers we have full copies of on this page. Core references come first, then closely related supporting literature."
+        refs={[...pkg.key.withPdf, ...pkg.supporting.withPdf].sort(coreFirst)}
+        token={params.token}
+      />
+      <Section
+        title="Available through your library"
+        intro="Papers we located but couldn't download. Open the DOI link — your university library's subscription usually gives full access. Core references come first, then closely related supporting literature."
+        refs={[...pkg.key.paywalled, ...pkg.supporting.paywalled].sort(coreFirst)}
+        token={params.token}
+      />
 
       {pkg.totals.paywalled > 0 ? (
         <section className="mt-10 rounded-xl border border-border/60 bg-zone px-5 py-4 text-sm text-foreground">
