@@ -19,6 +19,7 @@ import { StatsCard } from "@/components/dashboard/StatsCard";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralShareCard } from "@/components/ambassadors/ReferralShareCard";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { CadenceNotice } from "@/components/shared/CadenceNotice";
 import { firstName, formatNaira } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My referrals" };
@@ -59,6 +60,8 @@ export default async function AmbassadorDashboardPage() {
         </h1>
         <TierBadge tier={data.tier} />
       </div>
+
+      <CadenceNotice>Your commission is owed the moment someone you referred pays their downpayment, and paid out every Saturday to the bank account on your profile.</CadenceNotice>
 
       {isProvisional(ambassador) ? (
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl bg-gold/10 px-4 py-3">

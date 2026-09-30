@@ -154,7 +154,7 @@ async function loadFootprints(client: Db, ids: string[], now: Date): Promise<Map
       return [`platinum:${q}:${r.ambassadorId}`, `challenge:${q}:${r.ambassadorId}`];
     });
   const bonuses = bonusKeys.length
-    ? await client.payoutRecord.findMany({ where: { bonusKey: { in: bonusKeys }, status: { not: "CANCELLED" } }, select: { bonusKey: true } })
+    ? await client.payoutRecord.findMany({ where: { bonusKey: { in: bonusKeys }, status: { notIn: ["CANCELLED", "REVERSED"] } }, select: { bonusKey: true } })
     : [];
   const processedBonuses = new Set(bonuses.map((b) => b.bonusKey));
   const flaggerIds = projects.map((p) => p.testFlaggedById).filter((x): x is string => Boolean(x));

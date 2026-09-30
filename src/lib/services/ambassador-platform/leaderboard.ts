@@ -117,7 +117,7 @@ const REF_SELECT = {
       ambassadorCommission: true,
       parentAmbassadorId: true,
       parentCommission: true,
-      payoutRecords: { where: { status: { not: "CANCELLED" }, leg: { in: ["AMBASSADOR", "PARENT"] } }, select: { leg: true, recipientId: true, amount: true } },
+      payoutRecords: { where: { status: { notIn: ["CANCELLED", "REVERSED"] }, leg: { in: ["AMBASSADOR", "PARENT"] } }, select: { leg: true, recipientId: true, amount: true } },
     },
   },
 } satisfies Prisma.AmbassadorReferralSelect;

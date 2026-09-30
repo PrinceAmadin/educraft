@@ -94,6 +94,8 @@ export const ROUTE_PERMISSIONS: readonly RoutePermission[] = [
   // The commission structure: every executive may read it; only the founder publishes (founder, 30 Sept 2026).
   { prefix: "/admin/settings/cashflow", roles: ALL_EXECS },
   { prefix: "/admin/settings/bank", roles: ALL_EXECS },
+  // Each executive's own commissions and bonuses (owed and paid), from the payout ledger (Phase 3).
+  { prefix: "/admin/earnings", roles: ["SUPER_ADMIN", "HOG", "COO"] },
   { prefix: "/admin", roles: ["SUPER_ADMIN"] },
 ];
 

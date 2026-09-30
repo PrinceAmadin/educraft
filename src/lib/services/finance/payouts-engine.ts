@@ -1,7 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { personLegs, ratePercentForTier, workerLeg, workersPercent, type ProjectLegs } from "@/lib/finance/commission-config";
+import { personLegs, workerLeg, workersPercent, type ProjectLegs } from "@/lib/finance/commission-config";
 import { TIER_LABELS, isActiveRow, type CashflowStructure, type PersonTrigger } from "@/lib/finance/cashflow-types";
+import {
+  CREATE_STATUS,
+  NOT_OWED,
+  UNPAID_STATUSES,
+  isPaid,
+  reconcileAction,
+  triggerFired,
+  type PayoutStatus,
+} from "@/lib/finance/payout-status";
 import { cashflowForProject, getActiveCashflow } from "@/lib/services/cashflow";
 import { monthKeyOf } from "@/lib/services/finance/buckets";
 import { monthLabel, monthRange } from "@/lib/services/finance/surplus";
@@ -79,6 +89,10 @@ export interface LegRow {
   basis: string;
   /** When this leg becomes owed, from the structure the project is computed under. */
   trigger: PersonTrigger;
+  /** The cashflow Level-1 key this leg belongs to (workers, ambassador, hog, coo, …). */
+  ruleKey: string;
+  /** The rate this leg was computed at, in percent (for the record's audit columns). */
+  ratePercent: number;
 }
 
 export interface ExecNames {
@@ -143,6 +157,7 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames, s: CashflowStructur
   if (p.workerId && p.worker) {
     const amount = workerLeg(legs, s);
     if (amount > 0) {
+      const rate = p.workerPayoutRate ?? workersPercent(s);
       out.push({
         leg: "WORKER",
         recipientType: "WORKER",
@@ -151,11 +166,14 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames, s: CashflowStructur
         amount,
         basis: `${pct(p.workerPayoutRate, workersPercent(s))} worker rate`,
         trigger: triggerOfRecipients(s, "workers"),
+        ruleKey: "workers",
+        ratePercent: rate,
       });
     }
   }
   if (p.ambassadorId && p.ambassador && (p.ambassadorCommission ?? 0) > 0) {
     const sub = p.parentAmbassadorId != null;
+    const rate = p.ambassadorCommRate ?? lowestTier;
     out.push({
       leg: "AMBASSADOR",
       recipientType: "AMBASSADOR",
@@ -164,6 +182,8 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames, s: CashflowStructur
       amount: Math.round(p.ambassadorCommission ?? 0),
       basis: `${pct(p.ambassadorCommRate, lowestTier)} ${sub ? "Sub-Ambassador" : "ambassador"} rate (${rateTierLabel(p.ambassadorCommRate, s)})`,
       trigger: triggerOfRecipients(s, "ambassadors"),
+      ruleKey: "ambassador",
+      ratePercent: rate,
     });
   }
   if (p.parentAmbassadorId && p.parentAmbassador && (p.parentCommission ?? 0) > 0) {
@@ -175,6 +195,8 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames, s: CashflowStructur
       amount: Math.round(p.parentCommission ?? 0),
       basis: `${pct(p.parentCommRate, 0)} Core override`,
       trigger: triggerOfRecipients(s, "ambassadors"),
+      ruleKey: "ambassador",
+      ratePercent: p.parentCommRate ?? 0,
     });
   }
   for (const leg of personLegs(legs, s)) {
@@ -189,6 +211,8 @@ export function legsFor(p: ProjectForLegs, execs: ExecNames, s: CashflowStructur
       amount: leg.amount,
       basis: `${pct(leg.ratePercent, 0)} ${leg.label} commission${leg.role === "HOG" ? " on ambassador-driven project" : leg.role === "COO" ? " on delivered project" : ""}`,
       trigger: leg.trigger,
+      ruleKey: leg.key,
+      ratePercent: leg.ratePercent,
     });
   }
   return out;
@@ -222,9 +246,14 @@ const DEAD_STATUSES = ["CANCELLED", "REFUNDED"];
  *   the project is COMPLETED, in the completion month (`opts.month` overrides
  *   it for a monthly recalculation); one triggered at full payment when the
  *   balance is verified.
- * - A cancelled or refunded project owes nothing: its PENDING records are
- *   cancelled. A PAID record is never touched. A leg already marked paid on
- *   the project before the engine existed is recorded as PAID.
+ * - A leg no longer produced on a LIVE project (the ambassador was removed, a
+ *   rate went to zero) has its owed record CANCELLED. A cancelled or refunded
+ *   project owes nothing new, but its already-ACCRUED records are left alone in
+ *   Phase 3 — a commission is undone only by a refund (a REVERSED record with a
+ *   reason, Phase 6), never by a page load; today's cancel still cancels unpaid
+ *   rows because the project goes dead and its legs stop being produced.
+ * - A PAID or REVERSED record is settled and never touched. A leg already
+ *   marked paid on the project before the engine existed is recorded as PAID.
  */
 export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts: { month?: string } = {}): Promise<ReconcileResult> {
   const project = await tx.project.findUnique({ where: { id: projectDbId }, select: PROJECT_SELECT });
@@ -232,12 +261,14 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
   const s = await cashflowForProject(project);
   const execs = await execNames(tx, s);
   const alive = !DEAD_STATUSES.includes(project.status);
-  const converted = alive && project.downpaymentStatus === "Verified";
-  const completed = alive && project.status === "COMPLETED";
-  const fullyPaid = alive && (project.balanceStatus === "Verified" || completed);
-  const fired = (trigger: PersonTrigger) => (trigger === "downpayment" ? converted : trigger === "full_payment" ? fullyPaid : completed);
+  const state = {
+    alive,
+    downpaymentVerified: project.downpaymentStatus === "Verified",
+    balanceVerified: project.balanceStatus === "Verified",
+    completed: project.status === "COMPLETED",
+  };
   const all = alive ? legsFor(project, execs, s) : [];
-  const produced = all.filter((l) => fired(l.trigger));
+  const produced = all.filter((l) => triggerFired(l.trigger, state));
   const completionMonth = opts.month ?? monthKeyOf(project.finalCompletionDate ?? new Date());
   const conversionMonth = monthKeyOf(project.downpaymentDate ?? project.finalCompletionDate ?? new Date());
   const fullPaymentMonth = monthKeyOf(project.balanceDate ?? project.finalCompletionDate ?? new Date());
@@ -254,7 +285,19 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
     // A downpayment leg stays in the month it was first recorded in: records
     // made before Phase 3 (at completion) are not moved to an earlier month.
     const month = leg.trigger === "downpayment" ? (row?.month ?? conversionMonth) : leg.trigger === "full_payment" ? (row?.month ?? fullPaymentMonth) : completionMonth;
-    if (!row) {
+    const changed =
+      !!row &&
+      (row.amount !== leg.amount ||
+        row.basis !== leg.basis ||
+        row.recipientName !== leg.recipientName ||
+        row.recipientType !== leg.recipientType ||
+        row.month !== month ||
+        row.ruleKey !== leg.ruleKey ||
+        row.ratePercent !== leg.ratePercent ||
+        row.triggerEventKey !== leg.trigger ||
+        row.cashflowVersionId !== (project.cashflowVersionId ?? null));
+    const action = reconcileAction({ existingStatus: (row?.status as PayoutStatus) ?? null, produced: true, changed });
+    if (action === "create") {
       const paidBefore = legacyPaid(project, leg.leg);
       await tx.payoutRecord.create({
         data: {
@@ -266,30 +309,43 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
           projectId: projectDbId,
           amount: leg.amount,
           basis: leg.basis,
-          status: paidBefore ? "PAID" : "PENDING",
+          status: paidBefore ? "PAID" : CREATE_STATUS,
+          ruleKey: leg.ruleKey,
+          ratePercent: leg.ratePercent,
+          triggerEventKey: leg.trigger,
+          cashflowVersionId: project.cashflowVersionId,
+          accruedAt: paidBefore ? (project.finalCompletionDate ?? project.downpaymentDate ?? new Date()) : new Date(),
           paidAt: paidBefore ? (project.finalCompletionDate ?? project.downpaymentDate ?? new Date()) : null,
           notes: paidBefore ? "Paid before the payout engine (project flag)" : null,
         },
       });
       result.created += 1;
       if (leg.recipientType === "AMBASSADOR") touched.add(leg.recipientId);
-      continue;
-    }
-    if (row.status === "PAID") continue;
-    const changed =
-      row.amount !== leg.amount || row.basis !== leg.basis || row.recipientName !== leg.recipientName || row.month !== month || row.status === "CANCELLED";
-    if (changed) {
+    } else if (action === "update" && row) {
       await tx.payoutRecord.update({
         where: { id: row.id },
-        data: { amount: leg.amount, basis: leg.basis, recipientName: leg.recipientName, recipientType: leg.recipientType, month, status: "PENDING" },
+        data: {
+          amount: leg.amount,
+          basis: leg.basis,
+          recipientName: leg.recipientName,
+          recipientType: leg.recipientType,
+          month,
+          status: CREATE_STATUS,
+          ruleKey: leg.ruleKey,
+          ratePercent: leg.ratePercent,
+          triggerEventKey: leg.trigger,
+          cashflowVersionId: project.cashflowVersionId,
+          // A cancelled row coming back to life gets a fresh accrual date; a live one keeps its own.
+          ...(row.status === "CANCELLED" ? { accruedAt: row.accruedAt ?? new Date() } : {}),
+        },
       });
       result.updated += 1;
       if (leg.recipientType === "AMBASSADOR") touched.add(leg.recipientId);
     }
   }
   for (const row of existing) {
-    if (row.status !== "PENDING") continue;
     if (keep.has(`${row.leg}:${row.recipientId}`)) continue;
+    if (reconcileAction({ existingStatus: row.status as PayoutStatus, produced: false, changed: false }) !== "cancel") continue;
     await tx.payoutRecord.update({ where: { id: row.id }, data: { status: "CANCELLED", notes: "No longer owed: the project's legs changed" } });
     result.cancelled += 1;
     if (row.recipientType === "AMBASSADOR") touched.add(row.recipientId);
@@ -364,7 +420,7 @@ export interface PayoutLine {
   amount: number;
   basis: string;
   completedAt: string | null;
-  status: "PENDING" | "PAID";
+  status: PayoutStatus;
   paidAt: string | null;
 }
 
@@ -418,7 +474,7 @@ export interface BonusRow {
   recipientName: string;
   amount: number;
   reason: string;
-  status: "PENDING" | "PAID" | "CANCELLED";
+  status: PayoutStatus;
   createdAt: string;
   paidAt: string | null;
 }
@@ -476,14 +532,14 @@ function toLine(r: RecordRow): PayoutLine {
     amount: r.amount,
     basis: r.basis,
     completedAt: r.project?.finalCompletionDate?.toISOString() ?? null,
-    status: r.status as "PENDING" | "PAID",
+    status: r.status as PayoutStatus,
     paidAt: r.paidAt?.toISOString() ?? null,
   };
 }
 
 function groupBase(recipientId: string, name: string, lines: PayoutLine[]): GroupBase {
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0));
-  const paid = Math.round(lines.filter((l) => l.status === "PAID").reduce((s, l) => s + l.amount, 0));
+  const paid = Math.round(lines.filter((l) => isPaid(l.status)).reduce((s, l) => s + l.amount, 0));
   const unpaid = total - paid;
   const paidDates = lines.filter((l) => l.paidAt).map((l) => l.paidAt as string);
   return {
@@ -558,9 +614,8 @@ async function submissionInfo(month: string): Promise<SubmissionInfo | null> {
 export async function getPayoutMonth(month: string): Promise<PayoutMonth> {
   const active = await getActiveCashflow();
   const s = active.structure;
-  const [records, bonuses, metrics, submission, execs] = await Promise.all([
-    db.payoutRecord.findMany({ where: { month, status: { not: "CANCELLED" } }, include: RECORD_INCLUDE }),
-    db.performanceBonus.findMany({ where: { month, status: { not: "CANCELLED" } }, orderBy: { createdAt: "asc" } }),
+  const [records, metrics, submission, execs] = await Promise.all([
+    db.payoutRecord.findMany({ where: { month, status: { notIn: [...NOT_OWED] } }, include: RECORD_INCLUDE }),
     getBonusMetrics(month),
     submissionInfo(month),
     execNames(db, s),
@@ -604,7 +659,10 @@ export async function getPayoutMonth(month: string): Promise<PayoutMonth> {
   });
 
   // The single-recipient people rows of the structure in force (HOG, COO, anyone the founder added),
-  // then any executive/user record in the month that no active row produces any more.
+  // then any executive/user record in the month that no active row produces any more. Each group
+  // shows the executive's COMMISSION lines; their performance bonuses (BONUS leg) sit in `bonuses`,
+  // added to the grand total once, so the section reads as it did before bonuses were folded in.
+  const commissionLines = (rows: RecordRow[]) => rows.filter((r) => r.leg !== "BONUS").map(toLine);
   const personRows = s.level1.filter((r) => r.kind === "person" && isActiveRow(r) && (r.recipients === "role" || r.recipients === "user"));
   const executives: ExecutivePayoutGroup[] = [];
   const covered = new Set<string>();
@@ -617,14 +675,16 @@ export async function getPayoutMonth(month: string): Promise<PayoutMonth> {
     const rows = byRecipient.get(key) ?? [];
     const name = recipientType === "EXECUTIVE" ? execs[recipientId as ExecRecipient].name : (execs.users[recipientId]?.name ?? row.label);
     const userId = recipientType === "EXECUTIVE" ? execs[recipientId as ExecRecipient].userId : recipientId;
-    executives.push({ ...groupBase(recipientId, name, rows.map(toLine)), recipientId, recipientType, label: row.label, rate: row.percentage, userId });
+    executives.push({ ...groupBase(recipientId, name, commissionLines(rows)), recipientId, recipientType, label: row.label, rate: row.percentage, userId });
   }
   for (const [key, rows] of byRecipient) {
     const [recipientType, recipientId] = key.split(":") as [RecipientType, string];
     if ((recipientType !== "EXECUTIVE" && recipientType !== "USER") || covered.has(key)) continue;
-    const rates = rows.map((r) => Number(/^([\d.]+)%/.exec(r.basis)?.[1])).filter((n) => Number.isFinite(n));
+    const comm = rows.filter((r) => r.leg !== "BONUS");
+    if (comm.length === 0) continue; // an exec with only a bonus this month shows in `bonuses`, not as a commission group
+    const rates = comm.map((r) => Number(/^([\d.]+)%/.exec(r.basis)?.[1])).filter((n) => Number.isFinite(n));
     executives.push({
-      ...groupBase(recipientId, rows[0]?.recipientName ?? recipientId, rows.map(toLine)),
+      ...groupBase(recipientId, rows[0]?.recipientName ?? recipientId, commissionLines(rows)),
       recipientId,
       recipientType,
       label: rows[0]?.recipientName ?? recipientId,
@@ -633,20 +693,24 @@ export async function getPayoutMonth(month: string): Promise<PayoutMonth> {
     });
   }
 
-  const bonusRows: BonusRow[] = bonuses.map((b) => ({
-    id: b.id,
-    recipientId: b.recipientId,
-    recipientName: b.recipientName,
-    amount: b.amount,
-    reason: b.reason,
-    status: b.status as BonusRow["status"],
-    createdAt: b.createdAt.toISOString(),
-    paidAt: b.paidAt?.toISOString() ?? null,
-  }));
+  // Performance bonuses are now BONUS-leg PayoutRecords with recipientType EXECUTIVE.
+  const bonusRows: BonusRow[] = records
+    .filter((r) => r.leg === "BONUS" && r.recipientType === "EXECUTIVE")
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+    .map((r) => ({
+      id: r.id,
+      recipientId: r.recipientId,
+      recipientName: r.recipientName,
+      amount: r.amount,
+      reason: r.basis,
+      status: r.status as PayoutStatus,
+      createdAt: r.createdAt.toISOString(),
+      paidAt: r.paidAt?.toISOString() ?? null,
+    }));
   const bonusTotals = {
     owed: bonusRows.reduce((s, b) => s + b.amount, 0),
-    paid: bonusRows.filter((b) => b.status === "PAID").reduce((s, b) => s + b.amount, 0),
-    unpaid: bonusRows.filter((b) => b.status === "PENDING").reduce((s, b) => s + b.amount, 0),
+    paid: bonusRows.filter((b) => isPaid(b.status)).reduce((s, b) => s + b.amount, 0),
+    unpaid: bonusRows.filter((b) => !isPaid(b.status)).reduce((s, b) => s + b.amount, 0),
   };
   const tw = sectionTotals(workers);
   const ta = sectionTotals(ambassadors);
@@ -783,12 +847,13 @@ const PERSON_ROLE: Record<RecipientType, string> = { WORKER: "Worker", AMBASSADO
  * with a login are told.
  */
 export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInput): Promise<MarkPaidResult> {
+  const payable = { in: [...UNPAID_STATUSES] };
   const where: Prisma.PayoutRecordWhereInput =
     target.kind === "record"
-      ? { id: target.id, status: "PENDING" }
+      ? { id: target.id, status: payable }
       : target.kind === "recipient"
-        ? { month: target.month, recipientType: target.recipientType, recipientId: target.recipientId, status: "PENDING" }
-        : { month: target.month, recipientType: target.recipientType, status: "PENDING" };
+        ? { month: target.month, recipientType: target.recipientType, recipientId: target.recipientId, status: payable }
+        : { month: target.month, recipientType: target.recipientType, status: payable };
   const paidOn = input.date ? new Date(input.date) : new Date();
   const execs = await execNames(db, (await getActiveCashflow()).structure);
   // Several payments are minted in one transaction: number them from one read so they never collide.
@@ -822,7 +887,7 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
                 ? recipientId
                 : (execs[recipientId as ExecRecipient]?.userId ?? null);
 
-        const claimed = await tx.payoutRecord.updateMany({ where: { id: { in: ids }, status: "PENDING" }, data: { status: "PAID" } });
+        const claimed = await tx.payoutRecord.updateMany({ where: { id: { in: ids }, status: payable }, data: { status: "PAID" } });
         if (claimed.count !== ids.length) throw new PayoutError("Someone else just recorded part of this payout. Refresh the page.");
 
         const projectCount = new Set(rows.map((r) => r.projectId).filter((x): x is string => x != null)).size;
@@ -873,7 +938,7 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
           title: t.recipientType === "WORKER" ? "Payout sent" : "Commission paid",
           message: `${formatNaira(t.amount)} was recorded as paid to you.`,
           type: "success",
-          link: t.recipientType === "WORKER" ? "/worker/earnings" : t.recipientType === "AMBASSADOR" ? "/ambassador/commissions" : "/admin/settings/bank",
+          link: t.recipientType === "WORKER" ? "/worker/earnings" : t.recipientType === "AMBASSADOR" ? "/ambassador/commissions" : "/admin/earnings",
         })
       )
   );
@@ -882,66 +947,42 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
 
 // ── Performance bonuses ─────────────────────────────────────────────────
 
+/**
+ * Enter an executive performance bonus. Since Phase 3 a bonus is a BONUS-leg
+ * PayoutRecord (recipientType EXECUTIVE) so it rides the same ledger, queue and
+ * batch as commissions; its `bonusKey` (perf:…) keeps it unique and lets the
+ * cleanup tell it apart. It is paid through `markPayoutsPaid`, not a separate path.
+ */
 export async function addPerformanceBonus(input: { month: string; recipientId: ExecRecipient; amount: number; reason: string; createdById: string }): Promise<BonusRow> {
   const execs = await execNames();
-  const row = await db.performanceBonus.create({
+  const now = new Date();
+  const row = await db.payoutRecord.create({
     data: {
       month: input.month,
+      leg: "BONUS",
       recipientType: "EXECUTIVE",
       recipientId: input.recipientId,
       recipientName: execs[input.recipientId].name,
+      bonusKey: `perf:${randomUUID()}`,
       amount: Math.round(input.amount),
-      reason: input.reason.trim(),
-      createdById: input.createdById,
+      basis: input.reason.trim(),
+      status: CREATE_STATUS,
+      accruedAt: now,
+      notes: `Performance bonus entered by ${input.createdById}`,
     },
   });
   await notifyRole(input.recipientId, {
     title: "Performance bonus added",
-    message: `A ${formatNaira(row.amount)} bonus for ${monthLabel(input.month)} has been entered: ${row.reason}. It is paid with your commission.`,
+    message: `A ${formatNaira(row.amount)} bonus for ${monthLabel(input.month)} has been entered: ${row.basis}. It is paid with your commission.`,
     type: "success",
+    link: "/admin/earnings",
   });
-  return { id: row.id, recipientId: row.recipientId, recipientName: row.recipientName, amount: row.amount, reason: row.reason, status: "PENDING", createdAt: row.createdAt.toISOString(), paidAt: null };
-}
-
-/** Pay a bonus on its own: PENDING -> PAID under a claim, one OUTFLOW Payment. */
-export async function markBonusPaid(id: string, input: MarkPaidInput): Promise<MarkPaidResult> {
-  const paidOn = input.date ? new Date(input.date) : new Date();
-  const execs = await execNames();
-  const bonus = await db.$transaction(async (tx) => {
-    const b = await tx.performanceBonus.findUnique({ where: { id } });
-    if (!b) throw new PayoutError("That bonus was not found");
-    const claimed = await tx.performanceBonus.updateMany({ where: { id, status: "PENDING" }, data: { status: "PAID" } });
-    if (claimed.count !== 1) throw new PayoutError("That bonus is already paid");
-    const payment = await tx.payment.create({
-      data: {
-        paymentId: await nextId("PAYMENT"),
-        type: "EXECUTIVE_COMMISSION",
-        direction: "OUTFLOW",
-        personName: b.recipientName,
-        personRole: "Executive",
-        amount: b.amount,
-        reference: input.reference || null,
-        confirmedById: input.paidById,
-        status: "Confirmed",
-        source: "SYSTEM",
-        date: paidOn,
-        notes: `${b.month} performance bonus: ${b.reason}`,
-      },
-      select: { id: true },
-    });
-    await tx.performanceBonus.update({ where: { id }, data: { paidAt: paidOn, paidById: input.paidById, paymentId: payment.id } });
-    return b;
-  });
-  const userId = execs[bonus.recipientId as ExecRecipient]?.userId;
-  if (userId) {
-    await notifyUsers([userId], { title: "Bonus paid", message: `${formatNaira(bonus.amount)} bonus (${bonus.reason}) was recorded as paid to you.`, type: "success" });
-  }
-  return { recipients: 1, records: 1, totalAmount: bonus.amount };
+  return { id: row.id, recipientId: row.recipientId, recipientName: row.recipientName, amount: row.amount, reason: row.basis, status: CREATE_STATUS, createdAt: row.createdAt.toISOString(), paidAt: null };
 }
 
 /** Owed and paid by leg for a month — the finance figures other pages read (never Payment OUTFLOW sums). */
 export async function payoutTotalsForMonth(month: string): Promise<{ owed: number; paid: number; unpaid: number; byLeg: Record<string, number> }> {
-  const rows = await db.payoutRecord.groupBy({ by: ["leg", "status"], where: { month, status: { not: "CANCELLED" } }, _sum: { amount: true } });
+  const rows = await db.payoutRecord.groupBy({ by: ["leg", "status"], where: { month, status: { notIn: [...NOT_OWED] } }, _sum: { amount: true } });
   const byLeg: Record<string, number> = { WORKER: 0, AMBASSADOR: 0, PARENT: 0, HOG: 0, COO: 0, BONUS: 0 };
   let owed = 0;
   let paid = 0;
@@ -949,7 +990,7 @@ export async function payoutTotalsForMonth(month: string): Promise<{ owed: numbe
     const amt = Math.round(r._sum.amount ?? 0);
     byLeg[r.leg] = (byLeg[r.leg] ?? 0) + amt;
     owed += amt;
-    if (r.status === "PAID") paid += amt;
+    if (isPaid(r.status)) paid += amt;
   }
   return { owed, paid, unpaid: owed - paid, byLeg };
 }

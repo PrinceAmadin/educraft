@@ -2167,8 +2167,28 @@ model PayoutRecord {
   bonusKey      String?  @unique
   amount        Float
   basis         String
-  /// PENDING, PAID, CANCELLED
+  /// PENDING (legacy, read-tolerated), ACCRUED (owed), PAID, REVERSED (refund), CANCELLED. See src/lib/finance/payout-status.ts.
   status        String   @default("PENDING")
+  /// The cashflow version the row was computed under (the project's stamped version).
+  cashflowVersionId String?
+  /// The Level-1 key this leg belongs to: workers, ambassador, hog, coo, growth_associate, …
+  ruleKey       String?
+  /// The rate this leg was computed at, in percent.
+  ratePercent   Float?
+  /// The trigger that produced the row: downpayment | full_payment | completion.
+  triggerEventKey String?
+  /// When the row became owed (ACCRUED).
+  accruedAt     DateTime?
+  /// The payout batch that paid it (Phase 5).
+  batchId       String?
+  /// A refund's reversal (Phase 6).
+  reversedAt    DateTime?
+  reversalReason String?
+  refundId      String?
+  /// A PAID row reversed by a refund: what must be recovered, and when it was.
+  recoveryAmount Float?
+  recoveredAt   DateTime?
+  recoveredById String?
   paidAt        DateTime?
   paidById      String?
   paidToUserId  String?
@@ -2178,13 +2198,20 @@ model PayoutRecord {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  performanceBonus PerformanceBonus?
+
   @@unique([projectId, leg, recipientId])
   @@index([month, status])
   @@index([recipientType, recipientId])
+  @@index([recipientType, recipientId, status])
   @@index([status])
+  @@index([batchId])
+  @@index([accruedAt])
 }
 
-/// A bonus the CFO enters by hand after reviewing the month's metrics.
+/// A performance bonus the CFO enters by hand. Since Phase 3 a bonus IS a
+/// BONUS-leg PayoutRecord (recipientType EXECUTIVE); this table keeps the
+/// pre-Phase-3 rows and links each to the record it became.
 model PerformanceBonus {
   id            String   @id @default(cuid())
   month         String
@@ -2200,6 +2227,9 @@ model PerformanceBonus {
   paidById      String?
   paymentId     String?
   createdById   String?
+  /// The BONUS PayoutRecord this bonus was folded into (Phase 3).
+  payoutRecordId String? @unique
+  payoutRecord   PayoutRecord? @relation(fields: [payoutRecordId], references: [id])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

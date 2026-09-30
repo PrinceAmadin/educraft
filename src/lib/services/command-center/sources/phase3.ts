@@ -177,7 +177,7 @@ export async function platinumBonusAlerts(now: Date): Promise<CcAlert[] | null> 
 
     // requires Phase 3 merge: PayoutRecord.bonusKey ("platinum:Q3-2026:<ambassadorId>", leg BONUS).
     const pending = (await p3.payoutRecord.findMany({
-      where: { leg: "BONUS", status: "PENDING", bonusKey: { startsWith: "platinum:" } },
+      where: { leg: "BONUS", status: { in: ["PENDING", "ACCRUED"] }, bonusKey: { startsWith: "platinum:" } },
       select: { bonusKey: true, recipientId: true, amount: true },
     })) as BonusRecordRow[];
     const byQuarter = new Map<string, { recipients: Set<string>; amount: number }>();
@@ -224,7 +224,7 @@ export async function platinumBonusAlerts(now: Date): Promise<CcAlert[] | null> 
           }) as Promise<{ id: string; tier: AmbassadorTier; lifetimeConversions: number }[]>,
           // requires Phase 3 merge: PayoutRecord.bonusKey.
           p3.payoutRecord.findMany({
-            where: { bonusKey: { startsWith: `platinum:${last.key}:` }, status: { not: "CANCELLED" } },
+            where: { bonusKey: { startsWith: `platinum:${last.key}:` }, status: { notIn: ["CANCELLED", "REVERSED"] } },
             select: { bonusKey: true, recipientId: true, amount: true },
           }) as Promise<BonusRecordRow[]>,
         ]);

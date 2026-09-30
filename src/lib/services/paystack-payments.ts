@@ -1,6 +1,7 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { recordConversion } from "@/lib/services/ambassador-platform/referrals";
+import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
 import { deliverIfFinalReleased, nextId } from "@/lib/services/projects";
 import { notifyFinance, notifyOperations, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { monthKeyOf, syncProjectBuckets } from "@/lib/services/finance/buckets";
@@ -445,6 +446,8 @@ async function creditProjectPayment(
       await syncProjectBuckets(tx, project.id, { reason: "PAYMENT", paymentId: payment.id, month: monthKeyOf(paidOn) });
       // A confirmed downpayment on a referred job is the ambassador's conversion (Phase 3).
       if (leg === "downpayment") await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
+      // Fire every leg this confirmation makes owed (a direct downpayment, or the balance leg). Idempotent.
+      await reconcileProjectPayouts(tx, project.id);
       return { advance };
     },
     { timeout: 60_000, maxWait: 10_000 }
@@ -685,6 +688,8 @@ async function processPendingIntake(
       await syncProjectBuckets(tx, project.id, { reason: "PAYMENT", paymentId: payment.id, month: monthKeyOf(paidOn) });
       // A confirmed downpayment on a referred job is the ambassador's conversion (Phase 3).
       await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
+      // Fire every downpayment-triggered leg, referred or direct. Idempotent after the conversion above.
+      await reconcileProjectPayouts(tx, project.id);
       return { paymentId: payment.id };
     },
     { timeout: 60_000, maxWait: 10_000 }

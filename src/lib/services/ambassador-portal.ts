@@ -4,6 +4,7 @@ import { notifyAdmins } from "@/lib/services/notifications";
 import { PAID_ORDER } from "@/lib/ambassador";
 import { tierLadderRows, tierProgress, type TierProgress } from "@/lib/ambassadors/tier-utils";
 import { ratePercentForTier } from "@/lib/finance/commission-config";
+import { NOT_OWED, isPaid } from "@/lib/finance/payout-status";
 import { TIER_KEYS } from "@/lib/finance/cashflow-types";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import type { ReferralFilter } from "@/lib/validations/ambassador";
@@ -32,26 +33,40 @@ interface AmbassadorMetrics {
 
 function metricsFrom(
   referredClientPaidProjectCounts: number[],
-  projects: { price: number; status: string; ambassadorCommission: number | null; ambassadorCommPaid: boolean }[]
+  projects: { price: number }[],
+  commission: { earned: number; paid: number }
 ): AmbassadorMetrics {
   const referrals = referredClientPaidProjectCounts.length;
   const payingClients = referredClientPaidProjectCounts.filter((n) => n > 0).length;
   const revenueGenerated = projects.reduce((s, p) => s + p.price, 0);
-  const completed = projects.filter((p) => p.status === "COMPLETED");
-  const commissionEarned = completed.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0);
-  const commissionPaid = completed
-    .filter((p) => p.ambassadorCommPaid)
-    .reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0);
 
   return {
     referrals,
     payingClients,
     payingClientRate: referrals > 0 ? Math.round((payingClients / referrals) * 100) : null,
     revenueGenerated,
-    commissionEarned,
-    commissionPaid,
-    commissionBalance: commissionEarned - commissionPaid,
+    commissionEarned: commission.earned,
+    commissionPaid: commission.paid,
+    commissionBalance: commission.earned - commission.paid,
   };
+}
+
+/**
+ * What an ambassador is owed and has been paid, from the payout ledger: their
+ * own referral commissions (AMBASSADOR), any Core override they earn from a Sub
+ * (PARENT) and their quarterly / Platinum bonuses (BONUS) — every record under
+ * their recipientType, so this agrees exactly with the lifetime-earnings figure
+ * the recount stores. A commission is owed the moment the referred downpayment
+ * is confirmed, not at completion.
+ */
+async function ledgerCommission(ambassadorId: string): Promise<{ earned: number; paid: number }> {
+  const rows = await db.payoutRecord.findMany({
+    where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { notIn: [...NOT_OWED] } },
+    select: { amount: true, status: true },
+  });
+  const earned = Math.round(rows.reduce((s, r) => s + r.amount, 0));
+  const paid = Math.round(rows.filter((r) => isPaid(r.status)).reduce((s, r) => s + r.amount, 0));
+  return { earned, paid };
 }
 
 // ── Dashboard ────────────────────────────────────────────────
@@ -76,14 +91,15 @@ export async function getAmbassadorDashboard(ambassadorId: string): Promise<Amba
       tier: true,
       referredClients: { select: { _count: { select: { projects: { where: PAID_ORDER } } } } },
       projects: {
-        select: { price: true, status: true, ambassadorCommission: true, ambassadorCommPaid: true },
+        select: { price: true },
       },
     },
   });
 
   const metrics = metricsFrom(
     ambassador.referredClients.map((c) => c._count.projects),
-    ambassador.projects
+    ambassador.projects,
+    await ledgerCommission(ambassadorId)
   );
   const { tiers } = (await getActiveCashflow()).structure;
   const progress = tierProgress(ambassador.tier, metrics.payingClients, tiers);
@@ -181,62 +197,40 @@ export interface AmbassadorCommissions {
 export async function getAmbassadorCommissions(
   ambassadorId: string
 ): Promise<AmbassadorCommissions> {
-  const projects = await db.project.findMany({
-    where: { ambassadorId, ambassadorCommission: { not: null } },
-    orderBy: { createdAt: "desc" },
+  // The payout ledger is the source of truth: a personal referral commission (AMBASSADOR), a Core
+  // override from a Sub (PARENT), or a quarterly / Platinum bonus (BONUS) — every record owed to this
+  // ambassador, owed the moment it accrues and paid when finance records the transfer. Cancelled and
+  // reversed rows are left out. This matches the lifetime-earnings figure exactly.
+  const records = await db.payoutRecord.findMany({
+    where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { notIn: [...NOT_OWED] } },
+    orderBy: [{ accruedAt: "desc" }, { createdAt: "desc" }],
     select: {
-      projectId: true,
+      leg: true,
+      amount: true,
       status: true,
-      ambassadorCommRate: true,
-      ambassadorCommission: true,
-      ambassadorCommPaid: true,
-      downpaymentDate: true,
-      client: { select: { fullName: true } },
+      ratePercent: true,
+      basis: true,
+      accruedAt: true,
+      createdAt: true,
+      paidAt: true,
+      project: { select: { projectId: true, status: true, client: { select: { fullName: true } } } },
     },
   });
 
-  // Match each paid commission to its OUTFLOW Payment for the paid date.
-  const payments = await db.payment.findMany({
-    where: {
-      type: "AMBASSADOR_COMMISSION",
-      direction: "OUTFLOW",
-      project: { ambassadorId },
-    },
-    orderBy: { date: "desc" },
-    select: { date: true, projectId: true },
-  });
-  const paidDateByProject = new Map<string, Date>();
-  for (const p of payments) {
-    if (p.projectId && !paidDateByProject.has(p.projectId)) {
-      paidDateByProject.set(p.projectId, p.date);
-    }
-  }
+  const rows: CommissionRow[] = records.map((r) => ({
+    projectId: r.project?.projectId ?? "—",
+    clientName:
+      r.project?.client.fullName ?? (r.leg === "PARENT" ? "Sub-ambassador override" : r.leg === "BONUS" ? "Quarterly bonus" : "—"),
+    rate: r.leg === "BONUS" ? null : r.ratePercent ?? (Number(/^([\d.]+)%/.exec(r.basis)?.[1]) || null),
+    amount: r.amount,
+    status: r.project?.status ?? "",
+    earnedOn: (r.accruedAt ?? r.createdAt)?.toISOString() ?? null,
+    paidOn: r.paidAt?.toISOString() ?? null,
+    paid: isPaid(r.status),
+  }));
 
-  const projectRows = await db.project.findMany({
-    where: { ambassadorId, ambassadorCommission: { not: null } },
-    select: { id: true, projectId: true },
-  });
-  const dbIdByCode = new Map(projectRows.map((p) => [p.projectId, p.id]));
-
-  const rows: CommissionRow[] = projects.map((p) => {
-    const dbId = dbIdByCode.get(p.projectId);
-    return {
-      projectId: p.projectId,
-      clientName: p.client.fullName,
-      rate: p.ambassadorCommRate,
-      amount: p.ambassadorCommission ?? 0,
-      status: p.status,
-      earnedOn: p.downpaymentDate?.toISOString() ?? null,
-      paidOn: (dbId && paidDateByProject.get(dbId)?.toISOString()) || null,
-      paid: p.ambassadorCommPaid,
-    };
-  });
-
-  const completed = projects.filter((p) => p.status === "COMPLETED");
-  const totalEarned = completed.reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0);
-  const totalPaid = completed
-    .filter((p) => p.ambassadorCommPaid)
-    .reduce((s, p) => s + (p.ambassadorCommission ?? 0), 0);
+  const totalEarned = Math.round(records.reduce((s, r) => s + r.amount, 0));
+  const totalPaid = Math.round(records.filter((r) => isPaid(r.status)).reduce((s, r) => s + r.amount, 0));
 
   return { totalEarned, totalPaid, balance: totalEarned - totalPaid, rows };
 }

@@ -6,6 +6,7 @@ import { StatsCard, STATS_GRID } from "@/components/dashboard/StatsCard";
 import { WorkerAssignmentList } from "@/components/worker/WorkerAssignmentList";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { CadenceNotice } from "@/components/shared/CadenceNotice";
 import { firstName, formatNaira } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My work" };
@@ -30,6 +31,8 @@ export default async function WorkerDashboardPage() {
   return (
     <div className="space-y-10">
       <PageHeader title={`Welcome back, ${firstName(name)}`} description="Here's what needs your attention." />
+
+      <CadenceNotice>Payments run on the last Friday of each month, to the bank account on your profile.</CadenceNotice>
 
       <section aria-label="Your numbers" className={STATS_GRID}>
         <StatsCard label="Active assignments" value={String(stats.activeAssignments)} icon={LuFolderKanban} tone="primary" />

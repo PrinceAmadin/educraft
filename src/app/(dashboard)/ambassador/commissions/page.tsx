@@ -28,8 +28,8 @@ export default async function AmbassadorCommissionsPage() {
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Commissions</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          You earn commission on every project from a client you referred. It is yours once the
-          project is completed, and we pay it out from there.
+          You earn commission on every project from a client you referred. It is yours the moment they
+          pay their downpayment, and paid out to your bank account every Saturday.
         </p>
       </div>
 

@@ -30,7 +30,7 @@ export default async function WorkerEarningsPage() {
     <div className="space-y-5">
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">Earnings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your 40% payout, per project.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Your payout for each project, owed once it is completed.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

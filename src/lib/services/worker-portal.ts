@@ -1,5 +1,6 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { NOT_OWED, isPaid } from "@/lib/finance/payout-status";
 import { WORKER_FILE_WHERE } from "@/lib/services/file-access";
 import { transitionProject, TransitionError } from "@/lib/services/projects";
 import {
@@ -261,31 +262,35 @@ export interface WorkerEarnings {
 }
 
 export async function getWorkerEarnings(workerId: string): Promise<WorkerEarnings> {
-  const projects = await db.project.findMany({
-    where: { workerId, workerPayout: { not: null } },
-    orderBy: { createdAt: "desc" },
-    select: {
-      projectId: true,
-      status: true,
-      workerPayout: true,
-      workerPayoutPaid: true,
-      service: { select: { serviceName: true } },
-    },
+  // What is owed and paid comes from the payout ledger (a WORKER record per project, owed once the
+  // project completes); the list also shows assigned work that has not accrued yet, so the worker
+  // still sees what is coming, but only ledger records count toward the totals.
+  const [projects, records] = await Promise.all([
+    db.project.findMany({
+      where: { workerId, workerPayout: { not: null } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, projectId: true, status: true, workerPayout: true, service: { select: { serviceName: true } } },
+    }),
+    db.payoutRecord.findMany({
+      where: { leg: "WORKER", recipientId: workerId, status: { notIn: [...NOT_OWED] } },
+      select: { projectId: true, amount: true, status: true },
+    }),
+  ]);
+  const byProject = new Map(records.filter((r) => r.projectId).map((r) => [r.projectId as string, r]));
+
+  const rows: WorkerEarningsRow[] = projects.map((p) => {
+    const rec = byProject.get(p.id);
+    return {
+      projectId: p.projectId,
+      serviceName: p.service.serviceName,
+      status: p.status,
+      amount: rec?.amount ?? p.workerPayout ?? 0,
+      paid: rec ? isPaid(rec.status) : false,
+    };
   });
 
-  const rows: WorkerEarningsRow[] = projects.map((p) => ({
-    projectId: p.projectId,
-    serviceName: p.service.serviceName,
-    status: p.status,
-    amount: p.workerPayout ?? 0,
-    paid: p.workerPayoutPaid,
-  }));
-
-  const completed = projects.filter((p) => p.status === "COMPLETED");
-  const totalEarned = completed.reduce((s, p) => s + (p.workerPayout ?? 0), 0);
-  const totalPaid = completed
-    .filter((p) => p.workerPayoutPaid)
-    .reduce((s, p) => s + (p.workerPayout ?? 0), 0);
+  const totalEarned = Math.round(records.reduce((s, r) => s + r.amount, 0));
+  const totalPaid = Math.round(records.filter((r) => isPaid(r.status)).reduce((s, r) => s + r.amount, 0));
 
   return { totalEarned, totalPaid, balance: totalEarned - totalPaid, rows };
 }

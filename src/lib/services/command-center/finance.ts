@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { executiveLegs, workerLeg } from "@/lib/finance/commission-config";
+import { NOT_OWED, isPaid } from "@/lib/finance/payout-status";
 import { cashflowForProject } from "@/lib/services/cashflow";
 import { AI_COST_PER_PROJECT } from "@/lib/command-center/rag";
 import { currentMonthKey, monthBounds, monthLongLabel, shiftMonth } from "@/lib/command-center/time";
@@ -253,17 +254,11 @@ function toGroupStatus(acc: PayoutAccumulator): PayoutGroupStatus {
  * left out, as `payoutTotalsForMonth` leaves them out.
  */
 async function payoutStatus(month: string): Promise<FinancePayload["payoutStatus"]> {
-  // Group 1 (4 queries): records, the HOG/COO performance bonuses, the COO's submission, the executives' names.
-  const [rows, bonusRows, submission, execs] = await Promise.all([
+  // Group 1 (3 queries): records (commissions AND folded performance bonuses), the COO's submission, the exec names.
+  const [rows, submission, execs] = await Promise.all([
     db.payoutRecord.groupBy({
-      by: ["recipientType", "recipientId", "status"],
-      where: { month, status: { not: "CANCELLED" } },
-      _sum: { amount: true },
-    }),
-    // The Payout engine's "Still unpaid" includes these (getPayoutMonth -> grand.unpaid), so the lines here do too.
-    db.performanceBonus.groupBy({
-      by: ["recipientId", "status"],
-      where: { month, status: { not: "CANCELLED" } },
+      by: ["recipientType", "recipientId", "status", "leg"],
+      where: { month, status: { notIn: [...NOT_OWED] } },
       _sum: { amount: true },
     }),
     db.payoutSubmission.findUnique({ where: { month }, select: { submittedAt: true } }),
@@ -279,30 +274,22 @@ async function payoutStatus(month: string): Promise<FinancePayload["payoutStatus
     COO: newAccumulator(),
   };
   let totalPending = 0;
+  // Performance bonuses are BONUS-leg EXECUTIVE records since Phase 3: they fold into the HOG/COO groups
+  // and the per-exec bonus breakdown, counted once.
+  const bonus = { HOG: { pending: 0, paid: 0 }, COO: { pending: 0, paid: 0 } };
   for (const r of rows) {
     const amount = Math.round(r._sum.amount ?? 0);
-    if (r.status === "PENDING") totalPending += amount;
+    const paid = isPaid(r.status);
+    if (!paid) totalPending += amount;
     const key = payoutGroupKey(r.recipientType, r.recipientId);
     if (!key) continue;
     const acc = groups[key];
     acc.recipients.add(r.recipientId);
-    if (r.status === "PAID") acc.paid += amount;
-    else if (r.status === "PENDING") acc.pending += amount;
-  }
-
-  const bonus = { HOG: { pending: 0, paid: 0 }, COO: { pending: 0, paid: 0 } };
-  for (const b of bonusRows) {
-    const amount = Math.round(b._sum.amount ?? 0);
-    if (b.status === "PENDING") totalPending += amount;
-    if (b.recipientId !== "HOG" && b.recipientId !== "COO") continue;
-    const acc = groups[b.recipientId];
-    acc.recipients.add(b.recipientId);
-    if (b.status === "PAID") {
-      acc.paid += amount;
-      bonus[b.recipientId].paid += amount;
-    } else if (b.status === "PENDING") {
-      acc.pending += amount;
-      bonus[b.recipientId].pending += amount;
+    if (paid) acc.paid += amount;
+    else acc.pending += amount;
+    if (r.leg === "BONUS" && (r.recipientId === "HOG" || r.recipientId === "COO")) {
+      if (paid) bonus[r.recipientId].paid += amount;
+      else bonus[r.recipientId].pending += amount;
     }
   }
 

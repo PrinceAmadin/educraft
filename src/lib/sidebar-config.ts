@@ -86,6 +86,8 @@ export const ADMIN_SIDEBAR: NavSection[] = [
       // The commission structure: the founder edits, every executive reads.
       { label: "EduCraft Cashflow", href: "/admin/settings/cashflow", icon: Percent, roles: ALL },
       { label: "Bank details", href: "/admin/settings/bank", icon: Landmark, roles: ALL },
+      // Each earning executive's own commissions and bonuses (the HOG and COO 2.5% legs), owed and paid.
+      { label: "My earnings", href: "/admin/earnings", icon: Wallet, roles: [SA, HOG, COO] },
     ],
   },
 ];

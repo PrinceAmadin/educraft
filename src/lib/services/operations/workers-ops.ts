@@ -255,7 +255,7 @@ export async function getWorkerProfileOps(workerId: string, now: Date = new Date
     .sort((a, b) => b.deliveredAt.localeCompare(a.deliveredAt));
 
   const records = await db.payoutRecord.findMany({
-    where: { leg: "WORKER", recipientId: worker.id, status: { not: "CANCELLED" } },
+    where: { leg: "WORKER", recipientId: worker.id, status: { notIn: ["CANCELLED", "REVERSED"] } },
     select: { month: true, amount: true, status: true, paidAt: true },
   });
   const byMonth = new Map<string, { amount: number; paid: number; count: number; paidCount: number; paidAt: Date | null }>();

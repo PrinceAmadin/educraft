@@ -2,6 +2,7 @@ import type { AmbassadorTier, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { activityStatus, platinumBonusClientCount, platinumByOffice, TOP_TIER, topTierMinConversions, type ActivityStatus, type TierLadder } from "@/lib/ambassadors/tier-utils";
 import type { CashflowStructure } from "@/lib/finance/cashflow-types";
+import { NOT_OWED, UNPAID_STATUSES } from "@/lib/finance/payout-status";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import { getPayoutMonth, type AmbassadorPayoutGroup } from "@/lib/services/finance/payouts-engine";
 import { currentMonthKey, monthLabel, quarterOf } from "@/lib/services/finance/surplus";
@@ -222,11 +223,14 @@ export interface HistoryResult {
 }
 
 export async function getCommissionHistory(q: CommissionHistoryQuery): Promise<HistoryResult> {
+  // "PENDING" is the filter's word for "owed but unpaid" — which is ACCRUED since Phase 3 (and any
+  // legacy PENDING row) — so map it to the unpaid set; "PAID" stays exact; unset shows everything owed.
+  const statusFilter: Prisma.PayoutRecordWhereInput["status"] =
+    q.status === "PAID" ? "PAID" : q.status === "PENDING" ? { in: [...UNPAID_STATUSES] } : { notIn: [...NOT_OWED] };
   const where: Prisma.PayoutRecordWhereInput = {
     recipientType: "AMBASSADOR",
-    status: { not: "CANCELLED" },
+    status: statusFilter,
     ...(q.month ? { month: q.month } : {}),
-    ...(q.status ? { status: q.status } : {}),
     ...(q.q ? { recipientName: { contains: q.q, mode: "insensitive" } } : {}),
   };
   const records = await db.payoutRecord.findMany({
@@ -360,7 +364,7 @@ export async function getQuarterTracker(key: string = currentQuarterKey(), now: 
     db.ambassador.findMany({ where: { status: { notIn: CLOSED } }, select: { id: true, ambassadorId: true, fullName: true, tier: true, lifetimeConversions: true, ...EXEC_RECORD_SELECT } }),
     db.ambassadorReferral.groupBy({ by: ["ambassadorId"], where: { status: "CONVERTED", convertedAt: { gte: quarter.start, lt: quarter.end } }, _count: { _all: true } }),
     db.ambassadorQuarterlyChallenge.findMany({ where: { quarter: key } }),
-    db.payoutRecord.findMany({ where: { leg: "BONUS", OR: [{ bonusKey: { startsWith: `platinum:${key}:` } }, { bonusKey: { startsWith: `challenge:${key}:` } }], status: { not: "CANCELLED" } }, select: { bonusKey: true, status: true, amount: true } }),
+    db.payoutRecord.findMany({ where: { leg: "BONUS", OR: [{ bonusKey: { startsWith: `platinum:${key}:` } }, { bonusKey: { startsWith: `challenge:${key}:` } }], status: { notIn: ["CANCELLED", "REVERSED"] } }, select: { bonusKey: true, status: true, amount: true } }),
     loadExecIndex(),
     getActiveCashflow(),
   ]);
@@ -467,7 +471,7 @@ export async function processQuarterBonuses(key: string, byUserId: string, now: 
         continue;
       }
       await db.$transaction(async (tx) => {
-        await tx.payoutRecord.create({ data: { month, leg: "BONUS", recipientType: "AMBASSADOR", recipientId: r.id, recipientName: r.name, bonusKey: w.bonusKey, amount: w.amount, basis: w.basis, status: "PENDING", notes: `Processed by ${byUserId}` } });
+        await tx.payoutRecord.create({ data: { month, leg: "BONUS", recipientType: "AMBASSADOR", recipientId: r.id, recipientName: r.name, bonusKey: w.bonusKey, amount: w.amount, basis: w.basis, status: "ACCRUED", accruedAt: new Date(), notes: `Processed by ${byUserId}` } });
         if (w.bonusKey.startsWith("challenge:")) {
           await tx.ambassadorQuarterlyChallenge.upsert({
             where: { ambassadorId_quarter: { ambassadorId: r.id, quarter: key } },

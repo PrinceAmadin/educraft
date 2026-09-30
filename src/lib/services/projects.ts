@@ -935,6 +935,10 @@ export async function verifyPayment(
       });
       // A confirmed downpayment on a referred job is the ambassador's conversion (Phase 3).
       if (leg === "downpayment") await recordConversion(tx, project.id, { paymentId: payment.id, paidOn });
+      // Fire every leg this confirmation makes owed: the ambassador conversion above covers referred
+      // downpayments; this covers a direct downpayment (a downpayment-triggered worker/custom row) and
+      // the balance leg (a full_payment-triggered row). Idempotent — a second run finds the rows unchanged.
+      await reconcileProjectPayouts(tx, project.id);
       if (advance) {
         await tx.projectStatusLog.create({
           data: {

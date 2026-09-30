@@ -25,6 +25,7 @@ import { countVersionsToReview } from "@/lib/services/deliverables";
 import { countPendingRerunRequests } from "@/lib/services/research-runs";
 import { countPendingWorkerApplications } from "@/lib/services/worker-applications";
 import { getBucketBalances } from "@/lib/services/finance/buckets";
+import { UNPAID_STATUSES } from "@/lib/finance/payout-status";
 import { activationSnapshot, conversionsBetween, countConversions, referralsBetween } from "./ambassador-activity";
 import { getThresholds } from "./settings";
 import { contentPostsToday, platinumBonusAlerts, tierChangesToday } from "./sources/phase3";
@@ -320,23 +321,17 @@ export async function getToday(now: Date = new Date()): Promise<TodayPayload> {
     }),
     getBucketBalances(),
     // Every month before this one with anything still owed; which of them are late is decided below.
+    // Performance bonuses are BONUS-leg PayoutRecords since Phase 3, so they are included here.
     db.payoutRecord.groupBy({
       by: ["month", "recipientId"],
-      where: { status: "PENDING", month: { lt: payoutMonthNow } },
+      where: { status: { in: [...UNPAID_STATUSES] }, month: { lt: payoutMonthNow } },
       _sum: { amount: true },
     }),
     referralsBetween(yesterdayStart, end),
   ]);
 
-  // Group 2 — the Ambassador Dashboard's activation rate, and unpaid performance bonuses.
-  const [activation, unpaidBonuses] = await Promise.all([
-    activationSnapshot(now),
-    db.performanceBonus.groupBy({
-      by: ["month", "recipientId"],
-      where: { status: "PENDING", month: { lt: payoutMonthNow } },
-      _sum: { amount: true },
-    }),
-  ]);
+  // Group 2 — the Ambassador Dashboard's activation rate.
+  const activation = await activationSnapshot(now);
 
   // Group 3 — attention counts.
   const [unassignedByStatus, markedPaidRows, revisionCapCount, ambassadorApplicationRows, qaWaiting] = await Promise.all([
@@ -382,7 +377,7 @@ export async function getToday(now: Date = new Date()): Promise<TodayPayload> {
 
   // Months whose payouts are late: before last month, or last month once the WAT 5th has come.
   const lateMonths = new Map<string, { recipients: Set<string>; amount: number }>();
-  for (const r of [...unpaidPayouts, ...unpaidBonuses]) {
+  for (const r of unpaidPayouts) {
     if (r.month > payoutPrevMonth || (r.month === payoutPrevMonth && !pastPayoutDay)) continue;
     const m = lateMonths.get(r.month) ?? { recipients: new Set<string>(), amount: 0 };
     m.recipients.add(r.recipientId);

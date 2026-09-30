@@ -315,7 +315,7 @@ export async function getChallengeView(ambassadorId: string, month: string = cur
 
 async function commissionBreakdown(ambassadorId: string, month: string): Promise<CommissionBreakdown> {
   const rows = await db.payoutRecord.findMany({
-    where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, month, status: { not: "CANCELLED" } },
+    where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, month, status: { notIn: ["CANCELLED", "REVERSED"] } },
     select: { leg: true, amount: true, status: true, project: { select: { ambassador: { select: { id: true, fullName: true, tier: true } } } } },
   });
   const personal = rows.filter((r) => r.leg === "AMBASSADOR");
@@ -329,7 +329,7 @@ async function commissionBreakdown(ambassadorId: string, month: string): Promise
     overrideMap.set(key, cur);
   }
   const total = Math.round(rows.reduce((s, r) => s + r.amount, 0));
-  const unpaid = Math.round(rows.filter((r) => r.status === "PENDING").reduce((s, r) => s + r.amount, 0));
+  const unpaid = Math.round(rows.filter((r) => r.status !== "PAID").reduce((s, r) => s + r.amount, 0));
   return {
     month,
     label: monthLabel(month),
@@ -342,7 +342,7 @@ async function commissionBreakdown(ambassadorId: string, month: string): Promise
 
 async function earningsByMonth(ambassadorId: string): Promise<EarningsMonth[]> {
   const rows = await db.payoutRecord.findMany({
-    where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { not: "CANCELLED" } },
+    where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { notIn: ["CANCELLED", "REVERSED"] } },
     select: { month: true, amount: true, status: true, paidAt: true },
   });
   const map = new Map<string, EarningsMonth & { paidDates: string[] }>();
@@ -406,7 +406,7 @@ export async function getDirectoryDetail(id: string, now: Date = new Date()): Pr
         status: true,
         source: true,
         client: { select: { clientId: true } },
-        project: { select: { id: true, projectId: true, service: { select: { serviceName: true } }, payoutRecords: { where: { leg: "AMBASSADOR", recipientId: id, status: { not: "CANCELLED" } }, select: { amount: true } } } },
+        project: { select: { id: true, projectId: true, service: { select: { serviceName: true } }, payoutRecords: { where: { leg: "AMBASSADOR", recipientId: id, status: { notIn: ["CANCELLED", "REVERSED"] } }, select: { amount: true } } } },
       },
     }),
     earningsByMonth(id),

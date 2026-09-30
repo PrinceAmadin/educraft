@@ -105,7 +105,7 @@ async function main() {
       downpaymentStatus: "Verified",
       status: { notIn: ["COMPLETED", "CANCELLED", "REFUNDED"] },
       ambassadorCommission: { gt: 0 },
-      payoutRecords: { none: { leg: "AMBASSADOR", status: { not: "CANCELLED" } } },
+      payoutRecords: { none: { leg: "AMBASSADOR", status: { notIn: ["CANCELLED", "REVERSED"] } } },
     },
     select: { id: true, projectId: true, ambassadorCommission: true, parentCommission: true, ambassadorCommPaid: true, downpaymentDate: true, ambassador: { select: { fullName: true } } },
   });

@@ -40,7 +40,7 @@ export async function recountAmbassador(tx: Db, ambassadorId: string, tiers?: Ti
     tx.ambassadorReferral.count({ where: { ambassadorId, status: "CONVERTED" } }),
     tx.ambassadorReferral.findFirst({ where: { ambassadorId, status: "CONVERTED" }, orderBy: { convertedAt: "desc" }, select: { convertedAt: true } }),
     tx.ambassadorReferral.findFirst({ where: { ambassadorId, status: { not: "CANCELLED" } }, orderBy: { submittedAt: "desc" }, select: { submittedAt: true } }),
-    tx.payoutRecord.aggregate({ where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { not: "CANCELLED" } }, _sum: { amount: true } }),
+    tx.payoutRecord.aggregate({ where: { recipientType: "AMBASSADOR", recipientId: ambassadorId, status: { notIn: ["CANCELLED", "REVERSED"] } }, _sum: { amount: true } }),
     loadExecIndex(tx),
     tiers ? Promise.resolve(tiers) : getActiveCashflow().then((v) => v.structure.tiers),
   ]);

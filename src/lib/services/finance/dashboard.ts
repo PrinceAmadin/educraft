@@ -94,7 +94,7 @@ export async function getDashboardMonth(month: string): Promise<DashboardMonth> 
 }
 
 async function unpaidByType(recipientType: "WORKER" | "AMBASSADOR" | "EXECUTIVE"): Promise<{ count: number; amount: number }> {
-  const rows = await db.payoutRecord.groupBy({ by: ["recipientId"], where: { recipientType, status: "PENDING" }, _sum: { amount: true } });
+  const rows = await db.payoutRecord.groupBy({ by: ["recipientId"], where: { recipientType, status: { in: ["PENDING", "ACCRUED"] } }, _sum: { amount: true } });
   return { count: rows.length, amount: Math.round(rows.reduce((s, r) => s + (r._sum.amount ?? 0), 0)) };
 }
 
