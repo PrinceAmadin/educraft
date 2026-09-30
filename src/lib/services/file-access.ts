@@ -87,7 +87,7 @@ export async function fileForClient(scope: ClientScope, code: string, fileId: st
       version: {
         select: {
           releaseNo: true,
-          deliverable: { select: { title: true, access: true, archivedAt: true } },
+          deliverable: { select: { title: true, access: true, archivedAt: true, clientHidden: true } },
         },
       },
     },
@@ -99,9 +99,9 @@ export async function fileForClient(scope: ClientScope, code: string, fileId: st
     return { kind: "ok", file, downloadAs: file.fileName };
   }
 
-  // A released chapter or document.
+  // A released chapter or document (never an item kept off the client's list, such as a one-chapter order's chapter).
   const v = file.version;
-  if (!v || v.releaseNo == null || v.deliverable.archivedAt) return { kind: "missing" };
+  if (!v || v.releaseNo == null || v.deliverable.archivedAt || v.deliverable.clientHidden) return { kind: "missing" };
   const gate = deliverableGate(true, v.deliverable.access, file.project);
   if (gate.state === "locked") return { kind: "locked", reason: gate.reason };
   if (gate.state !== "open") return { kind: "missing" };

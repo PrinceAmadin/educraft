@@ -20,6 +20,8 @@ import { CooActions, type TransitionOption } from "@/components/operations/CooAc
 import { NotesTimeline } from "@/components/operations/NotesTimeline";
 import { SupervisorCorrectionsPanel } from "@/components/operations/SupervisorCorrectionsPanel";
 import { listDeliverablesForAdmin } from "@/lib/services/deliverables";
+import { ensureChapterDrafts } from "@/lib/services/chapter-review";
+import { approvedVersion } from "@/lib/chapter-review";
 import { getResearchSummary } from "@/lib/services/research-summary";
 import { getProjectOps } from "@/lib/services/operations/project-ops";
 import { getExpectedHours } from "@/lib/services/operations/pipeline";
@@ -70,6 +72,8 @@ export default async function ProjectDetailPage({
   ]);
   if (!project) notFound();
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
+  // Chapter review: a finished chapter with no AI draft gets one now (normally made when it was written).
+  if (reportProject) await ensureChapterDrafts(project.id).catch((error) => console.warn("[chapter review] drafts not checked", error instanceof Error ? error.message : error));
   const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary, generation, prelims] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
@@ -89,8 +93,18 @@ export default async function ProjectDetailPage({
   ]);
   const adminBase = `/api/admin/projects/${encodeURIComponent(project.projectId)}`;
   const dataToCheck = pauses.some((p) => p.status === "SUBMITTED");
-  const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED")).length;
+  // An AI draft waits for the specialist, not for the COO: only people's uploads count here.
+  const toReview = deliverables.filter((d) => !d.archived && d.versions.some((v) => v.status === "SUBMITTED" && !v.aiDraft)).length;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  // Chapter review: which chapters are approved (the Report tab's working copy), and which a person has
+  // reviewed (the quality panel returns those to the specialist instead of re-generating them).
+  const reviewChapters = deliverables.filter((d) => d.review && !d.archived && d.chapter != null);
+  const reportReview = reviewChapters.length
+    ? { audience: "staff" as const, notApproved: reviewChapters.filter((d) => !approvedVersion(d.versions)).map((d) => d.chapter as number) }
+    : null;
+  const chapterReviewMap = reviewChapters.length
+    ? Object.fromEntries(reviewChapters.map((d) => [d.chapter as number, { deliverableId: d.id, reviewed: d.versions.some((v) => !v.aiDraft) }]))
+    : null;
 
   const candidate = toCandidate(project);
   const transitions: TransitionOption[] = allowedTransitions(candidate).map((r) => ({
@@ -119,11 +133,18 @@ export default async function ProjectDetailPage({
                     downloadUrl={`${adminBase}/documents/docx`}
                     // D9: Start, Stop, Continue and a chapter's restart, for the founder and the COO.
                     controls={{ generation: `${adminBase}/generation`, dataPause: `${adminBase}/data-pause` }}
+                    review={reportReview}
                   />
                 ) : null}
                 {generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? (
                   // The key is the last quality run: a check the orchestrator ran by itself reloads the panel.
-                  <QualityGatePanel key={generation.run?.gateRanAt ?? "not-run"} endpoint={`${adminBase}/quality`} canRegenerate />
+                  <QualityGatePanel
+                    key={generation.run?.gateRanAt ?? "not-run"}
+                    endpoint={`${adminBase}/quality`}
+                    canRegenerate
+                    chapterReview={chapterReviewMap}
+                    changesBase={`${adminBase}/deliverables`}
+                  />
                 ) : null}
                 {prelims?.applies && generation && (modeCard.status === "APPROVED" || modeCard.generationStarted) ? (
                   <PreliminaryPagesCard

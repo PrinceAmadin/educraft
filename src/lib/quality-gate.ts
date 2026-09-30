@@ -19,7 +19,7 @@ import { db } from "@/lib/db";
 import { callClaudeForJson } from "@/lib/anthropic";
 import { AssemblyError, loadAssemblyInput, reportFileName } from "@/lib/assembly/assemble";
 import { runPreliminaryPagesAgent } from "@/lib/services/preliminary-pages";
-import { nameKey } from "@/lib/assembly/text-rules";
+import { knownCommonCitation } from "@/lib/quality/known-citations";
 import { lookupDepartment } from "@/lib/generation/department-map";
 import { approvedChapterInput } from "@/lib/generation/approved-inputs";
 import { startChapterGeneration, GenerationError } from "@/lib/generation/generate-chapter";
@@ -30,6 +30,8 @@ import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { getApprovedBrief } from "@/lib/research/source-stage-actions";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { submitGeneratedReport } from "@/lib/services/deliverables";
+import { projectReviewState } from "@/lib/services/chapter-review";
+import { CHAPTER_REVIEW_TEXT } from "@/lib/chapter-review";
 import { transitionProject, TransitionError } from "@/lib/services/projects";
 import { SECONDARY_DATA_CATEGORY } from "@/lib/services/secondary-data";
 import { validateAiVoiceFindings, VOICE_TOOL, type VoiceFinding } from "@/lib/quality/voice-scan";
@@ -42,31 +44,9 @@ import { recallState, recallWindowEnd, RECALL_REFUSAL, RECALL_WINDOW_MINUTES, ty
 import { QUALITY_TEXT } from "@/lib/quality/text";
 import type { CheckResult, QualityItem } from "@/lib/quality/types";
 
-// ─── Known common citations (FIX 2) ──────────────────────────────────────────
+// ─── Known common citations (FIX 2), shared with the chapter read-back ───────
 
-export interface KnownCitation {
-  surname: string;
-  year: number;
-  /** What the work is, for the note to the COO. */
-  work: string;
-}
-
-/**
- * Standard sources Nigerian reports cite by habit whether or not the research
- * step found them. Cited but missing from the verified references, they are a
- * WARN for the COO (add the entry by hand), never a failure, and never cost a point.
- */
-export const KNOWN_COMMON_CITATIONS: readonly KnownCitation[] = [
-  { surname: "Davis", year: 1989, work: "the Technology Acceptance Model (MIS Quarterly)" },
-  { surname: "Yamane", year: 1967, work: "Statistics: An Introductory Analysis, the sample-size formula" },
-];
-
-/** The known citation an author-date citation names ("Davis", "1989a"), or null. */
-export function knownCommonCitation(author: string, year: string): KnownCitation | null {
-  const y = Number(year.slice(0, 4));
-  const key = nameKey(author);
-  return KNOWN_COMMON_CITATIONS.find((k) => k.year === y && nameKey(k.surname) === key) ?? null;
-}
+export { KNOWN_COMMON_CITATIONS, knownCommonCitation, type KnownCitation } from "@/lib/quality/known-citations";
 
 // ─── Errors and shapes ───────────────────────────────────────────────────────
 
@@ -189,7 +169,7 @@ function readStored(json: Prisma.JsonValue | null | undefined): StoredReport | n
  * 85/89 with no CRITICAL failure, a project still being worked on goes to the
  * QA queue with the assembled file as its complete-document version.
  */
-export async function runQualityGate(projectDbId: string, actor: QualityActor): Promise<QualityRunResponse> {
+export async function runQualityGate(projectDbId: string, actor: QualityActor, opts: { rebuild?: boolean } = {}): Promise<QualityRunResponse> {
   const project = await db.project.findUnique({
     where: { id: projectDbId },
     select: { id: true, projectId: true, status: true, workerId: true, projectTitle: true, departmentOutline: true, worker: { select: { userId: true } } },
@@ -207,7 +187,7 @@ export async function runQualityGate(projectDbId: string, actor: QualityActor): 
   if (got.count === 0) throw new QualityGateError("A quality check is already running on this report.", 409, "QUALITY_RUN_IN_PROGRESS");
 
   try {
-    return await runLocked(project, actor, started);
+    return await runLocked(project, actor, started, opts);
   } finally {
     await db.qaReview.updateMany({ where: { projectId: project.id, qualityRunLockedUntil: lease }, data: { qualityRunLockedUntil: null } }).catch(() => undefined);
   }
@@ -217,10 +197,13 @@ async function runLocked(
   project: { id: string; projectId: string; status: ProjectStatus; workerId: string | null; projectTitle: string | null; departmentOutline: string | null; worker: { userId: string | null } | null },
   actor: QualityActor,
   started: Date,
+  opts: { rebuild?: boolean },
 ): Promise<QualityRunResponse> {
   let input;
   try {
-    input = await loadAssemblyInput(project.id);
+    // Chapter review: the gate scores the approved uploads where there are some (the AI text elsewhere),
+    // and only a report whose every chapter is approved can go to QA.
+    input = await loadAssemblyInput(project.id, { source: "canonical" });
   } catch (error) {
     if (error instanceof AssemblyError) throw new QualityGateError(error.message, error.status, error.code, error.details);
     throw error;
@@ -409,14 +392,21 @@ async function runLocked(
     .then((r) => Math.round((r._sum.costNaira ?? 0) * 100) / 100)
     .catch(() => 0);
 
-  const canSubmit = score.passed && (project.status === "IN_PROGRESS" || project.status === "REVISION_NEEDED") && Boolean(project.workerId);
+  // Chapter review: nothing but COO-approved uploads (with no correction outstanding) reaches QA.
+  const chapterReview = await projectReviewState(project.id);
+  const approvedReport = !chapterReview.applies || (chapterReview.allSettled && input.source === "approved");
+  const inProgress = project.status === "IN_PROGRESS" || project.status === "REVISION_NEEDED";
+  const afterQa = project.status === "APPROVED" || project.status === "BALANCE_VERIFIED" || project.status === "DELIVERED" || project.status === "SUPERVISOR_CORRECTIONS";
+  const canSubmit = score.passed && approvedReport && Boolean(project.workerId) && (inProgress || (opts.rebuild === true && afterQa));
+  // A report that passes while chapters still wait for approval is not sent: the note says which.
+  const reviewNotes = score.passed && !approvedReport && inProgress ? [CHAPTER_REVIEW_TEXT.notAllApproved(chapterReview.pending)] : [];
   const stored: StoredReport = {
     version: 1,
     ranAt: started.toISOString(),
     ranBy: actor.name,
     checks: checks.map((c) => ({ ...c, issues: c.issues.slice(0, 40) })),
     warnings: score.warnings,
-    notes: [...prepared.report.notes, ...ai.errors],
+    notes: [...prepared.report.notes, ...ai.errors, ...reviewNotes],
     costNaira: cost,
     ai,
     history: [{ at: started.toISOString(), score: score.qualityScore, passed: score.passed, autoSubmitted: false, by: actor.name }, ...(previous?.history ?? [])].slice(0, HISTORY_KEPT),
@@ -430,9 +420,13 @@ async function runLocked(
         projectDbId: project.id,
         buffer: prepared.buffer,
         fileName: reportFileName(input.title, project.projectId),
-        note: `Quality check: ${score.qualityScore} of ${QUALITY_TOTAL} checks passed.`,
+        note: `Quality check: ${score.qualityScore} of ${QUALITY_TOTAL} checks passed.${input.builtFrom ? ` ${CHAPTER_REVIEW_TEXT.finalBuilt}` : ""}`,
         actorUserId: actor.userId,
+        builtFrom: input.builtFrom ?? null,
+        moveToQa: inProgress,
       });
+      // A rebuild after QA is recorded for release; there is no recall window and no move.
+      if (!inProgress) return getQualityReport(project.id, { autoSubmitError: null, includeCost: actor.role !== "WORKER" });
       const at = new Date();
       const until = recallWindowEnd(at);
       stored.history[0].autoSubmitted = true;
@@ -680,7 +674,7 @@ export async function regenerateChapterForQuality(
   try {
     checkpoint = await startChapterGeneration({ project: project.id, prompt, requestedById: actor.userId, replace: true, qualityFailures: lines });
   } catch (error) {
-    if (error instanceof GenerationError) throw new QualityGateError(error.message, 409, "GENERATION_REFUSED");
+    if (error instanceof GenerationError) throw new QualityGateError(error.message, 409, error.code === "HUMAN_VERSION_EXISTS" ? "HUMAN_VERSION_EXISTS" : "GENERATION_REFUSED");
     throw error;
   }
   // The chapter exists from here on. If handing it to the runner fails (a timeout), it is carried

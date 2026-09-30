@@ -13,8 +13,16 @@ export const submitVersionSchema = z.object({
 });
 
 export const reviewVersionSchema = z.object({
-  decision: z.enum(["release", "return"]),
+  /** "approve" is a chapter's release under chapter review (the same action, the COO's word for it). */
+  decision: z.enum(["release", "return", "approve"]),
   note: z.string().trim().max(2000).optional().or(z.literal("")),
+  /** The read-back the COO looked at: approval is refused when the file was read again since. */
+  readbackHash: z.string().trim().max(64).optional(),
+});
+
+/** The COO's correction notes on an approved chapter (or on the AI draft before the specialist uploads). */
+export const chapterChangesSchema = z.object({
+  note: z.string().trim().min(3, "Say what needs to change.").max(4000),
 });
 
 export const adminUploadVersionSchema = z.object({
@@ -23,7 +31,7 @@ export const adminUploadVersionSchema = z.object({
   release: z.boolean().default(false),
 });
 
-export const DELIVERABLE_ACCESS = ["DOWNPAYMENT", "BALANCE", "ALWAYS", "WITHHELD"] as const;
+export const DELIVERABLE_ACCESS = ["DOWNPAYMENT", "BALANCE", "WITH_COMPLETE", "ALWAYS", "WITHHELD"] as const;
 
 export const updateDeliverableSchema = z
   .object({
@@ -43,6 +51,7 @@ export const shareResearchSchema = z.object({ shared: z.boolean() });
 export const ACCESS_LABELS: Record<(typeof DELIVERABLE_ACCESS)[number], string> = {
   DOWNPAYMENT: "After the downpayment",
   BALANCE: "After the balance",
+  WITH_COMPLETE: "Only in the complete project",
   ALWAYS: "Now (super admin)",
   WITHHELD: "Withheld",
 };

@@ -668,6 +668,7 @@ enum DeliverableStatus {
 enum DeliverableAccess {
   DOWNPAYMENT // once the downpayment is verified
   BALANCE // once the balance is verified
+  WITH_COMPLETE // a full report's Chapter 3 onwards: never on its own, the client gets it in the complete project
   ALWAYS // released early by a super admin (a pricing decision)
   WITHHELD // an admin is holding it back
 }
@@ -695,6 +696,12 @@ model ProjectDeliverable {
   accessSetById String?
   accessSetAt   DateTime?
   archivedAt    DateTime?
+  /// Reviewed like any chapter but never listed for the client (a one-chapter order's chapter: the client gets it as the complete document).
+  clientHidden  Boolean           @default(false)
+  /// Chapter review: the COO's correction notes on a chapter already approved (the specialist sees them); the next approval clears them.
+  changeNote     String?
+  changeNoteAt   DateTime?
+  changeNoteById String?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -724,10 +731,20 @@ model DeliverableVersion {
   reviewedById    String?
   reviewedAt      DateTime?
   releasedAt      DateTime?
+  /// Chapter review: an AI draft (submittedByRole SYSTEM) records the hash of the generated text it was built from; one draft per text.
+  sourceHash      String?
+  /// Chapter review: the uploaded .docx read back into chapter text (src/lib/assembly/read-chapter-docx.ts): summary, blocking issues, flags.
+  readback        Json?
+  readbackText    String?            @db.Text
+  readbackAt      DateTime?
+  readerVersion   Int?
+  /// A complete document built from approved chapters: the chapter version ids it was built from (a newer approval makes it stale).
+  builtFrom       Json?
   createdAt       DateTime           @default(now())
 
   @@unique([deliverableId, version])
   @@unique([deliverableId, releaseNo])
+  @@unique([deliverableId, sourceHash])
   @@index([status, createdAt])
 }
 
@@ -1612,6 +1629,7 @@ enum OrchestratorStatus {
   GENERATING // a chapter is being written; holds a slot
   WAITING_FOR_DATA // a data pause is open; the slot is released
   FETCHING_DATA // Mode 5: fetching the dataset after Chapter 3; holds a slot
+  WAITING_FOR_APPROVAL // every chapter is written; waits for the COO to approve the specialist's reviewed chapters; no slot
   QUALITY_CHECK // every chapter is written; the quality gate has been asked for
   QUALITY_FAILED // the gate failed; waits for the founder or the COO to re-generate chapters
   HELD // the project is On hold, Disputed or Awaiting client input (or its research is running again); carries on by itself

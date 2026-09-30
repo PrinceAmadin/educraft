@@ -38,6 +38,7 @@ import { toPromptPrimarySources } from "./approved-inputs";
 import { pausesBeforeChapter } from "./dynamic-data-form";
 import { attachmentRefs, loadDataAttachments, pauseDataForChapter, type AttachmentRef } from "@/lib/services/data-pause";
 import { secondaryDataForChapter } from "@/lib/services/secondary-data";
+import { CHAPTER_REVIEW_TEXT } from "@/lib/chapter-review";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -101,7 +102,9 @@ export type GenerationErrorCode =
   | "PAUSE_NOT_VERIFIED"
   | "DATASET_MISSING"
   | "ALREADY_RUNNING"
-  | "ALREADY_EXISTS";
+  | "ALREADY_EXISTS"
+  /** Chapter review: the specialist has uploaded their version; the AI does not write the chapter again. */
+  | "HUMAN_VERSION_EXISTS";
 
 /** `fatal`: retrying cannot help (a refusal, a bad request, a broken plan in the prompt). */
 export class GenerationError extends Error {
@@ -292,6 +295,12 @@ export async function startChapterGeneration(input: StartChapterInput) {
             "ALREADY_EXISTS",
           );
         }
+        // Chapter review: once the specialist has uploaded their own version of the chapter, the AI never
+        // writes it again (that would discard their work); the COO returns it to them with notes instead.
+        const reviewed = await tx.deliverableVersion.count({
+          where: { submittedByRole: { not: "SYSTEM" }, file: { deletedAt: null }, deliverable: { projectId: project.id, kind: "CHAPTER", chapter, archivedAt: null } },
+        });
+        if (reviewed > 0) throw new GenerationError(CHAPTER_REVIEW_TEXT.humanVersionExists(chapter), true, "HUMAN_VERSION_EXISTS");
         await tx.generationCheckpoint.delete({ where: { id: existing.id } });
       }
       return tx.generationCheckpoint.create({
@@ -565,6 +574,13 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
         : { progressPercent: computeProgress({ status: "WRITING", previous: progress, targetWords: plan.targetWords, wordsWritten: wordsBefore + words }) }),
     },
   }));
+  // Chapter review: the finished chapter becomes the AI draft the specialist reviews (a Word file, with the
+  // free automated checks). Never fails the chapter: a page load or the orchestrator makes the draft later.
+  if (last && res.count > 0) {
+    await import("@/lib/services/chapter-review")
+      .then((m) => m.ensureChapterDraft(cp.projectId, cp.chapterNumber))
+      .catch((error) => console.warn(`[chapter review] draft for chapter ${cp.chapterNumber} not made yet`, error instanceof Error ? error.message : error));
+  }
   return { done: res.count === 0 || last };
 }
 

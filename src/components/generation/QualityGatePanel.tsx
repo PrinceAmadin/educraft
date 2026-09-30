@@ -42,13 +42,27 @@ const WHEN = (iso: string) => new Date(iso).toLocaleTimeString("en-GB", { timeZo
  * chapter, with the quote and the fix), the notes for the COO, the recall
  * button for 30 minutes after the report goes to QA on its own, and, for the
  * founder and the COO, re-generating a chapter with its failures in its brief.
+ * Chapter review: a chapter the specialist has reviewed is never re-generated;
+ * its failures go back to the specialist as correction notes instead.
  */
-export function QualityGatePanel({ endpoint, canRegenerate }: { endpoint: string; canRegenerate: boolean }) {
+export function QualityGatePanel({
+  endpoint,
+  canRegenerate,
+  chapterReview = null,
+  changesBase,
+}: {
+  endpoint: string;
+  canRegenerate: boolean;
+  /** Per chapter: its review item, and whether the specialist has uploaded their own version. */
+  chapterReview?: Record<number, { deliverableId: string; reviewed: boolean }> | null;
+  /** /api/admin/projects/<code>/deliverables: where correction notes are posted. */
+  changesBase?: string;
+}) {
   const router = useRouter();
   const [report, setReport] = React.useState<QualityRunResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState<"run" | "recall" | `regen:${number}` | null>(null);
+  const [busy, setBusy] = React.useState<"run" | "recall" | `regen:${number}` | `return:${number}` | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [confirmChapter, setConfirmChapter] = React.useState<number | null>(null);
@@ -122,6 +136,31 @@ export function QualityGatePanel({ endpoint, canRegenerate }: { endpoint: string
     router.refresh();
   }
 
+  /** Chapter review: the chapter's failures go to the specialist as the COO's correction notes. */
+  async function returnToSpecialist(chapter: number) {
+    const item = chapterReview?.[chapter];
+    if (!item || !changesBase || !report) return;
+    setConfirmChapter(null);
+    setBusy(`return:${chapter}`);
+    setError(null);
+    setNotice(null);
+    try {
+      const note = failureNotes(report.failuresJson, chapter);
+      const res = await fetch(`${changesBase}/${item.deliverableId}/changes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }) });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(json?.error ?? "That didn't work. Try again.");
+        return;
+      }
+      setNotice(`Chapter ${chapter} went back to the specialist with its failures as your correction notes. The check runs again once you approve their corrected version.`);
+      router.refresh();
+    } catch {
+      setError("Could not reach EduCraft. Check your connection and try again.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const ran = Boolean(report?.ranAt);
 
   return (
@@ -179,10 +218,12 @@ export function QualityGatePanel({ endpoint, canRegenerate }: { endpoint: string
           <Failures
             items={report.failuresJson}
             canRegenerate={canRegenerate && (report.status === "IN_PROGRESS" || report.status === "REVISION_NEEDED")}
+            reviewed={(n) => Boolean(chapterReview?.[n]?.reviewed && changesBase)}
             busy={busy}
             confirmChapter={confirmChapter}
             onAsk={setConfirmChapter}
             onRegenerate={(n) => void regenerate(n)}
+            onReturn={(n) => void returnToSpecialist(n)}
           />
           <Warnings items={report.warnings} notes={report.notes} />
           <AllChecks checks={report.checks} />
@@ -286,20 +327,37 @@ function RecallLine({ report, busy, onRecall }: { report: QualityRunResponse; bu
   );
 }
 
+/** A chapter's failures as correction notes for the specialist (at most 4,000 characters). */
+function failureNotes(items: QualityItem[], chapter: number): string {
+  const lines = items
+    .filter((f) => (f.chapter ?? f.locations.find((l) => l.chapter)?.chapter ?? null) === chapter)
+    .map((f) => {
+      const quote = f.locations.find((l) => l.chapter === chapter && l.quote)?.quote;
+      return `- ${f.message}${quote ? ` Example: "${quote}"` : ""}${f.fix ? ` Fix: ${f.fix}` : ""}`;
+    });
+  const text = `The quality check found these in Chapter ${chapter}:\n${lines.join("\n")}`;
+  return text.length > 4000 ? `${text.slice(0, 3990)}…` : text;
+}
+
 function Failures({
   items,
   canRegenerate,
+  reviewed,
   busy,
   confirmChapter,
   onAsk,
   onRegenerate,
+  onReturn,
 }: {
   items: QualityItem[];
   canRegenerate: boolean;
+  /** Chapter review: the specialist has reviewed this chapter, so it goes back to them instead. */
+  reviewed: (chapter: number) => boolean;
   busy: string | null;
   confirmChapter: number | null;
   onAsk: (n: number | null) => void;
   onRegenerate: (n: number) => void;
+  onReturn: (n: number) => void;
 }) {
   if (!items.length) return null;
   const groups = new Map<number | null, QualityItem[]>();
@@ -318,21 +376,29 @@ function Failures({
             {chapter && canRegenerate ? (
               confirmChapter === chapter ? null : (
                 <Button type="button" size="sm" variant="outline" onClick={() => onAsk(chapter)} disabled={busy !== null}>
-                  <LuRotateCcw aria-hidden />
-                  Re-generate Chapter {chapter}
+                  {reviewed(chapter) ? <LuUndo2 aria-hidden /> : <LuRotateCcw aria-hidden />}
+                  {reviewed(chapter) ? `Return Chapter ${chapter} to the specialist` : `Re-generate Chapter ${chapter}`}
                 </Button>
               )
             ) : null}
           </div>
           {chapter && confirmChapter === chapter ? (
-            <div className="space-y-3 rounded-xl bg-card p-3 shadow-soft" role="group" aria-label={`Confirm re-generating Chapter ${chapter}`}>
+            <div className="space-y-3 rounded-xl bg-card p-3 shadow-soft" role="group" aria-label={`Confirm ${reviewed(chapter) ? "returning" : "re-generating"} Chapter ${chapter}`}>
               <p className="text-sm text-foreground">
-                This rewrites Chapter {chapter} from scratch with these failures in its brief, and replaces the current text. It spends Claude credits (about ₦100–700 for a chapter).
+                {reviewed(chapter)
+                  ? `The specialist has reviewed Chapter ${chapter}, so it is not written again. These failures go to them as your correction notes; the approved version stays in use until you approve their correction.`
+                  : `This rewrites Chapter ${chapter} from scratch with these failures in its brief, and replaces the current text. It spends Claude credits (about ₦100–700 for a chapter).`}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" onClick={() => onRegenerate(chapter)} disabled={busy !== null}>
-                  {busy === `regen:${chapter}` ? <LuLoaderCircle className="animate-spin" aria-hidden /> : <LuRotateCcw aria-hidden />}
-                  Re-generate Chapter {chapter}
+                <Button type="button" size="sm" onClick={() => (reviewed(chapter) ? onReturn(chapter) : onRegenerate(chapter))} disabled={busy !== null}>
+                  {busy === `regen:${chapter}` || busy === `return:${chapter}` ? (
+                    <LuLoaderCircle className="animate-spin" aria-hidden />
+                  ) : reviewed(chapter) ? (
+                    <LuUndo2 aria-hidden />
+                  ) : (
+                    <LuRotateCcw aria-hidden />
+                  )}
+                  {reviewed(chapter) ? `Return Chapter ${chapter}` : `Re-generate Chapter ${chapter}`}
                 </Button>
                 <Button type="button" size="sm" variant="ghost" onClick={() => onAsk(null)}>
                   Cancel

@@ -157,6 +157,36 @@ export async function readFile(pathname: string): Promise<{ stream: ReadableStre
   return { stream: result.stream, size: result.blob.size };
 }
 
+/** A whole stored file in memory (chapter review reads approved Word files back), or null when missing. Refuses anything over `maxBytes`. */
+export async function readFileBytes(pathname: string, maxBytes: number): Promise<Uint8Array | null> {
+  const file = await readFile(pathname);
+  if (!file) return null;
+  if (file.size > maxBytes) {
+    await file.stream.cancel().catch(() => undefined);
+    throw new Error("File is too large to read");
+  }
+  const reader = file.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error("File is too large to read");
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+}
+
 /** The first bytes of a file (to check it really is what its name says). */
 export async function readFirstBytes(pathname: string, count = 16): Promise<Uint8Array | null> {
   const file = await readFile(pathname);

@@ -6,6 +6,8 @@ import { LuFile, LuDownload, LuTriangleAlert } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getWorkerAssignment, getWorkerByUserId } from "@/lib/services/worker-portal";
 import { canSubmitDeliverable, listDeliverablesForWorker, whySubmitClosed } from "@/lib/services/deliverables";
+import { ensureChapterDrafts } from "@/lib/services/chapter-review";
+import { approvedVersion, CHAPTER_REVIEW_TEXT } from "@/lib/chapter-review";
 import { OrderDetailsNotice } from "@/components/projects/OrderDetailsNotice";
 import { fileHref } from "@/lib/files/links";
 import { WorkerAssignmentActions } from "@/components/worker/WorkerAssignmentActions";
@@ -94,8 +96,21 @@ export default async function WorkerAssignmentPage({
     <SecondaryDataCard initial={secondary} endpoint={`${routeBase}/generation/fetch-secondary-data`} uploadEndpoint={`${routeBase}/generation/upload-secondary-data`} filesBase={routeBase} />
   ) : null;
 
-  const deliverables = (await listDeliverablesForWorker(project.id)).map((d) => {
-    const open = canSubmitDeliverable(d.kind, project.status);
+  // Chapter review: a finished chapter with no AI draft gets one now (normally made when it was written).
+  if (dashboard) await ensureChapterDrafts(project.id).catch((error) => console.warn("[chapter review] drafts not checked", error instanceof Error ? error.message : error));
+  const listed = await listDeliverablesForWorker(project.id);
+  const chapterReview = listed.some((d) => d.review);
+  const deliverables = listed.map((d) => {
+    let open = canSubmitDeliverable(d.kind, project.status);
+    let closedReason = open ? null : whySubmitClosed(d.kind, project.status);
+    // The complete project is built from the approved chapters; a chapter is uploaded once the AI has written it.
+    if (chapterReview && d.kind === "FINAL") {
+      open = false;
+      closedReason = CHAPTER_REVIEW_TEXT.finalByHandRefused;
+    } else if (d.review?.state === "WRITING") {
+      open = false;
+      closedReason = CHAPTER_REVIEW_TEXT.specialistLine.WRITING;
+    }
     return {
       id: d.id,
       title: d.title,
@@ -103,10 +118,16 @@ export default async function WorkerAssignmentPage({
       status: d.status,
       versions: d.versions,
       canSubmit: open,
-      closedReason: open ? null : whySubmitClosed(d.kind, project.status),
-      goesToQa: d.kind === "FINAL" && (project.status === "IN_PROGRESS" || project.status === "REVISION_NEEDED"),
+      closedReason,
+      goesToQa: !chapterReview && d.kind === "FINAL" && (project.status === "IN_PROGRESS" || project.status === "REVISION_NEEDED"),
+      review: d.review,
     };
   });
+  // The complete report opens for the specialist once every chapter has an approved version.
+  const reviewChapters = listed.filter((d) => d.review && d.chapter != null);
+  const reportReview = reviewChapters.length
+    ? { audience: "specialist" as const, notApproved: reviewChapters.filter((d) => !approvedVersion(d.versions)).map((d) => d.chapter as number) }
+    : null;
 
   return (
     <div className="space-y-5">
@@ -257,6 +278,7 @@ export default async function WorkerAssignmentPage({
                         uploadEndpoint={`${routeBase}/upload`}
                         actionEndpoint={`${routeBase}/data-pause`}
                         downloadUrl={`${routeBase}/documents/docx`}
+                        review={reportReview}
                       />
                       <QualityGatePanel key={dashboard.run?.gateRanAt ?? "not-run"} endpoint={`${routeBase}/quality`} canRegenerate={false} />
                       {prelims ? <PreliminaryPagesCard initial={prelims} readOnly /> : null}

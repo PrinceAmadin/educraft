@@ -35,6 +35,7 @@ import { writtenBlanks } from "@/lib/assembly/text-rules";
 import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS, ABSTRACT_TARGET_HI, ABSTRACT_TARGET_LO } from "@/lib/generation/preliminary-pages-rules";
 import { isChapterBasedOrder, prelimIntakeGaps } from "@/lib/assembly/assemble";
 import { expectedChapters } from "@/lib/deliverables";
+import { loadChapterTexts } from "@/lib/services/chapter-texts";
 
 const TAG = "[preliminary-pages]";
 const SUBSYSTEM = "preliminary_pages";
@@ -327,10 +328,14 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
     },
   });
   if (!project) return null;
-  const chapters = project.generationCheckpoints
+  const aiChapters = project.generationCheckpoints
     .map((c) => ({ number: c.chapterNumber, text: c.fullOutput ?? "" }))
     .filter((c) => c.text);
-  if (chapters.length === 0) return null;
+  if (aiChapters.length === 0) return null;
+  // Chapter review: the pages describe the chapters as approved (the AI text only where none is approved yet).
+  const chapters = await loadChapterTexts(projectDbId, aiChapters.map((c) => c.number), "canonical")
+    .then((t) => t.chapters.map((c) => ({ number: c.number, text: c.text.replace(/^\[IMAGE:[^\]]*\]$/gm, "") })))
+    .catch(() => aiChapters);
   const extracted = extractChapterInputs(chapters);
   const parentReference = readParentReference(project.dedicationDetails) ?? "family and friends";
   const acknowledgmentNote = readAcknowledgmentNote(project.acknowledgmentDetails) ?? "";

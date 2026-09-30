@@ -46,6 +46,7 @@ import { lockProjectRow } from "@/lib/generation/generation-state";
 import type { PromptSecondaryData } from "@/lib/generation/prompt-loader";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { ModeNotApprovedError } from "@/lib/services/mode-errors";
+import { loadChapterTexts } from "@/lib/services/chapter-texts";
 
 type Tx = Prisma.TransactionClient;
 
@@ -381,8 +382,13 @@ async function prepareModel(projectDbId: string): Promise<{
     db.generationCheckpoint.findUnique({ where: { projectId_chapterNumber: { projectId: project.id, chapterNumber: 4 } }, select: { id: true } }),
   ]);
   if (chapterFour) throw new SecondaryDataError(CHAPTER_FOUR_STARTED, 409, "GENERATION_STARTED");
-  const chapterText = chapterThree?.status === "COMPLETED" ? chapterThree.fullOutput?.trim() : null;
-  if (!chapterText) throw new SecondaryDataError("Chapter 3 must be written first: the variables and the period are read from it.", 409, "CHAPTER_3_NOT_READY");
+  const aiText = chapterThree?.status === "COMPLETED" ? chapterThree.fullOutput?.trim() : null;
+  if (!aiText) throw new SecondaryDataError("Chapter 3 must be written first: the variables and the period are read from it.", 409, "CHAPTER_3_NOT_READY");
+  // Chapter review: the model is read from the COO-approved Chapter 3 when there is one.
+  const chapterText =
+    (await loadChapterTexts(project.id, [3], "canonical")
+      .then((t) => t.chapters[0]?.text.trim() || null)
+      .catch(() => null)) ?? aiText;
 
   const chapterThreeHash = crypto.createHash("sha256").update(chapterText).digest("hex");
   const saved = await savedModelReading(project.id);

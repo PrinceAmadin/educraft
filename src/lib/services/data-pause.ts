@@ -538,7 +538,7 @@ async function activePause(projectDbId: string, pauseId: string, statuses: reado
       formSpec: true,
       round: true,
       clockPausedAt: true,
-      project: { select: { projectId: true } },
+      project: { select: { projectId: true, worker: { select: { userId: true } } } },
       files: { where: { deletedAt: null }, select: { id: true, fileName: true, fileSize: true, blobPathname: true } },
     },
   });
@@ -654,6 +654,23 @@ export async function verifyDataPause(
     },
     { timeout: 20_000, maxWait: 10_000 },
   );
+  // Chapter review: a chapter whose blanks were just filled gets a new AI draft; if the specialist
+  // already uploaded their own version, they are told the figures to put into it.
+  if (changed.length) {
+    const review = await import("@/lib/services/chapter-review");
+    const lines = slots.map((s) => `${s.label}: ${values[s.key] ?? ""}`).join("; ");
+    for (const ch of changed) {
+      const outcome = await review.ensureChapterDraft(projectDbId, ch.number).catch(() => null);
+      if (outcome === "reviewed") {
+        await notifyUsers([pause.project.worker?.userId], {
+          title: `Chapter ${ch.number}: the client's figures`,
+          message: `${pause.project.projectId}: the client's data filled the blanks in Chapter ${ch.number}, but your version was uploaded before. Put these into it and upload it again: ${lines}.`,
+          type: "warning",
+          link: `/worker/projects/${pause.project.projectId}?tab=documents`,
+        }).catch(() => undefined);
+      }
+    }
+  }
   await notifyClient(projectDbId, { title: DATA_PAUSE_CLIENT_TEXT.checkedTitle, message: `${pause.project.projectId}: ${DATA_PAUSE_CLIENT_TEXT.checkedBody}`, type: "success", tab: "progress" });
   await notifyOperations({
     title: "Client data verified",

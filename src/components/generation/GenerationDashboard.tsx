@@ -13,7 +13,7 @@ import { OrchestratorPanel } from "./OrchestratorPanel";
 import { PauseBanner } from "./PauseBanner";
 import { ProgressBar } from "./ProgressBar";
 import { QueueCard } from "./QueueCard";
-import { ReportDownload } from "./ReportDownload";
+import { ReportDownload, type ReportReviewSummary } from "./ReportDownload";
 
 type Connection = "connecting" | "live" | "reconnecting" | "offline";
 
@@ -53,6 +53,7 @@ export function GenerationDashboard({
   actionEndpoint,
   downloadUrl,
   controls,
+  review,
 }: {
   initial: GenerationDashboardState;
   /** The server's clock when it rendered: the first render uses it on both sides, so the times match. */
@@ -64,6 +65,8 @@ export function GenerationDashboard({
   downloadUrl?: string;
   /** D9, founder and COO only: where Start, Stop, Continue and a chapter's restart are posted. */
   controls?: { generation: string; dataPause: string };
+  /** Chapter review: which chapters are approved (the download and the working copy follow it). */
+  review?: ReportReviewSummary | null;
 }) {
   const router = useRouter();
   const [chapters, setChapters] = React.useState<ChapterCardView[]>(initial.chapters);
@@ -208,7 +211,7 @@ export function GenerationDashboard({
           <ProgressBar value={overall} label="Whole report progress" />
           <span className="w-10 shrink-0 text-right font-mono text-sm tabular-nums text-foreground">{overall}%</span>
         </div>
-        {downloadUrl ? <ReportDownload href={downloadUrl} ready={chapters.length > 0 && done === chapters.length} total={chapters.length} /> : null}
+        {downloadUrl ? <ReportDownload href={downloadUrl} ready={chapters.length > 0 && done === chapters.length} total={chapters.length} review={review} /> : null}
       </div>
 
       {run ? (

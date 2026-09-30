@@ -14,6 +14,7 @@ import { balancePayable, downpaymentDue } from "@/lib/payment-rules";
 import { resyncPaystackReference } from "@/lib/services/paystack-payments";
 import { ensureDeliverables } from "@/lib/services/deliverables";
 import { deliverableGate, type LockReason } from "@/lib/files/policy";
+import { notReadyHint } from "@/lib/client-document-text";
 
 /**
  * Everything a client page reads comes through here. Two rules:
@@ -488,12 +489,6 @@ export interface ClientDocument {
   notReadyHint: string;
 }
 
-function notReadyHint(access: string, project: { downpaymentStatus: string; balanceStatus: string }): string {
-  if (access === "BALANCE" && project.balanceStatus !== "Verified") return "Not ready yet · downloads once your balance is paid";
-  if (access === "DOWNPAYMENT" && project.downpaymentStatus !== "Verified") return "Not ready yet · downloads once your downpayment is in";
-  return "Not ready yet · we'll let you know the moment it is";
-}
-
 /**
  * The project's chapters and documents as the client sees them: only
  * released versions, numbered by release (never internal upload counts),
@@ -508,7 +503,7 @@ export async function getClientDocuments(projectDbId: string): Promise<ClientDoc
       downpaymentStatus: true,
       balanceStatus: true,
       deliverables: {
-        where: { archivedAt: null },
+        where: { archivedAt: null, clientHidden: false },
         orderBy: { sortOrder: "asc" },
         select: {
           id: true,

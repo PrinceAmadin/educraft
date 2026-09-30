@@ -22,7 +22,8 @@ export type Block =
   | { kind: "list"; items: { marker: string; text: string }[] }
   | { kind: "equation"; text: string; modelNumber: string | null }
   | { kind: "table"; caption: string | null; header: string[]; rows: string[][]; source: string | null }
-  | { kind: "figure"; placeholder: string; caption: string | null; source: string | null }
+  /** A figure: a [FIGURE PLACEHOLDER] still to be drawn, or (chapter review) a picture from an approved upload. */
+  | { kind: "figure"; placeholder: string; caption: string | null; source: string | null; image?: { key: string; width: number; height: number } }
   | { kind: "endnotes"; lines: string[] };
 
 export interface ParsedChapter {
@@ -39,6 +40,9 @@ const TABLE_CAPTION = /^\**\s*Table\s+(\d+(?:\.\d+)?)\s*[:.\-–—]?\s*(.*?)\s*
 const FIGURE_CAPTION = /^\**\s*Fig(?:ure|\.)?\s+(\d+(?:\.\d+)?)\s*[:.\-–—]?\s*(.*?)\s*\**$/i;
 const SOURCE_LINE = /^\(?\**\s*Sources?\s*:\s*(.+?)\**\)?\s*$/i;
 const FIGURE_PLACEHOLDER = /\[FIGURE PLACEHOLDER:[^\]]*\]/i;
+/** Chapter review: a picture from the approved upload, "[IMAGE: word/media/image1.png | 480x320]" (read-chapter-docx.ts). */
+export const IMAGE_LINE = /^\[IMAGE:\s*([^|\]]+?)\s*\|\s*(\d{1,5})x(\d{1,5})\s*\]$/;
+const FIGURE_START = (line: string) => FIGURE_PLACEHOLDER.test(line) || IMAGE_LINE.test(line.trim());
 const LIST_LINE = /^\s*(?:((?:[ivxlc]{1,6}|\d{1,2}|[a-z])[.)])|([•▪◦\-–*]))\s+(.+)$/i;
 const NUMBERED_HEADING = /^\**\s*(\d+(?:\.\d+){1,4})\.?\s+(\S.*?)\s*\**:?$/;
 
@@ -72,7 +76,7 @@ function levelFromNumber(text: string): { level: 2 | 3; tooDeep: boolean } | nul
 function isPipeRow(line: string): boolean {
   const t = line.trim();
   if (!t.includes("|")) return false;
-  if (/^\[(?:EQ|TABLE|FIG)\]/i.test(t)) return false;
+  if (/^\[(?:EQ|TABLE|FIG)\]/i.test(t) || IMAGE_LINE.test(t)) return false;
   return t.split("|").filter((c) => c.trim() !== "").length >= 2 || /^\|?\s*:?-{3,}/.test(t);
 }
 
@@ -329,6 +333,14 @@ export function parseChapter(raw: string, chapter: number | null = null): Parsed
       continue;
     }
 
+    const image = IMAGE_LINE.exec(trimmed);
+    if (image) {
+      flush();
+      blocks.push({ kind: "figure", placeholder: "", caption: pendingFigureCaption, source: null, image: { key: image[1], width: Number(image[2]), height: Number(image[3]) } });
+      pendingFigureCaption = null;
+      continue;
+    }
+
     if (FIGURE_PLACEHOLDER.test(trimmed)) {
       flush();
       const placeholder = FIGURE_PLACEHOLDER.exec(trimmed)![0];
@@ -344,7 +356,7 @@ export function parseChapter(raw: string, chapter: number | null = null): Parsed
       flush();
       const last = lastBlock();
       if (last?.kind === "figure" && !last.caption) last.caption = stripEmphasis(trimmed);
-      else if (FIGURE_PLACEHOLDER.test(lines[i + 1] ?? "") || FIGURE_PLACEHOLDER.test(lines[i + 2] ?? "")) pendingFigureCaption = stripEmphasis(trimmed);
+      else if (FIGURE_START(lines[i + 1] ?? "") || FIGURE_START(lines[i + 2] ?? "")) pendingFigureCaption = stripEmphasis(trimmed);
       else blocks.push({ kind: "paragraph", text: trimmed });
       continue;
     }

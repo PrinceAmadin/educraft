@@ -2,11 +2,24 @@ import crypto from "node:crypto";
 import { Prisma, type DeliverableAccess, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
-import { deliverableTemplate, orderedChapters } from "@/lib/deliverables";
+import { deliverableTemplate, expectedChapters, orderedChapters } from "@/lib/deliverables";
 import { deliverableGate, type Gate } from "@/lib/files/policy";
 import { checkUploadedFile, type UploadedFileInput } from "@/lib/files/register";
 import { buildPrivatePath } from "@/lib/files/paths";
-import { putPrivateFile } from "@/lib/files/storage";
+import { deleteStoredFile, putPrivateFile } from "@/lib/files/storage";
+import { releaseAnnouncement } from "@/lib/client-document-text";
+import {
+  approvalRefusals,
+  builtFromIsStale,
+  CHAPTER_REVIEW_TEXT,
+  chapterReviewState,
+  isAiDraft,
+  isWordFile,
+  reportReview,
+  type ChapterReviewState,
+} from "@/lib/chapter-review";
+import { ensureReadback, readBackVersion, readbackFacts, readStoredReadback, type StoredReadback } from "@/lib/services/chapter-readback";
+import { chapterReviewItems } from "@/lib/services/chapter-texts";
 import { siteUrl } from "@/lib/site-url";
 import { documentReadyMessage, toWaNumber, waLink } from "@/lib/whatsapp";
 import { recordUpdate } from "@/lib/services/client-updates";
@@ -23,6 +36,8 @@ async function recordVersion(input: {
   /** WORKER or ADMIN; SYSTEM for the quality gate's own submission (D8), with the person who ran the gate. */
   submittedByRole: "WORKER" | "ADMIN" | "SYSTEM";
   note: string | null;
+  /** A complete document built from approved chapters: the chapter version ids (chapter review). */
+  builtFrom?: Record<string, string> | null;
 }): Promise<{ versionId: string; fileId: string }> {
   return db
     .$transaction(
@@ -59,6 +74,7 @@ async function recordVersion(input: {
             submittedById: input.submittedById,
             submittedByRole: input.submittedByRole,
             workerNote: input.note,
+            ...(input.builtFrom ? { builtFrom: input.builtFrom } : {}),
           },
           select: { id: true },
         });
@@ -89,7 +105,10 @@ async function recordVersion(input: {
 export class DeliverableError extends Error {
   constructor(
     message: string,
-    public status = 400
+    public status = 400,
+    /** A machine-readable reason (e.g. APPROVAL_REFUSED, BUILT_FROM_STALE) with its details, for the screen. */
+    public code: string | null = null,
+    public details: Record<string, unknown> = {}
   ) {
     super(message);
   }
@@ -165,9 +184,23 @@ export async function ensureDeliverables(projectDbId: string): Promise<void> {
       title: s.title,
       sortOrder: s.sortOrder,
       access: s.access,
+      clientHidden: s.clientHidden ?? false,
     })),
     skipDuplicates: true,
   });
+}
+
+/** Chapter review applies to a report the pipeline writes (it has generation runs); a hand-written project keeps the plain release flow. */
+export async function chapterReviewApplies(projectDbId: string): Promise<boolean> {
+  return (await db.generationCheckpoint.count({ where: { projectId: projectDbId } })) > 0;
+}
+
+/** Every chapter's approved version now (what a complete document must have been built from). */
+async function currentApprovals(projectDbId: string): Promise<Map<number, string>> {
+  const project = await db.project.findUnique({ where: { id: projectDbId }, select: { chapterCount: true, additionalData: true, service: { select: { serviceCode: true } } } });
+  if (!project) return new Map();
+  const expected = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
+  return reportReview(await chapterReviewItems(projectDbId), expected).approvedVersionIds;
 }
 
 // ── Reading ──────────────────────────────────────────────────
@@ -182,6 +215,8 @@ const versionSelect = {
   reviewNote: true,
   createdAt: true,
   releasedAt: true,
+  readback: true,
+  builtFrom: true,
   file: { select: { id: true, fileName: true, fileSize: true, hiddenFromWorkerAt: true } },
 } satisfies Prisma.DeliverableVersionSelect;
 
@@ -191,6 +226,8 @@ export interface VersionView {
   releaseNo: number | null;
   status: "SUBMITTED" | "RELEASED" | "RETURNED" | "SUPERSEDED";
   submittedByRole: string;
+  /** Chapter review: the AI draft (the specialist works from it; it is never approved). */
+  aiDraft: boolean;
   workerNote: string | null;
   reviewNote: string | null;
   createdAt: string;
@@ -198,29 +235,40 @@ export interface VersionView {
   fileId: string;
   fileName: string;
   fileSize: number | null;
+  /** Chapter review: the upload read back (what the complete report will contain). */
+  readback: StoredReadback | null;
+  /** A complete document built from approved chapters: which chapters are no longer the approved ones. */
+  staleChapters: number[];
+  builtFromApproved: boolean;
 }
 
 export interface DeliverableView {
   id: string;
   key: string;
   kind: "CHAPTER" | "FINAL" | "OTHER";
+  chapter: number | null;
   title: string;
   status: "NOT_STARTED" | "IN_REVIEW" | "CHANGES_REQUESTED" | "RELEASED";
   access: DeliverableAccess;
   archived: boolean;
+  clientHidden: boolean;
   /** Newest first. */
   versions: VersionView[];
   /** What the client sees for this item right now. */
   gate: Gate;
+  /** Chapter review (a report the pipeline writes): where this chapter stands, and the COO's notes on an approved one. */
+  review: { state: ChapterReviewState; changeNote: string | null; changeNoteAt: string | null } | null;
 }
 
-function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof versionSelect }>): VersionView {
+function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof versionSelect }>, approvals: Map<number, string> | null): VersionView {
+  const staleChapters = v.builtFrom && approvals ? builtFromIsStale(v.builtFrom, approvals) : [];
   return {
     id: v.id,
     version: v.version,
     releaseNo: v.releaseNo,
     status: v.status,
     submittedByRole: v.submittedByRole,
+    aiDraft: isAiDraft(v),
     workerNote: v.workerNote,
     reviewNote: v.reviewNote,
     createdAt: v.createdAt.toISOString(),
@@ -228,7 +276,24 @@ function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof v
     fileId: v.file.id,
     fileName: v.file.fileName,
     fileSize: v.file.fileSize,
+    readback: readStoredReadback(v.readback),
+    staleChapters,
+    builtFromApproved: v.builtFrom != null,
   };
+}
+
+type LoadedDeliverable = Awaited<ReturnType<typeof loadDeliverables>>[number];
+
+function reviewOf(d: LoadedDeliverable, applies: boolean): DeliverableView["review"] {
+  if (!applies || d.kind !== "CHAPTER") return null;
+  const state = chapterReviewState({
+    kind: d.kind,
+    chapter: d.chapter,
+    archived: d.archivedAt != null,
+    changeNote: d.changeNote,
+    versions: d.versions.map((v) => ({ ...v, fileName: v.file.fileName })),
+  });
+  return { state, changeNote: d.changeNote, changeNoteAt: d.changeNoteAt ? d.changeNoteAt.toISOString() : null };
 }
 
 async function loadDeliverables(projectDbId: string, opts: { forWorker: boolean }) {
@@ -247,42 +312,52 @@ async function loadDeliverables(projectDbId: string, opts: { forWorker: boolean 
 }
 
 export async function listDeliverablesForAdmin(projectDbId: string): Promise<DeliverableView[]> {
-  const [project, rows] = await Promise.all([
+  const [project, rows, applies] = await Promise.all([
     db.project.findUnique({
       where: { id: projectDbId },
       select: { status: true, downpaymentStatus: true, balanceStatus: true },
     }),
     loadDeliverables(projectDbId, { forWorker: false }),
+    chapterReviewApplies(projectDbId),
   ]);
   if (!project) return [];
+  const approvals = applies && rows.some((d) => d.versions.some((v) => v.builtFrom != null)) ? await currentApprovals(projectDbId) : null;
   return rows.map((d) => ({
     id: d.id,
     key: d.key,
     kind: d.kind,
+    chapter: d.chapter,
     title: d.title,
     status: d.status,
     access: d.access,
     archived: d.archivedAt != null,
-    versions: d.versions.map(toVersionView),
-    gate: deliverableGate(
-      d.archivedAt == null && d.versions.some((v) => v.releaseNo != null),
-      d.access,
-      project
-    ),
+    clientHidden: d.clientHidden,
+    versions: d.versions.map((v) => toVersionView(v, approvals)),
+    gate: d.clientHidden
+      ? { state: "hidden" }
+      : deliverableGate(
+          d.archivedAt == null && d.versions.some((v) => v.releaseNo != null),
+          d.access,
+          project
+        ),
+    review: reviewOf(d, applies),
   }));
 }
 
 /** The worker's view: their uploads, admin copies they may see, return notes. No access or payment state. */
 export async function listDeliverablesForWorker(projectDbId: string): Promise<Omit<DeliverableView, "gate" | "access">[]> {
-  const rows = await loadDeliverables(projectDbId, { forWorker: true });
+  const [rows, applies] = await Promise.all([loadDeliverables(projectDbId, { forWorker: true }), chapterReviewApplies(projectDbId)]);
   return rows.map((d) => ({
     id: d.id,
     key: d.key,
     kind: d.kind,
+    chapter: d.chapter,
     title: d.title,
     status: d.status,
     archived: false,
-    versions: d.versions.map(toVersionView),
+    clientHidden: d.clientHidden,
+    versions: d.versions.map((v) => toVersionView(v, null)),
+    review: reviewOf(d, applies),
   }));
 }
 
@@ -304,9 +379,12 @@ export async function submitVersion(input: {
 
   const deliverable = await db.projectDeliverable.findFirst({
     where: { id: input.deliverableId, projectId: project.id, archivedAt: null },
-    select: { id: true, kind: true, title: true },
+    select: { id: true, kind: true, title: true, chapter: true },
   });
   if (!deliverable) throw new DeliverableError("That document isn't part of this project", 404);
+  const underReview = await chapterReviewApplies(project.id);
+  // Chapter review: the complete project is built from the approved chapters, never uploaded by hand.
+  if (underReview && deliverable.kind === "FINAL") throw new DeliverableError(CHAPTER_REVIEW_TEXT.finalByHandRefused, 409, "FINAL_BUILT_FROM_CHAPTERS");
   if (!canSubmitDeliverable(deliverable.kind, project.status)) {
     throw new DeliverableError(whySubmitClosed(deliverable.kind, project.status), 409);
   }
@@ -317,6 +395,11 @@ export async function submitVersion(input: {
     purpose: "deliverable",
     targetId: deliverable.id,
   });
+  // A reviewed chapter is read back into the report, so it must be a Word file.
+  if (underReview && deliverable.kind === "CHAPTER" && !isWordFile(checked.fileName)) {
+    await deleteStoredFile(checked.pathname).catch(() => undefined);
+    throw new DeliverableError(CHAPTER_REVIEW_TEXT.refuse.notWord, 400, "NOT_WORD");
+  }
   const note = input.note?.trim() || null;
 
   const { versionId } = await recordVersion({
@@ -327,6 +410,22 @@ export async function submitVersion(input: {
     submittedByRole: "WORKER",
     note,
   });
+
+  if (underReview && deliverable.kind === "CHAPTER") {
+    // Read it back now, so the COO sees what the report will contain (and anything that would stop approval).
+    const read = await readBackVersion(versionId).catch((error) => {
+      console.warn(`[chapter review] ${project.projectId}: the upload was not read back yet`, error instanceof Error ? error.message : error);
+      return null;
+    });
+    const blocking = read?.readback.blocking.length ?? 0;
+    await notifyOperations({
+      title: `${deliverable.title} ready for approval`,
+      message: `${project.projectId}: the specialist uploaded their reviewed ${deliverable.title}.${blocking ? ` ${blocking} problem${blocking === 1 ? "" : "s"} must be fixed before it can be approved.` : " Check it and approve it, or return it with notes."}`,
+      type: "info",
+      link: `/admin/projects/${project.projectId}?tab=documents`,
+    });
+    return { versionId, movedToQa: false };
+  }
 
   // The complete document is the one the quality check reviews.
   let movedToQa = false;
@@ -362,10 +461,20 @@ export async function submitGeneratedReport(input: {
   note: string;
   /** Whoever ran the gate (recorded on the version); the move itself is the system's. */
   actorUserId: string;
+  /** Chapter review: the approved chapter versions the document was built from. */
+  builtFrom?: Record<string, string> | null;
+  /**
+   * False: a rebuild after QA (supervisor corrections, say) is recorded as the next complete
+   * document for release, and the pipeline stays where it is.
+   */
+  moveToQa?: boolean;
 }): Promise<{ versionId: string; fileId: string }> {
   const project = await db.project.findUnique({ where: { id: input.projectDbId }, select: { id: true, projectId: true, status: true } });
   if (!project) throw new DeliverableError("Project not found", 404);
-  if (!FINAL_TO_QA_STATUSES.includes(project.status)) throw new DeliverableError(whySubmitClosed("FINAL", project.status), 409);
+  const moveToQa = input.moveToQa !== false;
+  if (moveToQa ? !FINAL_TO_QA_STATUSES.includes(project.status) : !QA_PASSED_STATUSES.includes(project.status)) {
+    throw new DeliverableError(whySubmitClosed("FINAL", project.status), 409);
+  }
   // Deliverables are made when a page first lists them; the gate may be the first to need the complete document.
   await ensureDeliverables(project.id);
   const deliverable = await db.projectDeliverable.findFirst({
@@ -385,8 +494,9 @@ export async function submitGeneratedReport(input: {
     submittedById: input.actorUserId,
     submittedByRole: "SYSTEM",
     note: input.note,
+    builtFrom: input.builtFrom ?? null,
   });
-  await transitionProject(project.id, "SUBMITTED", { changedById: null, note: input.note });
+  if (moveToQa) await transitionProject(project.id, "SUBMITTED", { changedById: null, note: input.note });
   return recorded;
 }
 
@@ -426,9 +536,12 @@ async function releaseMessage(projectDbId: string, title: string, isFinal: boole
 export async function reviewVersion(input: {
   projectIdOrCode: string;
   versionId: string;
-  decision: "release" | "return";
+  /** "approve" is a reviewed chapter's release: the same action. */
+  decision: "release" | "return" | "approve";
   note?: string | null;
   adminUserId: string;
+  /** The read-back the COO looked at (chapter review): approval is refused if the file was read again since. */
+  readbackHash?: string | null;
 }): Promise<ReviewResult> {
   const version = await db.deliverableVersion.findFirst({
     where: {
@@ -438,13 +551,18 @@ export async function reviewVersion(input: {
     select: {
       id: true,
       status: true,
+      submittedByRole: true,
+      builtFrom: true,
+      file: { select: { fileName: true } },
       deliverable: {
         select: {
           id: true,
           kind: true,
+          chapter: true,
           title: true,
           access: true,
           archivedAt: true,
+          clientHidden: true,
           project: {
             select: {
               id: true,
@@ -494,6 +612,27 @@ export async function reviewVersion(input: {
     throw new DeliverableError("The complete document can be released once it has passed the quality check.", 409);
   }
 
+  // Chapter review: releasing a chapter of a generated report is the COO's approval of the specialist's
+  // reviewed upload, and only that upload, read back cleanly, can be approved.
+  const underReview = await chapterReviewApplies(project.id);
+  const approving = underReview && deliverable.kind === "CHAPTER";
+  if (approving) {
+    const readback = isAiDraft(version) ? null : (await ensureReadback(version.id)).readback;
+    const refusals = approvalRefusals({
+      version: { status: version.status, submittedByRole: version.submittedByRole, fileName: version.file.fileName },
+      projectStatus: project.status,
+      readback: readbackFacts(readback),
+      seenHash: input.readbackHash ?? null,
+    });
+    if (refusals.length) throw new DeliverableError(refusals[0], 409, "APPROVAL_REFUSED", { refusals });
+  }
+  // A complete document built from approved chapters is out of date once a chapter is approved again.
+  if (deliverable.kind === "FINAL" && version.builtFrom) {
+    const stale = builtFromIsStale(version.builtFrom, await currentApprovals(project.id));
+    if (stale.length) throw new DeliverableError(CHAPTER_REVIEW_TEXT.finalStale(stale), 409, "BUILT_FROM_STALE", { staleChapters: stale });
+  }
+
+  const isFinal = deliverable.kind === "FINAL";
   const releaseNo = await db.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM ${sqlTable("ProjectDeliverable")} WHERE id = ${deliverable.id} FOR UPDATE`;
@@ -511,57 +650,52 @@ export async function reviewVersion(input: {
         },
       });
       if (c.count !== 1) return null;
-      await tx.projectDeliverable.update({ where: { id: deliverable.id }, data: { status: "RELEASED" } });
-      const gate = deliverableGate(true, deliverable.access, project);
-      await recordUpdate(tx, {
-        projectId: project.id,
-        kind: "RELEASE",
-        title: next > 1 ? `${deliverable.title} (version ${next}) is ready` : `${deliverable.title} is ready`,
-        body:
-          gate.state === "open"
-            ? "Download it from the Documents tab."
-            : gate.state === "locked" && gate.reason === "balance"
-              ? "It unlocks for download when your balance is paid."
-              : "You'll be able to download it from the Documents tab.",
-        dedupeKey: `release:${version.id}`,
+      // An approval also settles the COO's notes on the chapter it replaces.
+      await tx.projectDeliverable.update({
+        where: { id: deliverable.id },
+        data: { status: "RELEASED", ...(approving ? { changeNote: null, changeNoteAt: null, changeNoteById: null } : {}) },
       });
+      const told = announcementFor(next);
+      if (told) await recordUpdate(tx, { projectId: project.id, kind: "RELEASE", title: told.feedTitle, body: told.feedBody, dedupeKey: `release:${version.id}` });
       return next;
     },
     { timeout: 15_000, maxWait: 10_000 }
   );
   if (releaseNo == null) throw new DeliverableError("Someone already reviewed this upload. Refresh.", 409);
 
-  const gate = deliverableGate(true, deliverable.access, project);
-  const isFinal = deliverable.kind === "FINAL";
-  await notifyClient(project.id, {
-    title: isFinal ? "Your complete project is ready" : `${deliverable.title} is ready`,
-    message:
-      gate.state === "open"
-        ? `${project.projectId}: download it from Documents.`
-        : `${project.projectId}: it unlocks when your balance is paid.`,
-    type: "success",
-    tab: gate.state === "locked" && gate.reason === "balance" ? "payments" : "documents",
-    email: {
-      kind: "release",
-      heading: isFinal ? "Your complete project is ready" : `${deliverable.title} is ready`,
-      lines:
-        gate.state === "open"
-          ? ["It's on your dashboard now. Open the Documents tab to download it."]
-          : ["It's on your dashboard. It unlocks for download once your balance is paid, from the Payments tab."],
-      ctaLabel: gate.state === "open" ? "Download it" : "Open your project",
-    },
-  });
+  // The client hears about a document only when there is something for them (never a chapter that only
+  // comes inside the complete project, nor one kept off their list).
+  const told = announcementFor(releaseNo);
+  if (told) {
+    await notifyClient(project.id, {
+      title: told.notifyTitle,
+      message: told.notifyMessage(project.projectId),
+      type: "success",
+      tab: told.tab,
+      email: { kind: "release", heading: told.notifyTitle, lines: told.emailLines, ctaLabel: told.ctaLabel },
+    });
+  }
   await notifyUsers([project.worker?.userId], {
-    title: `${deliverable.title} released`,
-    message: `${project.projectId}: ${deliverable.title} was released to the client.`,
+    title: approving ? `${deliverable.title} approved` : `${deliverable.title} released`,
+    message: approving
+      ? `${project.projectId}: the COO approved your ${deliverable.title}. The complete report is built from it.`
+      : `${project.projectId}: ${deliverable.title} was released to the client.`,
     type: "success",
     link: `/worker/projects/${project.projectId}?tab=documents`,
   });
 
+  // An approval may be what the orchestrator waits for before the quality check.
+  if (approving) await import("@/lib/generation/orchestrator").then((m) => m.nudge(project.id)).catch(() => undefined);
+
   // Everything paid and the complete document released: that is delivery.
   if (isFinal) await deliverIfFinalReleased(project.id);
 
-  return { released: true, whatsappUrl: await releaseMessage(project.id, deliverable.title, isFinal) };
+  return { released: true, whatsappUrl: told ? await releaseMessage(project.id, deliverable.title, isFinal) : null };
+
+  function announcementFor(releaseNumber: number) {
+    if (deliverable.clientHidden) return null;
+    return releaseAnnouncement({ title: deliverable.title, isFinal, releaseNo: releaseNumber, gate: deliverableGate(true, deliverable.access, project) });
+  }
 }
 
 /**
@@ -581,9 +715,11 @@ export async function adminUploadVersion(input: {
       id: input.deliverableId,
       project: { OR: [{ id: input.projectIdOrCode }, { projectId: input.projectIdOrCode }] },
     },
-    select: { id: true, projectId: true },
+    select: { id: true, projectId: true, kind: true },
   });
   if (!deliverable) throw new DeliverableError("Document not found", 404);
+  const underReview = await chapterReviewApplies(deliverable.projectId);
+  if (underReview && deliverable.kind === "FINAL") throw new DeliverableError(CHAPTER_REVIEW_TEXT.finalByHandRefused, 409, "FINAL_BUILT_FROM_CHAPTERS");
 
   const checked = await checkUploadedFile(input.upload, {
     userId: input.adminUserId,
@@ -591,6 +727,10 @@ export async function adminUploadVersion(input: {
     purpose: "deliverable",
     targetId: deliverable.id,
   });
+  if (underReview && deliverable.kind === "CHAPTER" && !isWordFile(checked.fileName)) {
+    await deleteStoredFile(checked.pathname).catch(() => undefined);
+    throw new DeliverableError(CHAPTER_REVIEW_TEXT.refuse.notWord, 400, "NOT_WORD");
+  }
 
   const versionId = await db.$transaction(
     async (tx) => {
@@ -632,6 +772,8 @@ export async function adminUploadVersion(input: {
     },
     { timeout: 15_000, maxWait: 10_000 }
   );
+  // A reviewed chapter is read back before anyone can approve it.
+  if (underReview && deliverable.kind === "CHAPTER") await readBackVersion(versionId);
 
   if (!input.release) return { released: false, whatsappUrl: null };
   return reviewVersion({
@@ -663,6 +805,10 @@ export async function updateDeliverable(input: {
   // Opening a document before it is paid for is a pricing decision.
   if (input.access === "ALWAYS" && input.actor.role !== "SUPER_ADMIN") {
     throw new DeliverableError("Only a super admin can release a document before it is paid for.", 403);
+  }
+  // Chapter 3 onwards of a full report reach the client only in the complete project: the founder's rule to lift.
+  if (d.access === "WITH_COMPLETE" && input.access !== undefined && input.access !== "WITH_COMPLETE" && input.access !== "WITHHELD" && input.actor.role !== "SUPER_ADMIN") {
+    throw new DeliverableError("Only a super admin can let the client have this chapter on its own.", 403);
   }
   const data: Prisma.ProjectDeliverableUpdateInput = {};
   if (input.title !== undefined) {
@@ -735,14 +881,22 @@ export interface ReviewQueueRow {
   submittedAt: string;
 }
 
-/** Uploads waiting for an admin, oldest first. A complete document still in the quality check is QA's, not listed here. */
+/**
+ * Uploads waiting for an admin, oldest first. A complete document still in the quality check is QA's,
+ * and a chapter's AI draft is the specialist's to review, so neither is listed here.
+ */
+const TO_REVIEW: Prisma.DeliverableVersionWhereInput = {
+  status: "SUBMITTED",
+  deliverable: { archivedAt: null },
+  NOT: [
+    { deliverable: { kind: "FINAL", project: { status: { in: ["SUBMITTED", "IN_QA_REVIEW", "REVISION_NEEDED"] } } } },
+    { submittedByRole: "SYSTEM", deliverable: { kind: "CHAPTER" } },
+  ],
+};
+
 export async function listVersionsToReview(take = 50): Promise<ReviewQueueRow[]> {
   const rows = await db.deliverableVersion.findMany({
-    where: {
-      status: "SUBMITTED",
-      deliverable: { archivedAt: null },
-      NOT: { deliverable: { kind: "FINAL", project: { status: { in: ["SUBMITTED", "IN_QA_REVIEW", "REVISION_NEEDED"] } } } },
-    },
+    where: TO_REVIEW,
     orderBy: { createdAt: "asc" },
     take,
     select: {
@@ -768,11 +922,5 @@ export async function listVersionsToReview(take = 50): Promise<ReviewQueueRow[]>
 }
 
 export async function countVersionsToReview(): Promise<number> {
-  return db.deliverableVersion.count({
-    where: {
-      status: "SUBMITTED",
-      deliverable: { archivedAt: null },
-      NOT: { deliverable: { kind: "FINAL", project: { status: { in: ["SUBMITTED", "IN_QA_REVIEW", "REVISION_NEEDED"] } } } },
-    },
-  });
+  return db.deliverableVersion.count({ where: TO_REVIEW });
 }

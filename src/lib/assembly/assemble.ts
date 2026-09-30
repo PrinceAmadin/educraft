@@ -22,6 +22,7 @@ import {
   Document,
   Footer,
   HeadingLevel,
+  ImageRun,
   ImportedXmlComponent,
   NumberFormat,
   Packer,
@@ -53,8 +54,11 @@ import { CERTIFICATE_AWARDS, degreeName, getDegreeFromDepartment, lookupDepartme
 import { STYLE_LABEL } from "@/lib/generation/referencing";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { formattedReferences, type DocReference, type ReferencingStyle as ListStyle } from "@/lib/research-references-doc";
+import { loadChapterTexts, type ChapterTextSource } from "@/lib/services/chapter-texts";
 import { parseChapter, type Block } from "./parse-chapter";
 import { analyseChapterNotes, collectEndnotes, resolveNotes, type CollectedEndnotes } from "./endnotes";
+import { CHAPTER_STAMP, type ImageType } from "./read-chapter-docx";
+import { AssemblyError } from "./errors";
 import { parseEquation, type MathNode } from "./equation-omml";
 import {
   chapterWord,
@@ -95,8 +99,18 @@ export interface AssemblyInput {
   referencingStyle: string;
   citationPlacement: string | null;
   thematicTitles: { chapter3: string | null; chapter4: string | null };
-  /** Finished chapters, in order. */
+  /** Finished chapters, in order: the COO-approved uploads read back, or (a working copy) the AI text. */
   chapters: { number: number; text: string }[];
+  /** Pictures the approved chapters use, by the key in their [IMAGE: key | WxH] lines. */
+  media?: Map<string, { data: Uint8Array; type: ImageType }>;
+  /**
+   * Chapter review: the approved version each chapter was built from, when every chapter is
+   * approved (a complete document records it, so a newer approval makes it stale). Null for a
+   * working copy that still uses AI text, or a report written by hand.
+   */
+  builtFrom?: Record<string, string> | null;
+  /** Where the chapter text came from: every chapter approved, or a working copy. */
+  source?: "approved" | "working-copy" | "ai";
   references: DocReference[];
   /** Full reports get the preliminary pages; a chapter-based order is just its chapters. */
   includePrelims: boolean;
@@ -137,16 +151,7 @@ export interface AssemblyReport {
   notes: string[];
 }
 
-export class AssemblyError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code: string,
-    readonly details: Record<string, unknown> = {},
-  ) {
-    super(message);
-  }
-}
+export { AssemblyError } from "./errors";
 
 // ─── Wording (for the founder's review) ──────────────────────────────────────
 
@@ -221,8 +226,17 @@ export function isChapterBasedOrder(serviceCode: string, additionalData: unknown
   return (serviceCode === "FYP-CHAPTERS" && orderedChapters(additionalData).length > 0) || serviceCode === "FYP-CH4";
 }
 
-/** Everything a report needs, read once. 404 for a project that is not a written report; 409 while a chapter is unfinished. */
-export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyInput> {
+/**
+ * Everything a report needs, read once. 404 for a project that is not a written report; 409 while
+ * a chapter is unfinished, or (source "approved") not yet approved by the COO.
+ *
+ *   approved   every chapter must be a COO-approved upload: the complete report, what QA and the
+ *              specialist receive
+ *   canonical  the approved upload where there is one, the AI text where not: the founder's and
+ *              the COO's working copy, and what the quality gate scores
+ *   ai         the AI text only (reports written before chapter review, and the check scripts)
+ */
+export async function loadAssemblyInput(projectDbId: string, opts: { source?: ChapterTextSource; only?: number[] } = {}): Promise<AssemblyInput> {
   const project = await db.project.findUnique({
     where: { id: projectDbId },
     select: {
@@ -248,14 +262,12 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
   }
 
   const chapterBased = isChapterBasedOrder(project.service.serviceCode, project.additionalData);
-  const expected = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
+  const all = expectedChapters({ serviceCode: project.service.serviceCode, additionalData: project.additionalData, chapterCount: project.chapterCount });
+  // `only`: one chapter on its own (the AI draft the specialist reviews).
+  const expected = opts.only ? all.filter((n) => opts.only!.includes(n)) : all;
 
-  const [runs, references, settings, preliminaryRow] = await Promise.all([
-    db.generationCheckpoint.findMany({
-      where: { projectId: project.id, chapterNumber: { in: expected } },
-      select: { chapterNumber: true, status: true, fullOutput: true },
-      orderBy: { chapterNumber: "asc" },
-    }),
+  const [texts, references, settings, preliminaryRow] = await Promise.all([
+    loadChapterTexts(project.id, expected, opts.source ?? "canonical"),
     db.reference.findMany({
       where: { projectId: project.id, status: "KEPT" },
       select: { title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true },
@@ -267,17 +279,6 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
       select: { acknowledgement: true, abstract: true, abbreviations: true, needsReview: true },
     }),
   ]);
-  const done = new Map(runs.filter((r) => r.status === "COMPLETED" && r.fullOutput).map((r) => [r.chapterNumber, r.fullOutput as string]));
-  const missing = expected.filter((n) => !done.has(n));
-  if (missing.length) {
-    throw new AssemblyError(
-      `The report can be assembled once every chapter is written. Still to come: Chapter ${missing.join(", ")}.`,
-      409,
-      "CHAPTERS_NOT_READY",
-      { missing },
-    );
-  }
-
   const contact = readSubmittedContact(project.additionalData);
   const university =
     contact?.universityId && contact.universityId.length > 0
@@ -313,7 +314,10 @@ export async function loadAssemblyInput(projectDbId: string): Promise<AssemblyIn
     referencingStyle: settings?.referencingStyle ?? "APA_7TH",
     citationPlacement: settings?.citationPlacement ?? null,
     thematicTitles: settings?.thematicTitles ?? { chapter3: null, chapter4: null },
-    chapters: expected.map((n) => ({ number: n, text: done.get(n)! })),
+    chapters: texts.chapters.map((c) => ({ number: c.number, text: c.text })),
+    media: texts.media,
+    builtFrom: texts.builtFrom,
+    source: texts.source,
     references,
     includePrelims: !chapterBased,
     preliminary: preliminaryRow
@@ -339,6 +343,8 @@ interface Ctx {
   thematic: AssemblyInput["thematicTitles"];
   /** The approved citation placement (MODE_A gathers a chapter's note blocks into one list at its end). */
   placement: string | null;
+  /** Pictures from approved chapters. */
+  media: AssemblyInput["media"];
 }
 
 function textRun(seg: Seg, extra: { bold?: boolean } = {}): TextRun {
@@ -568,11 +574,18 @@ function dataTable(block: Extract<Block, { kind: "table" }>, chapter: number, in
 function figureBlock(block: Extract<Block, { kind: "figure" }>, chapter: number, index: number, ctx: Ctx, chapterReport: ChapterReport): Paragraph[] {
   const description = /\[FIGURE PLACEHOLDER:\s*([^\]]*)\]/i.exec(block.placeholder)?.[1]?.trim() ?? "";
   const caption = tableCaptionText(block.caption ?? (description ? `Figure ${chapter}.${index}: ${description}` : null), chapter, index, "Figure");
-  if (!block.caption) chapterReport.warnings.push(`Figure ${chapter}.${index} had no caption; one was made from the placeholder.`);
-  const out = [
-    new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, children: [plain(block.placeholder)] }),
-    new Paragraph({ style: STYLE.figureCaption.id, children: runsFor(caption.text, ctx, { bold: true }) }),
-  ];
+  if (!block.caption) chapterReport.warnings.push(`Figure ${chapter}.${index} had no caption; ${block.image ? "a number was given to it" : "one was made from the placeholder"}.`);
+  // Chapter review: a picture from the approved upload, at the size the specialist gave it (capped to the page).
+  const picture = block.image ? ctx.media?.get(block.image.key) : undefined;
+  if (block.image && !picture) chapterReport.warnings.push(`Figure ${chapter}.${index}: the picture could not be loaded, so a placeholder stands in its place.`);
+  const figure = picture
+    ? new Paragraph({
+        alignment: AlignmentType.CENTER,
+        keepNext: true,
+        children: [new ImageRun({ type: picture.type, data: picture.data, transformation: { width: block.image!.width, height: block.image!.height } })],
+      })
+    : new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, children: [plain(block.image ? "[FIGURE PLACEHOLDER: picture missing]" : block.placeholder)] });
+  const out = [figure, new Paragraph({ style: STYLE.figureCaption.id, children: runsFor(caption.text, ctx, { bold: true }) })];
   if (block.source) out.push(new Paragraph({ alignment: AlignmentType.CENTER, children: runsFor(`Source: ${block.source}`, ctx) }));
   return out;
 }
@@ -1005,6 +1018,7 @@ export function buildReportDocument(input: AssemblyInput): { doc: Document; repo
     mode: input.mode,
     thematic: input.thematicTitles,
     placement: input.citationPlacement,
+    media: input.media,
   };
   if (input.citationPlacement === "MODE_C") {
     report.notes.push("This referencing style cites in footnotes. The chapters carry the note numbers, but the footnote text is not produced yet, so the specialist adds the notes.");
@@ -1077,17 +1091,95 @@ export function buildReportDocument(input: AssemblyInput): { doc: Document; repo
   return { doc, report };
 }
 
+/**
+ * Chapter review: one chapter as its own Word file, the AI draft the specialist
+ * corrects. The chapter is laid out exactly as in the report (the same styles and
+ * rules), its notes gathered into one list at its end and numbered 1..N (so any
+ * placement reads back the same), followed by the works it cites. The file is
+ * stamped with the project, the chapter and the text it was built from, so an
+ * upload of the wrong file is caught when it is read back.
+ */
+export function buildChapterDocument(input: AssemblyInput, chapterNumber: number, stamp: { sourceHash: string }): { doc: Document; report: AssemblyReport } {
+  const chapter = input.chapters.find((c) => c.number === chapterNumber);
+  if (!chapter) throw new AssemblyError(`Chapter ${chapterNumber} is not written yet.`, 409, "CHAPTERS_NOT_READY", { missing: [chapterNumber] });
+  const report: AssemblyReport = {
+    profile: profileFor(input),
+    chapters: [],
+    prelimPlaceholders: [],
+    etAl: 0,
+    dashesFixed: 0,
+    headingsRecased: 0,
+    equationsAsText: 0,
+    references: { style: input.referencingStyle, listedAs: input.referencingStyle, listed: 0, leftOut: 0, unmatchedCitations: [] },
+    notes: [],
+  };
+  const notePlacement = input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B";
+  let text = chapter.text;
+  if (notePlacement) {
+    const joined = collectEndnotes([chapter]);
+    text = joined.chapters[0]?.text ?? chapter.text;
+    if (joined.notes.length) text += `\n\n[ENDNOTES]\n${joined.notes.map((n) => `${n.number}. ${n.text}`).join("\n")}`;
+  }
+  const ctx: Ctx = {
+    profile: report.profile,
+    report,
+    properNouns: properNounsFrom(input.chapters.map((c) => c.text)),
+    mode: input.mode,
+    thematic: input.thematicTitles,
+    placement: notePlacement ? "MODE_A" : input.citationPlacement,
+    media: input.media,
+  };
+  const citedInNotes = new Set<DocReference>();
+  if (notePlacement) {
+    for (const [, refs] of resolveNotes(analyseChapterNotes(text), input.references)) if (refs !== "comment") refs.forEach((r) => citedInNotes.add(r));
+  }
+  const body = [...chapterContent({ number: chapterNumber, text }, true, ctx), ...referencesPages({ ...input, chapters: [{ number: chapterNumber, text }] }, ctx, citedInNotes)];
+  const doc = new Document({
+    creator: "EduCraft",
+    title: `${input.title}: Chapter ${chapterNumber}`,
+    description: `${input.projectCode} Chapter ${chapterNumber}`,
+    customProperties: [
+      { name: CHAPTER_STAMP.project, value: input.projectCode },
+      { name: CHAPTER_STAMP.chapter, value: String(chapterNumber) },
+      { name: CHAPTER_STAMP.source, value: stamp.sourceHash },
+    ],
+    styles: reportStyles(),
+    sections: [
+      {
+        properties: { page: { size: PAGE.size, margin: PAGE.margin, pageNumbers: { start: 1, formatType: NumberFormat.DECIMAL } } },
+        footers: { default: pageNumberFooter() },
+        children: body,
+      },
+    ],
+  });
+  return { doc, report };
+}
+
+export async function packChapter(input: AssemblyInput, chapterNumber: number, stamp: { sourceHash: string }): Promise<{ buffer: Buffer; report: AssemblyReport }> {
+  const { doc, report } = buildChapterDocument(input, chapterNumber, stamp);
+  return { buffer: await Packer.toBuffer(doc), report };
+}
+
+/** "<project title> Chapter 2.docx". */
+export function chapterFileName(title: string | null | undefined, code: string, chapter: number): string {
+  return downloadName([title?.trim() || code, `Chapter ${chapter}`], "docx");
+}
+
 /** "<project title>.docx", safe for a download header (falls back to the project code). */
 export function reportFileName(title: string | null | undefined, code: string): string {
   return downloadName([title?.trim() || code], "docx");
 }
 
 /** Load, build and pack. Throws AssemblyError (404 / 409). */
-export async function assembleReport(projectDbId: string): Promise<{ buffer: Buffer; fileName: string; report: AssemblyReport }> {
-  const input = await loadAssemblyInput(projectDbId);
+export async function assembleReport(
+  projectDbId: string,
+  opts: { source?: ChapterTextSource } = {},
+): Promise<{ buffer: Buffer; fileName: string; report: AssemblyReport; source: AssemblyInput["source"] }> {
+  const input = await loadAssemblyInput(projectDbId, opts);
   const { doc, report } = buildReportDocument(input);
   const buffer = await Packer.toBuffer(doc);
-  return { buffer, fileName: reportFileName(input.title, input.projectCode), report };
+  const workingCopy = input.source === "working-copy";
+  return { buffer, fileName: workingCopy ? downloadName([input.title?.trim() || input.projectCode, "(working copy)"], "docx") : reportFileName(input.title, input.projectCode), report, source: input.source };
 }
 
 /** For the check script: the same document as a buffer, from fixture input. */

@@ -7,7 +7,9 @@ import { TransitionError } from "@/lib/services/projects";
 
 /** One answer for every expected failure of a file or document action. */
 export function fileActionError(tag: string, error: unknown): NextResponse {
-  if (error instanceof DeliverableError) return NextResponse.json({ error: error.message }, { status: error.status });
+  if (error instanceof DeliverableError) {
+    return NextResponse.json({ error: error.message, ...(error.code ? { code: error.code, ...error.details } : {}) }, { status: error.status });
+  }
   if (error instanceof UploadCheckError) return NextResponse.json({ error: error.message }, { status: 400 });
   if (error instanceof TransitionError) return NextResponse.json({ error: error.message }, { status: 409 });
   if (error instanceof StorageNotConfigured) {

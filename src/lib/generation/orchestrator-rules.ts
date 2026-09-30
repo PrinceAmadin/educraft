@@ -38,6 +38,8 @@ export const PARKED_CHECK_MS = 2 * 60_000;
 export const ATTENTION_CHECK_MS = 5 * 60_000;
 /** A report in the QA queue or back from it: a re-generated chapter wakes it at once, this is the backstop. */
 export const COMPLETE_CHECK_MS = 30 * 60_000;
+/** Every chapter written, waiting for the COO's approvals: an approval wakes it at once, this is the backstop. */
+export const APPROVAL_CHECK_MS = 30 * 60_000;
 /** A tick working on a run holds it this long (longer than a function may run, so a live tick never loses it). */
 export const RUN_LEASE_MS = 330_000;
 /** Alert keys kept on a run. */
@@ -131,6 +133,18 @@ export interface OrchestratorFacts {
   hasDataset: boolean;
   research: { state: "PASSED" | "RUNNING" | "FAILED" | "NONE"; kept: number };
   gate: GateFact;
+  /**
+   * Chapter review (30 Sept 2026): the quality check runs, and the report goes to QA, only once the COO
+   * has approved every chapter as the specialist reviewed it. Null for a report written before it.
+   */
+  review?: ReviewFact | null;
+}
+
+export interface ReviewFact {
+  /** Chapters not yet approved with nothing outstanding, in order. */
+  pending: number[];
+  /** When each chapter's approved version was approved: a newer approval makes a gate result stale. */
+  approvedAt: Partial<Record<number, Date>>;
 }
 
 // ─── What the report needs next ──────────────────────────────────────────────
@@ -154,6 +168,8 @@ export type Action =
   | { kind: "FETCH_DATA" }
   /** The next chapter is ready to be written and needs one of the slots. */
   | { kind: "NEED_SLOT"; chapter: number }
+  /** Every chapter is written; the COO has still to approve these (as reviewed by the specialist). No slot. */
+  | { kind: "WAIT_FOR_APPROVAL"; pending: number[] }
   | { kind: "REQUEST_GATE" }
   | { kind: "GATE_RUNNING" }
   | { kind: "PASS"; ranAt: Date; score: number | null; total: number | null }
@@ -265,8 +281,9 @@ export function decide(f: OrchestratorFacts): Action {
     return { kind: "NEED_SLOT", chapter: next };
   }
 
-  // D. Every chapter is written: the quality gate.
-  const latest = Math.max(...[...done.values()].map((c) => c.completedAt?.getTime() ?? 0));
+  // D. Every chapter is written: the COO's approvals (chapter review), then the quality gate.
+  const latest = latestChange(f, [...done.values()]);
+  const pending = f.review?.pending ?? [];
   const g = f.gate;
   const gateBusy = g.lockedUntil !== null && g.lockedUntil.getTime() > f.now.getTime();
   const current = g.ranAt !== null && g.ranAt.getTime() > latest && g.passed !== null;
@@ -275,16 +292,27 @@ export function decide(f: OrchestratorFacts): Action {
     if (!g.passed) return { kind: "FAIL", ...base };
     const submitted = g.autoSubmittedAt !== null && g.autoSubmittedAt.getTime() >= (g.ranAt as Date).getTime();
     if (submitted || hold === "IN_QA") return { kind: "PASS", ...base };
+    // It passed on a working copy, but nothing goes to QA until every chapter is approved.
+    if (pending.length) return { kind: "WAIT_FOR_APPROVAL", pending };
     return { kind: "ATTENTION", reason: "PASSED_NOT_SUBMITTED", chapter: null, checkpointId: null, detail: null };
   }
   if (gateBusy) return { kind: "GATE_RUNNING" };
   if (hold) return { kind: "HOLD", reason: hold };
+  if (pending.length) return { kind: "WAIT_FOR_APPROVAL", pending };
   const asked = f.run.gateRequestedAt !== null && f.run.gateRequestedAt.getTime() > latest ? f.run.gateRequestedAt.getTime() : null;
   if (asked !== null && f.now.getTime() - asked < GATE_WAIT_MS) return { kind: "GATE_RUNNING" };
   if (asked !== null && f.run.gateAttempts >= MAX_GATE_ATTEMPTS) {
     return { kind: "ATTENTION", reason: "GATE_ERROR", chapter: null, checkpointId: null, detail: f.run.gateError };
   }
   return { kind: "REQUEST_GATE" };
+}
+
+/**
+ * When the report last changed: its chapters' finishes and (chapter review) their approvals. A quality
+ * result older than this is stale; a request for the check must be later than it. One rule for both.
+ */
+export function latestChange(f: Pick<OrchestratorFacts, "review">, chapters: Pick<ChapterFact, "chapter" | "completedAt">[]): number {
+  return Math.max(0, ...chapters.map((c) => Math.max(c.completedAt?.getTime() ?? 0, f.review?.approvedAt[c.chapter]?.getTime() ?? 0)));
 }
 
 /**
@@ -318,6 +346,8 @@ export function statusAfter(action: Action, current: RunStatus): RunStatus | nul
       return "FETCHING_DATA";
     case "NEED_SLOT":
       return holdsSlot(current) ? "GENERATING" : "QUEUED";
+    case "WAIT_FOR_APPROVAL":
+      return "WAITING_FOR_APPROVAL";
     case "REQUEST_GATE":
     case "GATE_RUNNING":
       return "QUALITY_CHECK";
@@ -330,7 +360,15 @@ export function statusAfter(action: Action, current: RunStatus): RunStatus | nul
 
 /** A run in one of these statuses has nothing pressing: it is not looked at on every tick. */
 export function isParked(status: RunStatus): boolean {
-  return status === "COMPLETE" || status === "QUALITY_FAILED" || status === "NEEDS_ATTENTION" || status === "HELD" || status === "WAITING_FOR_DATA" || status === "STOPPED";
+  return (
+    status === "COMPLETE" ||
+    status === "QUALITY_FAILED" ||
+    status === "NEEDS_ATTENTION" ||
+    status === "HELD" ||
+    status === "WAITING_FOR_DATA" ||
+    status === "WAITING_FOR_APPROVAL" ||
+    status === "STOPPED"
+  );
 }
 
 /** Past QA: nothing the orchestrator does can matter any more. */
@@ -352,6 +390,8 @@ export function nextCheckDelayMs(status: RunStatus, projectStatus: ProjectStatus
     case "WAITING_FOR_DATA":
     case "HELD":
       return PARKED_CHECK_MS;
+    case "WAITING_FOR_APPROVAL":
+      return APPROVAL_CHECK_MS;
     case "NEEDS_ATTENTION":
     case "QUALITY_FAILED":
       return ATTENTION_CHECK_MS;
@@ -472,6 +512,8 @@ export const noticeKey = {
   reportReady: (ranAt: Date) => `ready:${ranAt.getTime()}`,
   gateFailed: (ranAt: Date) => `gate-failed:${ranAt.getTime()}`,
   passedNotSubmitted: (ranAt: Date | null) => `passed-not-submitted:${ranAt?.getTime() ?? 0}`,
+  /** Once per finished set of chapters: the COO is asked for the approvals. */
+  awaitingApprovals: (latestChapterAt: number) => `approvals:${latestChapterAt}`,
   attention: (reason: AttentionReason, chapter: number | null) => `attention:${reason}:${chapter ?? 0}`,
 };
 
@@ -505,6 +547,7 @@ export const ORCHESTRATOR_TEXT = {
     GENERATING: "Writing",
     WAITING_FOR_DATA: "Waiting for data",
     FETCHING_DATA: "Fetching the dataset",
+    WAITING_FOR_APPROVAL: "Waiting for approval",
     QUALITY_CHECK: "Quality check running",
     QUALITY_FAILED: "Quality check failed",
     HELD: "On hold",
@@ -519,6 +562,10 @@ export const ORCHESTRATOR_TEXT = {
     GENERATING: (chapter: number | null) => `${chapterName(chapter)} is being written.`,
     WAITING_FOR_DATA: (after: number | null) => `${chapterName(after)} is written. The report carries on once the data is verified.`,
     FETCHING_DATA: "Chapter Three is written. The dataset for Chapter Four is being fetched.",
+    WAITING_FOR_APPROVAL: (pending: readonly number[]) =>
+      pending.length
+        ? `Every chapter is written. The quality check runs once the COO has approved ${chapterList(pending)} as the specialist reviewed ${pending.length === 1 ? "it" : "them"}.`
+        : "Every chapter is written and approved. The quality check starts next.",
     QUALITY_CHECK: "Every chapter is written. The quality check is running.",
     QUALITY_FAILED: (score: number | null, total: number | null) => `The report scored ${score ?? "—"} of ${total ?? 89}. It needs 85 with no critical failure. ${QUALITY_FAILED_NEXT.staff}`,
     COMPLETE: (score: number | null, total: number | null) => `The report passed the quality check (${score ?? "—"} of ${total ?? 89}) and is in the QA queue.`,
@@ -590,9 +637,19 @@ export const ORCHESTRATOR_TEXT = {
     failedMessage: (code: string, chapter: number, error: string | null) =>
       `Chapter ${chapter} of ${code} stopped${error ? `: ${error}` : "."} Try it again from the Report tab; the parts already written are kept.`,
     attentionTitle: (code: string) => `${code}: report generation needs you`,
+    approvalsTitle: (code: string) => `${code}: every chapter is written`,
+    approvalsMessage: (code: string, pending: readonly number[]) =>
+      `Every chapter of ${code} is written. Approve ${chapterList(pending)} as the specialist reviewed ${pending.length === 1 ? "it" : "them"} on the Documents tab; the quality check then runs by itself.`,
     passedNotSubmittedTitle: (code: string) => `${code} passed the quality check but is not in QA`,
   },
 } as const;
+
+/** A run waiting for approvals keeps the chapters it waits for in its `reason`: "APPROVALS:1,3". */
+export const approvalReason = (pending: readonly number[]) => `APPROVALS:${pending.join(",")}`;
+export function pendingFromReason(reason: string | null): number[] {
+  const m = /^APPROVALS:([\d,]*)$/.exec(reason ?? "");
+  return m ? m[1].split(",").filter(Boolean).map(Number) : [];
+}
 
 /** The sentence under the run's status, for the Report tab. */
 export function runLine(run: { status: RunStatus; currentChapter: number | null; reason: string | null; reasonDetail?: string | null }, gate: { score: number | null; total: number | null }): string {
@@ -606,6 +663,8 @@ export function runLine(run: { status: RunStatus; currentChapter: number | null;
       return t.line.WAITING_FOR_DATA(run.currentChapter);
     case "FETCHING_DATA":
       return t.line.FETCHING_DATA;
+    case "WAITING_FOR_APPROVAL":
+      return t.line.WAITING_FOR_APPROVAL(pendingFromReason(run.reason));
     case "QUALITY_CHECK":
       return t.line.QUALITY_CHECK;
     case "QUALITY_FAILED":
@@ -776,6 +835,8 @@ export function runViewForWorker(v: RunView): RunView {
           ? s.stopped
           : v.status === "QUALITY_FAILED"
             ? v.line.replace(QUALITY_FAILED_NEXT.staff, QUALITY_FAILED_NEXT.specialist)
-            : v.line;
+            : v.status === "WAITING_FOR_APPROVAL"
+              ? v.line.replace("as the specialist reviewed", "as you reviewed")
+              : v.line;
   return { ...v, line, actions: [], canStart: false, canStop: false, start: null, detail: null, startedByName: null, cancelledPauseId: null, schedulerQuiet: false };
 }

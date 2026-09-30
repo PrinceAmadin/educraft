@@ -22,6 +22,7 @@ const TARGETS = [
   "src/lib/emails/client-update.ts",
   "src/lib/receipts.ts",
   "src/lib/deliverables.ts",
+  "src/lib/client-document-text.ts",
   "src/lib/client-research-message.ts",
   "src/lib/services/client-research.ts",
 ];

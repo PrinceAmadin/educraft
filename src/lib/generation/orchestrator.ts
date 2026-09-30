@@ -32,6 +32,7 @@ import crypto from "crypto";
 import { Prisma, type OrchestratorRun, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { expectedChapters } from "@/lib/deliverables";
+import { reportReview } from "@/lib/chapter-review";
 import { selfBaseUrl } from "@/lib/self-base-url";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { alertReportReady, alertReportStopped } from "@/lib/services/team-alerts";
@@ -61,11 +62,13 @@ import {
   MAX_FETCH_ATTEMPTS,
   ORCHESTRATOR_TEXT,
   RUN_LEASE_MS,
+  approvalReason,
   attentionLine,
   decide,
   holdsSlot,
   isNewNotice,
   kicksSinceProgress,
+  latestChange,
   nextCheckDelayMs,
   noticeKey,
   pickStarts,
@@ -197,12 +200,31 @@ const PROJECT_FACTS = {
     select: { id: true, chapterNumber: true, status: true, lockedUntil: true, lastStepAt: true, lastProgressAt: true, createdAt: true, startedAt: true, completedAt: true, errorMessage: true },
   },
   pauses: { select: { id: true, afterChapter: true, status: true, formStatus: true, formError: true } },
+  // Chapter review: each chapter's versions, for the COO's approvals.
+  deliverables: {
+    where: { kind: "CHAPTER" as const },
+    select: {
+      kind: true,
+      chapter: true,
+      archivedAt: true,
+      changeNote: true,
+      versions: {
+        where: { file: { deletedAt: null } },
+        select: { id: true, version: true, status: true, submittedByRole: true, releaseNo: true, releasedAt: true, createdAt: true, file: { select: { fileName: true } } },
+      },
+    },
+  },
   _count: { select: { references: { where: { status: "KEPT" as const } }, files: { where: { category: "secondary_data", deletedAt: null } } } },
 } satisfies Prisma.ProjectSelect;
 
 type ProjectFacts = Prisma.ProjectGetPayload<{ select: typeof PROJECT_FACTS }>;
 
 function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): OrchestratorFacts {
+  const chapters = expectedChapters({ serviceCode: p.service.serviceCode, additionalData: p.additionalData, chapterCount: p.chapterCount });
+  const review = reportReview(
+    p.deliverables.map((d) => ({ kind: d.kind, chapter: d.chapter, archived: d.archivedAt != null, changeNote: d.changeNote, versions: d.versions.map((v) => ({ ...v, fileName: v.file.fileName })) })),
+    chapters,
+  );
   return {
     now,
     run: {
@@ -222,7 +244,7 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): Orchestrat
     },
     project: { status: p.status, hasSpecialist: Boolean(p.workerId) },
     mode: p.researchMode?.isLocked ? p.researchMode.modeNumber : null,
-    chapters: expectedChapters({ serviceCode: p.service.serviceCode, additionalData: p.additionalData, chapterCount: p.chapterCount }),
+    chapters,
     checkpoints: p.generationCheckpoints.map((c) => ({
       id: c.id,
       chapter: c.chapterNumber,
@@ -246,6 +268,8 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date): Orchestrat
       total: p.qaReview?.qualityTotal ?? null,
       autoSubmittedAt: p.qaReview?.autoSubmittedAt ?? null,
     },
+    // Every report the orchestrator writes is under chapter review.
+    review: { pending: review.pending, approvedAt: Object.fromEntries(review.approvedAt) },
   };
 }
 
@@ -517,8 +541,23 @@ async function perform(ctx: Ctx, action: Action): Promise<Outcome> {
       }
       return { again: false };
 
+    case "WAIT_FOR_APPROVAL": {
+      const reason = approvalReason(action.pending);
+      if (run.status !== "WAITING_FOR_APPROVAL" || run.reason !== reason) {
+        await update(run.id, { status: "WAITING_FOR_APPROVAL", reason, reasonDetail: null, currentChapter: null });
+        // Every chapter must have its AI draft for the specialist (normally made when it was written).
+        await import("@/lib/services/chapter-review").then((m) => m.ensureChapterDrafts(project.id)).catch((error) => console.warn(`${TAG} ${code}: AI drafts not checked`, error instanceof Error ? error.message : error));
+      }
+      const written = latestChange({ review: null }, facts.checkpoints);
+      await announceOnce(run.id, noticeKey.awaitingApprovals(written), () =>
+        notifyOperations({ title: ORCHESTRATOR_TEXT.notice.approvalsTitle(code), message: ORCHESTRATOR_TEXT.notice.approvalsMessage(code, action.pending), type: "info", link: `/admin/projects/${code}?tab=documents` }),
+      );
+      return { again: false };
+    }
+
     case "REQUEST_GATE": {
-      const latest = Math.max(0, ...facts.checkpoints.map((c) => c.completedAt?.getTime() ?? 0));
+      // Later than every chapter's finish and approval: the same rule the decision uses.
+      const latest = latestChange(facts, facts.checkpoints);
       const counts = run.gateRequestedAt !== null && run.gateRequestedAt.getTime() > latest;
       // Always later than the last chapter's finish, or the next tick would not see that the check was asked for.
       const askedAt = new Date(Math.max(Date.now(), latest + 1));

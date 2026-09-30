@@ -10,8 +10,9 @@ export const runtime = "nodejs";
 /**
  * GET: the assigned worker's report as one Word file (Phase D7): the
  * preliminary pages, every chapter and the References, formatted to the 71
- * rules. 404 for another worker's project or one that is not a report; 409
- * `CHAPTERS_NOT_READY` with the chapters still to come.
+ * rules. Chapter review: built only from the COO-approved chapters, whatever
+ * the payment. 404 for another worker's project or one that is not a report;
+ * 409 `CHAPTERS_NOT_READY` / `CHAPTERS_NOT_APPROVED` with the chapters still to come.
  */
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireWorker();
@@ -19,7 +20,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   try {
     const project = await resolveGenerationProject(params.id, guard.workerId);
     if (!project) return projectNotFound();
-    return await reportDownload(project.id);
+    return await reportDownload(project.id, { source: "approved" });
   } catch (error) {
     return serverError("GET /api/worker/projects/[id]/documents/docx", error);
   }

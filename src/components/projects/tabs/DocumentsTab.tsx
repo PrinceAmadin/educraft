@@ -12,7 +12,7 @@ import { hasPdf } from "@/lib/services/research-files";
 const QA_PASSED = ["APPROVED", "BALANCE_VERIFIED", "DELIVERED", "SUPERVISOR_CORRECTIONS", "COMPLETED"];
 
 function payState(p: ProjectDetail): string {
-  if (p.isProBono) return "Pro bono: everything released opens for the client.";
+  if (p.isProBono) return "Pro bono: both payments count as paid.";
   const down = p.downpaymentStatus === "Verified" ? "Downpayment paid" : "Downpayment not paid";
   const bal = p.balanceStatus === "Verified" ? "balance paid" : "balance not paid";
   return `${down}, ${bal}.`;
@@ -51,6 +51,8 @@ export async function DocumentsTab({
   const active = deliverables.filter((d) => !d.archived);
   const archived = deliverables.filter((d) => d.archived);
   const withPdf = job?.references.filter(hasPdf).length ?? 0;
+  // Chapter review: a report the pipeline writes (its chapters carry a review state).
+  const chapterReview = deliverables.some((d) => d.review != null);
 
   return (
     <div className="space-y-12">
@@ -58,8 +60,14 @@ export async function DocumentsTab({
         <div>
           <h2 className="text-base font-semibold text-foreground">Chapters and documents</h2>
           <p className="mt-1 max-w-2xl text-[13px] text-muted-foreground">
-            The worker uploads here and you release each one to the client or send it back with a note. A released
-            item downloads once its payment is in. {payState(project)}
+            {chapterReview
+              ? `Each chapter starts as an AI draft the specialist reviews in Word. You approve their version, or return it with correction notes. Only approved chapters reach the client${
+                  deliverables.some((d) => d.access === "WITH_COMPLETE")
+                    ? " (Chapters 1 and 2 on their own, the rest in the complete project, which is built from the approved chapters and opens at full payment)."
+                    : ", each once it is paid for in full, and the complete document is built from the approved chapters."
+                }`
+              : "The worker uploads here and you release each one to the client or send it back with a note. A released item downloads once its payment is in."}{" "}
+            {payState(project)}
           </p>
         </div>
         <div className="divide-y divide-border/80">
@@ -71,6 +79,7 @@ export async function DocumentsTab({
               canReleaseFinal={canReleaseFinal}
               isSuperAdmin={isSuperAdmin}
               contact={contact}
+              chapterReview={chapterReview}
             />
           ))}
         </div>
@@ -89,6 +98,7 @@ export async function DocumentsTab({
                   canReleaseFinal={canReleaseFinal}
                   isSuperAdmin={isSuperAdmin}
                   contact={contact}
+                  chapterReview={chapterReview}
                 />
               ))}
             </div>

@@ -5,14 +5,16 @@ import { CHAPTER_SERVICE_CODE, normalizeChapters } from "@/lib/chapter-pricing";
  * piece. Pure: no database. Keyed by service code, not intake template,
  * because the chapter-based order and the combos share the FYP template.
  *
- * The founder's rule for full reports: Chapters 1 and 2 download once the
- * downpayment is verified; Chapter 3 onwards and the complete document need
- * the balance. A chapter-based order downloads nothing until its balance is
- * paid. Admins can change any item's access later (see files/policy.ts).
+ * The founder's rule for full reports (30 Sept 2026): Chapters 1 and 2
+ * download once approved and the downpayment is verified; Chapter 3 onwards
+ * never download on their own (they come in the complete project), and the
+ * complete document needs 100% payment. A chapter-based order downloads nothing
+ * until its balance is paid. Only the super admin can release an item early
+ * (see files/policy.ts).
  */
 
 export type DeliverableKindName = "CHAPTER" | "FINAL" | "OTHER";
-export type DeliverableTier = "DOWNPAYMENT" | "BALANCE";
+export type DeliverableTier = "DOWNPAYMENT" | "BALANCE" | "WITH_COMPLETE";
 
 export interface DeliverableSpec {
   key: string;
@@ -21,6 +23,8 @@ export interface DeliverableSpec {
   title: string;
   sortOrder: number;
   access: DeliverableTier;
+  /** Reviewed like any chapter but never listed for the client. */
+  clientHidden?: boolean;
 }
 
 export const DEFAULT_CHAPTER_COUNT = 5;
@@ -59,6 +63,9 @@ export function deliverableTemplate(input: {
     const chapters = normalizeChapters(input.chapters);
     if (chapters.length === 1) {
       // One chapter is the whole order: it is the item that goes through the quality check.
+      // Chapter 1 alone is written by the report pipeline, so it also gets a chapter item for the
+      // COO's approval (hidden from the client, who receives it as the complete document).
+      if (chapters[0] === 1) push({ key: "ch1", kind: "CHAPTER", chapter: 1, title: chapterTitle(1), access: "BALANCE", clientHidden: true });
       push({ key: "final", kind: "FINAL", chapter: chapters[0], title: chapterTitle(chapters[0]), access: "BALANCE" });
       return out;
     }
@@ -80,7 +87,7 @@ export function deliverableTemplate(input: {
         kind: "CHAPTER",
         chapter: c,
         title: chapterTitle(c),
-        access: c <= EARLY_CHAPTERS ? "DOWNPAYMENT" : "BALANCE",
+        access: c <= EARLY_CHAPTERS ? "DOWNPAYMENT" : "WITH_COMPLETE",
       });
     }
     push({ key: "final", kind: "FINAL", chapter: null, title: "Complete project", access: "BALANCE" });

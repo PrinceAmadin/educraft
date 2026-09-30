@@ -24,6 +24,8 @@ const nextConfig = {
       "/api/admin/projects/[id]/quality/run": ["./prompts/**/*"],
       "/api/worker/projects/[id]/quality/run": ["./prompts/**/*"],
       "/api/admin/projects/[id]/quality/regenerate": ["./prompts/**/*"],
+      // Chapter review: rebuilding from the approved chapters runs the gate (the preliminary pages read prompts/).
+      "/api/admin/projects/[id]/report/rebuild": ["./prompts/**/*"],
       // D9: the orchestrator's tick starts chapters and drafts data requests; the internal gate; Start's rehearsal; Continue.
       "/api/internal/orchestrator/tick": ["./prompts/**/*"],
       "/api/internal/quality/run": ["./prompts/**/*"],

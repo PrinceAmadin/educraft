@@ -23,7 +23,10 @@ import {
   STALL_AFTER_MS,
   STALL_MIN_KICKS,
   actionsFor,
+  approvalReason,
   attentionLine,
+  latestChange,
+  pendingFromReason,
   chapterList,
   checkStart,
   decide,
@@ -605,9 +608,82 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
   check("the Report tab is sent again when the scheduler goes quiet or comes back", runViewKey(live) !== runViewKey({ ...live, schedulerQuiet: false }));
 }
 
+// ─── Chapter review: the COO's approvals before the quality check (30 Sept 2026) ─
+{
+  const all = written(1, 2, 3, 4, 5);
+  const approvedAt = (ns: number[], minute: number) => Object.fromEntries(ns.map((n) => [n, at(minute)]));
+  const base = { mode: 1, checkpoints: all, run: READ, now: at(90) } as const;
+
+  const none = decide(facts({ ...base, review: { pending: [1, 2, 3, 4, 5], approvedAt: {} } }));
+  check("approvals: none approved, the report waits (no slot, no gate)", none.kind === "WAIT_FOR_APPROVAL" && same(none.pending, [1, 2, 3, 4, 5]), none);
+  check("approvals: waiting holds no slot", !holdsSlot("WAITING_FOR_APPROVAL") && isParked("WAITING_FOR_APPROVAL"));
+  check("approvals: looked at again every 30 minutes as a backstop", nextCheckDelayMs("WAITING_FOR_APPROVAL", "IN_PROGRESS", false) === 30 * 60_000);
+  const some = decide(facts({ ...base, review: { pending: [4, 5], approvedAt: approvedAt([1, 2, 3], 70) } }));
+  check("approvals: some approved, still waiting for the rest", some.kind === "WAIT_FOR_APPROVAL" && same(some.pending, [4, 5]), some);
+  const done = decide(facts({ ...base, review: { pending: [], approvedAt: approvedAt([1, 2, 3, 4, 5], 80) } }));
+  check("approvals: all approved, the quality check is asked for", done.kind === "REQUEST_GATE", done);
+  check("approvals: wait is the run's status", statusAfter(none, "GENERATING") === "WAITING_FOR_APPROVAL");
+
+  // Chapters keep being written while earlier ones are reviewed.
+  const writingOn = decide(facts({ mode: 1, checkpoints: written(1, 2), run: READ, now: at(90), review: { pending: [1, 2, 3, 4, 5], approvedAt: {} } }));
+  check("approvals: never hold up writing the next chapter", writingOn.kind === "NEED_SLOT" && writingOn.chapter === 3, writingOn);
+
+  // A gate result older than an approval is stale; one newer is current.
+  const gateAt = (m: number, passed: boolean, submittedAt: number | null) => ({ ranAt: at(m), lockedUntil: null, passed, score: passed ? 87 : 80, total: 89, autoSubmittedAt: submittedAt === null ? null : at(submittedAt) });
+  const stale = decide(facts({ ...base, review: { pending: [], approvedAt: approvedAt([1, 2, 3, 4, 5], 85) }, gate: gateAt(82, false, null) }));
+  check("staleness: a failed check before the last approval is asked for again", stale.kind === "REQUEST_GATE", stale);
+  const fresh = decide(facts({ ...base, review: { pending: [], approvedAt: approvedAt([1, 2, 3, 4, 5], 80) }, gate: gateAt(82, false, null) }));
+  check("staleness: a check after the last approval stands", fresh.kind === "FAIL", fresh);
+  const asked = decide(facts({ ...base, now: at(86), review: { pending: [], approvedAt: approvedAt([1, 2, 3, 4, 5], 85) }, run: { ...READ, gateRequestedAt: at(84) } }));
+  check("staleness: a request made before the last approval does not count as asked", asked.kind === "REQUEST_GATE", asked);
+  check("staleness: one rule for both (latestChange)", latestChange({ review: { pending: [], approvedAt: { 2: at(99) } } }, all) === at(99).getTime());
+
+  // A report already in QA settles as before; a hold beats the wait; a pass on a working copy waits for approvals.
+  const legacy = decide(facts({ ...base, project: { status: "SUBMITTED", hasSpecialist: true }, review: { pending: [1, 2, 3, 4, 5], approvedAt: {} }, gate: gateAt(70, true, 71) }));
+  check("legacy: a report sent to QA before chapter review stays complete", legacy.kind === "PASS", legacy);
+  const held = decide(facts({ ...base, project: { status: "ON_HOLD", hasSpecialist: true }, review: { pending: [3], approvedAt: {} } }));
+  check("a hold beats the wait for approvals", held.kind === "HOLD", held);
+  const passedWorking = decide(facts({ ...base, review: { pending: [5], approvedAt: approvedAt([1, 2, 3, 4], 60) }, gate: gateAt(70, true, null) }));
+  check("a pass on a working copy waits for the approvals (it is never sent)", passedWorking.kind === "WAIT_FOR_APPROVAL", passedWorking);
+  const recalled = decide(facts({ ...base, review: { pending: [], approvedAt: approvedAt([1, 2, 3, 4, 5], 60) }, gate: gateAt(70, true, 71) }));
+  check("recall: a passed, sent report brought back stays sent until something changes", recalled.kind === "PASS", recalled);
+  const reapproved = decide(facts({ ...base, review: { pending: [], approvedAt: { ...approvedAt([1, 2, 3, 4], 60), 5: at(80) } }, gate: gateAt(70, true, 71) }));
+  check("recall: a chapter approved again after the check asks for a new one", reapproved.kind === "REQUEST_GATE", reapproved);
+  const failedThenApproved = decide(facts({ ...base, review: { pending: [], approvedAt: approvedAt([1, 2, 3, 4, 5], 88) }, gate: gateAt(75, false, null), run: { ...READ, status: "QUALITY_FAILED" } }));
+  check("a failed check, then new approvals: the check runs again by itself", failedThenApproved.kind === "REQUEST_GATE", failedThenApproved);
+
+  // Wording.
+  const line = runLine({ status: "WAITING_FOR_APPROVAL", currentChapter: null, reason: approvalReason([2, 4]) }, { score: null, total: null });
+  check("wording: the line names the chapters to approve", line.includes("Chapters 2 and 4"), line);
+  check("wording: the reason round-trips", same(pendingFromReason(approvalReason([1, 3, 5])), [1, 3, 5]) && same(pendingFromReason("NO_REFERENCES"), []));
+  const worker = runViewForWorker({
+    status: "WAITING_FOR_APPROVAL",
+    label: "",
+    line,
+    detail: null,
+    reason: approvalReason([2, 4]),
+    currentChapter: null,
+    actions: [],
+    canStart: false,
+    canStop: true,
+    start: null,
+    startedByName: "Emmanuel",
+    requestedAt: null,
+    paused: false,
+    schedulerQuiet: false,
+    generationStarted: true,
+    references: 50,
+    research: "PASSED",
+    gateRanAt: null,
+    cancelledPauseId: null,
+  });
+  check("wording: the specialist reads 'as you reviewed'", worker.line.includes("as you reviewed") && !worker.line.includes("the specialist"), worker.line);
+  check("wording: the status has a label", ORCHESTRATOR_TEXT.status.WAITING_FOR_APPROVAL === "Waiting for approval");
+}
+
 // ─── Result ──────────────────────────────────────────────────────────────────
-const actionKinds: Action["kind"][] = ["WAIT", "STOP", "HOLD", "WRITING", "KICK", "STALL", "ATTENTION", "READ_STATEMENTS", "OPEN_PAUSE", "WAIT_FOR_DATA", "FETCH_DATA", "NEED_SLOT", "REQUEST_GATE", "GATE_RUNNING", "PASS", "FAIL"];
-check("every action has a status rule", actionKinds.length === 16);
+const actionKinds: Action["kind"][] = ["WAIT", "STOP", "HOLD", "WRITING", "KICK", "STALL", "ATTENTION", "READ_STATEMENTS", "OPEN_PAUSE", "WAIT_FOR_DATA", "FETCH_DATA", "NEED_SLOT", "WAIT_FOR_APPROVAL", "REQUEST_GATE", "GATE_RUNNING", "PASS", "FAIL"];
+check("every action has a status rule", actionKinds.length === 17);
 
 if (failures.length) {
   console.error(`check:orchestrator — ${failures.length} failed, ${passed} passed`);

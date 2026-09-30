@@ -4,9 +4,10 @@
  * use these, so the screen and the server can never disagree about a lock.
  */
 
-export type AccessName = "DOWNPAYMENT" | "BALANCE" | "ALWAYS" | "WITHHELD";
+export type AccessName = "DOWNPAYMENT" | "BALANCE" | "WITH_COMPLETE" | "ALWAYS" | "WITHHELD";
 
-export type LockReason = "downpayment" | "balance" | "withheld" | "closed";
+/** with_complete: a full report's Chapter 3 onwards, which the client only ever gets inside the complete project. */
+export type LockReason = "downpayment" | "balance" | "with_complete" | "withheld" | "closed";
 
 export type Gate = { state: "hidden" } | { state: "locked"; reason: LockReason } | { state: "open" };
 
@@ -22,12 +23,14 @@ export interface GateProject {
  *  1. nothing released yet: hidden
  *  2. refunded: locked
  *  3. withheld by an admin: locked
- *  4. released early by a super admin: open
+ *  4. released early by a super admin: open (the founder's override, even for Chapter 3 onwards)
  *  5. cancelled: locked
- *  6. downpayment not verified: locked
- *  7. downpayment tier: open
- *  8. balance tier: open once the balance is verified
- * Pro bono projects have both payments verified, so everything opens.
+ *  6. a full report's Chapter 3 onwards: locked, it comes in the complete project
+ *  7. downpayment not verified: locked
+ *  8. downpayment tier: open
+ *  9. balance tier: open once the balance is verified (both legs paid: 100%)
+ * Pro bono projects have both payments verified, so everything but rule 6 opens.
+ * "Released" is the COO's approval for a generated report's chapters (chapter-review.ts).
  */
 export function deliverableGate(released: boolean, access: AccessName, project: GateProject): Gate {
   if (!released) return { state: "hidden" };
@@ -35,17 +38,18 @@ export function deliverableGate(released: boolean, access: AccessName, project: 
   if (access === "WITHHELD") return { state: "locked", reason: "withheld" };
   if (access === "ALWAYS") return { state: "open" };
   if (project.status === "CANCELLED") return { state: "locked", reason: "closed" };
+  if (access === "WITH_COMPLETE") return { state: "locked", reason: "with_complete" };
   if (project.downpaymentStatus !== "Verified") return { state: "locked", reason: "downpayment" };
   if (access === "DOWNPAYMENT") return { state: "open" };
   return project.balanceStatus === "Verified" ? { state: "open" } : { state: "locked", reason: "balance" };
 }
 
-export const LOCK_TEXT: Record<LockReason, string> = {
-  downpayment: "Pay your downpayment to download",
-  balance: "Pay your balance to download",
-  withheld: "Not available yet. Message us if you need it",
-  closed: "No longer available",
-};
+/** Both legs verified: the client has paid 100% (pro bono counts). */
+export function isFullyPaid(project: Pick<GateProject, "downpaymentStatus" | "balanceStatus">): boolean {
+  return project.downpaymentStatus === "Verified" && project.balanceStatus === "Verified";
+}
+
+export { LOCK_TEXT } from "@/lib/client-document-text";
 
 // ── Uploads ──────────────────────────────────────────────────
 
