@@ -10,6 +10,7 @@ import { ExpensesTable } from "@/components/finance/ExpensesTable";
 import { AddExpenseDialog } from "@/components/finance/AddExpenseDialog";
 import { HogBudgetPanel } from "@/components/finance/HogBudgetPanel";
 import { EXPENSE_PAGE_SIZE, getHogBudget, getMonthlyExpenseSummary, getProjectedRecurring, listExpenses, listPendingApprovals } from "@/lib/services/expenses";
+import { listPots } from "@/lib/services/finance/pots";
 import { currentMonthKey, monthLabel } from "@/lib/services/finance/surplus";
 import { expenseListParamsSchema } from "@/lib/validations/expenses";
 import { cn, formatNaira } from "@/lib/utils";
@@ -30,13 +31,14 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Rec
   const month = !rangeMode ? (parsed.month && parsed.month <= currentMonth ? parsed.month : currentMonth) : parsed.month ?? currentMonth;
   const filters = rangeMode ? parsed : { ...parsed, month };
 
-  const [session, list, summary, recurring, pending, hogBudget] = await Promise.all([
+  const [session, list, summary, recurring, pending, hogBudget, pots] = await Promise.all([
     auth(),
     listExpenses(filters),
     getMonthlyExpenseSummary(month),
     getProjectedRecurring(),
     listPendingApprovals(),
     getHogBudget(month),
+    listPots(),
   ]);
   const role = session?.user?.role;
   const isFounder = role === "SUPER_ADMIN";
@@ -51,7 +53,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Rec
         actions={
           <>
             <MonthPicker month={month} currentMonth={currentMonth} basePath="/admin/finance/expenses" />
-            <AddExpenseDialog isFounder={isFounder} />
+            <AddExpenseDialog isFounder={isFounder} pots={pots} />
           </>
         }
       />

@@ -9,12 +9,14 @@ import {
   bucketShareOfRetained,
   bucketShareOfRevenue,
   expectedBucketAllocation,
+  potSplit,
   retainedRateFor,
   type BucketAmounts,
   type BucketHealth,
 } from "@/lib/finance/commission-config";
 import { cashflowForProject, getActiveCashflow } from "@/lib/services/cashflow";
 import { getFinanceSettings } from "@/lib/services/finance/settings";
+import { getUsdToNairaRate } from "@/lib/fx-rate";
 
 /**
  * The four buckets.
@@ -162,6 +164,25 @@ export async function syncProjectBuckets(tx: Tx, projectDbId: string, opts: Sync
   })).filter((r) => r.amount !== 0);
   if (rows.length) await tx.bucketTransaction.createMany({ data: rows });
 
+  // Phase 4: sub-divide each bucket's delta into its tracked pots (Operations Reserve only in v1).
+  // Keyed to this allocation, so the same replay/true-up guards above cover the pot rows too.
+  const potRows = BUCKET_TYPES.flatMap((bucket) =>
+    [...potSplit(amounts[BUCKET_KEY[bucket]], bucket, s)]
+      .filter(([, amt]) => amt !== 0)
+      .map(([potKey, amt]) => ({
+        potKey,
+        bucketType: bucket,
+        type: inflowLike ? "INFLOW" : "ADJUSTMENT",
+        amount: amt,
+        allocationId: log.id,
+        paymentId: opts.paymentId ?? null,
+        projectId: projectDbId,
+        recordedById: opts.recordedById ?? null,
+        month,
+      }))
+  );
+  if (potRows.length) await tx.potTransaction.createMany({ data: potRows });
+
   await tx.bucketBalance.upsert({
     where: { month },
     create: { month, ...amounts },
@@ -197,6 +218,12 @@ export async function getBucketBalances(client: Db = db): Promise<BucketAmounts>
   return out;
 }
 
+/** Every pot's balance (Σ PotTransaction), whole naira, keyed by potKey. */
+export async function getPotBalances(client: Db = db): Promise<Record<string, number>> {
+  const rows = await client.potTransaction.groupBy({ by: ["potKey"], _sum: { amount: true } });
+  return Object.fromEntries(rows.map((r) => [r.potKey, Math.round(r._sum.amount ?? 0)]));
+}
+
 export interface BucketMonthFlow {
   inflow: number;
   outflow: number;
@@ -228,27 +255,60 @@ export interface BucketCard {
   balance: number;
   month: BucketMonthFlow;
   health: BucketHealth;
+  /** Phase 4: the tracked pots inside this bucket (Operations Reserve in v1), with their balances. */
+  pots: PotCard[];
+  /** Bucket cash not earmarked to any pot (general/untagged expenses): bucket balance − Σ pots. */
+  generalResidual: number;
 }
 
-/** The four bucket cards for a month, balances all-time, shares from the structure in force. */
+export interface PotCard {
+  key: string;
+  label: string;
+  balance: number;
+  /** claude_api only: what that balance could buy in Anthropic credit at the current rate. */
+  topUpUsd?: number;
+}
+
+/** The four bucket cards for a month, balances all-time, shares from the structure in force, with pot breakdowns. */
 export async function getBucketCards(month: string): Promise<BucketCard[]> {
-  const [balances, flows, settings, active] = await Promise.all([getBucketBalances(), getBucketMonthFlows(month), getFinanceSettings(), getActiveCashflow()]);
+  const [balances, flows, settings, active, potBalances, usdRate] = await Promise.all([
+    getBucketBalances(),
+    getBucketMonthFlows(month),
+    getFinanceSettings(),
+    getActiveCashflow(),
+    getPotBalances(),
+    getUsdToNairaRate(),
+  ]);
   const s = active.structure;
-  return BUCKET_TYPES.map((bucket) => ({
-    bucket,
-    label: bucketLabel(bucket, s),
-    purpose: s.level2.find((b) => b.key === bucket)?.purpose ?? BUCKET_META[bucket].purpose,
-    shareOfRetained: bucketShareOfRetained(bucket, s),
-    shareOfRevenue: bucketShareOfRevenue(bucket, s),
-    balance: balances[BUCKET_KEY[bucket]],
-    month: flows[bucket],
-    health: bucketHealth(
+  return BUCKET_TYPES.map((bucket) => {
+    const balance = balances[BUCKET_KEY[bucket]];
+    const pots: PotCard[] = s.level3
+      .filter((p) => p.parentKey === bucket && p.isTrackedAsPot)
+      .map((p) => ({
+        key: p.key,
+        label: p.label,
+        balance: potBalances[p.key] ?? 0,
+        ...(p.key === "claude_api" ? { topUpUsd: usdRate > 0 ? Math.max(0, Math.round((potBalances[p.key] ?? 0) / usdRate)) : 0 } : {}),
+      }));
+    const potSum = pots.reduce((n, p) => n + p.balance, 0);
+    return {
       bucket,
-      balances[BUCKET_KEY[bucket]],
-      { operatingBaseline: settings.operatingCostMonthlyBaseline, referenceRevenue: settings.bucketReferenceRevenue },
-      s
-    ),
-  }));
+      label: bucketLabel(bucket, s),
+      purpose: s.level2.find((b) => b.key === bucket)?.purpose ?? BUCKET_META[bucket].purpose,
+      shareOfRetained: bucketShareOfRetained(bucket, s),
+      shareOfRevenue: bucketShareOfRevenue(bucket, s),
+      balance,
+      month: flows[bucket],
+      health: bucketHealth(
+        bucket,
+        balance,
+        { operatingBaseline: settings.operatingCostMonthlyBaseline, referenceRevenue: settings.bucketReferenceRevenue },
+        s
+      ),
+      pots,
+      generalResidual: pots.length ? Math.round(balance - potSum) : 0,
+    };
+  });
 }
 
 export interface BucketTransactionRow {
@@ -348,25 +408,35 @@ export async function manualAdjustment(input: { bucket: BucketType; amount: numb
 export async function syncExpenseOutflow(tx: Db, expenseId: string): Promise<void> {
   const expense = await tx.expense.findUnique({
     where: { id: expenseId },
-    select: { id: true, amount: true, bucketSource: true, approvalStatus: true, description: true, category: true, date: true, kind: true },
+    select: { id: true, amount: true, bucketSource: true, approvalStatus: true, description: true, category: true, date: true, kind: true, potKey: true },
   });
   if (!expense) {
     await tx.bucketTransaction.deleteMany({ where: { expenseId } });
+    await tx.potTransaction.deleteMany({ where: { expenseId } });
     return;
   }
   const qualifies = expense.bucketSource != null && (expense.approvalStatus === "AUTO_APPROVED" || expense.approvalStatus === "APPROVED");
   if (!qualifies) {
     await tx.bucketTransaction.deleteMany({ where: { expenseId } });
+    await tx.potTransaction.deleteMany({ where: { expenseId } });
     return;
   }
   // AI cost rows are the one place kobo survive (they tie to the AI usage page to the kobo).
   const amount = expense.kind === "AI" ? -Math.round(expense.amount * 100) / 100 : -Math.round(expense.amount);
+  const month = monthKeyOf(expense.date);
   const data = {
     bucketType: expense.bucketSource as BucketType,
     type: "OUTFLOW",
     amount,
     description: `${expense.category}: ${expense.description}`,
-    month: monthKeyOf(expense.date),
+    month,
   };
   await tx.bucketTransaction.upsert({ where: { expenseId }, create: { ...data, expenseId }, update: data });
+  // Phase 4: an expense charged to a tracked pot also leaves that pot; a pot-less expense hits only the bucket.
+  if (expense.potKey) {
+    const potData = { potKey: expense.potKey, bucketType: expense.bucketSource as BucketType, type: "OUTFLOW", amount, month };
+    await tx.potTransaction.upsert({ where: { expenseId }, create: { ...potData, expenseId }, update: potData });
+  } else {
+    await tx.potTransaction.deleteMany({ where: { expenseId } });
+  }
 }

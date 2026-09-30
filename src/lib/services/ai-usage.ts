@@ -387,6 +387,36 @@ export async function setCreditBalance(balanceUsd: number) {
   ]);
 }
 
+/**
+ * Add newly bought Anthropic credit to the loaded USD (Phase 4, a Claude top-up)
+ * WITHOUT resetting `setAt` — so the running spent-since figure stays correct.
+ * If no balance has ever been configured, this establishes it (setAt = now).
+ */
+export async function incrementCreditBalance(addUsd: number) {
+  const fx = await resolveFxRate();
+  await db.$transaction(async (tx) => {
+    const rows = await tx.setting.findMany({ where: { key: { in: [BALANCE_USD_KEY, LEGACY_BALANCE_NAIRA_KEY, BALANCE_SET_AT_KEY] } } });
+    const val = (k: string) => rows.find((r) => r.key === k)?.value;
+    // Base the increment on however the balance is stored today — prefer the USD row, else fold in a
+    // legacy naira balance at the current rate so a top-up never silently discards it — matching getCreditBalance.
+    const usdRow = Number(val(BALANCE_USD_KEY));
+    const nairaRow = Number(val(LEGACY_BALANCE_NAIRA_KEY));
+    let base = 0;
+    if (Number.isFinite(usdRow) && val(BALANCE_USD_KEY) !== undefined) base = usdRow;
+    else if (Number.isFinite(nairaRow) && val(LEGACY_BALANCE_NAIRA_KEY) !== undefined) base = fx.effectiveRate > 0 ? nairaRow / fx.effectiveRate : 0;
+    await tx.setting.upsert({
+      where: { key: BALANCE_USD_KEY },
+      update: { value: String(base + addUsd) },
+      create: { key: BALANCE_USD_KEY, value: String(base + addUsd) },
+    });
+    // The USD row is now the source of truth; drop the legacy naira row so getCreditBalance can't double-count it.
+    if (val(LEGACY_BALANCE_NAIRA_KEY) !== undefined) await tx.setting.deleteMany({ where: { key: LEGACY_BALANCE_NAIRA_KEY } });
+    if (val(BALANCE_SET_AT_KEY) === undefined) {
+      await tx.setting.create({ data: { key: BALANCE_SET_AT_KEY, value: new Date().toISOString() } });
+    }
+  });
+}
+
 // ── Phase D10: token-usage dashboard panels ──────────────────
 // The founder asked for four new views once real reports start running:
 // a per-project cost table (a list, not a search box), a per-subsystem

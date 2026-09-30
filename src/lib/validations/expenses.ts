@@ -26,6 +26,18 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 export const EXPENSE_BUCKETS = ["OPERATIONS_RESERVE", "GROWTH_FUND", "REINVESTMENT_FUND"] as const;
 export type ExpenseBucket = (typeof EXPENSE_BUCKETS)[number];
 
+/**
+ * The tracked pot inside Operations Reserve a category is normally charged to
+ * (Phase 4). The form pre-selects it; the admin can change it or pick "General".
+ * Categories not listed here have no default pot (they hit the bucket only).
+ */
+export const DEFAULT_POT_FOR_CATEGORY: Partial<Record<ExpenseCategory, string>> = {
+  "API cost": "claude_api",
+  "Internet/Data": "data",
+  Hosting: "data",
+  Software: "software",
+};
+
 export const DEFAULT_BUCKET_FOR_CATEGORY: Record<ExpenseCategory, ExpenseBucket> = {
   Software: "OPERATIONS_RESERVE",
   "Internet/Data": "OPERATIONS_RESERVE",
@@ -45,7 +57,7 @@ export const DEFAULT_BUCKET_FOR_CATEGORY: Record<ExpenseCategory, ExpenseBucket>
 export const EXPENSE_STATUSES = ["AUTO_APPROVED", "PENDING_APPROVAL", "APPROVED", "DECLINED"] as const;
 export type ExpenseStatus = (typeof EXPENSE_STATUSES)[number];
 
-export const EXPENSE_KINDS = ["MANUAL", "COMMISSION", "AI", "SPONSORSHIP"] as const;
+export const EXPENSE_KINDS = ["MANUAL", "COMMISSION", "AI", "SPONSORSHIP", "AI_TOPUP"] as const;
 
 /**
  * What the expenses list can be filtered by: the manual categories plus the
@@ -69,6 +81,8 @@ export const createExpenseSchema = z
   .object({
     category: z.enum(EXPENSE_CATEGORIES),
     bucketSource: z.enum(EXPENSE_BUCKETS),
+    /** The tracked pot inside the bucket this is charged to; "" / omitted = a general bucket expense. */
+    potKey: z.string().trim().max(40).optional().or(z.literal("")),
     description: z.string().trim().min(2, "Enter a description").max(300),
     amount: z.coerce.number().positive("Enter an amount greater than 0").max(100_000_000),
     date: dateString,
@@ -112,6 +126,16 @@ export const sponsorshipExpenseSchema = z.object({
   notes: z.string().trim().max(300).optional().or(z.literal("")),
 });
 export type SponsorshipExpenseInput = z.infer<typeof sponsorshipExpenseSchema>;
+
+/** `POST /api/admin/ai-usage/top-up` — the CFO/founder logs Anthropic credits bought from the Claude API pot. */
+export const claudeTopUpSchema = z.object({
+  amountNgn: z.coerce.number().int("Whole naira only").positive("Enter an amount greater than 0").max(100_000_000),
+  /** The USD of credit bought (added to the balance card). Defaults to amountNgn ÷ the ₦/$ rate when omitted. */
+  amountUsd: z.coerce.number().positive().max(1_000_000).optional(),
+  reference: z.string().trim().max(120).optional().or(z.literal("")),
+  date: dateString.optional(),
+});
+export type ClaudeTopUpInput = z.infer<typeof claudeTopUpSchema>;
 
 /** `PATCH /api/admin/finance/settings` — the founder's finance numbers. */
 export const financeSettingsSchema = z

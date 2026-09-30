@@ -14,18 +14,20 @@ import { BUCKET_META, FINANCE_DEFAULTS } from "@/lib/finance/commission-config";
 import {
   createExpenseSchema,
   DEFAULT_BUCKET_FOR_CATEGORY,
+  DEFAULT_POT_FOR_CATEGORY,
   EXPENSE_BUCKETS,
   EXPENSE_CATEGORIES,
   EXPENSE_FREQUENCIES,
   type CreateExpenseInput,
 } from "@/lib/validations/expenses";
+import type { PotView } from "@/lib/services/finance/pots";
 import { formatNaira } from "@/lib/utils";
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function AddExpenseDialog({ isFounder }: { isFounder: boolean }) {
+export function AddExpenseDialog({ isFounder, pots }: { isFounder: boolean; pots: PotView[] }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
 
@@ -40,6 +42,7 @@ export function AddExpenseDialog({ isFounder }: { isFounder: boolean }) {
           {open ? (
             <ExpenseForm
               isFounder={isFounder}
+              pots={pots}
               onDone={() => {
                 setOpen(false);
                 router.refresh();
@@ -53,7 +56,7 @@ export function AddExpenseDialog({ isFounder }: { isFounder: boolean }) {
   );
 }
 
-function ExpenseForm({ isFounder, onDone, onCancel }: { isFounder: boolean; onDone: () => void; onCancel: () => void }) {
+function ExpenseForm({ isFounder, pots, onDone, onCancel }: { isFounder: boolean; pots: PotView[]; onDone: () => void; onCancel: () => void }) {
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const {
     register,
@@ -66,6 +69,7 @@ function ExpenseForm({ isFounder, onDone, onCancel }: { isFounder: boolean; onDo
     defaultValues: {
       category: "Software",
       bucketSource: "OPERATIONS_RESERVE",
+      potKey: "",
       description: "",
       amount: undefined,
       date: today(),
@@ -76,13 +80,26 @@ function ExpenseForm({ isFounder, onDone, onCancel }: { isFounder: boolean; onDo
 
   const recurring = watch("recurring");
   const category = watch("category");
+  const bucketSource = watch("bucketSource");
+  const potKey = watch("potKey");
   const amount = watch("amount");
   const needsApproval = !isFounder && Number(amount) > FINANCE_DEFAULTS.expenseApprovalThreshold;
+
+  // Pots that live inside the chosen bucket (Operations Reserve holds them in v1).
+  const bucketPots = React.useMemo(() => pots.filter((p) => p.parentKey === bucketSource), [pots, bucketSource]);
 
   // The category chooses the bucket it is normally paid from; the admin may still change it.
   React.useEffect(() => {
     if (category) setValue("bucketSource", DEFAULT_BUCKET_FOR_CATEGORY[category]);
   }, [category, setValue]);
+
+  // Pre-select the category's usual pot when it exists in the chosen bucket; otherwise clear it.
+  React.useEffect(() => {
+    const preferred = DEFAULT_POT_FOR_CATEGORY[category as keyof typeof DEFAULT_POT_FOR_CATEGORY];
+    if (preferred && bucketPots.some((p) => p.key === preferred)) setValue("potKey", preferred);
+    else if (potKey && !bucketPots.some((p) => p.key === potKey)) setValue("potKey", "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, bucketSource, bucketPots, setValue]);
 
   const onSubmit = async (data: CreateExpenseInput) => {
     setSubmitError(null);
@@ -130,6 +147,24 @@ function ExpenseForm({ isFounder, onDone, onCancel }: { isFounder: boolean; onDo
             </Select>
           </Field>
         </div>
+
+        {bucketPots.length > 0 ? (
+          <Field
+            label="Pot"
+            htmlFor="potKey"
+            error={errors.potKey?.message}
+            hint="Earmarked cash inside this bucket. Leave as general if it is not from a pot."
+          >
+            <Select id="potKey" {...register("potKey")}>
+              <option value="">No pot — general expense</option>
+              {bucketPots.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label} ({formatNaira(p.balance)})
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
 
         <Field label="Description" required htmlFor="description" error={errors.description?.message}>
           <Input id="description" autoComplete="off" {...register("description")} />

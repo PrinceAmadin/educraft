@@ -1134,6 +1134,12 @@ model Expense {
   /// or a renewal), so the partnership shows what it has cost the Growth Fund.
   partnershipId  String?
   partnership    Partnership? @relation(fields: [partnershipId], references: [id], onDelete: SetNull)
+  /// Phase 4: the tracked pot inside `bucketSource` this expense is charged to
+  /// (claude_api, data, software, …). Null = a general bucket expense, no pot.
+  potKey         String?
+  /// Phase 4: on a claude_api top-up, the USD of Anthropic credit bought — added
+  /// to the credit-balance card's loaded USD when the top-up is counted.
+  creditUsd      Float?
   createdAt   DateTime @default(now())
 
   @@index([date])
@@ -1142,6 +1148,7 @@ model Expense {
   @@index([kind, date])
   @@index([bucketSource, approvalStatus])
   @@index([partnershipId])
+  @@index([potKey, date])
 }
 
 // ─── NOTIFICATIONS ──────────────────────────────────────
@@ -2142,6 +2149,36 @@ model BucketTransaction {
   @@index([projectId])
   @@index([allocationId])
   @@index([founderDrawId])
+}
+
+/// Phase 4: a tracked pot inside a bucket (claude_api / data / software /
+/// emergencies under Operations Reserve). Same signed Σ-ledger as
+/// BucketTransaction, one level down: balance = Σ amount per potKey. INFLOW is
+/// the pot's share of a bucket allocation delta (potSplit, keyed to the
+/// BucketAllocationLog it came from); OUTFLOW is an Operations-Reserve expense
+/// tagged with the pot (keyed by expenseId). The claude_api pot drains on a
+/// top-up, not on per-call usage (founder, decision 5).
+model PotTransaction {
+  id            String     @id @default(cuid())
+  potKey        String
+  bucketType    BucketType
+  /// INFLOW, OUTFLOW, ADJUSTMENT
+  type          String
+  amount        Float
+  month         String
+  /// The BucketAllocationLog this inflow split from (replay-safe with the unique below).
+  allocationId  String?
+  /// The expense that drained the pot (an outflow). One pot row per expense.
+  expenseId     String?    @unique
+  paymentId     String?
+  projectId     String?
+  note          String?
+  recordedById  String?
+  createdAt     DateTime   @default(now())
+
+  @@unique([allocationId, potKey])
+  @@index([potKey, month])
+  @@index([projectId])
 }
 
 /// Every naira owed out on a completed project, one row per leg and recipient:

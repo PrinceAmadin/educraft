@@ -1,6 +1,5 @@
 import { waitUntil } from "@vercel/functions";
 import { db } from "@/lib/db";
-import { rollUpAiExpense } from "@/lib/services/expenses";
 import { costUsd } from "@/lib/ai-pricing";
 import { getUsdToNairaRate } from "@/lib/fx-rate";
 
@@ -30,9 +29,10 @@ export interface AiUsageRecord extends AiUsageContext {
 
 /**
  * Best-effort: a logging failure must never break the Claude call it
- * describes. Every logged call also keeps the day's Operations Reserve
- * expense for that project/subsystem in step (Phase 2: Claude costs flow
- * into Expenses automatically as API cost).
+ * describes. Since Phase 4 (decision 5) a call no longer posts an Operations
+ * Reserve expense — per-call spend touches no bucket or pot. It only lowers
+ * the credit-balance card's remaining (spentUsd) and feeds the monthly
+ * threshold; the Claude API pot drains when the CFO logs a top-up.
  */
 export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
   try {
@@ -46,7 +46,7 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
         : Promise.resolve(null),
       getUsdToNairaRate(),
     ]);
-    const log = await db.aiUsageLog.create({
+    await db.aiUsageLog.create({
       data: {
         projectId: rec.projectId ?? null,
         workerId: project?.workerId ?? null,
@@ -65,9 +65,11 @@ export async function logAiUsage(rec: AiUsageRecord): Promise<void> {
         durationMs: rec.durationMs,
         status: rec.status,
       },
-      select: { createdAt: true },
     });
-    await rollUpAiExpense({ day: log.createdAt, subsystem: rec.subsystem, projectId: rec.projectId ?? null });
+    // Phase 4 (decision 5): a Claude call no longer posts an Operations Reserve expense — per-call spend
+    // touches no bucket or pot. It reduces the credit-balance card's remaining (spentUsd) and feeds the
+    // monthly threshold below; the Claude API pot fills from the retained-share allocation and drains only
+    // when the CFO logs a top-up (logClaudeTopUp).
     // D10: fires at most once per calendar month per threshold; a read-only check when the threshold is
     // not set, so the call is cheap. Sent in waitUntil so the Claude call it describes never waits on Gmail.
     waitUntil(

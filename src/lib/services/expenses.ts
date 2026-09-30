@@ -1,11 +1,15 @@
 import { Prisma, type BucketType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { BUCKET_META, expenseNeedsApproval, FINANCE_DEFAULTS } from "@/lib/finance/commission-config";
+import { potsOf } from "@/lib/finance/cashflow-types";
+import { getActiveCashflow } from "@/lib/services/cashflow";
+import { getUsdToNairaRate } from "@/lib/fx-rate";
+import { incrementCreditBalance } from "@/lib/services/ai-usage";
 import { syncExpenseOutflow } from "@/lib/services/finance/buckets";
 import { getGrowthFundQuarter, quarterOf, type GrowthFundQuarter } from "@/lib/services/finance/surplus";
 import { notifyFinance, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { formatNaira } from "@/lib/utils";
-import type { CreateExpenseInput, ExpenseListParams, SponsorshipExpenseInput } from "@/lib/validations/expenses";
+import type { ClaudeTopUpInput, CreateExpenseInput, ExpenseListParams, SponsorshipExpenseInput } from "@/lib/validations/expenses";
 
 export const EXPENSE_PAGE_SIZE = 25;
 
@@ -282,6 +286,13 @@ async function displayName(userId: string): Promise<string> {
  */
 export async function createExpense(input: CreateExpenseInput, loggedById: string, loggedByRole: string): Promise<{ id: string; approvalStatus: string }> {
   const approvalStatus = expenseNeedsApproval(input.amount, loggedByRole) ? "PENDING_APPROVAL" : "AUTO_APPROVED";
+  // A pot must be a tracked pot of the chosen bucket in the structure in force; else it is a general bucket expense.
+  const potKey = input.potKey || null;
+  if (potKey) {
+    const { structure } = await getActiveCashflow();
+    const valid = potsOf(structure, input.bucketSource).some((p) => p.key === potKey && p.isTrackedAsPot);
+    if (!valid) throw new ExpenseError("That pot is not part of the chosen bucket");
+  }
   const row = await db.$transaction(async (tx) => {
     const created = await tx.expense.create({
       data: {
@@ -294,6 +305,7 @@ export async function createExpense(input: CreateExpenseInput, loggedById: strin
         approvedBy: loggedById,
         kind: "MANUAL",
         bucketSource: input.bucketSource,
+        potKey,
         approvalStatus,
       },
       select: { id: true, description: true, amount: true },
@@ -303,6 +315,44 @@ export async function createExpense(input: CreateExpenseInput, loggedById: strin
   });
   if (approvalStatus === "PENDING_APPROVAL") await notifyPendingApproval(row, await displayName(loggedById));
   return { id: row.id, approvalStatus };
+}
+
+/**
+ * The founder or CFO logs Anthropic credits bought — decision 5. The naira
+ * leaves the Claude API pot (and Operations Reserve) as an "API cost" expense,
+ * and the USD of credit bought is added to the AI-usage credit-balance card.
+ * Over the approval threshold and not the founder, the cash waits for approval;
+ * the credit-balance rise follows the same "counted" moment (here if
+ * auto-approved, else on approval in decideExpense).
+ */
+export async function logClaudeTopUp(input: ClaudeTopUpInput, loggedById: string, loggedByRole: string): Promise<{ id: string; approvalStatus: string; creditUsd: number }> {
+  const rate = await getUsdToNairaRate();
+  const creditUsd = input.amountUsd ?? (rate > 0 ? Math.round((input.amountNgn / rate) * 100) / 100 : 0);
+  const approvalStatus = expenseNeedsApproval(input.amountNgn, loggedByRole) ? "PENDING_APPROVAL" : "AUTO_APPROVED";
+  const counted = approvalStatus === "AUTO_APPROVED";
+  const row = await db.$transaction(async (tx) => {
+    const created = await tx.expense.create({
+      data: {
+        category: "API cost",
+        description: `Bought Anthropic credits${creditUsd ? `: $${creditUsd}` : ""}${input.reference ? ` (${input.reference})` : ""}`,
+        amount: input.amountNgn,
+        date: new Date(`${input.date ?? new Date().toISOString().slice(0, 10)}T00:00:00.000Z`),
+        approvedBy: loggedById,
+        kind: "AI_TOPUP",
+        bucketSource: "OPERATIONS_RESERVE",
+        potKey: "claude_api",
+        creditUsd,
+        approvalStatus,
+      },
+      select: { id: true, description: true, amount: true },
+    });
+    await syncExpenseOutflow(tx, created.id);
+    return created;
+  });
+  // The credit was bought the moment finance counts the spend: now if auto-approved, else on approval.
+  if (counted && creditUsd > 0) await incrementCreditBalance(creditUsd);
+  if (approvalStatus === "PENDING_APPROVAL") await notifyPendingApproval(row, await displayName(loggedById));
+  return { id: row.id, approvalStatus, creditUsd };
 }
 
 /** The HOG's student-union sponsorship, paid from the Growth Fund against the quarterly budget. */
@@ -358,8 +408,10 @@ export async function decideExpense(id: string, input: { decision: "approve" | "
     });
     if (claimed.count !== 1) throw new ExpenseError("Someone else just decided this expense. Refresh the page.");
     await syncExpenseOutflow(tx, id);
-    return tx.expense.findUniqueOrThrow({ where: { id }, select: ROW_SELECT });
+    return tx.expense.findUniqueOrThrow({ where: { id }, select: { ...ROW_SELECT, creditUsd: true } });
   });
+  // A Claude top-up approved now: the credits it bought reach the balance card at the moment the spend is counted.
+  if (status === "APPROVED" && updated.creditUsd && updated.creditUsd > 0) await incrementCreditBalance(updated.creditUsd);
   if (expense.approvedBy) {
     await notifyUsers([expense.approvedBy], {
       title: status === "APPROVED" ? "Expense approved" : "Expense declined",

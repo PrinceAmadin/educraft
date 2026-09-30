@@ -104,6 +104,32 @@ function BucketCard({ card, extras }: { card: BucketCardData; extras: BucketExtr
           </div>
         ) : null}
       </dl>
+
+      {/* Phase 4: tracked pots inside this bucket (Operations Reserve in v1). */}
+      {card.pots.length > 0 ? (
+        <div className="mt-4 border-t border-border/60 pt-3">
+          <p className="meta-label">Earmarked</p>
+          <dl className="mt-2 space-y-1.5 text-[13px]">
+            {card.pots.map((p) => (
+              <div key={p.key} className="flex items-baseline justify-between gap-3">
+                <dt className="text-muted-foreground">
+                  {p.label}
+                  {p.topUpUsd !== undefined ? (
+                    <span className="ml-1.5 text-xs">≈ ${p.topUpUsd.toLocaleString("en-US")} to top up</span>
+                  ) : null}
+                </dt>
+                <dd className="font-mono tabular-nums text-foreground">{formatNaira(p.balance)}</dd>
+              </div>
+            ))}
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-muted-foreground">General (unearmarked)</dt>
+              <dd className={cn("font-mono tabular-nums", card.generalResidual < 0 ? "text-danger" : "text-foreground")}>
+                {formatNaira(card.generalResidual)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
     </section>
   );
 }
