@@ -5,18 +5,21 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { FormSection } from "@/components/forms/FormSection";
 import { MAX_OBJECTIVE_CHARS, MAX_OBJECTIVES, MIN_OBJECTIVES } from "@/lib/generation/objectives-rules";
-import type { BriefView } from "@/lib/research/source-stage-view";
+import { objectivesModeMismatch, type BriefView } from "@/lib/research/source-stage-view";
 
 export type BriefAction = "start" | "redraft_objectives" | "carry_on";
 
 /**
- * The report's objectives on the COO's card (D3b): drafted by the research
- * step, edited here, approved with the mode. Chapter 1 states them word for
- * word. While the draft (and a Law/History source search) runs, the section
- * shows progress; a stopped run offers "Carry on".
+ * The report's objectives on the COO's card (D3b): drafted only when the
+ * founder or the COO presses Draft objectives (never on their own), edited
+ * here, approved with the mode. Chapter 1 states them word for word. Draft
+ * again re-drafts them whenever they choose. While the draft (and a
+ * Law/History source search) runs, the section shows progress; a stopped run
+ * offers "Carry on".
  */
 export function ObjectivesSection({
   brief,
+  modeNumber,
   objectives,
   onChange,
   editable,
@@ -25,6 +28,8 @@ export function ObjectivesSection({
   problems,
 }: {
   brief: BriefView;
+  /** The mode chosen on the card now (0: none yet). The draft follows it. */
+  modeNumber: number;
   objectives: string[];
   onChange: (next: string[]) => void;
   editable: boolean;
@@ -34,31 +39,38 @@ export function ObjectivesSection({
 }) {
   const searchWord = brief.sourceKind === "CASE" ? "cases" : brief.sourceKind === "ARCHIVE" ? "archival sources" : null;
   const edited = brief.draftedObjectives.length > 0 && brief.draftedObjectives.join("\n") !== objectives.join("\n");
+  const mismatch = editable ? objectivesModeMismatch(brief, modeNumber || null) : null;
+  const redraftLabel = busy === "redraft_objectives" ? "Asking…" : modeNumber ? `Draft again for Mode ${modeNumber}` : "Draft again";
 
   return (
     <FormSection
       title="Objectives"
       description="Chapter 1 states these word for word, and every chapter follows them in this order."
       action={
-        brief.canRedraft && editable ? (
-          <Button type="button" variant="outline" size="sm" disabled={busy !== null} onClick={() => onAction("redraft_objectives")}>
+        brief.canRedraft && editable && !mismatch ? (
+          <Button type="button" variant="outline" size="sm" disabled={busy !== null || !modeNumber} onClick={() => onAction("redraft_objectives")}>
             <LuRefreshCw aria-hidden />
-            {busy === "redraft_objectives" ? "Asking…" : "Draft again"}
+            {redraftLabel}
           </Button>
         ) : null
       }
     >
-      {brief.status === "NONE" ? (
+      {brief.notStarted ? (
         <div className="space-y-3 rounded-2xl bg-zone p-4">
           <p className="text-sm text-foreground">
-            No objectives yet. They are drafted from the topic, the department and the research found
-            {searchWord ? `, together with a search for ${searchWord} (at most ${brief.searchLimit} searches)` : ""}.
+            No objectives yet. Nothing is drafted until you press the button: they are drafted for the mode chosen above, from
+            the topic and the department{searchWord ? `, together with a search for ${searchWord} (at most ${brief.searchLimit} searches)` : ""}.
           </p>
           {brief.canStart ? (
-            <Button type="button" disabled={busy !== null} onClick={() => onAction("start")}>
-              <LuSparkles aria-hidden />
-              {busy === "start" ? "Starting…" : searchWord ? `Draft objectives and find ${searchWord}` : "Draft objectives"}
-            </Button>
+            <div className="space-y-2">
+              <Button type="button" disabled={busy !== null || !modeNumber} onClick={() => onAction("start")}>
+                <LuSparkles aria-hidden />
+                {busy === "start"
+                  ? "Starting…"
+                  : `Draft objectives${modeNumber ? ` for Mode ${modeNumber}` : ""}${searchWord ? ` and find ${searchWord}` : ""}`}
+              </Button>
+              {!modeNumber ? <p className="text-xs text-muted-foreground">Pick a mode first.</p> : null}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -103,6 +115,24 @@ export function ObjectivesSection({
               {busy === "start" ? "Starting…" : "Start again"}
             </Button>
           ) : null}
+        </div>
+      ) : null}
+
+      {mismatch && brief.canRedraft ? (
+        <div className="space-y-3 rounded-2xl bg-gold/10 p-4" role="status">
+          <p className="flex items-start gap-2 text-sm text-foreground">
+            <LuTriangleAlert className="mt-0.5 size-4 shrink-0 text-gold" aria-hidden />
+            <span>
+              {mismatch.drafted
+                ? `These objectives were drafted for Mode ${mismatch.drafted}; the mode is now Mode ${mismatch.now}.`
+                : `These objectives were drafted before the mode was recorded; the mode is now Mode ${mismatch.now}.`}{" "}
+              Draft them again before approving.
+            </span>
+          </p>
+          <Button type="button" variant="outline" disabled={busy !== null} onClick={() => onAction("redraft_objectives")}>
+            <LuRefreshCw aria-hidden />
+            {redraftLabel}
+          </Button>
         </div>
       ) : null}
 

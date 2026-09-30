@@ -13,7 +13,6 @@ import { deleteReferencePdf } from "@/lib/services/research-files";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
 import { isStaffRole } from "@/lib/roles";
 import { ledgerRunFinished } from "@/lib/services/operations/research-ledger";
-import { createPendingBrief } from "@/lib/research/source-stage";
 import { claimRun, getRerunState, releaseClaim } from "@/lib/services/research-runs";
 
 export class ResearchError extends Error {}
@@ -1289,8 +1288,8 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
     );
   }
   await ledgerRunFinished(job.projectId, job.id, "COMPLETE");
-  // D3b: a report project's objectives (and Law/History sources) come next; the next browser request starts them.
-  await createPendingBrief(job.projectId).catch((error) => console.error("[research] could not queue the objectives stage", error));
+  // D3b: a report project's objectives (and Law/History sources) come next, but only when the founder or the COO
+  // presses Draft objectives on the Report tab: nothing starts them from here.
   if (job.requestedById) {
     const [total, withPdf] = await Promise.all([
       db.reference.count({ where: { researchJobId: job.id, status: "KEPT" } }),

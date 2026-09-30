@@ -33,8 +33,15 @@ import {
 } from "../src/lib/research/source-policy";
 import { readPoints } from "../src/lib/research/source-points";
 import { resumeStatusFor } from "../src/lib/research/source-stage";
-import { modeChangeAction } from "../src/lib/research/source-stage-actions";
-import { briefBlockers, buildBriefView, type BriefCardRow } from "../src/lib/research/source-stage-view";
+import {
+  STAGE_QUIET_MS,
+  briefBlockers,
+  buildBriefView,
+  isQuietRun,
+  modeMismatchLine,
+  objectivesModeMismatch,
+  type BriefCardRow,
+} from "../src/lib/research/source-stage-view";
 
 let failures = 0;
 let passes = 0;
@@ -261,6 +268,7 @@ const row = (over: Partial<BriefCardRow>): BriefCardRow => ({
   draftedObjectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria", "To propose w for Nigeria"],
   objectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria", "To propose w for Nigeria"],
   objectivesFromClient: false,
+  objectivesModeNumber: 2,
   points: [
     { index: 0, text: "Point A", searches: 2, outcome: "FOUND", queries: [], attempts: [] },
     { index: 1, text: "Point B", searches: 2, outcome: "NONE", queries: [], attempts: [] },
@@ -278,10 +286,10 @@ const row = (over: Partial<BriefCardRow>): BriefCardRow => ({
   ],
   ...over,
 });
-const none = buildBriefView(null, { costNaira: 0, currentDepartment: "Law", locked: false, now });
+const none = buildBriefView(null, { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
 expect("no brief yet: Law can start a case search", [none.status, none.kindLabel, none.canStart, none.placeholder], ["NONE", "Cases", true, "[CASE TO BE SUPPLIED]"]);
 expect("no brief yet blocks approval", briefBlockers(none, true), ["Draft the objectives first: press Draft objectives below."]);
-const ready = buildBriefView(row({}), { costNaira: 420.5, currentDepartment: "Law", locked: false, now });
+const ready = buildBriefView(row({}), { costNaira: 420.5, currentDepartment: "Law", currentMode: 2, locked: false, now });
 expect("ready: sources under their points, the PDF known, the domain shown", [ready.points[0].sources.map((s) => [s.id, s.hasPdf, s.sourceDomain]), ready.points[1].sources.length], [
   [
     ["s1", true, "guardian.ng"],
@@ -290,23 +298,23 @@ expect("ready: sources under their points, the PDF known, the domain shown", [re
   0,
 ]);
 expect("ready: editable, can redraft, nothing blocks", [ready.canEdit, ready.canRedraft, briefBlockers(ready, true)], [true, true, []]);
-const running = buildBriefView(row({ status: "SEARCHING", cursor: 2, lockedUntil: new Date(now + 60_000) }), { costNaira: 0, currentDepartment: "Law", locked: false, now });
+const running = buildBriefView(row({ status: "SEARCHING", cursor: 2, lockedUntil: new Date(now + 60_000) }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
 expect("running: progress by point, approval waits", [running.running, running.progress, briefBlockers(running, true)], [true, "Finding cases: point 2 of 2", ["The objectives and sources are still being prepared."]]);
-const stopped = buildBriefView(row({ status: "SEARCHING", failedSteps: 4, lastError: "overloaded" }), { costNaira: 0, currentDepartment: "Law", locked: false, now });
+const stopped = buildBriefView(row({ status: "SEARCHING", failedSteps: 4, lastError: "overloaded" }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
 expect("stopped after 4 failures: Carry on", [stopped.stopped, stopped.canCarryOn, stopped.error], [true, true, "overloaded"]);
-const moved = buildBriefView(row({}), { costNaira: 0, currentDepartment: "History", locked: false, now });
+const moved = buildBriefView(row({}), { costNaira: 0, currentDepartment: "History", currentMode: 2, locked: false, now });
 expect("department now History: start again for archives", [moved.kindMismatch, moved.canStart, briefBlockers(moved, true)], [
   { now: "ARCHIVE" },
   true,
   ["The department now calls for archival sources: press Start again to search for them."],
 ]);
-const emptySearch = buildBriefView(row({ points: [], sources: [] }), { costNaira: 0, currentDepartment: "Law", locked: false, now });
+const emptySearch = buildBriefView(row({ points: [], sources: [] }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
 expect("a finished search with no points: Search again is offered", [emptySearch.noPoints, emptySearch.canStart], [true, true]);
-const lockedView = buildBriefView(row({}), { costNaira: 0, currentDepartment: "Law", locked: true, now });
+const lockedView = buildBriefView(row({}), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: true, now });
 expect("locked: nothing editable", [lockedView.canEdit, lockedView.canRedraft, lockedView.canStart], [false, false, false]);
-const badObjectives = buildBriefView(row({ objectives: ["To x"] }), { costNaira: 0, currentDepartment: "Law", locked: false, now });
+const badObjectives = buildBriefView(row({ objectives: ["To x"] }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
 expect("bad saved objectives block approval", briefBlockers(badObjectives, true)[0], "Give 4 to 5 objectives (there is 1).");
-const hansard = buildBriefView(row({ sourceKind: "ARCHIVE", department: "History", sources: [{ ...row({}).sources[0], id: "h1", kind: "ARCHIVE", origin: "HANSARD" }] }), { costNaira: 0, currentDepartment: "History", locked: false, now });
+const hansard = buildBriefView(row({ sourceKind: "ARCHIVE", department: "History", sources: [{ ...row({}).sources[0], id: "h1", kind: "ARCHIVE", origin: "HANSARD" }] }), { costNaira: 0, currentDepartment: "History", currentMode: 2, locked: false, now });
 expect("Hansard used: the licence attribution shows", hansard.attribution, "Contains Parliamentary information licensed under the Open Parliament Licence v3.0.");
 
 // ── The lines the chapters get ──
@@ -319,17 +327,48 @@ expect("a case line with no citation or year", formatPrimarySource("case", { poi
 expect("an archive line", formatPrimarySource("archive", { point: "Q", title: "Taxation in Nigeria", decidedOn: "1934-1943", holder: "The National Archives, Kew", reference: "CO 583/200/6", recordType: "Primary" }), "Taxation in Nigeria, 1934-1943, The National Archives, Kew, CO 583/200/6 (primary record). Bears on: Q");
 expect("a {TOKEN} in a found title never becomes a placeholder", formatPrimarySource("case", { point: "P", title: "{SUPERVISOR} v. State" }).includes("{SUPERVISOR}"), false);
 
-// ── Mode change reset (mighty-wondering-hippo, 2026-09-29) ──
-// Objectives are keyed to the approved mode; if the COO changes the mode after
-// drafting, the brief resets so stepDraft rewrites them for the new mode. When
-// no objectives have been drafted yet, the brief just moves to DRAFTING.
-expect("no objectives yet, brief still PENDING: mode 5 chosen → drafting", modeChangeAction(null, 5, "PENDING"), "drafting");
-expect("no objectives yet, brief already DRAFTING: mode 5 chosen → drafting", modeChangeAction(null, 5, "DRAFTING_OBJECTIVES"), "drafting");
-expect("objectives already drafted for Mode 3, brief READY: mode 5 → redraft", modeChangeAction(3, 5, "READY"), "redraft");
-expect("objectives already drafted for Mode 3, brief PLANNING: mode 5 → redraft", modeChangeAction(3, 5, "PLANNING_POINTS"), "redraft");
-expect("objectives already drafted for Mode 3, brief SEARCHING: mode 5 → redraft", modeChangeAction(3, 5, "SEARCHING"), "redraft");
-expect("objectives already drafted for Mode 5, mode 5 chosen: no-op", modeChangeAction(5, 5, "READY"), "no-op");
-expect("no objectives, brief READY (a search finished without any): mode 5 → redraft", modeChangeAction(null, 5, "READY"), "redraft");
+// ── Nothing starts on its own (founder, 30 Sept 2026) ──
+// A brief is drafted only when the founder or the COO presses Draft objectives.
+// PENDING (a brief made by research passing, before this rule) is "not started";
+// a run whose chain was lost is "stopped" with Carry on, never restarted by a page
+// load; a mode change never re-drafts, it asks for Draft again.
+const pending = buildBriefView(row({ status: "PENDING", objectives: [], draftedObjectives: [], objectivesModeNumber: null, points: null, sources: [], sourceKind: null, cursor: 0, searchesUsed: 0, searchedAt: null }), { costNaira: 0, currentDepartment: "Computer Science", currentMode: 3, locked: false, now });
+expect("a PENDING brief is not started: Draft objectives offered, nothing running (no poll)", [pending.status, pending.notStarted, pending.running, pending.stopped, pending.canStart, pending.progress], ["PENDING", true, false, false, true, null]);
+expect("a PENDING brief blocks approval until Draft objectives", briefBlockers(pending, true), ["Draft the objectives first: press Draft objectives below."]);
+expect("no brief is not started either", [none.notStarted, none.running], [true, false]);
+const pendingLocked = buildBriefView(row({ status: "PENDING", objectives: [], points: null, sources: [] }), { costNaira: 0, currentDepartment: "Law", currentMode: 1, locked: true, now });
+expect("a PENDING brief on a locked card offers nothing", [pendingLocked.canStart, pendingLocked.canCarryOn], [false, false]);
+
+const liveLease = buildBriefView(row({ status: "DRAFTING_OBJECTIVES", lockedUntil: new Date(now + 60_000), updatedAt: new Date(now - 10 * 60_000) }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("a live lease is running, however old the last write", [liveLease.running, liveLease.stopped, liveLease.progress], [true, false, "Drafting objectives…"]);
+const quiet = buildBriefView(row({ status: "SEARCHING", lockedUntil: new Date(now - 5 * 60_000), updatedAt: new Date(now - 4 * 60_000) }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("a lapsed lease with no write for 4 min is stopped: Carry on, no auto-restart", [quiet.running, quiet.stopped, quiet.canCarryOn, quiet.error], [false, true, true, "The background run was interrupted."]);
+expect("a quiet run blocks approval with Carry on", briefBlockers(quiet, true), ["The objectives and source search stopped: The background run was interrupted. Press Carry on."]);
+const handOver = buildBriefView(row({ status: "SEARCHING", lockedUntil: null, updatedAt: new Date(now - 20_000) }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("a lapsed lease written 20 s ago is between slices: still running", [handOver.running, handOver.stopped], [true, false]);
+const lostChain = buildBriefView(row({ status: "PLANNING_POINTS", lockedUntil: null, updatedAt: new Date(now - STAGE_QUIET_MS), lastError: "The background run was interrupted (HTTP 508). Press Carry on on the Report tab to resume it." }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("a lost chain keeps its own reason", [lostChain.stopped, lostChain.error], [true, "The background run was interrupted (HTTP 508). Press Carry on on the Report tab to resume it."]);
+expect("isQuietRun: PENDING and READY are never quiet", [
+  isQuietRun({ status: "PENDING", lockedUntil: null, updatedAt: new Date(now - 60 * 60_000) }, now),
+  isQuietRun({ status: "READY", lockedUntil: null, updatedAt: new Date(now - 60 * 60_000) }, now),
+  isQuietRun({ status: "DRAFTING_OBJECTIVES", lockedUntil: null, updatedAt: new Date(now - 60 * 60_000) }, now),
+], [false, false, true]);
+
+const otherMode = buildBriefView(row({ objectivesModeNumber: 3 }), { costNaira: 0, currentDepartment: "Law", currentMode: 5, locked: false, now });
+expect("objectives drafted for Mode 3, card on Mode 5: Draft again, approval refused", [otherMode.modeMismatch, otherMode.canRedraft, briefBlockers(otherMode, true)], [
+  { drafted: 3, now: 5 },
+  true,
+  ["The objectives were drafted for Mode 3. Press Draft again to draft them for Mode 5."],
+]);
+const sameMode = buildBriefView(row({ objectivesModeNumber: 5 }), { costNaira: 0, currentDepartment: "Law", currentMode: 5, locked: false, now });
+expect("objectives drafted for the mode on the card: nothing blocks", [sameMode.modeMismatch, briefBlockers(sameMode, true)], [null, []]);
+const legacy = buildBriefView(row({ objectivesModeNumber: null }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("objectives from before modes were recorded: Draft again", briefBlockers(legacy, true), ["The objectives were drafted before the mode was recorded. Press Draft again to draft them for Mode 2."]);
+const lockedOther = buildBriefView(row({ objectivesModeNumber: 3 }), { costNaira: 0, currentDepartment: "Law", currentMode: 5, locked: true, now });
+expect("a locked card shows no mode mismatch and offers nothing", [lockedOther.modeMismatch, lockedOther.canRedraft, lockedOther.canStart, lockedOther.canCarryOn], [null, false, false, false]);
+expect("no mode on the card yet: no mismatch", objectivesModeMismatch({ status: "READY", objectivesMode: 3 }, null), null);
+expect("a brief still running: no mismatch yet", objectivesModeMismatch({ status: "SEARCHING", objectivesMode: 3 }, 5), null);
+expect("the mismatch line names both modes", modeMismatchLine({ drafted: 1, now: 2 }), "The objectives were drafted for Mode 1. Press Draft again to draft them for Mode 2.");
 
 console.log(`${passes} checks passed, ${failures} failed.`);
 if (failures > 0) process.exit(1);

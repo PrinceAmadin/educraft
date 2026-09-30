@@ -12,8 +12,22 @@ import { readPoints } from "@/lib/research/source-points";
 
 /** Matches source-stage-runner.ts (kept here so this file stays free of the runner's imports). */
 const MAX_STAGE_FAILURES = 4;
-const STALL_MS = 30_000;
-const ACTIVE: SourceStageStatus[] = ["PENDING", "DRAFTING_OBJECTIVES", "PLANNING_POINTS", "SEARCHING"];
+/** The statuses a background run works through. PENDING is not one: it waits for the founder's or the COO's click. */
+const RUNNING: SourceStageStatus[] = ["DRAFTING_OBJECTIVES", "PLANNING_POINTS", "SEARCHING"];
+/**
+ * A run whose lease has lapsed and that has not been written for this long has
+ * lost its background chain (a live slice renews its lease every 20 s, and a
+ * hand-over between slices takes seconds). Nothing restarts it on its own: the
+ * card shows it as stopped and offers Carry on.
+ */
+export const STAGE_QUIET_MS = 180_000;
+
+/** True when a run has gone quiet (see STAGE_QUIET_MS). Shared by the card and carryOnSourceStage. */
+export function isQuietRun(b: { status: SourceStageStatus; lockedUntil: Date | null; updatedAt: Date }, now = Date.now()): boolean {
+  if (!RUNNING.includes(b.status)) return false;
+  if (b.lockedUntil && b.lockedUntil.getTime() > now) return false;
+  return now - b.updatedAt.getTime() >= STAGE_QUIET_MS;
+}
 
 export const BRIEF_CARD_SELECT = {
   id: true,
@@ -23,6 +37,7 @@ export const BRIEF_CARD_SELECT = {
   draftedObjectives: true,
   objectives: true,
   objectivesFromClient: true,
+  objectivesModeNumber: true,
   points: true,
   searchesUsed: true,
   cursor: true,
@@ -93,10 +108,12 @@ export interface BriefPointView {
 }
 
 export interface BriefView {
-  /** NONE: no brief yet (research has not passed, or the project predates D3b). */
+  /** NONE: no brief yet. PENDING: made before the manual start (e.g. EC-00010), also not started. */
   status: SourceStageStatus | "NONE";
+  /** Nothing drafted or searched yet: the card offers Draft objectives. */
+  notStarted: boolean;
   running: boolean;
-  /** Stopped after repeated failures, or FAILED: "Carry on" resumes. */
+  /** Stopped after repeated failures, FAILED, or gone quiet: "Carry on" resumes. */
   stopped: boolean;
   error: string | null;
   sourceKind: SourceKind | null;
@@ -109,6 +126,10 @@ export interface BriefView {
   objectives: string[];
   draftedObjectives: string[];
   objectivesFromClient: boolean;
+  /** The mode the objectives were drafted for (null: drafted before modes were recorded). */
+  objectivesMode: number | null;
+  /** The objectives were drafted for another mode than the one on the card: Draft again. */
+  modeMismatch: { drafted: number | null; now: number } | null;
   objectivesProblems: string[];
   points: BriefPointView[];
   searchesUsed: number;
@@ -160,15 +181,32 @@ function progressLine(b: BriefCardRow, pointCount: number): string | null {
   }
 }
 
+/** The sentence for objectives drafted for another mode (the card and the approval refusal share it). */
+export function modeMismatchLine(m: { drafted: number | null; now: number }): string {
+  return m.drafted
+    ? `The objectives were drafted for Mode ${m.drafted}. Press Draft again to draft them for Mode ${m.now}.`
+    : `The objectives were drafted before the mode was recorded. Press Draft again to draft them for Mode ${m.now}.`;
+}
+
+/** Objectives drafted for another mode than `currentMode`, on a finished brief (null when they match or nothing is drafted). */
+export function objectivesModeMismatch(
+  b: { status: SourceStageStatus | "NONE"; objectivesMode: number | null },
+  currentMode: number | null,
+): { drafted: number | null; now: number } | null {
+  if (b.status !== "READY" || !currentMode || b.objectivesMode === currentMode) return null;
+  return { drafted: b.objectivesMode, now: currentMode };
+}
+
 export function buildBriefView(
   b: BriefCardRow | null,
-  opts: { costNaira: number; currentDepartment: string | null; locked: boolean; now?: number },
+  opts: { costNaira: number; currentDepartment: string | null; currentMode: number | null; locked: boolean; now?: number },
 ): BriefView {
   const now = opts.now ?? Date.now();
   const expected = sourceKindForDepartment(opts.currentDepartment);
-  if (!b) {
+  if (!b || b.status === "PENDING") {
     return {
-      status: "NONE",
+      status: b ? "PENDING" : "NONE",
+      notStarted: true,
       running: false,
       stopped: false,
       error: null,
@@ -180,9 +218,11 @@ export function buildBriefView(
       objectives: [],
       draftedObjectives: [],
       objectivesFromClient: false,
+      objectivesMode: null,
+      modeMismatch: null,
       objectivesProblems: [],
       points: [],
-      searchesUsed: 0,
+      searchesUsed: b?.searchesUsed ?? 0,
       searchLimit: SOURCE_SEARCH_LIMIT,
       costNaira: opts.costNaira,
       progress: null,
@@ -193,8 +233,9 @@ export function buildBriefView(
       canEdit: false,
     };
   }
-  const active = ACTIVE.includes(b.status);
-  const stopped = b.status === "FAILED" || (active && b.failedSteps >= MAX_STAGE_FAILURES);
+  const active = RUNNING.includes(b.status);
+  const quiet = isQuietRun(b, now);
+  const stopped = b.status === "FAILED" || (active && b.failedSteps >= MAX_STAGE_FAILURES) || quiet;
   const leaseLive = Boolean(b.lockedUntil && b.lockedUntil.getTime() > now);
   const running = active && !stopped;
   const points = readPoints(b.points);
@@ -234,12 +275,15 @@ export function buildBriefView(
   const mismatch = ready && b.sourceKind !== expected ? { now: expected } : null;
   const noPoints = ready && !mismatch && Boolean(b.sourceKind) && points.length === 0;
   const hasHansard = sources.some((s) => s.origin === "HANSARD");
+  const modeMismatch = opts.locked ? null : objectivesModeMismatch({ status: b.status, objectivesMode: b.objectivesModeNumber }, opts.currentMode);
+  const error = quiet && !b.lastError ? "The background run was interrupted." : stopped || (!leaseLive && b.lastError) ? b.lastError : null;
 
   return {
     status: b.status,
+    notStarted: false,
     running,
     stopped,
-    error: stopped || (!leaseLive && b.lastError) ? b.lastError : null,
+    error,
     sourceKind: b.sourceKind,
     kindLabel: kindLabel(b.sourceKind),
     placeholder: b.sourceKind ? placeholderFor(b.sourceKind) : null,
@@ -248,6 +292,8 @@ export function buildBriefView(
     objectives: b.objectives,
     draftedObjectives: b.draftedObjectives,
     objectivesFromClient: b.objectivesFromClient,
+    objectivesMode: b.objectivesModeNumber,
+    modeMismatch,
     objectivesProblems: ready && !check.ok ? check.problems : [],
     points: pointViews,
     searchesUsed: b.searchesUsed,
@@ -255,7 +301,7 @@ export function buildBriefView(
     costNaira: opts.costNaira,
     progress: running ? progressLine(b, points.length) : null,
     attribution: hasHansard ? "Contains Parliamentary information licensed under the Open Parliament Licence v3.0." : null,
-    canStart: !opts.locked && (mismatch !== null || noPoints || (b.status === "PENDING" && !leaseLive && now - b.updatedAt.getTime() > STALL_MS)),
+    canStart: !opts.locked && (mismatch !== null || noPoints),
     canRedraft: !opts.locked && ready,
     canCarryOn: !opts.locked && stopped,
     canEdit: !opts.locked && ready,
@@ -265,8 +311,8 @@ export function buildBriefView(
 /** For the card's blockers: why the brief stops approval now (empty when it does not). */
 export function briefBlockers(view: BriefView, reportProject: boolean): string[] {
   if (!reportProject) return [];
-  if (view.status === "NONE") return ["Draft the objectives first: press Draft objectives below."];
-  if (view.stopped) return [`The objectives and source search stopped${view.error ? `: ${view.error}` : ""}. Press Carry on.`];
+  if (view.notStarted) return ["Draft the objectives first: press Draft objectives below."];
+  if (view.stopped) return [`The objectives and source search stopped${view.error ? `: ${view.error.replace(/\.+$/, "")}` : ""}. Press Carry on.`];
   if (view.running) return ["The objectives and sources are still being prepared."];
   if (view.kindMismatch) {
     const now = view.kindMismatch.now;
@@ -276,5 +322,6 @@ export function briefBlockers(view: BriefView, reportProject: boolean): string[]
         : "The department no longer needs a source search: press Start again to clear it.",
     ];
   }
+  if (view.modeMismatch) return [modeMismatchLine(view.modeMismatch)];
   return view.objectivesProblems;
 }

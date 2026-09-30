@@ -14,6 +14,11 @@
  * part refunded after it, so a crash can never overspend. Each step is
  * compare-and-set on status and cursor: a repeat of a finished step writes
  * nothing.
+ *
+ * Nothing starts a stage on its own: the founder or the COO presses Draft
+ * objectives (or Draft again, or Carry on) on the Report tab
+ * (source-stage-actions.ts). Research passing, opening the card, the worker's
+ * research poll and a mode change never do.
  */
 
 import crypto from "crypto";
@@ -23,7 +28,6 @@ import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { WebSearchCallError } from "@/lib/anthropic";
 import { buildPrivatePath } from "@/lib/files/paths";
 import { putPrivateFile } from "@/lib/files/storage";
-import { isReportTemplate } from "@/lib/generation/generation-state";
 import { draftObjectives, extractClientStatedObjectives } from "@/lib/generation/objectives-drafter";
 import { getDegreeFromDepartment } from "@/lib/generation/department-map";
 import { isModeNumber } from "@/lib/mode-classifier";
@@ -35,7 +39,6 @@ import {
   ATTEMPTS_PER_POINT,
   OFFICIAL_LOOKUP_LIMIT,
   SOURCE_SEARCH_LIMIT,
-  sourceKindForDepartment,
   webSearchesForPoint,
   type ArchiveRecord,
 } from "./source-policy";
@@ -207,7 +210,8 @@ async function stepDraft(brief: StageBrief): Promise<void> {
     // Never draft objectives before the COO has saved a research mode: the
     // recommendation could still be wrong, and any draft made now would have
     // to be thrown away (see mighty-wondering-hippo plan, 2026-09-29). Park the
-    // brief back at PENDING; changeMode / approveMode reschedule it.
+    // brief back at PENDING, where the card offers Draft objectives again (the
+    // button saves the mode on screen first, so this is only a safety net).
     await db.projectBrief.updateMany({
       where: { id: brief.id, status: "DRAFTING_OBJECTIVES" },
       data: { status: "PENDING", failedSteps: 0, lastError: null, lockedUntil: null },
@@ -538,29 +542,4 @@ export function resumeStatusFor(b: { objectives: string[]; sourceKind: string | 
   if (!b.sourceKind || b.searchedAt) return "READY";
   if (!Array.isArray(b.points)) return "PLANNING_POINTS";
   return "SEARCHING";
-}
-
-// ─── Created when research passes ───────────────────────────────────────────
-
-/**
- * Called when a project's research job passes: a report project gets a PENDING
- * brief, which the next browser request (the worker's research poll, the COO's
- * card) starts. Nothing is chained from inside the research runner, whose
- * request chain may already be deep (Vercel refuses more than 5).
- */
-export async function createPendingBrief(projectDbId: string): Promise<void> {
-  const project = await db.project.findUnique({
-    where: { id: projectDbId },
-    select: {
-      service: { select: { intakeFormTemplate: true } },
-      client: { select: { department: true } },
-      researchMode: { select: { department: true } },
-      brief: { select: { id: true } },
-    },
-  });
-  if (!project || project.brief || !isReportTemplate(project.service.intakeFormTemplate)) return;
-  const department = project.researchMode?.department ?? project.client.department ?? null;
-  await db.projectBrief
-    .create({ data: { projectId: projectDbId, status: "PENDING", sourceKind: sourceKindForDepartment(department), department } })
-    .catch(() => {}); // created by a parallel request: the unique projectId keeps one
 }

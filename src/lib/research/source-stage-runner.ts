@@ -22,9 +22,10 @@ import { ACTIVE_STAGE_STATUSES, SourceStageError, YieldToNextSlice, advanceSourc
  *    MAX_STAGE_FAILURES in a row the stage stops where it is (everything found
  *    is kept) and the COO's card offers "Carry on"; an error retrying cannot
  *    fix marks it FAILED.
- *  - Nothing restarts a stopped stage on its own: the next browser request that
- *    looks at it (the COO's card, the worker's research poll) does, and only
- *    while it has not hit MAX_STAGE_FAILURES.
+ *  - Nothing starts or restarts a stage on its own. A run starts only from the
+ *    founder's or the COO's click on the Report tab (source-stage-actions.ts);
+ *    a stopped run, or one whose chain was lost (STAGE_QUIET_MS in
+ *    source-stage-view.ts), waits for their "Carry on".
  */
 
 const LEASE_MS = 150_000; // a web-search step may take 100 s
@@ -33,8 +34,6 @@ const SLICE_DEADLINE_MS = 270_000;
 const MAX_HOPS = 5;
 export const MAX_STAGE_FAILURES = 4;
 const MAX_DELAY_SECONDS = 20;
-/** A stage whose lease lapsed and that has not moved for this long is restarted when looked at. */
-export const STAGE_STALL_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -82,7 +81,7 @@ async function chain(briefId: string, delaySeconds: number, hop: number): Promis
         const reason = error instanceof Error ? error.message : String(error);
         console.error("[source stage runner] could not schedule the next slice", briefId, reason);
         await db.projectBrief
-          .updateMany({ where: { id: briefId }, data: { lastError: `The background run was interrupted (${reason}). It restarts when the Report tab is next opened.` } })
+          .updateMany({ where: { id: briefId }, data: { lastError: `The background run was interrupted (${reason}). Press Carry on on the Report tab to resume it.` } })
           .catch(() => {});
       }
     }
@@ -128,10 +127,16 @@ class Lease {
     return this.queue;
   }
 
+  /**
+   * Always tried, even once `lost`: a renewal also "loses" the lease when the
+   * slice's own last step settled the stage (READY), and skipping the release
+   * then left the finished brief locked for LEASE_MS, so a Draft again pressed
+   * in that window started nothing. Compare-and-set on this slice's own token,
+   * so a lease another slice has taken since is never cleared.
+   */
   release(): Promise<unknown> {
     this.queue = this.queue
       .then(async () => {
-        if (this.lost) return;
         await db.projectBrief.updateMany({ where: { id: this.id, lockedUntil: this.until }, data: { lockedUntil: null } });
         this.lost = true;
       })

@@ -27,6 +27,7 @@ import {
 import { INTAKE_MODE_LABEL } from "@/lib/constants";
 import { validateObjectives } from "@/lib/generation/objectives-rules";
 import { sourceKindForDepartment } from "@/lib/research/source-policy";
+import { modeMismatchLine, objectivesModeMismatch } from "@/lib/research/source-stage-view";
 import type { ModeCard as ModeCardData } from "@/lib/services/research-mode";
 import { ObjectivesSection, type BriefAction } from "./ObjectivesSection";
 import { SourcesSection, type ManualSourceDraft } from "./SourcesSection";
@@ -145,8 +146,9 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const brief = card.brief;
   const objectivesCheck = validateObjectives(form.objectives);
   const objectivesProblems = brief?.status === "READY" && !objectivesCheck.ok ? objectivesCheck.problems : [];
+  const modeMismatch = brief && !locked ? objectivesModeMismatch(brief, form.modeNumber || null) : null;
   const briefProblems = brief
-    ? brief.status === "NONE"
+    ? brief.notStarted
       ? ["Draft the objectives first: press Draft objectives."]
       : brief.stopped
         ? ["The objectives and source search stopped. Press Carry on."]
@@ -154,14 +156,17 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
           ? ["The objectives and sources are still being prepared."]
           : sourceKindForDepartment(form.department) !== brief.sourceKind
             ? ["The department you picked calls for a different source search: save the draft, then press Start again."]
-            : objectivesProblems
+            : modeMismatch
+              ? [modeMismatchLine(modeMismatch)]
+              : objectivesProblems
     : [];
   const liveProblems = [...(validation.ok ? [] : validation.problems), ...briefProblems];
   const briefEditable = !locked && brief?.status === "READY";
   const selectedSet = React.useMemo(() => new Set(form.selected), [form.selected]);
 
-  // While the brief is being prepared, the card asks for news every 5 seconds (the server runs it).
-  const waiting = Boolean(brief && (brief.status === "PENDING" || brief.running));
+  // While a run the COO started is working, the card asks for news every 5 seconds (the server runs it).
+  // A brief that has not been started (PENDING or none) is never polled: nothing moves until a button is pressed.
+  const waiting = Boolean(brief?.running);
   React.useEffect(() => {
     if (!waiting) return;
     let stop = false;
@@ -185,12 +190,43 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   }, [waiting, card.projectId]);
   const departmentChoices = DEPARTMENT_NAMES.includes(form.department) || !form.department ? DEPARTMENT_NAMES : [form.department, ...DEPARTMENT_NAMES];
 
+  /**
+   * Saves the card as it stands (department, mode, style…) as a draft, so a draft of the
+   * objectives follows the mode on screen. False (with the reasons shown) when it is refused.
+   * The objectives go with it only for Start again and only when they are valid: Draft again
+   * replaces them anyway, and objectives that break the rules must never block the redraft.
+   */
+  async function saveDraftFirst(action: BriefAction): Promise<boolean> {
+    const decision = decisionFrom(form, card);
+    const keepObjectives = action === "start" && decision.objectives && validateObjectives(decision.objectives).ok;
+    const res = await fetch(`/api/admin/projects/${card.projectId}/mode/change`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      // undefined drops out of the JSON: the ticks never travel, the objectives only when kept.
+      body: JSON.stringify({ ...decision, objectives: keepObjectives ? decision.objectives : undefined, selectedSourceIds: undefined }),
+    });
+    if (res.ok) return true;
+    const data = await res.json().catch(() => null);
+    if (data?.error === "MODE_LOCKED") setMessage(data.message ?? "The mode is locked.");
+    else if (Array.isArray(data?.problems)) setProblems(data.problems);
+    else setMessage(data?.error ?? "The card could not be saved, so nothing was drafted. Try again.");
+    return false;
+  }
+
   /** D3b: brief actions, hand-added sources. The answer is the card; the brief part of the form is refreshed from it. */
-  async function briefCall(path: string, method: "POST" | "DELETE", body: unknown, kind: BriefAction | "add" | "remove", done: string) {
+  async function briefCall(
+    path: string,
+    method: "POST" | "DELETE",
+    body: unknown,
+    kind: BriefAction | "add" | "remove",
+    done: string,
+    opts: { saveFirst?: boolean } = {},
+  ) {
     setBusy(kind);
     setProblems([]);
     setMessage(null);
     try {
+      if (opts.saveFirst && (kind === "start" || kind === "redraft_objectives") && !(await saveDraftFirst(kind))) return false;
       const res = await fetch(`/api/admin/projects/${card.projectId}/${path}`, {
         method,
         headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -217,14 +253,28 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
     }
   }
 
-  const briefAction = (action: BriefAction) =>
+  /**
+   * Every run starts from here (founder's call: nothing drafts on its own). Draft objectives and
+   * Draft again save the card first, so the server drafts for the mode on screen; Draft again asks
+   * first, because it replaces the objectives (and any edits).
+   */
+  const briefAction = (action: BriefAction) => {
+    const mode = form.modeNumber ? `Mode ${form.modeNumber}` : "the saved mode";
+    if (action === "redraft_objectives" && !window.confirm(`Draft the objectives again for ${mode}? The current objectives, including your edits, are replaced.`)) return;
+    const search = brief?.sourceKind ? " and the source search" : "";
     void briefCall(
       "mode/brief",
       "POST",
       { action },
       action,
-      action === "redraft_objectives" ? "Drafting the objectives again. This takes about a minute." : action === "carry_on" ? "Resumed." : "Started. This takes a few minutes; you can leave the page.",
+      action === "redraft_objectives"
+        ? `Drafting the objectives again for ${mode}. This takes about a minute.`
+        : action === "carry_on"
+          ? "Resumed."
+          : `Drafting the objectives${search} for ${mode}. This takes a few minutes; you can leave the page.`,
+      { saveFirst: action !== "carry_on" },
     );
+  };
 
   const addSource = (d: ManualSourceDraft) =>
     briefCall(
@@ -479,6 +529,7 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
         {brief ? (
           <ObjectivesSection
             brief={brief}
+            modeNumber={form.modeNumber}
             objectives={form.objectives}
             onChange={(next) => set("objectives", next)}
             editable={briefEditable}

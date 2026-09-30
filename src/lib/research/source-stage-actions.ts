@@ -4,6 +4,10 @@
  * project row lock (generation-state.ts) and refuses while the mode card is
  * approved or once a chapter has been generated (403 MODE_LOCKED), exactly
  * like the mode itself.
+ *
+ * Every run starts here, from a button on the Report tab (Draft objectives,
+ * Draft again, Carry on, Start / Search again): nothing drafts or searches on
+ * its own (founder, 30 Sept 2026).
  */
 
 import { Prisma, type SourceKind, type SourceStageStatus } from "@prisma/client";
@@ -18,8 +22,8 @@ import type { Actor } from "@/lib/services/operations/actor";
 import { readPoints } from "./source-points";
 import { placeholderFor, sourceKindForDepartment } from "./source-policy";
 import { ACTIVE_STAGE_STATUSES, SOURCE_STAGE_SUBSYSTEM, resumeStatusFor } from "./source-stage";
-import { MAX_STAGE_FAILURES, STAGE_STALL_MS, scheduleSourceStage } from "./source-stage-runner";
-import { BRIEF_CARD_SELECT, buildBriefView, type BriefView } from "./source-stage-view";
+import { MAX_STAGE_FAILURES, scheduleSourceStage } from "./source-stage-runner";
+import { BRIEF_CARD_SELECT, buildBriefView, isQuietRun, modeMismatchLine, objectivesModeMismatch, type BriefView } from "./source-stage-view";
 
 type Tx = Prisma.TransactionClient;
 const TX = { timeout: 20_000, maxWait: 10_000 } as const;
@@ -67,50 +71,25 @@ export async function sourceStageCost(projectDbId: string): Promise<number> {
 
 export async function briefViewFor(
   projectDbId: string,
-  opts: { currentDepartment: string | null; locked: boolean },
+  opts: { currentDepartment: string | null; currentMode: number | null; locked: boolean },
   client: Tx | typeof db = db,
 ): Promise<BriefView> {
   const [brief, cost] = await Promise.all([
     client.projectBrief.findUnique({ where: { projectId: projectDbId }, select: BRIEF_CARD_SELECT }),
     sourceStageCost(projectDbId),
   ]);
-  return buildBriefView(brief, { costNaira: cost, currentDepartment: opts.currentDepartment, locked: opts.locked });
-}
-
-/**
- * Restarts a stage that is waiting (PENDING) or whose run went quiet, from a
- * browser request (the COO's card, the worker's research poll). Never restarts
- * one that stopped after repeated failures: that needs "Carry on".
- */
-export async function kickSourceStage(projectIdOrCode: string, now = Date.now()): Promise<boolean> {
-  const b = await db.projectBrief.findFirst({
-    where: { project: { OR: [{ id: projectIdOrCode }, { projectId: projectIdOrCode }] } },
-    select: {
-      id: true,
-      status: true,
-      failedSteps: true,
-      lockedUntil: true,
-      updatedAt: true,
-      project: { select: { researchMode: { select: { modeNumber: true } } } },
-    },
-  });
-  if (!b || !ACTIVE_STAGE_STATUSES.includes(b.status) || b.failedSteps >= MAX_STAGE_FAILURES) return false;
-  if (b.lockedUntil && b.lockedUntil.getTime() > now) return false;
-  if (b.status !== "PENDING" && now - b.updatedAt.getTime() < STAGE_STALL_MS) return false;
-  // Do not start drafting until the COO has saved a research mode: the objectives
-  // must match the approved mode, so the recommendation is not a safe default.
-  if ((b.status === "PENDING" || b.status === "DRAFTING_OBJECTIVES") && !b.project.researchMode?.modeNumber) return false;
-  await schedule(b.id);
-  return true;
+  return buildBriefView(brief, { costNaira: cost, currentDepartment: opts.currentDepartment, currentMode: opts.currentMode, locked: opts.locked });
 }
 
 // ─── The COO's actions ──────────────────────────────────────────────────────
 
 /**
- * Draft objectives (and, for Law or History, find sources): for a project
- * whose research passed before D3b, one still waiting, or one whose department
- * now calls for a different search (the old search is cleared; the 16-search
- * budget is not reset).
+ * Draft objectives (and, for Law or History, find sources): the founder's or
+ * the COO's "Draft objectives" on a project with none yet (no brief, or a
+ * PENDING one made before the manual start), or "Start again" / "Search again"
+ * when the department now calls for a different search or the last search had
+ * no points (the old search is cleared; the 16-search budget is not reset).
+ * The card saves the mode on screen first, so the draft follows that mode.
  */
 export async function startSourceStage(idOrCode: string, actor: Actor): Promise<void> {
   const project = await projectFor(idOrCode);
@@ -134,13 +113,20 @@ export async function startSourceStage(idOrCode: string, actor: Actor): Promise<
       return created.id;
     }
     if (b.status === "PENDING") {
-      await tx.projectBrief.update({ where: { id: b.id }, data: { status: "DRAFTING_OBJECTIVES", startedById: actor.userId } });
+      // Made before the manual start: take today's department (its search kind may have changed since).
+      await tx.projectBrief.update({
+        where: { id: b.id },
+        data: { status: "DRAFTING_OBJECTIVES", sourceKind: kind, department, startedById: actor.userId, failedSteps: 0, lastError: null, lockedUntil: null },
+      });
+      await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Objectives drafting started${kind ? ` (with a search for ${kind === "CASE" ? "cases" : "archival sources"})` : ""}.` });
       return b.id;
     }
-    if (ACTIVE_STAGE_STATUSES.includes(b.status) && b.failedSteps < MAX_STAGE_FAILURES) return b.id; // running: make sure it is
+    if (ACTIVE_STAGE_STATUSES.includes(b.status) && b.failedSteps < MAX_STAGE_FAILURES) {
+      throw new ModeStateError("The objectives are already being prepared. Wait for this run to finish, or press Carry on if it has stopped.");
+    }
     if (b.status === "READY" && kind && b.sourceKind === kind && readPoints(b.points).length === 0) {
       // The search ended with no points to look for: plan them again (the 16-search budget is not reset).
-      await tx.projectBrief.update({ where: { id: b.id }, data: { status: "PLANNING_POINTS", cursor: 0, searchedAt: null, failedSteps: 0, lastError: null } });
+      await tx.projectBrief.update({ where: { id: b.id }, data: { status: "PLANNING_POINTS", cursor: 0, searchedAt: null, failedSteps: 0, lastError: null, lockedUntil: null } });
       await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: "Source search started again: the last run found no points to search." });
       return b.id;
     }
@@ -158,6 +144,7 @@ export async function startSourceStage(idOrCode: string, actor: Actor): Promise<
           status: kind ? "PLANNING_POINTS" : "READY",
           failedSteps: 0,
           lastError: null,
+          lockedUntil: null, // a READY brief has no live slice; never let a leftover lease block the new run
         },
       });
       await writeProjectNote(tx, project.id, {
@@ -176,7 +163,7 @@ export async function startSourceStage(idOrCode: string, actor: Actor): Promise<
   await schedule(briefId);
 }
 
-/** Resumes a stage that stopped after repeated failures (or FAILED), from where it stopped. */
+/** Resumes a stage that stopped after repeated failures, FAILED, or went quiet (its background chain was lost), from where it stopped. */
 export async function carryOnSourceStage(idOrCode: string, actor: Actor): Promise<void> {
   const project = await projectFor(idOrCode);
   const briefId = await db.$transaction(async (tx) => {
@@ -184,9 +171,10 @@ export async function carryOnSourceStage(idOrCode: string, actor: Actor): Promis
     await assertBriefEditable(tx, project.id);
     const b = await tx.projectBrief.findUnique({
       where: { projectId: project.id },
-      select: { id: true, status: true, failedSteps: true, objectives: true, sourceKind: true, points: true, searchedAt: true },
+      select: { id: true, status: true, failedSteps: true, lockedUntil: true, updatedAt: true, objectives: true, sourceKind: true, points: true, searchedAt: true },
     });
-    const stopped = b && (b.status === "FAILED" || (ACTIVE_STAGE_STATUSES.includes(b.status) && b.failedSteps >= MAX_STAGE_FAILURES));
+    const stopped =
+      b && (b.status === "FAILED" || (ACTIVE_STAGE_STATUSES.includes(b.status) && b.failedSteps >= MAX_STAGE_FAILURES) || isQuietRun(b));
     if (!b || !stopped) throw new ModeStateError("The search has not stopped, so there is nothing to carry on.");
     const status: SourceStageStatus = b.status === "FAILED" ? resumeStatusFor(b) : b.status;
     await tx.projectBrief.update({ where: { id: b.id }, data: { status, failedSteps: 0, lastError: null, lockedUntil: null } });
@@ -196,7 +184,7 @@ export async function carryOnSourceStage(idOrCode: string, actor: Actor): Promis
   await schedule(briefId);
 }
 
-/** Drafts the objectives again (one Claude call; no searches). The sources stay as they are. */
+/** "Draft again": drafts the objectives again for the saved mode (one Claude call; no searches). The sources stay as they are. */
 export async function redraftObjectives(idOrCode: string, actor: Actor): Promise<void> {
   const project = await projectFor(idOrCode);
   const briefId = await db.$transaction(async (tx) => {
@@ -204,7 +192,7 @@ export async function redraftObjectives(idOrCode: string, actor: Actor): Promise
     await assertBriefEditable(tx, project.id);
     const b = await tx.projectBrief.findUnique({ where: { projectId: project.id }, select: { id: true, status: true } });
     if (!b || b.status !== "READY") throw new ModeStateError("The objectives can be drafted again once the current run has finished.");
-    await tx.projectBrief.update({ where: { id: b.id }, data: { status: "DRAFTING_OBJECTIVES", redraftOnly: true, failedSteps: 0, lastError: null } });
+    await tx.projectBrief.update({ where: { id: b.id }, data: { status: "DRAFTING_OBJECTIVES", redraftOnly: true, failedSteps: 0, lastError: null, lockedUntil: null } });
     await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: "Objectives sent back to be drafted again." });
     return b.id;
   }, TX);
@@ -299,13 +287,22 @@ export async function saveBriefChoices(
   tx: Tx,
   projectDbId: string,
   choices: BriefChoices,
-  opts: { approving: boolean; department: string },
+  opts: { approving: boolean; department: string; modeNumber?: number },
 ): Promise<BriefSummary | null> {
   const b = await tx.projectBrief.findUnique({
     where: { projectId: projectDbId },
-    select: { id: true, status: true, failedSteps: true, sourceKind: true, objectives: true, points: true, sources: { select: { id: true, pointIndex: true } } },
+    select: {
+      id: true,
+      status: true,
+      failedSteps: true,
+      sourceKind: true,
+      objectives: true,
+      objectivesModeNumber: true,
+      points: true,
+      sources: { select: { id: true, pointIndex: true } },
+    },
   });
-  if (!b) {
+  if (!b || b.status === "PENDING") {
     if (opts.approving) throw new ModeDecisionError(["Draft the objectives first: press Draft objectives."]);
     return null;
   }
@@ -315,6 +312,10 @@ export async function saveBriefChoices(
       throw new ModeDecisionError([stopped ? "The objectives and source search stopped. Press Carry on." : "The objectives and sources are still being prepared."]);
     }
     return null;
+  }
+  if (opts.approving && opts.modeNumber) {
+    const mismatch = objectivesModeMismatch({ status: b.status, objectivesMode: b.objectivesModeNumber }, opts.modeNumber);
+    if (mismatch) throw new ModeDecisionError([modeMismatchLine(mismatch)]);
   }
   const expected = sourceKindForDepartment(opts.department);
   if (opts.approving && expected !== b.sourceKind) {
@@ -355,78 +356,6 @@ export async function saveBriefChoices(
     total: b.sources.length,
     unsupported: b.sourceKind ? points.filter((p) => !supported.has(p.index)).length : 0,
   };
-}
-
-/**
- * Pure decision for the mode-change reset: what to do with the brief when the
- * COO saves a new mode (changeMode / approveMode). Kept pure so check:sources
- * can cover every case without a database.
- *
- *   no-op        the objectives were already drafted for this mode
- *   drafting     no objectives yet; the brief just needs to move to DRAFTING
- *   redraft      objectives were drafted for another mode; reset to redraft
- */
-export type ModeChangeAction = "no-op" | "drafting" | "redraft";
-export function modeChangeAction(
-  currentObjectivesMode: number | null,
-  newMode: number,
-  status: SourceStageStatus,
-): ModeChangeAction {
-  if (currentObjectivesMode === newMode) return "no-op";
-  if (currentObjectivesMode === null && (status === "PENDING" || status === "DRAFTING_OBJECTIVES")) return "drafting";
-  return "redraft";
-}
-
-/**
- * Called by research-mode.ts inside the changeMode / approveMode transaction
- * after the new modeNumber has been saved. When the brief's current objectives
- * were drafted for a different mode, resets the brief to DRAFTING_OBJECTIVES
- * (redraftOnly, so the source search is not rerun) so stepDraft rewrites them
- * for the new mode. Returns the briefId to reschedule after commit, or null if
- * nothing to do.
- */
-export async function resetBriefForModeChange(
-  tx: Tx,
-  projectDbId: string,
-  newMode: number,
-  actor: Actor,
-): Promise<{ briefId: string; oldMode: number | null } | null> {
-  const b = await tx.projectBrief.findUnique({
-    where: { projectId: projectDbId },
-    select: { id: true, objectivesModeNumber: true, status: true },
-  });
-  if (!b) return null;
-  const action = modeChangeAction(b.objectivesModeNumber, newMode, b.status);
-  if (action === "no-op") return null;
-  if (action === "drafting") {
-    await tx.projectBrief.update({
-      where: { id: b.id },
-      data: { status: "DRAFTING_OBJECTIVES", redraftOnly: false, failedSteps: 0, lastError: null, lockedUntil: null },
-    });
-    return { briefId: b.id, oldMode: null };
-  }
-  await tx.projectBrief.update({
-    where: { id: b.id },
-    data: {
-      status: "DRAFTING_OBJECTIVES",
-      redraftOnly: true,
-      failedSteps: 0,
-      lastError: null,
-      lockedUntil: null,
-    },
-  });
-  const from = b.objectivesModeNumber ? `Mode ${b.objectivesModeNumber}` : "no mode";
-  await writeProjectNote(tx, projectDbId, {
-    kind: "MODE",
-    actor,
-    content: `Research mode changed (${from} → Mode ${newMode}) — objectives will redraft.`,
-  });
-  return { briefId: b.id, oldMode: b.objectivesModeNumber };
-}
-
-/** After commit: start the source stage for a brief that was reset above. */
-export function scheduleAfterModeChange(briefId: string): Promise<void> {
-  return schedule(briefId);
 }
 
 /** The line the approval note carries about the brief. */
