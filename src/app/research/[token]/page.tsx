@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { waitUntil } from "@vercel/functions";
 import Image from "next/image";
 import { LuDownload, LuExternalLink, LuFileText } from "react-icons/lu";
+import { CopyCitationButton } from "@/components/research/CopyCitationButton";
+import { cn } from "@/lib/utils";
 import { loadSupervisorPackage, recordSupervisorView, type SupervisorReference } from "@/lib/services/supervisor-package";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,19 @@ export async function generateMetadata({ params }: { params: { token: string } }
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function TierChip({ tier }: { tier: SupervisorReference["tier"] }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
+        tier === "key" ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-zone text-foreground",
+      )}
+    >
+      {tier === "key" ? "Core" : "Closely related"}
+    </span>
+  );
 }
 
 function ReferenceCard({ token, r }: { token: string; r: SupervisorReference }) {
@@ -42,14 +57,26 @@ function ReferenceCard({ token, r }: { token: string; r: SupervisorReference }) 
               doi.org/{r.doi}
             </a>
           ) : null}
+          {r.abstract ? (
+            <details className="group mt-2 text-sm">
+              <summary className="cursor-pointer list-none text-xs font-medium text-primary hover:underline print:hidden">
+                <span className="group-open:hidden">Show abstract</span>
+                <span className="hidden group-open:inline">Hide abstract</span>
+              </summary>
+              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-foreground/90">{r.abstract}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Abstract via OpenAlex.</p>
+            </details>
+          ) : null}
         </div>
-        <div className="shrink-0 print:hidden">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <TierChip tier={r.tier} />
+          {r.formattedCitation ? <CopyCitationButton citation={r.formattedCitation} /> : null}
           {r.hasPdf ? (
             <a
               href={`/api/research/${token}/pdf/${r.id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-soft hover:bg-primary/90"
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-soft hover:bg-primary/90 print:hidden"
             >
               <LuDownload className="size-4" aria-hidden /> PDF
             </a>
@@ -58,7 +85,7 @@ function ReferenceCard({ token, r }: { token: string; r: SupervisorReference }) 
               href={`https://doi.org/${r.doi}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:border-primary/40 hover:text-foreground print:hidden"
             >
               <LuExternalLink className="size-4" aria-hidden /> Get from library
             </a>
@@ -69,7 +96,26 @@ function ReferenceCard({ token, r }: { token: string; r: SupervisorReference }) 
   );
 }
 
-function Section({
+/** Subproblem-first grouping: each section shows the papers matched to one specific subproblem, in the analysis's order. */
+function SubproblemSection({ heading, description, refs, token }: { heading: string; description?: string; refs: SupervisorReference[]; token: string }) {
+  if (refs.length === 0) return null;
+  return (
+    <section className="mt-10">
+      <div className="border-b border-border/60 pb-2">
+        <h2 className="text-xl font-semibold text-foreground">{heading}</h2>
+        {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
+      </div>
+      <ul className="mt-4 space-y-2">
+        {refs.map((r) => (
+          <ReferenceCard key={r.id} token={token} r={r} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Fallback tier grouping (used when the job has no `supervisorGrouping`). */
+function TierSection({
   title,
   intro,
   withPdf,
@@ -128,6 +174,18 @@ export default async function SupervisorPage({ params }: { params: { token: stri
     .filter(Boolean)
     .join(" · ");
 
+  const cs = pkg.citationSummary;
+  const summaryStrip = [
+    cs.totalCitations > 0 ? `${cs.totalCitations.toLocaleString()} total citations` : null,
+    cs.medianYear ? `median year ${cs.medianYear}` : null,
+    cs.topCited && cs.topCited.citations > 0
+      ? `most cited: ${cs.topCited.authors ? cs.topCited.authors.split(";")[0]?.split(",")[0]?.trim() : cs.topCited.title.slice(0, 40)}${cs.topCited.year ? ` (${cs.topCited.year})` : ""} · ${cs.topCited.citations.toLocaleString()} citations`
+      : null,
+    cs.downloadable > 0 ? `${cs.downloadable} downloadable PDFs on this page` : null,
+  ].filter(Boolean);
+
+  const candidatesReviewed = pkg.candidateRounds * 150;
+
   return (
     <main className="mx-auto max-w-4xl px-5 py-10 print:px-0 print:py-6">
       <header className="border-b border-border/60 pb-6">
@@ -158,22 +216,60 @@ export default async function SupervisorPage({ params }: { params: { token: stri
           <span>Prepared {formatDate(pkg.preparedAt)}</span>
         </div>
         <p className="mt-4 rounded-xl bg-zone px-4 py-3 text-sm text-foreground">{summaryBits}</p>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          Our specialist ran targeted searches across OpenAlex (250 million-plus academic papers), reviewed more than{" "}
+          {candidatesReviewed.toLocaleString()} candidate papers, and kept the <strong>{pkg.totals.total}</strong> that most directly
+          address the goals of this project — <strong>{pkg.totals.withPdf}</strong> with a downloadable PDF and{" "}
+          <strong>{pkg.totals.paywalled}</strong> available through your university library. Every entry is a real published paper you
+          can verify through its DOI.
+        </p>
+        {summaryStrip.length > 0 ? (
+          <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {summaryStrip.map((bit, i) => (
+              <span key={i}>{i > 0 ? "· " : ""}{bit}</span>
+            ))}
+          </p>
+        ) : null}
       </header>
 
-      <Section
-        title="Key references"
-        intro="The base literature this project builds on."
-        withPdf={pkg.key.withPdf}
-        paywalled={pkg.key.paywalled}
-        token={params.token}
-      />
-      <Section
-        title="Supporting references"
-        intro="Papers that support the project's methods and background."
-        withPdf={pkg.supporting.withPdf}
-        paywalled={pkg.supporting.paywalled}
-        token={params.token}
-      />
+      {pkg.bySubproblem && pkg.bySubproblem.groups.length > 0 ? (
+        <>
+          {pkg.bySubproblem.groups.map((g) => (
+            <SubproblemSection
+              key={g.subproblem}
+              heading={`On ${g.subproblem}`}
+              description={`${g.references.length} paper${g.references.length === 1 ? "" : "s"} matched to this component of the project.`}
+              refs={g.references}
+              token={params.token}
+            />
+          ))}
+          {pkg.bySubproblem.unassigned.length > 0 ? (
+            <SubproblemSection
+              heading="Other foundations"
+              description="Papers that support the project's methods and background without belonging to a single subproblem."
+              refs={pkg.bySubproblem.unassigned}
+              token={params.token}
+            />
+          ) : null}
+        </>
+      ) : (
+        <>
+          <TierSection
+            title="Key references"
+            intro="The base literature this project builds on."
+            withPdf={pkg.key.withPdf}
+            paywalled={pkg.key.paywalled}
+            token={params.token}
+          />
+          <TierSection
+            title="Supporting references"
+            intro="Papers that support the project's methods and background."
+            withPdf={pkg.supporting.withPdf}
+            paywalled={pkg.supporting.paywalled}
+            token={params.token}
+          />
+        </>
+      )}
 
       {pkg.totals.paywalled > 0 ? (
         <section className="mt-10 rounded-xl border border-border/60 bg-zone px-5 py-4 text-sm text-foreground">

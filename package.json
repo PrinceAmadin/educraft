@@ -37,6 +37,7 @@
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
     "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",
     "research:tokenize": "dotenv -e .env.local -- tsx scripts/research-tokenize.ts",
+    "research:group": "dotenv -e .env.local -- tsx scripts/research-group.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
     "catalogue:sync": "dotenv -e .env.local -- tsx scripts/sync-service-catalogue.ts",
     "check:assembly": "tsx scripts/check-assembly.ts",

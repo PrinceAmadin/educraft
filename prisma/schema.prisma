@@ -1177,6 +1177,13 @@ model ResearchJob {
   /// Minted once at PASSED-time (or by the tokenize backfill for old rows).
   /// The token is the credential — 32 hex chars, unguessable.
   shareToken               String?   @unique
+  /// Which subproblem (from `projectAnalysis.subproblems`) each kept reference
+  /// primarily addresses. Written once per job by `computeSupervisorGrouping`
+  /// (one Claude call, ~₦25) and reused for every supervisor page view.
+  /// Shape: `{ groups: [{ subproblemIndex, referenceIds }], unassigned: [] }`.
+  /// Null on jobs that predate 1 Oct 2026 — the supervisor page falls back
+  /// to the Key / Supporting layout in that case.
+  supervisorGrouping       Json?
   /// Supervisor access counters — updated by the public routes in `waitUntil`.
   /// The first view fires one notifyOperations; after that only the counter bumps.
   supervisorViews          Int       @default(0)

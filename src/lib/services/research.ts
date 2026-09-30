@@ -1130,6 +1130,113 @@ async function savePdfToBlob(projectDbId: string, referenceId: string, fileUrl: 
   }
 }
 
+// ── Supervisor grouping (public /research/[token] page) ─────────────────────
+
+/** Which subproblem (by index into projectAnalysis.subproblems) each kept ref
+ *  primarily addresses. One primary bucket per ref keeps the supervisor page
+ *  tidy; papers that don't fit a specific subproblem land in `unassigned`. */
+export interface SupervisorGrouping {
+  groups: Array<{ subproblemIndex: number; referenceIds: string[] }>;
+  unassigned: string[];
+}
+
+/**
+ * One Claude call that reads the project analysis and every kept reference,
+ * then attributes each reference to the subproblem it most directly addresses
+ * (or to `unassigned`). Written once per job (stored on
+ * `ResearchJob.supervisorGrouping`) and reused for every supervisor page view.
+ * A reference could arguably belong to more than one subproblem — for the
+ * supervisor page we pick the strongest fit, because visual noise from
+ * multi-membership hurts more than a slightly forced primary bucket helps.
+ */
+export async function computeSupervisorGrouping(
+  ctx: ProjectContext,
+  analysis: ProjectAnalysis,
+  kept: { id: string; title: string | null; abstract: string | null }[],
+): Promise<SupervisorGrouping> {
+  if (analysis.subproblems.length === 0 || kept.length === 0) {
+    return { groups: [], unassigned: kept.map((r) => r.id) };
+  }
+  const system = `You are grouping the kept references of a student project so a supervisor can see the researcher gathered targeted literature for each subproblem. Read the PROJECT ANALYSIS carefully — the subproblems are numbered from 0. For every reference in the list, decide which single subproblem it MOST DIRECTLY addresses. If a reference is a general foundation that doesn't fit any specific subproblem (e.g. a broad NLP embeddings paper on a text-similarity project), put it in the unassigned bucket. Do NOT list the same reference under multiple subproblems — pick the strongest fit. Every reference id from the list must appear once, in exactly one bucket.`;
+  const user = [
+    `PROJECT TITLE: ${ctx.topic}`,
+    `DEPARTMENT: ${ctx.department}`,
+    "",
+    "PROJECT ANALYSIS",
+    `Goal: ${analysis.goal}`,
+    "Subproblems (indexed from 0):",
+    ...analysis.subproblems.map((s, i) => `${i}. ${s}`),
+    "",
+    `KEPT REFERENCES (${kept.length}):`,
+    ...kept.map(
+      (r) => `[${r.id}] "${r.title ?? "(untitled)"}" — ${r.abstract ? r.abstract.slice(0, 400) : "No abstract available."}`,
+    ),
+  ].join("\n");
+  try {
+    const result = await callClaudeForJson<SupervisorGrouping>({
+      system,
+      user,
+      toolName: "record_supervisor_grouping",
+      toolDescription: "Group the kept references by the subproblem each most directly addresses.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                subproblemIndex: { type: "integer" },
+                referenceIds: { type: "array", items: { type: "string" } },
+              },
+              required: ["subproblemIndex", "referenceIds"],
+            },
+          },
+          unassigned: { type: "array", items: { type: "string" } },
+        },
+        required: ["groups", "unassigned"],
+      },
+      maxTokens: 2048,
+      usage: { projectId: ctx.id, subsystem: "research_pipeline", step: "supervisor_grouping" },
+    });
+    // Enforce single-membership + valid ids, so the page renderer never
+    // double-shows a reference or shows one that isn't in the kept set.
+    const validIds = new Set(kept.map((r) => r.id));
+    const seen = new Set<string>();
+    const groups = (result.groups ?? [])
+      .filter((g) => Number.isInteger(g.subproblemIndex) && g.subproblemIndex >= 0 && g.subproblemIndex < analysis.subproblems.length)
+      .map((g) => ({
+        subproblemIndex: g.subproblemIndex,
+        referenceIds: (g.referenceIds ?? []).filter((id) => {
+          if (!validIds.has(id) || seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        }),
+      }))
+      .filter((g) => g.referenceIds.length > 0);
+    const unassigned = kept.map((r) => r.id).filter((id) => !seen.has(id));
+    return { groups, unassigned };
+  } catch (error) {
+    if (error instanceof AnthropicError) throw new ResearchError(error.message);
+    throw error;
+  }
+}
+
+/** Load kept refs, compute the grouping, save it to the job. Called from the
+ *  PASS branch and from the `research:group` backfill. Idempotent. */
+export async function mintSupervisorGrouping(ctx: ProjectContext, jobId: string, analysis: ProjectAnalysis): Promise<SupervisorGrouping> {
+  const kept = await db.reference.findMany({
+    where: { researchJobId: jobId, status: "KEPT" },
+    select: { id: true, title: true, abstract: true },
+  });
+  const grouping = await computeSupervisorGrouping(ctx, analysis, kept);
+  await db.researchJob.update({
+    where: { id: jobId },
+    data: { supervisorGrouping: grouping as unknown as Prisma.InputJsonValue },
+  });
+  return grouping;
+}
+
 async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<AdvanceResult> {
   // Track A: open-access PDFs into the private Blob store. Since 29 Sept 2026
   // this replaces the Google Drive uploader — no Google account, no refresh
@@ -1171,6 +1278,16 @@ async function advanceUploadingDrive(job: Job, ctx: ProjectContext): Promise<Adv
       ...(job.shareToken ? {} : { shareToken: crypto.randomBytes(16).toString("hex") }),
     },
   });
+  // Mint the supervisor grouping (which subproblem each kept ref addresses)
+  // right after PASS — one cached Claude call, ~₦25, reused for every view of
+  // the public supervisor page. Failure is non-blocking: the page falls back
+  // to the Key / Supporting layout when the JSON is null.
+  const analysisForGrouping = readAnalysis(job);
+  if (analysisForGrouping && !next.supervisorGrouping) {
+    await mintSupervisorGrouping(ctx, next.id, analysisForGrouping).catch((error) =>
+      console.error(`[research] supervisor grouping failed for ${ctx.projectId}`, error),
+    );
+  }
   await ledgerRunFinished(job.projectId, job.id, "COMPLETE");
   // D3b: a report project's objectives (and Law/History sources) come next; the next browser request starts them.
   await createPendingBrief(job.projectId).catch((error) => console.error("[research] could not queue the objectives stage", error));
