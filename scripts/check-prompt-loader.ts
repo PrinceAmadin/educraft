@@ -24,6 +24,7 @@ import {
 import {
   BLOCK_GAP,
   LOADER_TEXT,
+  listsAimHeading,
   describePromptLibrary,
   extractDepartmentSection,
   getModeInstructions,
@@ -605,6 +606,40 @@ async function main() {
     const lawNoneNoCases = await loadChapterPrompt(input({ chapter: 2, department: "Law", mode: 1, project: { referencingStyle: "NALT" }, references: [] }));
     has("D9 no research, Law with no source stage: the case placeholder rule stays", lawNoneNoCases.text, LOADER_TEXT.primarySourcesRule("case"));
   }
+
+  // ── The aim (founder, 30 Sept 2026): every report states one aim before its objectives ──
+  // Where a department's Chapter One list has no aim heading, the objectives section becomes
+  // "Aim and Objectives of the Study"; departments that list an aim keep their own headings.
+  const AIM = "The aim of this study is to design a smart energy meter that cuts billing errors for Nigerian homes.";
+  const aimCases: [string, ResearchModeNumber, boolean][] = [
+    ["Nursing", 2, true],
+    ["Business Administration", 2, true],
+    ["Economics", 5, true],
+    ["Computer Science", 5, true], // EC-00002: Computing on Mode 5 uses the Economics prompts
+    ["Computer Science", 3, false],
+    ["Electrical and Electronic Engineering", 3, false],
+    ["Medicine and Surgery", 2, false],
+    ["Education", 2, false],
+  ];
+  for (const [department, mode, wanted] of aimCases) {
+    const p = await loadChapterPrompt(input({ chapter: 1, department, mode, fromEarlierChapters: { ...EARLIER, aim: AIM } }));
+    expect(`Chapter 1, ${department} Mode ${mode}: the "Aim and Objectives of the Study" note ${wanted ? "is" : "is not"} added`, p.text.includes(LOADER_TEXT.aimSection), wanted);
+  }
+  const nursingNoAim = await loadChapterPrompt(input({ chapter: 1, department: "Nursing", mode: 2 }));
+  expect("no approved aim (an older report): no aim note", nursingNoAim.text.includes(LOADER_TEXT.aimSection), false);
+  const nursingCh2 = await loadChapterPrompt(input({ chapter: 2, department: "Nursing", mode: 2, fromEarlierChapters: { ...EARLIER, aim: AIM } }));
+  expect("the aim note is for Chapter One only", nursingCh2.text.includes(LOADER_TEXT.aimSection), false);
+  expect(
+    "an aim heading is a numbered section-list line naming the aim or purpose",
+    [
+      listsAimHeading("1.3 Aim and Objectives of the Study"),
+      listsAimHeading("1.4 Aim of the Study"),
+      listsAimHeading("1.3 Purpose / Aim of the Study"),
+      listsAimHeading("1.3 Objectives of the Study (2 marks)"),
+      listsAimHeading("Aim is exactly ONE sentence"),
+    ],
+    [true, true, true, false, false],
+  );
 
   if (process.argv.includes("--print")) {
     console.log("\n" + "━".repeat(100) + "\nCHAPTER 1 — ELECTRICAL ENGINEERING — MODE 3 (full assembled prompt)\n" + "━".repeat(100) + "\n");

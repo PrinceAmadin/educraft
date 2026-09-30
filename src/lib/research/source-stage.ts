@@ -28,10 +28,11 @@ import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { WebSearchCallError } from "@/lib/anthropic";
 import { buildPrivatePath } from "@/lib/files/paths";
 import { putPrivateFile } from "@/lib/files/storage";
-import { draftObjectives, extractClientStatedObjectives } from "@/lib/generation/objectives-drafter";
+import { draftAim, draftObjectives, extractClientStatedAim, extractClientStatedObjectives } from "@/lib/generation/objectives-drafter";
 import { getDegreeFromDepartment } from "@/lib/generation/department-map";
 import { isModeNumber } from "@/lib/mode-classifier";
 import { notifyOperations } from "@/lib/services/notifications";
+import { newCheckLease, requestObjectivesCheck } from "./objectives-check";
 import { judgeArchiveResults, planArchivePoints, runArchiveQuery, type ArchiveAttempt, type JudgeInput } from "./archive-fetcher";
 import { planLegalPoints, searchCasesForPoint, type FoundCase, type SourceContext } from "./legal-source-fetcher";
 import { readPoints, type StoredPoint } from "./source-points";
@@ -219,35 +220,38 @@ async function stepDraft(brief: StageBrief): Promise<void> {
     return;
   }
   const mode = savedMode;
+  const objectivesContext = { title: ctx.topic, department: ctx.department, degree: getDegreeFromDepartment(ctx.department), modeNumber: mode };
   // Pre-check: if the client's own brief or the supervisor's outline already
   // lists the objectives (a run of 4–5 "To …" lines), use them word for word
-  // and skip the Claude call. Preserves the fromClient flag used by the card.
-  const stated = extractClientStatedObjectives({ specialInstructions: p.specialInstructions, departmentOutline: p.departmentOutline });
+  // and skip the full draft. Preserves the fromClient flag used by the card.
+  // Every report states one aim (founder, 30 Sept 2026): the client's own
+  // "Aim: …" line if they wrote one, else one short aim-only call.
+  const clientText = { specialInstructions: p.specialInstructions, departmentOutline: p.departmentOutline };
+  const stated = extractClientStatedObjectives(clientText);
   const drafted = stated
-    ? { objectives: stated, fromClient: true }
-    : await draftObjectives(
-        {
-          title: ctx.topic,
-          department: ctx.department,
-          degree: getDegreeFromDepartment(ctx.department),
-          modeNumber: mode,
-        },
-        usage(brief, "draft_objectives"),
-      );
+    ? { objectives: stated, aim: extractClientStatedAim(clientText) ?? (await draftAim(objectivesContext, stated, usage(brief, "draft_aim"))), fromClient: true }
+    : await draftObjectives(objectivesContext, usage(brief, "draft_objectives"));
   const next: SourceStageStatus = brief.redraftOnly || !brief.sourceKind ? "READY" : "PLANNING_POINTS";
+  // The same write takes the independent check's lease, so the card shows it
+  // as running at once; the check then runs in its own invocation.
+  const lease = newCheckLease();
   const res = await db.projectBrief.updateMany({
     where: { id: brief.id, status: "DRAFTING_OBJECTIVES" },
     data: {
       draftedObjectives: drafted.objectives,
       objectives: drafted.objectives,
+      aim: drafted.aim,
+      draftedAim: drafted.aim,
       objectivesFromClient: drafted.fromClient,
       objectivesModeNumber: mode,
+      objectivesCheckLockedUntil: lease,
       draftedAt: new Date(),
       redraftOnly: false,
       status: next,
       ...(next === "READY" && !brief.redraftOnly ? { searchedAt: new Date() } : {}),
     },
   });
+  if (res.count === 1) await requestObjectivesCheck(brief.id, lease);
   if (res.count === 1 && next === "READY" && !brief.redraftOnly) await announceReady(brief);
 }
 

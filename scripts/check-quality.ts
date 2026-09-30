@@ -141,8 +141,9 @@ async function prepare(chapters = fixtureChapters(), over: Partial<AssemblyInput
   return { prepared, chapters };
 }
 
-function finish(prepared: PreparedReport, chapters: FixtureChapter[], ai: Partial<AiResults> = {}, ctx: { pureScience?: boolean; objectives?: string[] } = {}) {
+function finish(prepared: PreparedReport, chapters: FixtureChapter[], ai: Partial<AiResults> = {}, ctx: { pureScience?: boolean; objectives?: string[]; aim?: string | null } = {}) {
   return finishReport(prepared, { ...NO_AI, ...ai }, {
+    aim: ctx.aim ?? null,
     objectives: ctx.objectives ?? FIXTURE_OBJECTIVES,
     pureScience: ctx.pureScience ?? false,
     supervisorToc: false,
@@ -343,7 +344,7 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
   }
 
   // ── Layer 3 structure ────────────────────────────────────────────────────
-  const st = async (label: string, id: string, chs: FixtureChapter[], opts: { over?: Partial<AssemblyInput>; ctx?: { pureScience?: boolean; objectives?: string[] }; ai?: Partial<AiResults> } = {}) => {
+  const st = async (label: string, id: string, chs: FixtureChapter[], opts: { over?: Partial<AssemblyInput>; ctx?: { pureScience?: boolean; objectives?: string[]; aim?: string | null }; ai?: Partial<AiResults> } = {}) => {
     const { prepared: p2 } = await prepare(chs, opts.over);
     const r = finish(p2, chs, opts.ai, opts.ctx);
     check(label, statusOf(r.checks, id) === "FAIL", `${id}: ${statusOf(r.checks, id)} ${JSON.stringify(byId(r.checks, id)?.issues.slice(0, 2))}`);
@@ -360,6 +361,29 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
   await st("ST6: no Hypotheses Testing section fails", "ST6", withChapter(4, (t) => t.replace("[H2] 4.6 Hypotheses Testing", "[H2] 4.6 Further Results")));
   await st("ST7: no Recommendations section fails", "ST7", withChapter(5, (t) => t.replace("[H2] 5.4 Recommendations", "[H2] 5.4 Advice to Traders")));
   await st("ST8: an objective not stated word for word fails", "ST8", fixtureChapters(), { ctx: { objectives: [...FIXTURE_OBJECTIVES.slice(0, 2), "To measure the cost of cash handling among market traders in Lagos State."] } });
+  // The aim (founder, 30 Sept 2026): every report states one; Chapter One must carry it word for word under an aim heading.
+  {
+    const AIM = "The aim of this study is to examine how mobile money adoption shapes the trade of market traders in Lagos State.";
+    const withAim = withChapter(1, (t) => t.replace("[H2] 1.4 Objectives of the Study", `[H2] 1.4 Aim and Objectives of the Study
+${AIM}
+`));
+    await st("ST8: an approved aim missing from Chapter One fails", "ST8", fixtureChapters(), { ctx: { aim: AIM } });
+    await st("ST3: with an approved aim, a Chapter One with only \"Objectives of the Study\" fails", "ST3", fixtureChapters(), { ctx: { aim: AIM } });
+    const { prepared: pa, chapters: ca } = await prepare(withAim);
+    const ra = finish(pa, ca, {}, { aim: AIM });
+    check("ST8 and ST3: \"Aim and Objectives of the Study\" with the aim word for word passes both", statusOf(ra.checks, "ST8") === "PASS" && statusOf(ra.checks, "ST3") === "PASS", `${statusOf(ra.checks, "ST8")} ${statusOf(ra.checks, "ST3")} ${JSON.stringify(byId(ra.checks, "ST8")?.issues.slice(0, 1))}`);
+    const { prepared: po, chapters: co } = await prepare();
+    const ro = finish(po, co, {}, { aim: null });
+    check("ST8: a report approved before aims (no aim) is judged on its objectives only", statusOf(ro.checks, "ST8") === "PASS" && statusOf(ro.checks, "ST3") === "PASS");
+    const labels = (s: SectionKey) => (requiredSections(s, 1, { mode: 2, pureScience: false, hasHypotheses: true, hasAim: true }) as { label: string }[]).map((r) => r.label);
+    check(
+      "with an aim, every department's Chapter One needs an aim heading, placed before the objectives",
+      (["NURSING", "BUSINESS", "ECONOMICS", "COMPUTER_SCIENCE", "ENGINEERING", "MEDICAL_SCIENCE", "EDUCATION"] as SectionKey[]).every((s) => {
+        const l = labels(s);
+        return l.filter((x) => x === "Aim of the Study").length === 1 && l.indexOf("Aim of the Study") === l.indexOf("Objectives of the Study") - 1;
+      }),
+    );
+  }
   await st("ST9: an objective not reported fails", "ST9", fixtureChapters(), { ai: { traceability: { objectives: GOOD_TRACE.objectives.map((o, i) => (i === 2 ? { ...o, reported: false } : o)) } } });
   await st("ST9: an objective never judged in Chapter Five fails", "ST9", fixtureChapters(), { ai: { traceability: { objectives: GOOD_TRACE.objectives.map((o, i) => (i === 1 ? { ...o, verdict: "NOT_STATED" as const } : o)) } } });
   {

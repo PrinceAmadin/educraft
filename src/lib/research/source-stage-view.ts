@@ -6,7 +6,8 @@
  */
 
 import type { Prisma, SourceKind, SourceOrigin, SourceStageStatus } from "@prisma/client";
-import { validateObjectives } from "@/lib/generation/objectives-rules";
+import { validateAim, validateObjectives } from "@/lib/generation/objectives-rules";
+import { readStoredCheck, type StoredObjectivesCheck } from "@/lib/generation/objectives-check-rules";
 import { ARCHIVE_SOURCES, SOURCE_SEARCH_LIMIT, domainOf, placeholderFor, sourceKindForDepartment } from "@/lib/research/source-policy";
 import { readPoints } from "@/lib/research/source-points";
 
@@ -38,6 +39,10 @@ export const BRIEF_CARD_SELECT = {
   objectives: true,
   objectivesFromClient: true,
   objectivesModeNumber: true,
+  aim: true,
+  draftedAim: true,
+  objectivesCheck: true,
+  objectivesCheckLockedUntil: true,
   points: true,
   searchesUsed: true,
   cursor: true,
@@ -128,6 +133,16 @@ export interface BriefView {
   objectivesFromClient: boolean;
   /** The mode the objectives were drafted for (null: drafted before modes were recorded). */
   objectivesMode: number | null;
+  /** The aim as saved (null: not written yet, or a brief drafted before aims were asked for). */
+  aim: string | null;
+  /** What the drafter wrote, or the suggestion for a report approved without an aim. */
+  draftedAim: string | null;
+  /** Finished, with objectives but no aim: Draft the aim (or, on a locked card, Draft an aim / Save aim). */
+  aimMissing: boolean;
+  /** The independent check as stored (its key says what it was made for). */
+  objectivesCheck: StoredObjectivesCheck | null;
+  /** A check holds its lease: the card polls until it lands. */
+  checkRunning: boolean;
   /** The objectives were drafted for another mode than the one on the card: Draft again. */
   modeMismatch: { drafted: number | null; now: number } | null;
   objectivesProblems: string[];
@@ -141,6 +156,12 @@ export interface BriefView {
   canRedraft: boolean;
   canCarryOn: boolean;
   canEdit: boolean;
+  /** Draft the aim from the objectives (unlocked card, objectives finished). */
+  canDraftAim: boolean;
+  /** The one-off exception: a locked card with objectives and no aim may be given one. */
+  canAddAim: boolean;
+  /** Check again: there are objectives and no check is running. */
+  canCheck: boolean;
 }
 
 const ORIGIN_LABEL: Record<SourceOrigin, string> = {
@@ -220,6 +241,11 @@ export function buildBriefView(
       objectivesFromClient: false,
       objectivesMode: null,
       modeMismatch: null,
+      aim: null,
+      draftedAim: null,
+      aimMissing: false,
+      objectivesCheck: null,
+      checkRunning: false,
       objectivesProblems: [],
       points: [],
       searchesUsed: b?.searchesUsed ?? 0,
@@ -231,6 +257,9 @@ export function buildBriefView(
       canRedraft: false,
       canCarryOn: false,
       canEdit: false,
+      canDraftAim: false,
+      canAddAim: false,
+      canCheck: false,
     };
   }
   const active = RUNNING.includes(b.status);
@@ -276,6 +305,8 @@ export function buildBriefView(
   const noPoints = ready && !mismatch && Boolean(b.sourceKind) && points.length === 0;
   const hasHansard = sources.some((s) => s.origin === "HANSARD");
   const modeMismatch = opts.locked ? null : objectivesModeMismatch({ status: b.status, objectivesMode: b.objectivesModeNumber }, opts.currentMode);
+  const checkRunning = Boolean(b.objectivesCheckLockedUntil && b.objectivesCheckLockedUntil.getTime() > now);
+  const aimCheck = b.aim ? validateAim(b.aim) : null;
   const error = quiet && !b.lastError ? "The background run was interrupted." : stopped || (!leaseLive && b.lastError) ? b.lastError : null;
 
   return {
@@ -294,7 +325,12 @@ export function buildBriefView(
     objectivesFromClient: b.objectivesFromClient,
     objectivesMode: b.objectivesModeNumber,
     modeMismatch,
-    objectivesProblems: ready && !check.ok ? check.problems : [],
+    aim: b.aim,
+    draftedAim: b.draftedAim,
+    aimMissing: ready && !b.aim && b.objectives.length > 0,
+    objectivesCheck: readStoredCheck(b.objectivesCheck),
+    checkRunning,
+    objectivesProblems: ready ? [...(!check.ok ? check.problems : []), ...(aimCheck && !aimCheck.ok ? aimCheck.problems : [])] : [],
     points: pointViews,
     searchesUsed: b.searchesUsed,
     searchLimit: SOURCE_SEARCH_LIMIT,
@@ -305,6 +341,9 @@ export function buildBriefView(
     canRedraft: !opts.locked && ready,
     canCarryOn: !opts.locked && stopped,
     canEdit: !opts.locked && ready,
+    canDraftAim: !opts.locked && ready && b.objectives.length > 0,
+    canAddAim: opts.locked && ready && !b.aim && b.objectives.length > 0,
+    canCheck: b.objectives.length > 0 && !checkRunning && !running,
   };
 }
 
@@ -323,5 +362,6 @@ export function briefBlockers(view: BriefView, reportProject: boolean): string[]
     ];
   }
   if (view.modeMismatch) return [modeMismatchLine(view.modeMismatch)];
+  if (view.aimMissing) return ["Write the aim, or press Draft the aim: every report states one aim before its objectives."];
   return view.objectivesProblems;
 }

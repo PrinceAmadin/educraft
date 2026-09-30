@@ -116,6 +116,8 @@ const REPLY_WITH_TEXT =
 export const GENERATION_TEXT = {
   briefHeading: "PROJECT BRIEF",
   chapterOf: (chapter: number) => `This is Chapter ${chapter} of ${REPORT_CHAPTERS}. Write Chapter ${chapter} only.`,
+  aimRule:
+    "Use exactly this aim. Chapter 1 states it word for word, as one sentence, in its aim section (Aim and Objectives of the Study, or Aim of the Study where the department lists the aim separately); every later chapter serves it. Do not reword it.",
   objectivesRule:
     "Use exactly these objectives, in this order. Chapter 1 states them word for word; every later chapter follows them in the same order. Do not add, drop, merge or reword an objective.",
   questionsRule: "Use exactly these research questions, in this order.",
@@ -177,6 +179,8 @@ export interface BriefInput {
   department: string;
   template: "A" | "B";
   thematicTitles?: { chapter3?: string | null; chapter4?: string | null };
+  /** The approved aim (null only on a report approved before aims were asked for). */
+  aim?: string | null;
   objectives: string[];
   researchQuestions?: string[];
   hypotheses?: string[];
@@ -203,6 +207,7 @@ export function buildChapterBrief(b: BriefInput): string {
     if (t3) lines.push(`Chapter 3 title: ${t3}`);
     if (t4) lines.push(`Chapter 4 title: ${t4}`);
   }
+  if (b.aim?.trim()) lines.push("", "Aim of the study:", b.aim.trim(), GENERATION_TEXT.aimRule);
   lines.push("", "Objectives of the study:", numbered(b.objectives), GENERATION_TEXT.objectivesRule);
   if (b.researchQuestions?.length) lines.push("", "Research questions:", numbered(b.researchQuestions), GENERATION_TEXT.questionsRule);
   if (b.hypotheses?.length) lines.push("", "Hypotheses:", numbered(b.hypotheses), GENERATION_TEXT.hypothesesRule);

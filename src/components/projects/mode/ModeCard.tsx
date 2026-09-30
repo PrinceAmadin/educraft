@@ -12,7 +12,7 @@ import { Field } from "@/components/forms/Field";
 import { FormSection } from "@/components/forms/FormSection";
 import { FormActions } from "@/components/forms/FormActions";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DEPARTMENTS, MODE_NAMES, type ResearchModeNumber, type SectionKey } from "@/lib/generation/department-map";
+import { DEPARTMENTS, MODE_NAMES, getDegreeFromDepartment, type ResearchModeNumber, type SectionKey } from "@/lib/generation/department-map";
 import {
   MODE_SHORT,
   allowedModes,
@@ -25,7 +25,8 @@ import {
   type ModeDecision,
 } from "@/lib/mode-classifier";
 import { INTAKE_MODE_LABEL } from "@/lib/constants";
-import { validateObjectives } from "@/lib/generation/objectives-rules";
+import { validateAim, validateObjectives } from "@/lib/generation/objectives-rules";
+import { objectivesCheckKey } from "@/lib/generation/objectives-check-rules";
 import { sourceKindForDepartment } from "@/lib/research/source-policy";
 import { modeMismatchLine, objectivesModeMismatch } from "@/lib/research/source-stage-view";
 import type { ModeCard as ModeCardData } from "@/lib/services/research-mode";
@@ -61,14 +62,17 @@ type Form = {
   chapter3: string;
   chapter4: string;
   notes: string;
+  /** The aim as edited (every report states one, since 30 Sept 2026). */
+  aim: string;
   /** D3b: the objectives as edited, and the ids of the ticked cases or archival sources. */
   objectives: string[];
   selected: string[];
 };
 
-function briefForm(card: ModeCardData): Pick<Form, "objectives" | "selected"> {
+function briefForm(card: ModeCardData): Pick<Form, "aim" | "objectives" | "selected"> {
   const b = card.brief;
   return {
+    aim: b?.aim ?? "",
     objectives: b?.objectives ?? [],
     selected: b ? b.points.flatMap((p) => p.sources.filter((s) => s.selected).map((s) => s.id)) : [],
   };
@@ -89,13 +93,15 @@ function formFrom(card: ModeCardData): Form {
   };
 }
 
-type Decision = ModeDecision & { notes: string | null; objectives?: string[]; selectedSourceIds?: string[] };
+type Decision = ModeDecision & { notes: string | null; aim?: string | null; objectives?: string[]; selectedSourceIds?: string[] };
 
 function decisionFrom(form: Form, card?: ModeCardData): Decision {
-  // The objectives and ticks travel with the decision once the brief is ready (saved or approved together).
+  // The aim, objectives and ticks travel with the decision once the brief is ready (saved or approved together).
   const brief = card?.brief?.status === "READY" ? card.brief : null;
   return {
-    ...(brief ? { objectives: form.objectives, ...(brief.sourceKind ? { selectedSourceIds: form.selected } : {}) } : {}),
+    ...(brief
+      ? { aim: form.aim.trim() || null, objectives: form.objectives, ...(brief.sourceKind ? { selectedSourceIds: form.selected } : {}) }
+      : {}),
     department: form.department,
     modeNumber: form.modeNumber,
     section: form.section || null,
@@ -127,6 +133,8 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const [message, setMessage] = React.useState<string | null>(null);
   const [reopenOpen, setReopenOpen] = React.useState(false);
   const [reason, setReason] = React.useState("");
+  /** A report approved without an aim: the aim being written for it (starts as the suggestion). */
+  const [lockedAim, setLockedAim] = React.useState(initial.brief?.draftedAim ?? "");
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -145,11 +153,18 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   // D3b: the brief's own blockers (not ready, stopped, department changed) and the objectives as typed.
   const brief = card.brief;
   const objectivesCheck = validateObjectives(form.objectives);
-  const objectivesProblems = brief?.status === "READY" && !objectivesCheck.ok ? objectivesCheck.problems : [];
+  const aimCheck = validateAim(form.aim);
+  const objectivesProblems =
+    brief?.status === "READY"
+      ? [
+          ...(form.aim.trim() ? (aimCheck.ok ? [] : aimCheck.problems) : ["Write the aim, or press Draft the aim: every report states one aim before its objectives."]),
+          ...(objectivesCheck.ok ? [] : objectivesCheck.problems),
+        ]
+      : [];
   const modeMismatch = brief && !locked ? objectivesModeMismatch(brief, form.modeNumber || null) : null;
   const briefProblems = brief
     ? brief.notStarted
-      ? ["Draft the objectives first: press Draft objectives."]
+      ? ["Draft the aim and objectives first: press Draft aim and objectives."]
       : brief.stopped
         ? ["The objectives and source search stopped. Press Carry on."]
         : brief.running
@@ -164,9 +179,25 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const briefEditable = !locked && brief?.status === "READY";
   const selectedSet = React.useMemo(() => new Set(form.selected), [form.selected]);
 
-  // While a run the COO started is working, the card asks for news every 5 seconds (the server runs it).
-  // A brief that has not been started (PENDING or none) is never polled: nothing moves until a button is pressed.
-  const waiting = Boolean(brief?.running);
+  // The independent check is judged against what is on the card now: an edit makes a stored check stale at once.
+  const checkKey = objectivesCheckKey({
+    title: card.projectTitle ?? "",
+    department: form.department,
+    degree: getDegreeFromDepartment(form.department),
+    modeNumber: (mode ?? 1) as ResearchModeNumber,
+    aim: form.aim.trim() || null,
+    objectives: form.objectives,
+  });
+
+  // While a run the COO started is working (a draft, or the independent check), the card asks for news every
+  // 5 seconds (the server runs it). A brief that has not been started (PENDING or none) is never polled.
+  const waiting = Boolean(brief?.running || brief?.checkRunning);
+  // The form takes the server's aim and objectives only when a draft has just finished, never during a check
+  // (the COO may be typing while the check runs).
+  const draftRunning = React.useRef(Boolean(brief?.running));
+  React.useEffect(() => {
+    draftRunning.current = Boolean(brief?.running);
+  }, [brief?.running]);
   React.useEffect(() => {
     if (!waiting) return;
     let stop = false;
@@ -175,8 +206,10 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
         const res = await fetch(`/api/admin/projects/${card.projectId}/mode`, { cache: "no-store" });
         if (!res.ok || stop) return;
         const next = (await res.json()) as ModeCardData;
+        const justDrafted = draftRunning.current && next.brief?.status === "READY" && !next.brief.running;
+        draftRunning.current = Boolean(next.brief?.running);
         setCard(next);
-        if (next.brief && next.brief.status === "READY") setForm((f) => ({ ...f, ...briefForm(next) }));
+        if (justDrafted && next.brief) setForm((f) => ({ ...f, ...briefForm(next) }));
       } catch {
         // offline for a moment: the next tick tries again
       }
@@ -191,19 +224,27 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   const departmentChoices = DEPARTMENT_NAMES.includes(form.department) || !form.department ? DEPARTMENT_NAMES : [form.department, ...DEPARTMENT_NAMES];
 
   /**
-   * Saves the card as it stands (department, mode, style…) as a draft, so a draft of the
-   * objectives follows the mode on screen. False (with the reasons shown) when it is refused.
-   * The objectives go with it only for Start again and only when they are valid: Draft again
-   * replaces them anyway, and objectives that break the rules must never block the redraft.
+   * Saves the card as it stands (department, mode, style…) as a draft, so a draft follows the mode
+   * on screen and a check scores what is on the card. False (with the reasons shown) when refused.
+   * The aim and objectives go with it only when they are valid and the action keeps them (Start
+   * again, Draft the aim, Check again): Draft again replaces them anyway, and text that breaks the
+   * rules must never block the redraft.
    */
   async function saveDraftFirst(action: BriefAction): Promise<boolean> {
     const decision = decisionFrom(form, card);
-    const keepObjectives = action === "start" && decision.objectives && validateObjectives(decision.objectives).ok;
+    const keeps = action === "start" || action === "draft_aim" || action === "check_objectives";
+    const keepObjectives = keeps && decision.objectives && validateObjectives(decision.objectives).ok;
+    const keepAim = keeps && action !== "draft_aim" && decision.aim && validateAim(decision.aim).ok;
     const res = await fetch(`/api/admin/projects/${card.projectId}/mode/change`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      // undefined drops out of the JSON: the ticks never travel, the objectives only when kept.
-      body: JSON.stringify({ ...decision, objectives: keepObjectives ? decision.objectives : undefined, selectedSourceIds: undefined }),
+      // undefined drops out of the JSON: the ticks never travel, the aim and objectives only when kept.
+      body: JSON.stringify({
+        ...decision,
+        aim: keepAim ? decision.aim : undefined,
+        objectives: keepObjectives ? decision.objectives : undefined,
+        selectedSourceIds: undefined,
+      }),
     });
     if (res.ok) return true;
     const data = await res.json().catch(() => null);
@@ -226,7 +267,7 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
     setProblems([]);
     setMessage(null);
     try {
-      if (opts.saveFirst && (kind === "start" || kind === "redraft_objectives") && !(await saveDraftFirst(kind))) return false;
+      if (opts.saveFirst && (kind === "start" || kind === "redraft_objectives" || kind === "draft_aim" || kind === "check_objectives") && !(await saveDraftFirst(kind))) return false;
       const res = await fetch(`/api/admin/projects/${card.projectId}/${path}`, {
         method,
         headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -240,8 +281,10 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
       }
       const next = data as ModeCardData;
       setCard(next);
-      // Keep what the COO is typing in the objectives; take the server's ticks for a new or removed source.
-      setForm((f) => ({ ...f, ...(kind === "add" || kind === "remove" ? { selected: briefForm(next).selected } : briefForm(next)) }));
+      // Take the server's ticks for a new or removed source; after a check, keep what is typed (it was just saved).
+      if (kind === "add" || kind === "remove") setForm((f) => ({ ...f, selected: briefForm(next).selected }));
+      else if (kind !== "check_objectives" && kind !== "suggest_aim" && kind !== "add_aim") setForm((f) => ({ ...f, ...briefForm(next) }));
+      if (kind === "suggest_aim") setLockedAim(next.brief?.draftedAim ?? "");
       setMessage(done);
       router.refresh();
       return true;
@@ -254,26 +297,44 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
   }
 
   /**
-   * Every run starts from here (founder's call: nothing drafts on its own). Draft objectives and
-   * Draft again save the card first, so the server drafts for the mode on screen; Draft again asks
-   * first, because it replaces the objectives (and any edits).
+   * Every run starts from here (founder's call: nothing drafts or checks on its own). Draft,
+   * Draft again, Draft the aim and Check again save the card first, so the server works on what
+   * is on screen; Draft again asks first, because it replaces the aim and objectives (and any
+   * edits). A check needs a valid aim and objectives, so it is refused here before any call.
    */
   const briefAction = (action: BriefAction) => {
     const mode = form.modeNumber ? `Mode ${form.modeNumber}` : "the saved mode";
-    if (action === "redraft_objectives" && !window.confirm(`Draft the objectives again for ${mode}? The current objectives, including your edits, are replaced.`)) return;
+    if (
+      action === "redraft_objectives" &&
+      !window.confirm(`Draft the aim and objectives again for ${mode}? The current aim and objectives, including your edits, are replaced.`)
+    )
+      return;
+    if (action === "check_objectives" && !locked && brief?.status === "READY") {
+      const invalid = [...(aimCheck.ok ? [] : aimCheck.problems), ...(objectivesCheck.ok ? [] : objectivesCheck.problems)];
+      if (invalid.length) {
+        setProblems(invalid);
+        setMessage("Fix the aim and objectives first: the check scores what is saved.");
+        return;
+      }
+    }
+    if (action === "draft_aim" && !objectivesCheck.ok) {
+      setProblems(objectivesCheck.problems);
+      setMessage("The aim is drafted from the objectives: fix them first.");
+      return;
+    }
     const search = brief?.sourceKind ? " and the source search" : "";
-    void briefCall(
-      "mode/brief",
-      "POST",
-      { action },
-      action,
-      action === "redraft_objectives"
-        ? `Drafting the objectives again for ${mode}. This takes about a minute.`
-        : action === "carry_on"
-          ? "Resumed."
-          : `Drafting the objectives${search} for ${mode}. This takes a few minutes; you can leave the page.`,
-      { saveFirst: action !== "carry_on" },
-    );
+    const done: Record<BriefAction, string> = {
+      start: `Drafting the aim and objectives${search} for ${mode}. This takes a few minutes; you can leave the page.`,
+      redraft_objectives: `Drafting the aim and objectives again for ${mode}. This takes about a minute.`,
+      carry_on: "Resumed.",
+      draft_aim: "Aim drafted from the objectives. The independent check is running.",
+      suggest_aim: "Aim suggested. Read it, edit it if needed, then press Save aim.",
+      add_aim: "Aim saved. The objectives are unchanged; the specialist adds the aim to Chapter One by hand.",
+      check_objectives: "Checking the aim and objectives independently. This takes about half a minute.",
+    };
+    void briefCall("mode/brief", "POST", action === "add_aim" ? { action, aim: lockedAim } : { action }, action, done[action], {
+      saveFirst: action !== "carry_on" && action !== "suggest_aim" && action !== "add_aim" && !(action === "check_objectives" && locked),
+    });
   };
 
   const addSource = (d: ManualSourceDraft) =>
@@ -530,6 +591,11 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
           <ObjectivesSection
             brief={brief}
             modeNumber={form.modeNumber}
+            aim={form.aim}
+            onAimChange={(next) => set("aim", next)}
+            lockedAim={lockedAim}
+            onLockedAimChange={setLockedAim}
+            checkKey={checkKey}
             objectives={form.objectives}
             onChange={(next) => set("objectives", next)}
             editable={briefEditable}

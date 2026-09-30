@@ -25,6 +25,12 @@ export interface SectionContext {
   pureScience: boolean;
   /** Chapter One states hypotheses: the chapters that test them "if stated" must then have that section. */
   hasHypotheses: boolean;
+  /**
+   * The report has an approved aim (every report since 30 Sept 2026): Chapter One then needs an aim
+   * heading in every department, "Aim and Objectives of the Study" where the department's own list
+   * has none (the loader's aim note). One combined heading satisfies both the aim and the objectives.
+   */
+  hasAim?: boolean;
 }
 
 /** THEMATIC: a Template B thematic chapter, judged by its approved title and at least three sections. */
@@ -124,8 +130,21 @@ const LIMITATIONS = R("Limitations of the Study", /limitation/i);
 const FURTHER = R("Suggestions for Further Study", /further (?:study|studies|research|work|investigation)|future (?:work|research|studies)/i);
 const IMPLICATIONS = R("Educational Implications", /implication/i);
 
+/** Chapter One's list with the aim added before the objectives, when the report has an aim and the list has none. */
+function withAim(list: RequiredSection[], ctx: SectionContext): RequiredSection[] {
+  if (!ctx.hasAim || list.includes(AIM)) return list;
+  const at = list.indexOf(OBJECTIVES);
+  return at === -1 ? [...list, AIM] : [...list.slice(0, at), AIM, ...list.slice(at)];
+}
+
 /** The sections chapter `chapter` of section `section` must have (null = nothing required beyond the chapter itself). */
 export function requiredSections(section: SectionKey, chapter: number, ctx: SectionContext): ChapterRequirement | null {
+  const req = requiredSectionsAsListed(section, chapter, ctx);
+  return chapter === 1 && Array.isArray(req) ? withAim(req, ctx) : req;
+}
+
+/** The lists as the chapter prompts' department sections give them (check:quality holds them to the prompt files). */
+export function requiredSectionsAsListed(section: SectionKey, chapter: number, ctx: SectionContext): ChapterRequirement | null {
   const hyp = ctx.hasHypotheses ? [HYPOTHESES_TESTING] : [];
   const combined = ctx.pureScience && section === "MEDICAL_SCIENCE" && ctx.mode === 4;
   const human = !(ctx.pureScience && section === "MEDICAL_SCIENCE");

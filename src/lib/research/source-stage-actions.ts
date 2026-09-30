@@ -15,7 +15,10 @@ import { db } from "@/lib/db";
 import { deleteStoredFile } from "@/lib/files/storage";
 import type { DownloadableFile } from "@/lib/services/file-access";
 import { hasGenerationStarted, isReportTemplate, lockProjectRow } from "@/lib/generation/generation-state";
-import { validateObjectives } from "@/lib/generation/objectives-rules";
+import { validateAim, validateObjectives } from "@/lib/generation/objectives-rules";
+import { draftAim } from "@/lib/generation/objectives-drafter";
+import { getDegreeFromDepartment } from "@/lib/generation/department-map";
+import { isModeNumber } from "@/lib/mode-classifier";
 import { ModeDecisionError, ModeLockedError, ModeNotApprovedError, ModeStateError } from "@/lib/services/mode-errors";
 import { writeProjectNote } from "@/lib/services/operations/project-ops";
 import type { Actor } from "@/lib/services/operations/actor";
@@ -23,6 +26,7 @@ import { readPoints } from "./source-points";
 import { placeholderFor, sourceKindForDepartment } from "./source-policy";
 import { ACTIVE_STAGE_STATUSES, SOURCE_STAGE_SUBSYSTEM, resumeStatusFor } from "./source-stage";
 import { MAX_STAGE_FAILURES, scheduleSourceStage } from "./source-stage-runner";
+import { CheckRunningError, requestObjectivesCheck, takeCheckLease } from "./objectives-check";
 import { BRIEF_CARD_SELECT, buildBriefView, isQuietRun, modeMismatchLine, objectivesModeMismatch, type BriefView } from "./source-stage-view";
 
 type Tx = Prisma.TransactionClient;
@@ -199,6 +203,124 @@ export async function redraftObjectives(idOrCode: string, actor: Actor): Promise
   await schedule(briefId);
 }
 
+// ─── The aim (founder, 30 Sept 2026: every report states one aim) ──────────
+
+/** Approved, or chapters generated: the card's normal edits are closed. */
+async function isCardLocked(tx: Tx | typeof db, projectDbId: string): Promise<boolean> {
+  if (await hasGenerationStarted(projectDbId, tx as Tx)) return true;
+  const mode = await tx.researchMode.findUnique({ where: { projectId: projectDbId }, select: { isLocked: true } });
+  return Boolean(mode?.isLocked);
+}
+
+/** The aim-only draft's context: the project, its saved mode and the brief's objectives. */
+async function aimContextFor(projectDbId: string) {
+  const b = await db.projectBrief.findUnique({
+    where: { projectId: projectDbId },
+    select: {
+      id: true,
+      status: true,
+      aim: true,
+      objectives: true,
+      department: true,
+      project: { select: { projectTitle: true, client: { select: { department: true } }, researchMode: { select: { department: true, modeNumber: true } } } },
+    },
+  });
+  const mode = b?.project.researchMode?.modeNumber;
+  if (!b || b.status !== "READY" || !validateObjectives(b.objectives).ok) {
+    throw new ModeStateError("The aim is drafted from the objectives: draft the objectives first.");
+  }
+  if (!isModeNumber(mode)) throw new ModeDecisionError(["Pick a research mode first — the aim depends on it."]);
+  const department = b.project.researchMode?.department ?? b.department ?? b.project.client.department ?? "";
+  return {
+    brief: b,
+    context: { title: b.project.projectTitle ?? "", department, degree: getDegreeFromDepartment(department), modeNumber: mode },
+  };
+}
+
+function aimUsage(projectDbId: string) {
+  return { projectId: projectDbId, subsystem: SOURCE_STAGE_SUBSYSTEM, step: "draft_aim" };
+}
+
+/** Takes the check's lease and hands the check to its own invocation; false when one is already running. */
+async function startCheck(briefId: string): Promise<boolean> {
+  const lease = await takeCheckLease(briefId);
+  if (!lease) return false;
+  await requestObjectivesCheck(briefId, lease);
+  return true;
+}
+
+/**
+ * "Draft the aim": writes the one aim the brief's objectives serve (one short
+ * call; the objectives stay as they are), then checks them. The card must not
+ * be locked; a locked card uses suggestAim / addAim.
+ */
+export async function draftAimForBrief(idOrCode: string, actor: Actor): Promise<void> {
+  const project = await projectFor(idOrCode);
+  const { brief, context } = await aimContextFor(project.id);
+  const aim = await draftAim(context, brief.objectives, aimUsage(project.id));
+  await db.$transaction(async (tx) => {
+    await lockProjectRow(tx, project.id);
+    await assertBriefEditable(tx, project.id);
+    const now = await tx.projectBrief.findUnique({ where: { id: brief.id }, select: { status: true, objectives: true } });
+    if (!now || now.status !== "READY" || now.objectives.join("\n") !== brief.objectives.join("\n")) {
+      throw new ModeStateError("The objectives changed while the aim was being drafted. Press Draft the aim again.");
+    }
+    await tx.projectBrief.update({ where: { id: brief.id }, data: { aim, draftedAim: aim } });
+    await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Aim drafted (objectives kept): ${aim}` });
+  }, TX);
+  await startCheck(brief.id);
+}
+
+/**
+ * The one-off exception for a report approved without an aim (EC-00002):
+ * drafts an aim from its approved objectives and keeps it as a suggestion
+ * (draftedAim) for the founder or COO to read and edit. Only while the card is
+ * locked and has no aim; nothing else on the card changes.
+ */
+export async function suggestAimForLockedBrief(idOrCode: string, actor: Actor): Promise<void> {
+  const project = await projectFor(idOrCode);
+  if (!(await isCardLocked(db, project.id))) throw new ModeStateError("The card is not locked: write the aim with the objectives and approve them together.");
+  const { brief, context } = await aimContextFor(project.id);
+  if (brief.aim) throw new ModeStateError("This report already has an aim.");
+  const aim = await draftAim(context, brief.objectives, aimUsage(project.id));
+  const res = await db.projectBrief.updateMany({ where: { id: brief.id, aim: null }, data: { draftedAim: aim } });
+  if (res.count === 1) await writeProjectNote(db, project.id, { kind: "MODE", actor, content: `Aim suggested for a report approved without one (not saved yet): ${aim}` });
+}
+
+/**
+ * Saves the aim of a report approved without one. The objectives, sources and
+ * mode stay locked; Chapter One is not re-generated (the specialist adds the
+ * aim when correcting it, and the chapter check's ST8 holds them to it).
+ */
+export async function addAimToLockedBrief(idOrCode: string, rawAim: string, actor: Actor): Promise<void> {
+  const project = await projectFor(idOrCode);
+  const check = validateAim(rawAim);
+  if (!check.ok) throw new ModeDecisionError(check.problems);
+  const briefId = await db.$transaction(async (tx) => {
+    await lockProjectRow(tx, project.id);
+    if (!(await isCardLocked(tx, project.id))) throw new ModeStateError("The card is not locked: write the aim with the objectives and approve them together.");
+    const b = await tx.projectBrief.findUnique({ where: { projectId: project.id }, select: { id: true, status: true, aim: true } });
+    if (!b || b.status !== "READY") throw new ModeStateError("This report has no approved objectives to add an aim to.");
+    if (b.aim) throw new ModeStateError("This report already has an aim.");
+    await tx.projectBrief.update({ where: { id: b.id }, data: { aim: check.aim } });
+    await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Aim added after approval (objectives unchanged): ${check.aim}` });
+    return b.id;
+  }, TX);
+  await startCheck(briefId);
+}
+
+/**
+ * "Check again": the independent check of what is saved now (the card saves
+ * the draft first). Allowed on a locked card too: it changes nothing but the
+ * scores. 409 while a check is running.
+ */
+export async function checkObjectives(idOrCode: string): Promise<void> {
+  const project = await projectFor(idOrCode);
+  const b = await db.projectBrief.findUnique({ where: { projectId: project.id }, select: { id: true, objectives: true } });
+  if (!b || !b.objectives.length) throw new ModeStateError("There are no objectives to check yet.");
+  if (!(await startCheck(b.id))) throw new CheckRunningError();
+}
+
 export interface ManualSourceInput {
   pointIndex: number;
   title: string;
@@ -265,11 +387,13 @@ async function deleteFiles(paths: string[]): Promise<void> {
 // ─── Saved with the mode card (research-mode.ts) ────────────────────────────
 
 export interface BriefChoices {
+  aim?: string | null;
   objectives?: string[];
   selectedSourceIds?: string[];
 }
 
 export interface BriefSummary {
+  aim: string | null;
   objectives: string[];
   kind: SourceKind | null;
   ticked: number;
@@ -296,6 +420,7 @@ export async function saveBriefChoices(
       status: true,
       failedSteps: true,
       sourceKind: true,
+      aim: true,
       objectives: true,
       objectivesModeNumber: true,
       points: true,
@@ -335,7 +460,18 @@ export async function saveBriefChoices(
     const check = validateObjectives(objectives);
     if (!check.ok) throw new ModeDecisionError(check.problems);
   }
-  await tx.projectBrief.update({ where: { id: b.id }, data: { objectives } });
+  // Every report states one aim (founder, 30 Sept 2026): an empty aim on a draft save keeps the stored one; approval needs a valid one.
+  let aim = b.aim;
+  if (typeof choices.aim === "string" && choices.aim.trim()) {
+    const check = validateAim(choices.aim);
+    if (!check.ok) throw new ModeDecisionError(check.problems);
+    aim = check.aim;
+  }
+  if (opts.approving) {
+    const check = validateAim(aim);
+    if (!check.ok) throw new ModeDecisionError(aim ? check.problems : ["Write the aim, or press Draft the aim: every report states one aim before its objectives."]);
+  }
+  await tx.projectBrief.update({ where: { id: b.id }, data: { objectives, aim } });
 
   let selectedIds = new Set<string>();
   if (choices.selectedSourceIds) {
@@ -350,6 +486,7 @@ export async function saveBriefChoices(
   const points = readPoints(b.points);
   const supported = new Set(b.sources.filter((s) => selectedIds.has(s.id)).map((s) => s.pointIndex));
   return {
+    aim,
     objectives,
     kind: b.sourceKind,
     ticked: selectedIds.size,
@@ -361,7 +498,7 @@ export async function saveBriefChoices(
 /** The line the approval note carries about the brief. */
 export function briefApprovalNote(s: BriefSummary): string {
   const objectives = s.objectives.map((o, i) => `${i + 1}. ${o}`).join("; ");
-  let text = ` Objectives: ${objectives}.`;
+  let text = `${s.aim ? ` Aim: ${s.aim}` : ""} Objectives: ${objectives}.`;
   if (s.kind) {
     const what = s.kind === "CASE" ? "Cases" : "Archival sources";
     text += ` ${what} ticked: ${s.ticked} of ${s.total}.`;
@@ -388,6 +525,8 @@ export interface ApprovedSource {
 }
 
 export interface ApprovedBrief {
+  /** Null only on a report approved before aims were asked for (and not given one since). */
+  aim: string | null;
   objectives: string[];
   kind: SourceKind | null;
   sources: ApprovedSource[];
@@ -406,6 +545,7 @@ export async function getApprovedBrief(client: Tx | typeof db, projectDbId: stri
     select: {
       status: true,
       sourceKind: true,
+      aim: true,
       objectives: true,
       points: true,
       sources: {
@@ -423,11 +563,20 @@ export async function getApprovedBrief(client: Tx | typeof db, projectDbId: stri
   const sources = b.sources.map((s) => ({ ...s, point: text.get(s.pointIndex) ?? "" }));
   const supported = new Set(sources.map((s) => s.pointIndex));
   return {
+    aim: b.aim && validateAim(b.aim).ok ? b.aim : null,
     objectives: b.objectives,
     kind: b.sourceKind,
     sources,
     unsupportedPoints: b.sourceKind ? points.filter((p) => !supported.has(p.index)).map((p) => p.text) : [],
   };
+}
+
+/** The approved aim and objectives for the specialist's Report tab: null until the mode card is approved. */
+export async function approvedAimAndObjectives(projectDbId: string): Promise<{ aim: string | null; objectives: string[] } | null> {
+  const mode = await db.researchMode.findUnique({ where: { projectId: projectDbId }, select: { isLocked: true } });
+  if (!mode?.isLocked) return null;
+  const brief = await getApprovedBrief(db, projectDbId).catch(() => null);
+  return brief ? { aim: brief.aim, objectives: brief.objectives } : null;
 }
 
 /** The stored judgment PDF of a source (or the court's own link), for the admin download route. */

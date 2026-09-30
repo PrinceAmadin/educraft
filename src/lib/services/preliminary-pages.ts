@@ -320,6 +320,7 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
         },
       },
       researchMode: { select: { modeNumber: true } },
+      brief: { select: { aim: true } },
       generationCheckpoints: {
         where: { status: "COMPLETED" },
         select: { chapterNumber: true, fullOutput: true },
@@ -361,7 +362,8 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
     research_mode: `Mode ${project.researchMode?.modeNumber ?? 1}`,
     dedication_note: "",
     acknowledgment_note: acknowledgmentNote,
-    extracted_aim: extracted.aim,
+    // The approved aim when the report has one (every report since 30 Sept 2026); else read from Chapter One.
+    extracted_aim: project.brief?.aim?.trim() || extracted.aim,
     extracted_objectives: extracted.objectives,
     extracted_findings: extracted.findings,
     extracted_method: extracted.method,

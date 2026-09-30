@@ -1,9 +1,13 @@
 import { z } from "zod";
 
 /** D3b: what the COO asks the brief to do (POST /api/admin/projects/[id]/mode/brief). */
-export const briefActionSchema = z.object({
-  action: z.enum(["start", "redraft_objectives", "carry_on"]),
-});
+export const briefActionSchema = z
+  .object({
+    action: z.enum(["start", "redraft_objectives", "carry_on", "draft_aim", "suggest_aim", "add_aim", "check_objectives"]),
+    /** add_aim only: the aim to save on a report approved without one. */
+    aim: z.string().trim().max(400).optional(),
+  })
+  .refine((b) => b.action !== "add_aim" || Boolean(b.aim), { message: "Write the aim to save", path: ["aim"] });
 
 const optionalText = (max: number) =>
   z

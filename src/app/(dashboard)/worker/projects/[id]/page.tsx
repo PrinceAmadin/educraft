@@ -22,6 +22,8 @@ import { QualityGatePanel } from "@/components/generation/QualityGatePanel";
 import { PreliminaryPagesCard } from "@/components/generation/PreliminaryPagesCard";
 import { getPreliminaryPagesView } from "@/lib/services/preliminary-pages";
 import { generationDashboardFor } from "@/lib/services/generation-dashboard";
+import { approvedAimAndObjectives } from "@/lib/research/source-stage-actions";
+import { ApprovedAimObjectives } from "@/components/projects/mode/ApprovedAimObjectives";
 import { deriveResearchPanelGenerationState } from "@/lib/generation/research-panel-state";
 import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
@@ -75,11 +77,13 @@ export default async function WorkerAssignmentPage({
   // D4: the report waits here for the client's data; the worker checks it (and may add their own).
   // D5: Mode 5 projects get their dataset fetched from the World Bank and the CBN once Chapter 3 is written.
   // D6: the report's live dashboard (null for anything that is not a written report).
-  const [pause, secondary, dashboard] = await Promise.all([
+  const [pause, secondary, dashboard, approvedAim] = await Promise.all([
     getWorkerPauseView(worker.id, project.projectId),
     secondaryDataStatus(project.id, project.projectId),
     // A specialist sees where the report's run stands, without the founder's and the COO's buttons (D9).
     generationDashboardFor(project.id, "worker"),
+    // The approved aim and objectives, so a chapter corrected in Word keeps them word for word.
+    approvedAimAndObjectives(project.id).catch(() => null),
   ]);
   // D7b: the preliminary pages the report carries, read-only for the specialist (no staff names, no QA-copy note).
   const prelimView = dashboard ? await getPreliminaryPagesView(project.id).catch(() => null) : null;
@@ -279,6 +283,7 @@ export default async function WorkerAssignmentPage({
                   label: pause?.status === "SUBMITTED" ? "Report · data to check" : "Report",
                   content: (
                     <div className="space-y-8">
+                      {approvedAim ? <ApprovedAimObjectives aim={approvedAim.aim} objectives={approvedAim.objectives} /> : null}
                       <GenerationDashboard
                         initial={dashboard}
                         renderedAt={renderedAt}

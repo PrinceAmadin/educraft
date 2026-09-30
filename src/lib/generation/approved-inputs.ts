@@ -89,6 +89,7 @@ export async function approvedChapterInput(projectIdOrCode: string, chapter: Cha
     thematicTitles: settings.thematicTitles,
     samples: settings.samples,
     fromEarlierChapters: {
+      aim: brief.aim,
       objectives: brief.objectives,
       researchQuestions: extracted.researchQuestions,
       hypotheses: extracted.hypotheses,

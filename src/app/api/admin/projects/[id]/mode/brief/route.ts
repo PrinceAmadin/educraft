@@ -2,10 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { opsGuard, parseBody } from "@/lib/services/operations/route-helpers";
 import { getModeCard } from "@/lib/services/research-mode";
 import { modeErrorResponse } from "@/lib/services/research-mode-errors";
-import { carryOnSourceStage, redraftObjectives, startSourceStage } from "@/lib/research/source-stage-actions";
+import {
+  addAimToLockedBrief,
+  carryOnSourceStage,
+  checkObjectives,
+  draftAimForBrief,
+  redraftObjectives,
+  startSourceStage,
+  suggestAimForLockedBrief,
+} from "@/lib/research/source-stage-actions";
 import { briefActionSchema } from "@/lib/validations/source-stage";
 
 export const dynamic = "force-dynamic";
+// draft_aim and suggest_aim wait for one short Claude call.
+export const maxDuration = 120;
 
 /**
  * POST { action }: D3b, the brief on the mode card. Founder and COO only.
@@ -13,6 +23,10 @@ export const dynamic = "force-dynamic";
  *    sources) for a project that has none yet, or search again after the department changed
  *  - redraft_objectives: draft the objectives again (one Claude call, no searches)
  *  - carry_on: resume a search that stopped after repeated failures
+ *  - draft_aim: write the aim the objectives serve (objectives kept), then check them
+ *  - suggest_aim / add_aim {aim}: a report approved without an aim (locked card only):
+ *    suggest one, then save the founder's or COO's version; nothing else changes
+ *  - check_objectives: the independent check of what is saved (409 CHECK_RUNNING)
  * The work runs in the background; the answer is the card as it stands now.
  * 403 MODE_LOCKED while the card is approved or once chapters exist.
  */
@@ -22,9 +36,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const body = await parseBody(req, briefActionSchema);
   if (!body.ok) return body.response;
   try {
-    if (body.data.action === "start") await startSourceStage(params.id, guard.actor);
-    else if (body.data.action === "redraft_objectives") await redraftObjectives(params.id, guard.actor);
-    else await carryOnSourceStage(params.id, guard.actor);
+    const a = body.data.action;
+    if (a === "start") await startSourceStage(params.id, guard.actor);
+    else if (a === "redraft_objectives") await redraftObjectives(params.id, guard.actor);
+    else if (a === "carry_on") await carryOnSourceStage(params.id, guard.actor);
+    else if (a === "draft_aim") await draftAimForBrief(params.id, guard.actor);
+    else if (a === "suggest_aim") await suggestAimForLockedBrief(params.id, guard.actor);
+    else if (a === "add_aim") await addAimToLockedBrief(params.id, body.data.aim ?? "", guard.actor);
+    else await checkObjectives(params.id);
     const { card } = await getModeCard(params.id);
     return NextResponse.json(card, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

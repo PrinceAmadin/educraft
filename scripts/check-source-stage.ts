@@ -8,8 +8,19 @@
  * objectives rules, the planners' clean-up, the judge's mapping, the card's
  * view and blockers, and the lines the chapter prompts get.
  */
-import { validateObjectives } from "../src/lib/generation/objectives-rules";
-import { extractClientStatedObjectives, objectivesUserPrompt } from "../src/lib/generation/objectives-drafter";
+import { validateAim, validateObjectives } from "../src/lib/generation/objectives-rules";
+import { aimUserPrompt, extractClientStatedAim, extractClientStatedObjectives, objectivesUserPrompt } from "../src/lib/generation/objectives-drafter";
+import {
+  OBJECTIVES_CHECK_TEXT,
+  checkState,
+  checkUserPrompt,
+  isWeakRow,
+  objectivesCheckKey,
+  readStoredCheck,
+  scoreBand,
+  validateCheckReply,
+  type StoredObjectivesCheck,
+} from "../src/lib/generation/objectives-check-rules";
 import { formatPrimarySource } from "../src/lib/generation/prompt-loader";
 import { cleanArchivePlan, judgeUserPrompt, readJudgement } from "../src/lib/research/archive-fetcher";
 import { cleanPoints, vetRecordedCases } from "../src/lib/research/legal-source-fetcher";
@@ -248,6 +259,109 @@ expect(
   null,
 );
 
+// ── The aim (founder, 30 Sept 2026: every report states one aim before its objectives) ──
+const goodAim = "The aim of this study is to develop a cybersecurity framework of prevention and mitigation strategies for Nigerian SMEs.";
+expect("a one-sentence aim passes", validateAim(goodAim), { ok: true, aim: goodAim });
+expect("\"project\" and \"research\" are accepted openings", [
+  validateAim("The aim of this project is to design a solar-powered water pump that cuts diesel use for rural farms.").ok,
+  validateAim("The aim of this research is to examine the effect of plea bargaining on criminal justice in Nigeria.").ok,
+], [true, true]);
+expect("a missing full stop is added, not refused", validateAim(goodAim.slice(0, -1)), { ok: true, aim: goodAim });
+expect("an empty aim asks for one", validateAim("  "), { ok: false, problems: ['Write the aim: one sentence starting "The aim of this study is to".'] });
+expect("an aim that does not open the right way is refused", validateAim("To develop a cybersecurity framework for SMEs in Nigeria using published data.").ok, false);
+expect("two sentences are refused", validateAim(`${goodAim} It will also test the framework on real incidents.`), {
+  ok: false,
+  problems: ["The aim should be one sentence."],
+});
+expect("abbreviations do not count as a second sentence", validateAim("The aim of this study is to compare frameworks, e.g. NIST and ISO 27001, for Nigerian SMEs in Lagos.").ok, true);
+expect("an overlong aim is refused", validateAim(`The aim of this study is to ${"examine ".repeat(45)}everything.`).ok, false);
+expect("the aim-only prompt carries the project and the numbered objectives", aimUserPrompt({ title: "T", department: "Law", degree: "LL.B", modeNumber: 1 }, ["To a thing well", "To b thing well"]).split("\n").slice(-3), [
+  "OBJECTIVES:",
+  "1. To a thing well",
+  "2. To b thing well",
+]);
+expect(
+  "a client's \"Aim: to …\" line becomes the aim sentence",
+  extractClientStatedAim({ specialInstructions: "Topic below.\nAim: to develop a web-based hostel allocation system for Nigerian universities.\nThanks", departmentOutline: null }),
+  "The aim of this study is to develop a web-based hostel allocation system for Nigerian universities.",
+);
+expect(
+  "a full aim sentence in the outline is used word for word",
+  extractClientStatedAim({ specialInstructions: null, departmentOutline: "1.3 Aim and objectives\nThe aim of this project is to design a smart irrigation controller that saves water for smallholder farms." }),
+  "The aim of this project is to design a smart irrigation controller that saves water for smallholder farms.",
+);
+expect("no aim line → null", extractClientStatedAim({ specialInstructions: "Please aim for 60 pages.", departmentOutline: null }), null);
+
+// ── The independent check (founder, 30 Sept 2026: a separate model, blind to the drafter) ──
+const checkNow = Date.parse("2026-09-30T12:00:00Z");
+const checkIn = {
+  title: "Developing a Cybersecurity Framework for SMEs",
+  department: "Computer Science",
+  degree: "B.Sc",
+  modeNumber: 5 as const,
+  aim: goodAim,
+  objectives: ["To examine A in SMEs", "To analyse B in SMEs", "To assess C in SMEs", "To develop D for SMEs"],
+};
+const judgePrompt = checkUserPrompt(checkIn);
+expect("the judge gets the title, department, degree, method, aim and numbered objectives", [
+  judgePrompt.includes("PROJECT TITLE: Developing a Cybersecurity Framework for SMEs"),
+  judgePrompt.includes("DEGREE: B.Sc"),
+  judgePrompt.includes(`RESEARCH METHOD: ${OBJECTIVES_CHECK_TEXT.modes[5]}`),
+  judgePrompt.includes(`PROPOSED AIM:\n${goodAim}`),
+  judgePrompt.includes("4. To develop D for SMEs"),
+], [true, true, true, true, true]);
+expect(
+  "the judge is blind: nothing says the text was drafted by AI or shows the drafter's instructions",
+  [/\b(AI|artificial intelligence|drafter|drafted by|generated|Claude)\b/i.test(OBJECTIVES_CHECK_TEXT.system + judgePrompt), /STEP 1 — UNDERSTAND THE TITLE/.test(OBJECTIVES_CHECK_TEXT.system)],
+  [false, false],
+);
+expect("with no aim the judge is told so", checkUserPrompt({ ...checkIn, aim: null }).includes("PROPOSED AIM:\nNone stated."), true);
+const judgeRow = (number: number, extra: Record<string, unknown> = {}) => ({ number, related: 80, strong: 70.4, achievable: "75", reason: " Specific and measurable. ", suggestion: "", ...extra });
+const goodReply = {
+  overall: { related: 84, strong: 64, achievable: 66, summary: "Covers the title; objectives 1 and 2 overlap." },
+  aim: { related: 86, strong: 66, achievable: 72, reason: "One sentence.", suggestion: "" },
+  objectives: [judgeRow(2), judgeRow(1), judgeRow(3), judgeRow(4, { strong: 55, suggestion: "Name the dataset." })],
+};
+const parsed = validateCheckReply(goodReply, 4);
+expect("a good reply: rows sorted aim first, scores rounded, empty suggestions null", parsed.ok ? [parsed.rows.map((r) => r.index), parsed.rows[1].strong, parsed.rows[1].achievable, parsed.rows[1].reason, parsed.rows[1].suggestion, parsed.rows[4].suggestion] : parsed.problems, [
+  [0, 1, 2, 3, 4],
+  70,
+  75,
+  "Specific and measurable.",
+  null,
+  "Name the dataset.",
+]);
+expect("a score out of range is refused", validateCheckReply({ ...goodReply, overall: { ...goodReply.overall, related: 140 } }, 4).ok, false);
+expect("a missing objective row is refused", validateCheckReply({ ...goodReply, objectives: goodReply.objectives.slice(0, 3) }, 4), {
+  ok: false,
+  problems: ["Score every objective exactly once (4 expected, 3 given)."],
+});
+expect("a repeated number is refused", validateCheckReply({ ...goodReply, objectives: [judgeRow(1), judgeRow(1), judgeRow(3), judgeRow(4)] }, 4).ok, false);
+expect("an extra row is refused", validateCheckReply({ ...goodReply, objectives: [...goodReply.objectives, judgeRow(5)] }, 4).ok, false);
+expect("a missing summary is refused", validateCheckReply({ ...goodReply, overall: { ...goodReply.overall, summary: " " } }, 4).ok, false);
+expect("a long reason is trimmed to 240 characters", (() => {
+  const r = validateCheckReply({ ...goodReply, objectives: [judgeRow(1, { reason: "x".repeat(400) }), judgeRow(2), judgeRow(3), judgeRow(4)] }, 4);
+  return r.ok ? r.rows[1].reason.length : -1;
+})(), 240);
+expect("bands: 59 Weak, 60 Fair, 79 Fair, 80 Strong", [scoreBand(59), scoreBand(60), scoreBand(79), scoreBand(80)], ["Weak", "Fair", "Fair", "Strong"]);
+expect("a row is weak when any score is under 60", [isWeakRow({ related: 90, strong: 59, achievable: 90 }), isWeakRow({ related: 60, strong: 60, achievable: 60 })], [true, false]);
+const key = objectivesCheckKey(checkIn);
+expect("the key is stable and ignores spacing and title case", [objectivesCheckKey({ ...checkIn }), objectivesCheckKey({ ...checkIn, title: "  developing a cybersecurity   framework for SMEs " })], [key, key]);
+expect("an edited objective, a new aim, a new mode change the key", [
+  objectivesCheckKey({ ...checkIn, objectives: [...checkIn.objectives.slice(0, 3), "To develop E for SMEs"] }) !== key,
+  objectivesCheckKey({ ...checkIn, aim: "The aim of this study is to study SMEs and their security in Nigeria today." }) !== key,
+  objectivesCheckKey({ ...checkIn, modeNumber: 3 }) !== key,
+], [true, true, true]);
+const stored: StoredObjectivesCheck = { status: "done", model: "claude-opus-5-5", checkedAt: new Date(checkNow).toISOString(), inputKey: key, overall: { related: 84, strong: 64, achievable: 66, summary: "s" }, rows: [], costNaira: 56.5, error: null };
+expect("check state: running while the lease holds, then done, stale after an edit, failed", [
+  checkState(stored, new Date(checkNow + 60_000), key, checkNow),
+  checkState(stored, new Date(checkNow - 1), key, checkNow),
+  checkState(stored, null, "other", checkNow),
+  checkState({ ...stored, status: "failed", error: "Claude could not be reached" }, null, key, checkNow),
+  checkState(null, null, key, checkNow),
+], ["running", "done", "stale", "failed", "none"]);
+expect("a stored check reads back; junk reads as none", [readStoredCheck(JSON.parse(JSON.stringify(stored)))?.costNaira, readStoredCheck({ status: "odd" }), readStoredCheck(null)], [56.5, null, null]);
+
 // ── Where a stopped stage carries on ──
 expect("no objectives: draft them", resumeStatusFor({ objectives: [], sourceKind: "CASE", points: null, searchedAt: null }), "DRAFTING_OBJECTIVES");
 expect("objectives, no points: plan", resumeStatusFor({ objectives: ["To x"], sourceKind: "CASE", points: null, searchedAt: null }), "PLANNING_POINTS");
@@ -269,6 +383,10 @@ const row = (over: Partial<BriefCardRow>): BriefCardRow => ({
   objectives: ["To examine x in Nigeria", "To assess y in Nigeria", "To compare z in Nigeria", "To propose w for Nigeria"],
   objectivesFromClient: false,
   objectivesModeNumber: 2,
+  aim: "The aim of this study is to examine how x shapes y and z in Nigeria and propose w for Nigeria.",
+  draftedAim: null,
+  objectivesCheck: null,
+  objectivesCheckLockedUntil: null,
   points: [
     { index: 0, text: "Point A", searches: 2, outcome: "FOUND", queries: [], attempts: [] },
     { index: 1, text: "Point B", searches: 2, outcome: "NONE", queries: [], attempts: [] },
@@ -369,6 +487,29 @@ expect("a locked card shows no mode mismatch and offers nothing", [lockedOther.m
 expect("no mode on the card yet: no mismatch", objectivesModeMismatch({ status: "READY", objectivesMode: 3 }, null), null);
 expect("a brief still running: no mismatch yet", objectivesModeMismatch({ status: "SEARCHING", objectivesMode: 3 }, 5), null);
 expect("the mismatch line names both modes", modeMismatchLine({ drafted: 1, now: 2 }), "The objectives were drafted for Mode 1. Press Draft again to draft them for Mode 2.");
+
+// ── The aim and the check on the card ──
+const noAim = buildBriefView(row({ aim: null }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("objectives without an aim: Draft the aim offered, approval asks for the aim", [noAim.aimMissing, noAim.canDraftAim, noAim.canAddAim, briefBlockers(noAim, true)], [
+  true,
+  true,
+  false,
+  ["Write the aim, or press Draft the aim: every report states one aim before its objectives."],
+]);
+const lockedNoAim = buildBriefView(row({ aim: null, draftedAim: "The aim of this study is to examine x in Nigeria for w." }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: true, now });
+expect("a locked card without an aim offers the one-off aim, nothing else", [lockedNoAim.canAddAim, lockedNoAim.canDraftAim, lockedNoAim.canEdit, lockedNoAim.draftedAim], [
+  true,
+  false,
+  false,
+  "The aim of this study is to examine x in Nigeria for w.",
+]);
+expect("a locked card with an aim offers no aim action", buildBriefView(row({}), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: true, now }).canAddAim, false);
+const badAim = buildBriefView(row({ aim: "To examine x in Nigeria and propose w for the whole country." }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("a saved aim that breaks the rules blocks approval", briefBlockers(badAim, true)[0], 'The aim should begin "The aim of this study is to" (or "project" / "research") and a verb.');
+const checking = buildBriefView(row({ objectivesCheckLockedUntil: new Date(now + 60_000) }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: false, now });
+expect("a check holding its lease: running, no second check", [checking.checkRunning, checking.canCheck], [true, false]);
+const withCheck = buildBriefView(row({ objectivesCheck: JSON.parse(JSON.stringify(stored)) }), { costNaira: 0, currentDepartment: "Law", currentMode: 2, locked: true, now });
+expect("a stored check shows on a locked card too, and can be run again", [withCheck.objectivesCheck?.overall?.strong, withCheck.canCheck], [64, true]);
 
 console.log(`${passes} checks passed, ${failures} failed.`);
 if (failures > 0) process.exit(1);

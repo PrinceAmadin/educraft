@@ -103,7 +103,7 @@ export interface ChapterPromptInput {
   thematicTitles?: { chapter3?: string | null; chapter4?: string | null };
   /** Values taken from generated chapters: undefined = not extracted yet (throws where needed),
    *  an empty list = the chapter genuinely has none. */
-  fromEarlierChapters?: { objectives?: string[]; researchQuestions?: string[]; hypotheses?: string[] };
+  fromEarlierChapters?: { aim?: string | null; objectives?: string[]; researchQuestions?: string[]; hypotheses?: string[] };
   /** Reference rows with status KEPT on the project's finished research job. An empty list assembles with a warning (D9). */
   references: PromptReference[];
   /** Per-project override of the department's non-human-samples flag, and what the samples are (A2). */
@@ -232,6 +232,12 @@ export const LOADER_TEXT = {
     "In this report the Discussion of Findings is written in this Chapter Four, together with the results (4.5 Discussion of Findings in the Law section). This replaces the Chapter 4 cardinal rules PRESENT FIRST, DISCUSS LATER and NO NEW LITERATURE: interpret each finding against the literature and the legal framework here.",
   lawNonDoctrinalCh5:
     "In this report the Discussion of Findings was written in Chapter Four. This Chapter Five is the conclusion only (summary of findings, conclusion, recommendations, limitations and suggestions for further research): do not write a discussion of findings here. This replaces the Discussion requirements in the department section and the mode instructions.",
+  /**
+   * Chapter One of a department whose section list has no aim heading (Nursing, Business, Economics,
+   * and the sections that route to them): every report states one aim (founder, 30 Sept 2026).
+   */
+  aimSection:
+    "Every report states one aim before its objectives. In this Chapter One, write the section this department lists as \"Objectives of the Study\" as \"Aim and Objectives of the Study\", with the same number: the approved aim sentence first, word for word, then \"The objectives of this study are to:\" and the approved objectives. This adds the aim to the department's section list; every other section keeps its number and title.",
   /** Added wherever the loaded text mentions a sixth chapter (Q1/Q2: five chapters at most, everywhere). */
   fiveChapters:
     "This report has exactly five chapters, and Chapter Five is the last one. Ignore every mention of a sixth chapter or a six-chapter structure in this prompt: any outline of chapters lists five, and anything meant for a sixth chapter belongs in Chapter Five.",
@@ -794,6 +800,11 @@ function chapterThreeDefaultTitle(paragraphs: string[]): string | null {
 
 const IMAGE_POINTER = /IMAGE INTELLIGENCE RULES/;
 /** "SIX-CHAPTER RULE", "6-chapter structure", "Chapter count: SIX", "Chapter Six", "Ch.6", "Law: 6 chapters", "FIVE or SIX". */
+/** A Chapter One section-list line that names the aim ("1.4 Aim and Objectives of the Study", "1.3 Purpose / Aim of the Study"). */
+export function listsAimHeading(paragraph: string): boolean {
+  return /^1\.\d+\s[^\n]*\b(aims?|purpose)\b/i.test(paragraph.trim());
+}
+
 const SIX_CHAPTERS = /\b(six|6)[- ]chapter|\bchapter (six|6)\b|\bch\.\s?6\b|\b6 chapters\b|chapter count:\s*(five or )?six/i;
 
 function render(title: string, paragraphs: string[]): string {
@@ -879,6 +890,9 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (combinedResults && chapter === 5) notes.push(LOADER_TEXT.combinedResultsCh5);
   if (section === "LAW_NON_DOCTRINAL" && chapter === 4) notes.push(LOADER_TEXT.lawNonDoctrinalCh4);
   if (section === "LAW_NON_DOCTRINAL" && chapter === 5) notes.push(LOADER_TEXT.lawNonDoctrinalCh5);
+  // Every report states one aim: where this department's Chapter One list has no aim heading, the
+  // objectives section becomes "Aim and Objectives of the Study" (departments that list one keep theirs).
+  if (chapter === 1 && input.fromEarlierChapters?.aim && !deptBlocks.some((b) => b.paragraphs.some(listsAimHeading))) notes.push(LOADER_TEXT.aimSection);
   // A data pause that follows this chapter (Modes 2 and 4 Chapter 3; Mode 3 Chapters 2 and 3) supplies
   // the counts, dates and specifics only the client knows. Without this rule the model invents them
   // (the D9 test on a Mode 2 report saw "362 sent, 329 usable" written into Chapter 3 before any data

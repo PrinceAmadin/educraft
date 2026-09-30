@@ -83,6 +83,8 @@ export function finishReport(
   prepared: PreparedReport,
   ai: AiResults,
   context: {
+    /** The approved aim (null only on a report approved before aims were asked for). */
+    aim?: string | null;
     objectives: string[];
     pureScience: boolean;
     supervisorToc: boolean;
@@ -110,6 +112,7 @@ export function finishReport(
     pureScience: context.pureScience,
     template: prepared.template,
     thematicTitles: input.thematicTitles,
+    aim: context.aim ?? null,
     objectives: context.objectives,
     supervisorToc: context.supervisorToc,
     prelims: {

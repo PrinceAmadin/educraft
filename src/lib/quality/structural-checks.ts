@@ -33,6 +33,8 @@ export interface StructuralInput {
   pureScience: boolean;
   template: "A" | "B";
   thematicTitles: { chapter3: string | null; chapter4: string | null };
+  /** The approved aim (null only on a report approved before aims were asked for). */
+  aim?: string | null;
   objectives: string[];
   /** The order carries the supervisor's table of contents (the department outline): the plan followed it. */
   supervisorToc: boolean;
@@ -78,7 +80,7 @@ export const STRUCTURAL_CHECKS: readonly { id: string; title: string; severity: 
   { id: "ST5", title: "Chapter Three sections", severity: "MAJOR" },
   { id: "ST6", title: "Chapter Four sections", severity: "MAJOR" },
   { id: "ST7", title: "Chapter Five sections", severity: "MAJOR" },
-  { id: "ST8", title: "Objectives word for word", severity: "MAJOR" },
+  { id: "ST8", title: "Aim and objectives word for word", severity: "MAJOR" },
   { id: "ST9", title: "Objective traceability", severity: "MAJOR" },
   { id: "ST10", title: "Research questions and hypotheses answered", severity: "MAJOR" },
   { id: "ST11", title: "Chapter balance", severity: "MAJOR" },
@@ -145,7 +147,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   };
   const push = (id: string, issues: QualityIssue[], summary: { pass: string; fail?: string; na?: string } | string, opts: { na?: boolean } = {}) =>
     out.push(result(base(id), opts.na ? [] : issues, summary, opts));
-  const sectionCtx: SectionContext = { mode: input.mode, pureScience: input.pureScience, hasHypotheses: false };
+  const sectionCtx: SectionContext = { mode: input.mode, pureScience: input.pureScience, hasHypotheses: false, hasAim: Boolean(input.aim?.trim()) };
 
   // ── ST1 preliminary pages ────────────────────────────────────────────────
   {
@@ -265,12 +267,16 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     push(id, issues, `All ${req.length} sections the chapter instructions require are there.`);
   }
 
-  // ── ST8 objectives word for word ─────────────────────────────────────────
+  // ── ST8 aim and objectives word for word ─────────────────────────────────
   {
     const c1 = byNumber.get(1);
     const issues: QualityIssue[] = [];
+    const aim = input.aim?.trim() || null;
     if (c1 && input.objectives.length) {
       const body = normaliseForMatch(readable(c1.blocks));
+      if (aim && !body.includes(normaliseForMatch(aim).replace(/[.!?]+$/, ""))) {
+        issues.push({ level: "FAIL", message: `The aim is not stated word for word: "${shortQuote(aim, 200)}".`, chapter: 1, fix: "State the approved aim exactly as approved, as one sentence in the aim section (Aim and Objectives of the Study)." });
+      }
       let last = -1;
       input.objectives.forEach((o, i) => {
         const key = objectiveKey(o);
@@ -280,7 +286,12 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
         else last = at;
       });
     }
-    push("ST8", issues, { pass: `Chapter One states all ${input.objectives.length} approved objectives word for word, in order.`, na: "Chapter One is not part of this order." }, { na: !c1 || !input.objectives.length });
+    push(
+      "ST8",
+      issues,
+      { pass: `Chapter One states ${aim ? "the approved aim and " : ""}all ${input.objectives.length} approved objectives word for word, in order.`, na: "Chapter One is not part of this order." },
+      { na: !c1 || !input.objectives.length },
+    );
   }
 
   // ── ST9 objective traceability (AI) ──────────────────────────────────────

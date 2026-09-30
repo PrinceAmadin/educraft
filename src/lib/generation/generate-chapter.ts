@@ -205,6 +205,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
     department: assembled.department,
     template: assembled.template,
     thematicTitles: input.prompt.thematicTitles,
+    aim: earlier.aim ?? null,
     objectives,
     researchQuestions: earlier.researchQuestions,
     hypotheses: earlier.hypotheses,
@@ -258,6 +259,9 @@ export async function startChapterGeneration(input: StartChapterInput) {
       const given = earlier.objectives ?? [];
       if (given.length !== brief.objectives.length || given.some((o, i) => o !== brief.objectives[i])) {
         throw new GenerationError("These objectives are not the ones the COO approved. Every chapter uses the approved objectives word for word.", true, "STALE_INPUT");
+      }
+      if ((earlier.aim ?? null) !== brief.aim) {
+        throw new GenerationError("This aim is not the one the COO approved. Every chapter uses the approved aim word for word.", true, "STALE_INPUT");
       }
       if (JSON.stringify(input.prompt.primarySources ?? null) !== JSON.stringify(toPromptPrimarySources(brief) ?? null)) {
         throw new GenerationError(`These ${brief.kind === "ARCHIVE" ? "archival sources" : "cases"} are not the ones the COO approved.`, true, "STALE_INPUT");

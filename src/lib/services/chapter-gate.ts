@@ -261,6 +261,7 @@ async function evaluateChapter(s: Subject, force: boolean, opts: { ai?: boolean 
     prepared,
     { ...aiResultsFrom(out, references), traceability: null, errors: [] },
     {
+      aim: brief?.aim ?? null,
       objectives: brief?.objectives ?? [],
       pureScience: Boolean(lookupDepartment(settings?.department ?? input.department)?.pureScience),
       supervisorToc: Boolean(project?.departmentOutline?.trim()),

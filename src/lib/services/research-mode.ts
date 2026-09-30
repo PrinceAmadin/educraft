@@ -325,7 +325,7 @@ export async function changeMode(idOrCode: string, decision: ModeDecision & Brie
     });
     // A new mode never re-drafts the objectives by itself: the card flags objectives
     // drafted for another mode, and approval refuses them until Draft again is pressed.
-    await saveBriefChoices(tx, project.id, { objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds }, { approving: false, department: data.department });
+    await saveBriefChoices(tx, project.id, { aim: decision.aim, objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds }, { approving: false, department: data.department });
     const entry = getDepartmentModeDefault(decision.department).entry;
     const section = decision.section ?? defaultSectionFor(entry, mode);
     await writeProjectNote(tx, project.id, { kind: "MODE", actor, content: `Research mode set (not yet approved): ${describe(decision, section)}.` });
@@ -358,7 +358,7 @@ export async function approveMode(idOrCode: string, decision: ModeDecision & Bri
     const brief = await saveBriefChoices(
       tx,
       project.id,
-      { objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds },
+      { aim: decision.aim, objectives: decision.objectives, selectedSourceIds: decision.selectedSourceIds },
       { approving: true, department: valid.department, modeNumber: valid.mode },
     );
     const approval = {

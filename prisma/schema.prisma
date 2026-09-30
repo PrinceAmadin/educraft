@@ -1509,9 +1509,20 @@ model ProjectBrief {
   objectivesFromClient Boolean           @default(false)
   /// The ResearchMode.modeNumber the current objectives were drafted under.
   /// Null until the first successful draft. When ResearchMode.modeNumber later
-  /// differs, objectives are stale and are redrafted automatically (changeMode /
-  /// approveMode reset the brief to DRAFTING_OBJECTIVES + redraftOnly).
+  /// differs, the card flags the objectives and approval refuses them until the
+  /// founder or COO presses Draft again (nothing re-drafts on its own).
   objectivesModeNumber Int?
+  /// The COO's copy of the aim: one sentence, "The aim of this study is to …".
+  /// Chapter One states it word for word once approved. Null on briefs drafted
+  /// before aims were asked for (30 Sept 2026).
+  aim                  String?
+  /// What the drafter wrote (or suggested, on a report approved without an aim).
+  draftedAim           String?
+  /// The independent check of the aim and objectives (a different model, blind
+  /// to the drafter): scores, reasons, the inputs' key, the model and cost.
+  objectivesCheck      Json?
+  /// Held while a check runs, so two never run at once.
+  objectivesCheckLockedUntil DateTime?
   /// [{ index, text, attempts, outcome, queries }]
   points               Json?
   /// Web searches and archive queries spent; never more than 16 (source-policy.ts).

@@ -9,6 +9,8 @@
  */
 export const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
   "claude-sonnet-5": { input: 2, output: 10 },
+  // The independent objectives check (objectives-judge.ts), since 30 Sept 2026.
+  "claude-opus-5-5": { input: 4, output: 20 },
 };
 const FALLBACK_PRICE = { input: 2, output: 10 };
 /** Anthropic's server-side web search: $10 per 1,000 searches, on top of the tokens. */

@@ -51,9 +51,26 @@ export interface ClaudeToolCallInput<T> {
   cacheSystem?: boolean;
   /** Stop waiting after this long (default 240 s, inside the 300 s a function may run). A background tick sets less. */
   timeoutMs?: number;
+  /**
+   * Another model than the default Sonnet 5, e.g. the independent objectives
+   * check (Opus 5.5). A model in NO_FORCED_TOOL_MODELS refuses a forced tool
+   * choice, so the call asks for the tool by name instead, with a strict schema.
+   */
+  model?: string;
+  /** output_config.effort, for models that take it (Opus 5.5 defaults to medium). */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 const DEFAULT_JSON_TIMEOUT_MS = 240_000;
+
+/**
+ * Models that return a 400 for tool_choice "tool" / "any" (Opus 5.5, Sonnet
+ * 5.5, Fable 5.1). For them the tool is offered with tool_choice "auto",
+ * strict: true and the system prompt's instruction to call it, and the
+ * server-side refusal fallback is switched on ("default" routing).
+ */
+const NO_FORCED_TOOL_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]);
+const REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 export async function callClaudeForJson<T>({
   system,
@@ -65,8 +82,11 @@ export async function callClaudeForJson<T>({
   usage,
   cacheSystem = false,
   timeoutMs = DEFAULT_JSON_TIMEOUT_MS,
+  model = MODEL,
+  effort,
 }: ClaudeToolCallInput<T>): Promise<T> {
   const startedAt = Date.now();
+  const unforced = NO_FORCED_TOOL_MODELS.has(model);
   let res: Response;
   let json: any;
   try {
@@ -76,14 +96,17 @@ export async function callClaudeForJson<T>({
         "x-api-key": apiKey(),
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
+        ...(unforced ? { "anthropic-beta": REFUSAL_FALLBACK_BETA } : {}),
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         max_tokens: maxTokens,
         system: cacheSystem ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system,
         messages: [{ role: "user", content: user }],
-        tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema }],
-        tool_choice: { type: "tool", name: toolName },
+        tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema, ...(unforced ? { strict: true } : {}) }],
+        tool_choice: unforced ? { type: "auto" } : { type: "tool", name: toolName },
+        ...(effort ? { output_config: { effort } } : {}),
+        ...(unforced ? { fallbacks: "default" } : {}),
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -91,7 +114,7 @@ export async function callClaudeForJson<T>({
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     if (usage) {
-      await logAiUsage({ ...usage, model: MODEL, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, webSearchRequests: 0, durationMs: Date.now() - startedAt, status: "error" });
+      await logAiUsage({ ...usage, model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, webSearchRequests: 0, durationMs: Date.now() - startedAt, status: "error" });
     }
     throw new AnthropicError(timedOut ? `Claude did not answer within ${Math.round(timeoutMs / 1000)} seconds` : `Claude could not be reached (${error instanceof Error ? error.message : String(error)})`);
   }
@@ -99,7 +122,7 @@ export async function callClaudeForJson<T>({
   if (usage) {
     await logAiUsage({
       ...usage,
-      model: json?.model ?? MODEL,
+      model: json?.model ?? model,
       inputTokens: json?.usage?.input_tokens ?? 0,
       outputTokens: json?.usage?.output_tokens ?? 0,
       cacheWriteTokens: json?.usage?.cache_creation_input_tokens ?? 0,
@@ -111,6 +134,9 @@ export async function callClaudeForJson<T>({
   }
   if (!res.ok) {
     throw new AnthropicError(json?.error?.message || `Claude API error (${res.status})`);
+  }
+  if (json?.stop_reason === "refusal") {
+    throw new AnthropicError(`Claude declined the request${json?.stop_details?.category ? ` (${json.stop_details.category})` : ""}`);
   }
 
   const block = (json?.content ?? []).find((c: any) => c.type === "tool_use" && c.name === toolName);

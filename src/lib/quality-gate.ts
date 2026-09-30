@@ -267,6 +267,7 @@ async function runLocked(
     prepared,
     { ...aiResultsFrom(ai, references), traceability: ai.trace?.result ?? null, errors: ai.errors },
     {
+      aim: brief?.aim ?? null,
       objectives,
       pureScience: Boolean(entry?.pureScience),
       supervisorToc: Boolean(project.departmentOutline?.trim()),
