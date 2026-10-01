@@ -9,7 +9,6 @@ import {
   emailCommission,
   emailParentCommission,
   emailPendingCommission,
-  releaseCommission,
   resolveAmbassadorRate,
   resolveParentCommission,
   upsertCommissionExpense,
@@ -38,7 +37,7 @@ import { reopenQaReviewOnResubmit } from "@/lib/services/operations/qa-reviews";
 import { onProjectDelivered } from "@/lib/services/operations/ambassador-hooks";
 import { monthKeyOf, projectNetInflow, syncPaymentAmbassadorSnapshot, syncProjectBuckets } from "@/lib/services/finance/buckets";
 import { reconcileProjectPayouts } from "@/lib/services/finance/payouts-engine";
-import { cancelProjectReferral, ensureProjectReferral, recordConversion } from "@/lib/services/ambassador-platform/referrals";
+import { ensureProjectReferral, recordConversion } from "@/lib/services/ambassador-platform/referrals";
 import { ID_FORMAT, formatId, type IdKind } from "@/lib/id-format";
 import { statusFeedEntry } from "@/lib/client-updates";
 import { recordUpdate } from "@/lib/services/client-updates";
@@ -636,9 +635,7 @@ export async function holdProject(
   idOrCode: string,
   to: AdminHold,
   note: string,
-  changedById: string,
-  /** REFUNDED: what went back to the client — defaults to everything they paid. */
-  opts: { refundAmount?: number } = {}
+  changedById: string
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
@@ -649,16 +646,11 @@ export async function holdProject(
     throw new TransitionError(`Cannot ${to.toLowerCase()} a project that is ${project.status}`);
   }
 
-  // Money in on this job: a refund gives it back (its own OUTFLOW row, so the
-  // month's revenue is what was actually kept); a cancellation with money in
-  // is a decision for finance, not something to reverse automatically.
-  const moneyIn = to === "CANCELLED" || to === "REFUNDED" ? await projectNetInflow(db, project.id) : 0;
-  const refund = to === "REFUNDED" ? Math.round(opts.refundAmount ?? moneyIn) : 0;
-  if (to === "REFUNDED" && refund > moneyIn) {
-    throw new TransitionError(`A refund can't exceed what the client paid (${formatNaira(moneyIn)})`);
-  }
-  const refundPaymentId = refund > 0 ? await nextId("PAYMENT") : null;
-  const now = new Date();
+  // Refunding is its own flow now (Phase 6: Process refund) — not a hold.
+  // Cancelling never reverses a commission by itself (decision 6): the ACCRUED
+  // commissions stand, and a cancellation with money in becomes a persisting
+  // "decision needed" for finance (refund or keep). Nothing to the buckets.
+  const moneyIn = to === "CANCELLED" ? await projectNetInflow(db, project.id) : 0;
 
   const feed = statusFeedEntry(project.status, to);
   await db.$transaction(
@@ -668,40 +660,6 @@ export async function holdProject(
         data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
         select: { id: true },
       });
-      // A cancelled or refunded job earns no commission — drop it and its expense.
-      if (to === "CANCELLED" || to === "REFUNDED") {
-        await releaseCommission(tx, project.id);
-        await reconcileProjectPayouts(tx, project.id);
-        // The referral no longer counts toward the ambassador's tier.
-        await cancelProjectReferral(tx, project.id, to === "REFUNDED" ? `Project ${project.projectId} refunded` : `Project ${project.projectId} cancelled`);
-      }
-      if (refundPaymentId) {
-        await tx.payment.create({
-          data: {
-            paymentId: refundPaymentId,
-            type: "REFUND",
-            direction: "OUTFLOW",
-            projectId: project.id,
-            personName: project.client.fullName,
-            personRole: "Client",
-            amount: refund,
-            confirmedById: changedById,
-            status: "Confirmed",
-            source: "MANUAL",
-            notes: note,
-            date: now,
-          },
-        });
-      }
-      if (to === "CANCELLED" || to === "REFUNDED") {
-        // The legs (and the money in) changed: the buckets follow.
-        await syncPaymentAmbassadorSnapshot(tx, project.id);
-        await syncProjectBuckets(tx, project.id, {
-          reason: to === "REFUNDED" ? "REFUND" : "REALLOCATION",
-          month: monthKeyOf(now),
-          recordedById: changedById,
-        });
-      }
       if (feed) {
         await recordUpdate(tx, { projectId: project.id, kind: "STATUS", title: feed.title, body: feed.body, dedupeKey: `status:${log.id}` });
       }
@@ -709,19 +667,12 @@ export async function holdProject(
     { timeout: 30_000, maxWait: 10_000 }
   );
   if (feed) await notifyClient(project.id, { title: feed.title, message: `${project.projectId}: ${feed.title.toLowerCase()}.` });
-  if (to === "REFUNDED" && refund > 0) {
-    await notifyFinance({
-      title: "Refund recorded",
-      message: `${project.projectId}: ${formatNaira(refund)} refunded to the client. The buckets have given it back.`,
-      type: "warning",
-      link: "/admin/finance/revenue",
-    });
-  } else if (to === "CANCELLED" && moneyIn > 0) {
+  if (to === "CANCELLED" && moneyIn > 0) {
     await notifyFinance({
       title: "Decision needed: cancelled with money in",
-      message: `${project.projectId} was cancelled with ${formatNaira(moneyIn)} paid. Refund it (Mark refunded) or keep it — nothing was reversed.`,
+      message: `${project.projectId} was cancelled with ${formatNaira(moneyIn)} paid. Process a refund (reverse what's owed) or keep it — nothing was reversed.`,
       type: "urgent",
-      link: "/admin/finance/revenue",
+      link: `/admin/projects/${project.projectId}`,
     });
   }
 

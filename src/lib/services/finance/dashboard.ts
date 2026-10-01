@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getBucketCards, getRetainedForMonth, type BucketCard } from "@/lib/services/finance/buckets";
 import { getClaudePotHealth } from "@/lib/services/finance/pots";
+import { listCancelledUndecided } from "@/lib/services/finance/refunds";
 import { getMonthlyDrawPanel } from "@/lib/services/finance/founder-draws";
 import { payoutTotalsForMonth } from "@/lib/services/finance/payouts-engine";
 import { getRevenueSummary, listOutstandingBalances } from "@/lib/services/finance/revenue";
@@ -45,6 +46,8 @@ export interface DashboardAlerts {
   semesterBonusPending: boolean;
   /** The Claude API pot has been negative for 2+ consecutive weeks — the allocation % may be too low. */
   claudePotUnsustainable: boolean;
+  /** Cancelled projects with money in and no refund decision yet (decision 6). */
+  cancelledUndecided: { count: number; amount: number };
 }
 
 export interface RevenueHistoryPoint {
@@ -110,6 +113,7 @@ export async function getDashboardAlerts(month: string): Promise<DashboardAlerts
   const surplus = await getSurplusAnalysis(month);
   const overdue = outstanding.rows.filter((r) => r.daysSince > 7);
   const claudePot = await getClaudePotHealth();
+  const cancelled = await listCancelledUndecided();
   return {
     unpaidWorkers: workers,
     unpaidAmbassadors: ambassadors,
@@ -121,6 +125,7 @@ export async function getDashboardAlerts(month: string): Promise<DashboardAlerts
     duplicates: revenue.duplicates,
     semesterBonusPending: surplus.recommendation?.status === "PENDING",
     claudePotUnsustainable: claudePot.unsustainable,
+    cancelledUndecided: { count: cancelled.count, amount: cancelled.amount },
   };
 }
 

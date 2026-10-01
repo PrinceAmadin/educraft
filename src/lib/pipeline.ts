@@ -164,14 +164,14 @@ export const TRANSITIONS: Partial<Record<ProjectStatus, TransitionRule[]>> = {
   SUPERVISOR_CORRECTIONS: [{ to: "DELIVERED", action: "Re-deliver" }],
 };
 
-/** Admin overrides available from most non-terminal statuses. */
-export const ADMIN_HOLDS = ["ON_HOLD", "CANCELLED", "REFUNDED", "DISPUTED"] as const;
+/** Admin overrides available from most non-terminal statuses. Refunding is its
+ *  own flow (Phase 6: Process refund), not a hold. */
+export const ADMIN_HOLDS = ["ON_HOLD", "CANCELLED", "DISPUTED"] as const;
 export type AdminHold = (typeof ADMIN_HOLDS)[number];
 
 export const HOLD_LABELS: Record<AdminHold, string> = {
   ON_HOLD: "Put on hold",
   CANCELLED: "Cancel project",
-  REFUNDED: "Mark refunded",
   DISPUTED: "Mark disputed",
 };
 

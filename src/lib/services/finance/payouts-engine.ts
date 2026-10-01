@@ -343,12 +343,18 @@ export async function reconcileProjectPayouts(tx: Tx, projectDbId: string, opts:
       if (leg.recipientType === "AMBASSADOR") touched.add(leg.recipientId);
     }
   }
-  for (const row of existing) {
-    if (keep.has(`${row.leg}:${row.recipientId}`)) continue;
-    if (reconcileAction({ existingStatus: row.status as PayoutStatus, produced: false, changed: false }) !== "cancel") continue;
-    await tx.payoutRecord.update({ where: { id: row.id }, data: { status: "CANCELLED", notes: "No longer owed: the project's legs changed" } });
-    result.cancelled += 1;
-    if (row.recipientType === "AMBASSADOR") touched.add(row.recipientId);
+  // A leg is only cancelled when it genuinely stopped being produced on a LIVE project
+  // (the ambassador was removed, a rate went to 0). A cancelled/refunded project keeps
+  // its ACCRUED commissions standing: only a refund (processRefund) may reverse them,
+  // with a reason the recipient sees (Phase 6, decision 6).
+  if (alive) {
+    for (const row of existing) {
+      if (keep.has(`${row.leg}:${row.recipientId}`)) continue;
+      if (reconcileAction({ existingStatus: row.status as PayoutStatus, produced: false, changed: false }) !== "cancel") continue;
+      await tx.payoutRecord.update({ where: { id: row.id }, data: { status: "CANCELLED", notes: "No longer owed: the project's legs changed" } });
+      result.cancelled += 1;
+      if (row.recipientType === "AMBASSADOR") touched.add(row.recipientId);
+    }
   }
   for (const id of touched) await recountAmbassador(tx, id, s.tiers);
   return result;

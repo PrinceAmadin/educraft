@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { currentRunner } from "@/lib/generation/orchestrator-view";
 import { dueBatches } from "@/lib/finance/payout-schedule";
 import { buildDueBatches, finalizeDueBatches, sendBankReminders } from "@/lib/services/finance/payout-batches";
+import { sendCancelReminders } from "@/lib/services/finance/refunds";
 
 /**
  * The cashflow tick (Phase 5): the heartbeat that builds the batches due today,
@@ -64,9 +65,10 @@ export interface CashflowTickReport {
   built: number;
   finalised: number;
   remindersSent: number;
+  cancelRemindersSent: number;
 }
 
-/** One tick: build due batches, finalise any whose window has closed, remind missing-bank recipients on build days. */
+/** One tick: build due batches, finalise any whose window has closed, send the reminders. */
 export async function runCashflowTick(now: Date = new Date()): Promise<CashflowTickReport> {
   const due = dueBatches(now);
   const built = (await buildDueBatches(now)).built;
@@ -74,5 +76,7 @@ export async function runCashflowTick(now: Date = new Date()): Promise<CashflowT
   const finalised = (await finalizeDueBatches(now)).finalised;
   // Only on build days (the EmailLog guard keeps it to once per period even then).
   const remindersSent = due.length ? (await sendBankReminders(now)).sent : 0;
-  return { built, finalised, remindersSent };
+  // Once a day (self-gated): the cancelled-with-money-in decision reminders (decision 6).
+  const cancelRemindersSent = (await sendCancelReminders(now).catch(() => ({ sent: 0 }))).sent;
+  return { built, finalised, remindersSent, cancelRemindersSent };
 }

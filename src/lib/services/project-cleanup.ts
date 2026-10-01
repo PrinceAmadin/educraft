@@ -576,6 +576,7 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
 
       // Payout records go outright (a cancelled one left behind would read as a bonus), then the commission lines.
       await tx.payoutRecord.deleteMany({ where: { projectId: projectDbId } });
+      await tx.refundRecord.deleteMany({ where: { projectId: projectDbId } });
       await tx.expense.deleteMany({ where: { projectId: projectDbId } });
 
       // Payments (only hand-recorded, system or unpaid Paystack rows are left after the refusals).

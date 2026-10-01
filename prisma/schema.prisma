@@ -2369,6 +2369,38 @@ model FinanceFile {
   @@index([purpose, targetId])
 }
 
+/// A refund decision on a project (Phase 6). Writing one is the ONLY thing
+/// that reverses commissions (sets PayoutRecord REVERSED); cancelling a project
+/// never does. A "keep the money" decision is a row with refundAmount 0 that
+/// leaves the project CANCELLED and clears the "decision needed" reminder.
+model RefundRecord {
+  id            String   @id @default(cuid())
+  projectId     String
+  /// The stage the CFO chose (1 before work, 2 started, 3 chapter delivered, 4 complete).
+  stage         Int
+  /// The stage the system detected (for the record, even if the CFO overrode it).
+  detectedStage Int
+  refundPercent Float
+  /// Whole naira refunded to the client (0 for a keep-the-money decision).
+  refundAmount  Float
+  /// Net money in at the moment of the decision.
+  moneyInAtRefund Float
+  reason        String
+  initiatedById String
+  /// The REFUND OUTFLOW Payment this created (null for a 0 refund).
+  paymentId     String?  @unique
+  /// A FinanceFile (bank_confirmation) attached as proof, if any.
+  bankConfirmationFileId String?
+  /// What the worker was paid for chapters delivered before the refund (decision 7).
+  workerPartialAmount Float?
+  /// The PayoutRecord ids reversed by this refund.
+  reversedRecordIds String[] @default([])
+  clientEmailedAt DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([projectId])
+}
+
 // ─── CASHFLOW STRUCTURE (super-admin editable, versioned) ───────────────
 
 /// One immutable snapshot of the whole commission and bucket structure

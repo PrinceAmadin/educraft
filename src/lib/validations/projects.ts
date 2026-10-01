@@ -61,10 +61,9 @@ export const rejectPaymentBodySchema = z.object({
 });
 
 export const holdBodySchema = z.object({
-  to: z.enum(["ON_HOLD", "CANCELLED", "REFUNDED", "DISPUTED"]),
+  // Refunding is its own flow (Phase 6: Process refund); it is not a hold.
+  to: z.enum(["ON_HOLD", "CANCELLED", "DISPUTED"]),
   note: z.string().trim().min(3, "A reason is required").max(1000),
-  /** REFUNDED only: what was sent back to the client. Defaults to everything they paid. */
-  refundAmount: z.coerce.number().nonnegative().optional(),
 });
 
 export const assignWorkerBodySchema = z.object({

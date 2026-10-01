@@ -3,6 +3,7 @@ import { financialBreakdown } from "@/lib/project-display";
 import { PaymentVerification } from "@/components/projects/PaymentVerification";
 import { AmbassadorAllocation } from "@/components/projects/AmbassadorAllocation";
 import { MarkProBono } from "@/components/projects/MarkProBono";
+import { ProcessRefundDialog } from "@/components/projects/ProcessRefundDialog";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
@@ -214,6 +215,18 @@ export function FinancialsTab({
           become due when the project reaches Completed.
         </p>
       </section>
+
+      {canVerify && project.status !== "REFUNDED" ? (
+        <section className="space-y-2">
+          <h3 className="text-[15px] font-semibold text-foreground">Refund</h3>
+          <p className="text-[13px] text-muted-foreground">
+            {project.status === "CANCELLED"
+              ? "This job was cancelled with money in. Decide: refund the client (and reverse what's owed) or keep it. Nothing was reversed on cancellation."
+              : "Refund the client. Pick how far the work had gone; it reverses the commissions you choose and pays the worker for chapters delivered."}
+          </p>
+          <ProcessRefundDialog projectCode={project.projectId} cancelled={project.status === "CANCELLED"} />
+        </section>
+      ) : null}
 
       {canProBono && project.payments.length === 0 && !closed ? (
         <section className="space-y-2">
