@@ -2218,6 +2218,7 @@ model PayoutRecord {
   accruedAt     DateTime?
   /// The payout batch that paid it (Phase 5).
   batchId       String?
+  batch         PayoutBatch? @relation(fields: [batchId], references: [id])
   /// A refund's reversal (Phase 6).
   reversedAt    DateTime?
   reversalReason String?
@@ -2292,10 +2293,80 @@ model FounderDraw {
   createdById   String?
   /// Free text, or the JSON analysis snapshot behind a semester / annual recommendation.
   notes         String?
+  /// The founders payout batch that distributed it (Phase 5).
+  batchId       String?
+  batch         PayoutBatch? @relation(fields: [batchId], references: [id])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   @@index([month, drawType])
+  @@index([batchId])
+}
+
+/// A payout run for one cohort and period (Phase 5): the ACCRUED records it
+/// gathered, cleared together with a bank reference and confirmation, with a
+/// ten-minute undo window before the confirmation emails go out (sent by the
+/// cashflow tick, never inside the clear request). One batch per (cohort,
+/// periodKey).
+model PayoutBatch {
+  id             String   @id @default(cuid())
+  /// AMBASSADORS (weekly) | WORKERS | EXECUTIVES (monthly) | FOUNDERS (monthly)
+  cohort         String
+  /// "2026-W40" for a week, "2026-10" for a month.
+  periodKey      String
+  periodStart    DateTime
+  periodEnd      DateTime
+  /// READY (gathered, not paid) | CLEARED (paid, undo window open) | FINALIZED (emails sent) | UNDONE
+  status         String   @default("READY")
+  totalAmount    Float    @default(0)
+  recipientCount Int      @default(0)
+  builtAt        DateTime @default(now())
+  /// "tick" or a user id.
+  builtBy        String
+  clearedAt      DateTime?
+  clearedById    String?
+  paymentMethod  String?
+  paymentMethodDetail String?
+  batchReference String?
+  notes          String?
+  bankConfirmationFileId String?
+  /// The batch sends its confirmation emails after this instant (clearedAt + 10 min); it is also the undo deadline.
+  emailsScheduledAt DateTime?
+  /// A lease so only one tick finalises a batch.
+  emailsStartedAt DateTime?
+  emailsSentAt   DateTime?
+  /// Per-recipient send outcome once finalised: [{recipientType, recipientId, to, ok, error, at}].
+  emailReport    Json?
+  undoneAt       DateTime?
+  undoneById     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  records        PayoutRecord[]
+  draws          FounderDraw[]
+
+  @@unique([cohort, periodKey])
+  @@index([status, emailsScheduledAt])
+}
+
+/// An organisation-level finance document (Phase 5): a bank-transfer
+/// confirmation for a payout batch, or a generated weekly statement. Not tied
+/// to a project, so it lives outside the project-rooted ProjectFile store; the
+/// bytes are in the private Blob store under a `finance/…` path.
+model FinanceFile {
+  id           String   @id @default(cuid())
+  /// bank_confirmation | statement
+  purpose      String
+  /// The batch/statement id this belongs to (used in the blob path).
+  targetId     String
+  fileName     String
+  fileType     String
+  fileSize     Int
+  blobPathname String
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([purpose, targetId])
 }
 
 // ─── CASHFLOW STRUCTURE (super-admin editable, versioned) ───────────────

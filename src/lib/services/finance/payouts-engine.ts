@@ -840,11 +840,133 @@ const PAYMENT_TYPE: Record<RecipientType, "WORKER_PAYOUT" | "AMBASSADOR_COMMISSI
 };
 const PERSON_ROLE: Record<RecipientType, string> = { WORKER: "Worker", AMBASSADOR: "Ambassador", EXECUTIVE: "Executive", USER: "Staff" };
 
+/** The minimal record shape the pay helper needs (both the queue path and a batch select these fields). */
+export interface PayableRecord {
+  id: string;
+  recipientType: string;
+  recipientId: string;
+  recipientName: string;
+  amount: number;
+  leg: string;
+  projectId: string | null;
+  month: string;
+}
+export const PAYABLE_SELECT = { id: true, recipientType: true, recipientId: true, recipientName: true, amount: true, leg: true, projectId: true, month: true } as const;
+
+export interface PaidTo {
+  recipientType: RecipientType;
+  recipientId: string;
+  userId: string | null;
+  amount: number;
+}
+
+export interface PayRecordsResult {
+  paidTo: PaidTo[];
+  records: number;
+  totalAmount: number;
+}
+
+/**
+ * Pay an already-selected set of UNPAID records, inside a caller's transaction:
+ * group by recipient, claim each group PAID under a count check (a double click
+ * pays nothing twice), mint one OUTFLOW Payment per recipient, stamp the records
+ * (and `batchId` when a batch is paying), and flip the project's legacy paid
+ * flags. It does NOT notify — the queue path notifies at once, the batch path
+ * defers every message to the ten-minute-later finalise. Payment ids are numbered
+ * from `firstNumber` (one nextId read before the transaction) so several never collide.
+ */
+export async function payRecordsTx(
+  tx: Tx,
+  pending: PayableRecord[],
+  opts: { paidById: string; reference?: string | null; paidOn: Date; execs: Awaited<ReturnType<typeof execNames>>; batchId?: string | null; firstNumber: number }
+): Promise<PayRecordsResult> {
+  const payable = { in: [...UNPAID_STATUSES] };
+  const groups = new Map<string, PayableRecord[]>();
+  for (const r of pending) {
+    const key = `${r.recipientType}:${r.recipientId}`;
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  const paidTo: PaidTo[] = [];
+  let records = 0;
+  let totalAmount = 0;
+  let minted = 0;
+  for (const rows of groups.values()) {
+    const recipientType = rows[0].recipientType as RecipientType;
+    const recipientId = rows[0].recipientId;
+    const ids = rows.map((r) => r.id);
+    const amount = Math.round(rows.reduce((s, r) => s + r.amount, 0));
+    const userId =
+      recipientType === "WORKER"
+        ? ((await tx.worker.findUnique({ where: { id: recipientId }, select: { userId: true } }))?.userId ?? null)
+        : recipientType === "AMBASSADOR"
+          ? ((await tx.ambassador.findUnique({ where: { id: recipientId }, select: { userId: true } }))?.userId ?? null)
+          : recipientType === "USER"
+            ? recipientId
+            : (opts.execs[recipientId as ExecRecipient]?.userId ?? null);
+
+    const claimed = await tx.payoutRecord.updateMany({ where: { id: { in: ids }, status: payable }, data: { status: "PAID" } });
+    if (claimed.count !== ids.length) throw new PayoutError("Someone else just recorded part of this payout. Refresh the page.");
+
+    const projectCount = new Set(rows.map((r) => r.projectId).filter((x): x is string => x != null)).size;
+    const payment = await tx.payment.create({
+      data: {
+        paymentId: opts.firstNumber > 0 ? formatId("PAYMENT", opts.firstNumber + minted++) : await nextId("PAYMENT"),
+        type: PAYMENT_TYPE[recipientType],
+        direction: "OUTFLOW",
+        personName: rows[0].recipientName,
+        personRole: PERSON_ROLE[recipientType],
+        amount,
+        reference: opts.reference || null,
+        confirmedById: opts.paidById,
+        status: "Confirmed",
+        source: "SYSTEM",
+        date: opts.paidOn,
+        notes: `${rows[0].month} payout for ${projectCount} project${projectCount === 1 ? "" : "s"}`,
+      },
+      select: { id: true },
+    });
+    await tx.payoutRecord.updateMany({
+      where: { id: { in: ids } },
+      data: { paidAt: opts.paidOn, paidById: opts.paidById, paidToUserId: userId, paymentId: payment.id, ...(opts.batchId ? { batchId: opts.batchId } : {}) },
+    });
+    // The project flags the portals and the old queue read.
+    const byLeg = (leg: PayoutLeg) => rows.filter((r) => r.leg === leg).map((r) => r.projectId).filter((x): x is string => x != null);
+    const workerProjects = byLeg("WORKER");
+    const ambProjects = byLeg("AMBASSADOR");
+    const parentProjects = byLeg("PARENT");
+    if (workerProjects.length) await tx.project.updateMany({ where: { id: { in: workerProjects } }, data: { workerPayoutPaid: true } });
+    if (ambProjects.length) await tx.project.updateMany({ where: { id: { in: ambProjects } }, data: { ambassadorCommPaid: true } });
+    if (parentProjects.length) await tx.project.updateMany({ where: { id: { in: parentProjects } }, data: { parentCommPaid: true } });
+
+    paidTo.push({ recipientType, recipientId, userId, amount });
+    records += ids.length;
+    totalAmount += amount;
+  }
+  return { paidTo, records, totalAmount };
+}
+
+/** Tell each paid recipient with a login (the queue path only; batches defer this to finalise). */
+export async function notifyPaidTo(paidTo: PaidTo[]): Promise<void> {
+  await Promise.all(
+    paidTo
+      .filter((t) => t.userId)
+      .map((t) =>
+        notifyUsers([t.userId as string], {
+          title: t.recipientType === "WORKER" ? "Payout sent" : "Commission paid",
+          message: `${formatNaira(t.amount)} was recorded as paid to you.`,
+          type: "success",
+          link: t.recipientType === "WORKER" ? "/worker/earnings" : t.recipientType === "AMBASSADOR" ? "/ambassador/commissions" : "/admin/earnings",
+        })
+      )
+  );
+}
+
 /**
  * Record a transfer: the PENDING records become PAID under a count check
  * (a double click pays nothing twice), one OUTFLOW Payment per recipient
  * carries the sum, and the project's legacy paid flags follow. Recipients
- * with a login are told.
+ * with a login are told at once. (The batch path in payout-batches.ts uses
+ * payRecordsTx directly and defers notification to the finalise step.)
  */
 export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInput): Promise<MarkPaidResult> {
   const payable = { in: [...UNPAID_STATUSES] };
@@ -859,89 +981,17 @@ export async function markPayoutsPaid(target: MarkPaidTarget, input: MarkPaidInp
   // Several payments are minted in one transaction: number them from one read so they never collide.
   const firstPaymentId = await nextId("PAYMENT");
   const firstNumber = Number(/(\d+)$/.exec(firstPaymentId)?.[1] ?? 0);
-  let minted = 0;
 
   const outcome = await db.$transaction(
     async (tx) => {
-      const pending = await tx.payoutRecord.findMany({ where, orderBy: { createdAt: "asc" } });
+      const pending = await tx.payoutRecord.findMany({ where, orderBy: { createdAt: "asc" }, select: PAYABLE_SELECT });
       if (pending.length === 0) throw new PayoutError("Nothing pending to pay");
-      const groups = new Map<string, typeof pending>();
-      for (const r of pending) {
-        const key = `${r.recipientType}:${r.recipientId}`;
-        groups.set(key, [...(groups.get(key) ?? []), r]);
-      }
-      const paidTo: { recipientType: RecipientType; recipientId: string; userId: string | null; amount: number }[] = [];
-      let records = 0;
-      let totalAmount = 0;
-      for (const rows of groups.values()) {
-        const recipientType = rows[0].recipientType as RecipientType;
-        const recipientId = rows[0].recipientId;
-        const ids = rows.map((r) => r.id);
-        const amount = Math.round(rows.reduce((s, r) => s + r.amount, 0));
-        const userId =
-          recipientType === "WORKER"
-            ? ((await tx.worker.findUnique({ where: { id: recipientId }, select: { userId: true } }))?.userId ?? null)
-            : recipientType === "AMBASSADOR"
-              ? ((await tx.ambassador.findUnique({ where: { id: recipientId }, select: { userId: true } }))?.userId ?? null)
-              : recipientType === "USER"
-                ? recipientId
-                : (execs[recipientId as ExecRecipient]?.userId ?? null);
-
-        const claimed = await tx.payoutRecord.updateMany({ where: { id: { in: ids }, status: payable }, data: { status: "PAID" } });
-        if (claimed.count !== ids.length) throw new PayoutError("Someone else just recorded part of this payout. Refresh the page.");
-
-        const projectCount = new Set(rows.map((r) => r.projectId).filter((x): x is string => x != null)).size;
-        const payment = await tx.payment.create({
-          data: {
-            paymentId: firstNumber > 0 ? formatId("PAYMENT", firstNumber + minted++) : await nextId("PAYMENT"),
-            type: PAYMENT_TYPE[recipientType],
-            direction: "OUTFLOW",
-            personName: rows[0].recipientName,
-            personRole: PERSON_ROLE[recipientType],
-            amount,
-            reference: input.reference || null,
-            confirmedById: input.paidById,
-            status: "Confirmed",
-            source: "SYSTEM",
-            date: paidOn,
-            notes: `${rows[0].month} payout for ${projectCount} project${projectCount === 1 ? "" : "s"}`,
-          },
-          select: { id: true },
-        });
-        await tx.payoutRecord.updateMany({
-          where: { id: { in: ids } },
-          data: { paidAt: paidOn, paidById: input.paidById, paidToUserId: userId, paymentId: payment.id },
-        });
-        // The project flags the portals and the old queue read.
-        const byLeg = (leg: PayoutLeg) => rows.filter((r) => r.leg === leg).map((r) => r.projectId).filter((x): x is string => x != null);
-        const workerProjects = byLeg("WORKER");
-        const ambProjects = byLeg("AMBASSADOR");
-        const parentProjects = byLeg("PARENT");
-        if (workerProjects.length) await tx.project.updateMany({ where: { id: { in: workerProjects } }, data: { workerPayoutPaid: true } });
-        if (ambProjects.length) await tx.project.updateMany({ where: { id: { in: ambProjects } }, data: { ambassadorCommPaid: true } });
-        if (parentProjects.length) await tx.project.updateMany({ where: { id: { in: parentProjects } }, data: { parentCommPaid: true } });
-
-        paidTo.push({ recipientType, recipientId, userId, amount });
-        records += ids.length;
-        totalAmount += amount;
-      }
-      return { paidTo, records, totalAmount };
+      return payRecordsTx(tx, pending, { paidById: input.paidById, reference: input.reference ?? null, paidOn, execs, firstNumber });
     },
     { timeout: 25_000, maxWait: 10_000 }
   );
 
-  await Promise.all(
-    outcome.paidTo
-      .filter((t) => t.userId)
-      .map((t) =>
-        notifyUsers([t.userId as string], {
-          title: t.recipientType === "WORKER" ? "Payout sent" : "Commission paid",
-          message: `${formatNaira(t.amount)} was recorded as paid to you.`,
-          type: "success",
-          link: t.recipientType === "WORKER" ? "/worker/earnings" : t.recipientType === "AMBASSADOR" ? "/ambassador/commissions" : "/admin/earnings",
-        })
-      )
-  );
+  await notifyPaidTo(outcome.paidTo);
   return { recipients: outcome.paidTo.length, records: outcome.records, totalAmount: outcome.totalAmount };
 }
 

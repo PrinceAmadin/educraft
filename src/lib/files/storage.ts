@@ -5,7 +5,7 @@ import { BlobNotFoundError, del, get, head, issueSignedToken, put } from "@verce
 import { handleUploadPresigned, type HandleUploadPresignedBody } from "@vercel/blob/client";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { contentTypeFor, maxBytesFor } from "@/lib/files/policy";
-import { parseStoredPath } from "@/lib/files/paths";
+import { storedPathInfo } from "@/lib/files/paths";
 
 /**
  * The ONLY code that touches the private file store (chapters, final
@@ -75,7 +75,7 @@ async function blobAuth(): Promise<BlobAuth> {
 const LOCAL_ROOT = path.join(process.cwd(), ".private-files");
 
 function localPath(pathname: string): string {
-  if (!parseStoredPath(pathname)) throw new Error("Invalid private path");
+  if (!storedPathInfo(pathname)) throw new Error("Invalid private path");
   const full = path.join(LOCAL_ROOT, ...pathname.split("/"));
   if (!full.startsWith(LOCAL_ROOT + path.sep)) throw new Error("Invalid private path");
   return full;
@@ -115,7 +115,7 @@ export interface StoredFileInfo {
 }
 
 function typeFromPath(pathname: string): string {
-  const parsed = parseStoredPath(pathname);
+  const parsed = storedPathInfo(pathname);
   return (parsed && contentTypeFor(parsed.purpose, parsed.name)) || "application/octet-stream";
 }
 
@@ -223,7 +223,7 @@ export async function readFirstBytes(pathname: string, count = 16): Promise<Uint
  * needs a credential: link to a download route, never to it).
  */
 export async function putPrivateFile(pathname: string, bytes: Uint8Array, contentType: string): Promise<{ url: string }> {
-  const parsed = parseStoredPath(pathname);
+  const parsed = storedPathInfo(pathname);
   if (!parsed) throw new Error("Invalid private path");
   if (bytes.byteLength > maxBytesFor(parsed.purpose)) throw new Error("File is too large");
   if (storageDriver() === "local") {

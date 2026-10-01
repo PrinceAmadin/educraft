@@ -66,8 +66,10 @@ export const UPLOAD_PURPOSES: readonly UploadPurpose[] = ["deliverable", "messag
 /** Everything the private store holds: uploads plus server-written files.
  * - "source": court judgment PDFs (D3b) and Mode 5 datasets (D5).
  * - "receipt": one PDF per verified client payment (D10), rendered on Verify and streamed on click.
- * - "research": open-access PDFs fetched by the research pipeline's Step 4 (one per kept reference). */
-export type StoredPurpose = UploadPurpose | "source" | "receipt" | "research";
+ * - "research": open-access PDFs fetched by the research pipeline's Step 4 (one per kept reference).
+ * - "bank_confirmation": a bank-transfer confirmation a finance user attaches to a payout batch (Phase 5).
+ * - "statement": a generated weekly financial statement, PDF or spreadsheet (Phase 7). */
+export type StoredPurpose = UploadPurpose | "source" | "receipt" | "research" | "bank_confirmation" | "statement";
 
 /** What the caller's route knows about the upload (D4): whose project it is and whether it is paused for data. */
 export interface UploadContext {
@@ -119,10 +121,14 @@ const EXTENSIONS: Record<StoredPurpose, readonly string[]> = {
   receipt: ["pdf"],
   // Research PDFs the pipeline downloads from open-access hosts. Never uploaded.
   research: ["pdf"],
+  // A finance user's bank-transfer confirmation for a payout batch (Phase 5).
+  bank_confirmation: ["pdf", "png", "jpg", "jpeg", "webp"],
+  // A generated weekly financial statement (Phase 7), server-written.
+  statement: ["pdf", "csv", "xlsx"],
 };
 
 const MB = 1024 * 1024;
-const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB, data: 25 * MB, receipt: 512 * 1024, research: 25 * MB };
+const MAX_BYTES: Record<StoredPurpose, number> = { deliverable: 50 * MB, message: 25 * MB, source: 25 * MB, data: 25 * MB, receipt: 512 * 1024, research: 25 * MB, bank_confirmation: 10 * MB, statement: 25 * MB };
 
 export function maxBytesFor(purpose: StoredPurpose): number {
   return MAX_BYTES[purpose];

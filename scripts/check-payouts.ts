@@ -143,6 +143,49 @@ expect("unpaid = the two ACCRUED", unpaid, 10_500 + 4_900);
 expect("owed − paid = unpaid (no PENDING in the set)", owed - paid, unpaid);
 expect("the reversed and cancelled amounts count nowhere", owed + paid + unpaid - (10_500 + 4_900 + 7_700 + 7_700 + 10_500 + 4_900), 0);
 
+// ── Phase 5: payout batch schedule (pure, WAT) ───────────────────────────────
+import { COHORT_RECIPIENT_TYPES, dueBatches, emailsScheduledFor, isLastFridayOfMonth, shiftMonthKey, undoOpen, watMonthKey } from "../src/lib/finance/payout-schedule";
+
+// Reference WAT days in Oct/Nov 2026 (WAT = UTC+1): choose instants at 10:00 WAT = 09:00 UTC to avoid edges.
+const at = (iso: string) => new Date(iso); // ISO carries the zone; use explicit +01:00 below.
+const SAT = at("2026-10-03T10:00:00+01:00"); // Saturday
+const MON = at("2026-10-05T10:00:00+01:00"); // Monday
+const LAST_FRI = at("2026-10-30T10:00:00+01:00"); // last Friday of October 2026
+const MID_FRI = at("2026-10-09T10:00:00+01:00"); // a Friday that is not the last
+const FIRST = at("2026-11-01T10:00:00+01:00"); // the 1st (also a Sunday)
+
+const cohortsOn = (d: Date) => dueBatches(d).map((b) => b.cohort).sort();
+expect("Saturday is ambassadors day", cohortsOn(SAT), ["AMBASSADORS"]);
+expect("a plain Monday is no one's day", cohortsOn(MON), []);
+expect("the last Friday pays workers and executives", cohortsOn(LAST_FRI), ["EXECUTIVES", "WORKERS"]);
+expect("a mid-month Friday is not a payout day", cohortsOn(MID_FRI), []);
+expect("the 1st is founders day", cohortsOn(FIRST), ["FOUNDERS"]);
+expect("isLastFridayOfMonth is true only on the last Friday", [isLastFridayOfMonth(LAST_FRI), isLastFridayOfMonth(MID_FRI)], [true, false]);
+
+const worker = dueBatches(LAST_FRI).find((b) => b.cohort === "WORKERS")!;
+expect("the workers batch keys by the WAT month", worker.periodKey, "2026-10");
+const founders = dueBatches(FIRST).find((b) => b.cohort === "FOUNDERS")!;
+expect("the founders batch on 1 Nov is for October", founders.periodKey, "2026-10");
+expect("shiftMonthKey rolls the year", shiftMonthKey("2026-01", -1), "2025-12");
+expect("watMonthKey reads the WAT month", watMonthKey(FIRST), "2026-11");
+
+const amb = dueBatches(SAT).find((b) => b.cohort === "AMBASSADORS")!;
+expect("the ambassadors batch keys by ISO week", /^\d{4}-W\d{2}$/.test(amb.periodKey), true);
+
+// Cohort → recipient types (BONUS legs ride EXECUTIVE; PARENT overrides ride AMBASSADOR).
+expect("workers cohort pays WORKER records", COHORT_RECIPIENT_TYPES.WORKERS, ["WORKER"]);
+expect("ambassadors cohort pays AMBASSADOR records", COHORT_RECIPIENT_TYPES.AMBASSADORS, ["AMBASSADOR"]);
+expect("executives cohort pays EXECUTIVE and USER records", COHORT_RECIPIENT_TYPES.EXECUTIVES, ["EXECUTIVE", "USER"]);
+
+// The ten-minute undo window.
+const cleared = new Date("2026-10-30T10:00:00Z");
+const scheduled = emailsScheduledFor(cleared);
+expect("emails are scheduled ten minutes after clearing", scheduled.getTime() - cleared.getTime(), 10 * 60 * 1000);
+expect("undo is open at five minutes", undoOpen(scheduled, new Date(cleared.getTime() + 5 * 60 * 1000)), true);
+expect("undo is closed exactly at the deadline", undoOpen(scheduled, scheduled), false);
+expect("undo is closed after the deadline", undoOpen(scheduled, new Date(scheduled.getTime() + 1)), false);
+expect("undo needs a scheduled time", undoOpen(null, cleared), false);
+
 if (failures > 0) {
   console.log(`\n${failures} check(s) failed.`);
   process.exit(1);

@@ -65,6 +65,45 @@ export function parseStoredPath(pathname: string): StoredPath | null {
   return { projectDbId, purpose, targetId, name };
 }
 
+// ─── Finance files (Phase 5): organisation-level, not under a project ───────
+
+/** The finance purposes that live under the `finance/` root (not project-scoped). */
+export type FinancePurpose = "bank_confirmation" | "statement";
+const FINANCE_PURPOSES: FinancePurpose[] = ["bank_confirmation", "statement"];
+
+export interface FinancePath {
+  purpose: FinancePurpose;
+  targetId: string;
+  name: string;
+}
+
+/** finance/{purpose}/{targetId}/{random}.{ext} — a bank confirmation or a statement. */
+export function buildFinancePath(input: { purpose: FinancePurpose; targetId: string; random: string; ext: string }): string {
+  return `finance/${input.purpose}/${input.targetId}/${input.random}.${input.ext}`;
+}
+
+export function parseFinancePath(pathname: string): FinancePath | null {
+  const parts = pathname.split("/");
+  if (parts.length !== 4 || parts[0] !== "finance") return null;
+  const [, purpose, targetId, name] = parts;
+  if (!TARGET.test(targetId) || !NAME.test(name)) return null;
+  if (!FINANCE_PURPOSES.includes(purpose as FinancePurpose)) return null;
+  return { purpose: purpose as FinancePurpose, targetId, name };
+}
+
+/**
+ * The common facts storage.ts needs for ANY private path (project or finance):
+ * its purpose (for the content type and size cap) and its random name (for the
+ * extension). Keeps parseStoredPath project-only so its callers are unaffected.
+ */
+export function storedPathInfo(pathname: string): { purpose: StoredPurpose; name: string } | null {
+  const project = parseStoredPath(pathname);
+  if (project) return { purpose: project.purpose, name: project.name };
+  const finance = parseFinancePath(pathname);
+  if (finance) return { purpose: finance.purpose, name: finance.name };
+  return null;
+}
+
 /** Message attachments are uploaded before the message exists, so their target is the thread. */
 export const MESSAGE_TARGET = "thread";
 
