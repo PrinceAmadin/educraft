@@ -232,7 +232,9 @@ export async function processRefund(idOrCode: string, input: ProcessRefundInput,
 
       // The refund transition + the client-facing status, only when money actually goes back.
       if (refunding) {
-        await tx.project.update({ where: { id: project.id }, data: { status: "REFUNDED" } });
+        // Claim the transition so a double click (or two clerks) cannot refund twice.
+        const claimed = await tx.project.updateMany({ where: { id: project.id, status: { not: "REFUNDED" } }, data: { status: "REFUNDED" } });
+        if (claimed.count !== 1) throw new RefundError("This project was just refunded. Refresh the page.");
         await tx.projectStatusLog.create({ data: { projectId: project.id, fromStatus: project.status, toStatus: "REFUNDED", changedById: actorId, notes: input.reason.trim() } });
         await tx.payment.create({
           data: {

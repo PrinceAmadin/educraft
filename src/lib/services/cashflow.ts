@@ -30,7 +30,7 @@ export class NoCashflowVersion extends Error {
 export class CashflowPublishError extends Error {
   constructor(
     message: string,
-    public readonly status: 400 | 409,
+    public readonly status: 400 | 404 | 409,
     public readonly violations: Violation[] = []
   ) {
     super(message);
@@ -265,6 +265,17 @@ export async function publishCashflow(input: { structure: CashflowStructure; rea
     tiersChanged: previous ? tiersChanged(previous.structure, input.structure) : false,
     warnings: violations.filter((v) => v.severity === "warn"),
   };
+}
+
+/**
+ * Republish an old version as a new one (Phase 8): takes that version's exact
+ * structure through the same validation and publish path, so it becomes N+1 (a
+ * roll-back that keeps the history intact). A no-op if it equals the active one.
+ */
+export async function republishCashflow(versionNumber: number, actorId: string): Promise<PublishResult> {
+  const v = await getCashflowVersionByNumber(versionNumber);
+  if (!v) throw new CashflowPublishError(`Version ${versionNumber} not found`, 404);
+  return publishCashflow({ structure: v.structure, reason: `Republished from version ${versionNumber}`, actorId });
 }
 
 /** The founder's audit trail for the cashflow settings, newest first. */

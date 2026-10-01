@@ -107,8 +107,27 @@ for (const file of src) {
   });
 }
 
+// 5. Audit coverage (Phase 8): every cashflow structure / money-policy mutation writes a CashflowAuditLog action.
+const AUDITED: { file: string; fn: string; action: string }[] = [
+  { file: "src/lib/services/cashflow.ts", fn: "publishCashflow", action: "published_version" },
+  { file: "src/lib/services/settings.ts", fn: "updateGeneralSettings", action: "changed_hq_contact" },
+  { file: "src/lib/services/finance/buckets.ts", fn: "manualAdjustment", action: "bucket_adjustment" },
+  { file: "src/lib/services/finance/refunds.ts", fn: "processRefund", action: "processed_refund" },
+];
+for (const a of AUDITED) {
+  const full = join(ROOT, a.file);
+  if (!statSync(full, { throwIfNoEntry: false })) {
+    problem(full, 0, `audit-coverage: ${a.file} is missing — the check is out of date`);
+    continue;
+  }
+  const source = stripComments(readFileSync(full, "utf-8"));
+  if (!new RegExp(`function ${a.fn}\\b`).test(source)) problem(full, 0, `audit-coverage: ${a.fn} not found — update the check`);
+  else if (!source.includes("cashflowAuditLog.create")) problem(full, 0, `audit-coverage: ${a.fn} must write a CashflowAuditLog row`);
+  else if (!source.includes(`"${a.action}"`)) problem(full, 0, `audit-coverage: ${a.file} should record the action "${a.action}"`);
+}
+
 if (problems) {
-  console.log(`\n${problems} place(s) still hardcode a cashflow figure or an HQ contact detail.`);
+  console.log(`\n${problems} place(s) still hardcode a cashflow figure or an HQ contact detail, or miss an audit row.`);
   process.exit(1);
 }
-console.log("No hardcoded cashflow figures or HQ contact details outside the keep-list.");
+console.log("No hardcoded cashflow figures or HQ contact details outside the keep-list; cashflow mutations are audited.");

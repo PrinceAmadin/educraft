@@ -131,7 +131,7 @@ export function CashflowEditor({
         </div>
       ) : null}
 
-      <VersionHistory history={history} />
+      <VersionHistory history={history} canRepublish={!readOnly} />
 
       <PublishDialog
         open={publishing}
