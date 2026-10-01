@@ -77,7 +77,7 @@ export default async function ProjectsListPage({ searchParams }: { searchParams:
     <div className="space-y-8">
       <PageHeader
         title="Projects"
-        description="Every project between payment and completion. The bar shows where the work sits; the list below is what needs a hand."
+        description="Every project between payment and completion. The grid shows where the work sits; the list below is what needs a hand."
         actions={
           <div className="flex flex-wrap gap-2">
             {isSuperAdmin ? (
