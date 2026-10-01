@@ -6,7 +6,10 @@ import { MonthPicker } from "@/components/reports/MonthPicker";
 import { PayoutSection, type PayoutGroupView } from "@/components/finance/payouts/PayoutSection";
 import { BonusPanel } from "@/components/finance/payouts/BonusPanel";
 import { CooPayoutPanel } from "@/components/finance/payouts/CooPayoutPanel";
+import { PayoutBatches } from "@/components/finance/payouts/PayoutBatches";
 import { calculateMonthlyPayouts, getCooPayoutView, getPayoutMonth, type Bank } from "@/lib/services/finance/payouts-engine";
+import { getPayoutQueue } from "@/lib/services/finance/payout-batches";
+import { cashflowSchedulerQuiet } from "@/lib/services/finance/cashflow-tick";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import { currentMonthKey } from "@/lib/services/finance/surplus";
 import { payoutsQuerySchema } from "@/lib/validations/finance-payouts";
@@ -57,6 +60,7 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Reco
   const [data, active] = await Promise.all([getPayoutMonth(month), getActiveCashflow()]);
   const canMarkPaid = canMarkPayoutsPaid(role);
   const exportHref = `/api/admin/finance/payouts/export?month=${month}`;
+  const queue = await getPayoutQueue(session?.user?.id ?? "", await cashflowSchedulerQuiet());
 
   const workers: PayoutGroupView[] = data.workers.map((g) => ({
     recipientId: g.recipientId,
@@ -122,6 +126,8 @@ export default async function PayoutsPage({ searchParams }: { searchParams: Reco
         back={{ href: "/admin/finance", label: "Finance" }}
         actions={<MonthPicker month={month} currentMonth={currentMonth} basePath="/admin/finance/payouts" />}
       />
+
+      <PayoutBatches cohorts={queue.cohorts} history={queue.history} schedulerQuiet={queue.schedulerQuiet} canClear={canMarkPaid} />
 
       <section aria-label="Month totals" className="grid gap-x-10 gap-y-6 rounded-2xl bg-zone p-5 sm:grid-cols-3 sm:p-7">
         <div>

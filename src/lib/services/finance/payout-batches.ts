@@ -483,6 +483,56 @@ export async function sendBankReminders(now: Date = new Date()): Promise<{ sent:
 
 // ── The tick's batch duties ──────────────────────────────────────────────────
 
+export interface BatchHistoryRow {
+  id: string;
+  cohort: string;
+  cohortLabel: string;
+  periodKey: string;
+  status: string;
+  totalAmount: number;
+  recipientCount: number;
+  clearedAt: string | null;
+  emailsSentAt: string | null;
+  batchReference: string | null;
+  bankConfirmationFileId: string | null;
+}
+
+/** Recent cleared/finalised/undone batches, newest first. */
+export async function batchHistory(limit = 20): Promise<BatchHistoryRow[]> {
+  const rows = await db.payoutBatch.findMany({
+    where: { status: { in: ["CLEARED", "FINALIZED", "UNDONE"] } },
+    orderBy: { clearedAt: "desc" },
+    take: limit,
+    select: { id: true, cohort: true, periodKey: true, status: true, totalAmount: true, recipientCount: true, clearedAt: true, emailsSentAt: true, batchReference: true, bankConfirmationFileId: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    cohort: r.cohort,
+    cohortLabel: COHORT_LABEL[r.cohort as Cohort] ?? r.cohort,
+    periodKey: r.periodKey,
+    status: r.status,
+    totalAmount: Math.round(r.totalAmount),
+    recipientCount: r.recipientCount,
+    clearedAt: r.clearedAt?.toISOString() ?? null,
+    emailsSentAt: r.emailsSentAt?.toISOString() ?? null,
+    batchReference: r.batchReference,
+    bankConfirmationFileId: r.bankConfirmationFileId,
+  }));
+}
+
+export interface PayoutQueue {
+  cohorts: BatchView[];
+  history: BatchHistoryRow[];
+  schedulerQuiet: boolean;
+}
+
+/** The whole batch queue for the CFO: the three cohorts' current batches, recent history, scheduler health. */
+export async function getPayoutQueue(builtBy: string, schedulerQuiet: boolean, now: Date = new Date()): Promise<PayoutQueue> {
+  const cohorts: BatchView[] = [];
+  for (const cohort of PAYOUT_COHORTS) cohorts.push(await getBatchView(cohort, builtBy, now));
+  return { cohorts, history: await batchHistory(20), schedulerQuiet };
+}
+
 /** Build the batches due today (so they appear in the queue), skipping FOUNDERS. */
 export async function buildDueBatches(now: Date = new Date()): Promise<{ built: number }> {
   let built = 0;
