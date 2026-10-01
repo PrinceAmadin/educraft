@@ -7,10 +7,12 @@
  *   npm run check:cleanup
  *
  * A deletion removes the project's whole footprint as if it never existed —
- * payments, bucket amounts, payouts, commission expenses, the referral, files
- * — except the AI spend (real money that left the Anthropic balance) and a
- * `DeletedProject` record of what went. The service that does it is
- * src/lib/services/project-cleanup.ts.
+ * payments (Paystack ones included), bucket and pot amounts, payouts,
+ * commission expenses, the referral, files — except the AI spend (real money
+ * that left the Anthropic balance) and a `DeletedProject` record of what went.
+ * Where the money came from never blocks a delete: that only the founder can
+ * delete is the safeguard (founder's call, 1 Oct 2026). The service that does
+ * it is src/lib/services/project-cleanup.ts.
  */
 import { effectiveRole } from "@/lib/rbac";
 import { formatNaira } from "@/lib/utils";
@@ -26,7 +28,7 @@ export interface CleanupFacts {
   clientName: string;
   clientEmail: string | null;
   flagged: boolean;
-  /** Confirmed or Duplicate PAYSTACK inflows: money that really arrived through Paystack. */
+  /** Confirmed or Duplicate PAYSTACK inflows. Shown as a warning, never a block: test checkouts look the same. */
   paystackMoney: number;
   /** Confirmed inflows recorded by hand (a bank transfer finance verified), less refunds. */
   otherMoney: number;
@@ -46,14 +48,12 @@ export interface CleanupFacts {
 
 /**
  * Why this project can't be deleted, in the founder's words; empty = it can.
- * Money that really arrived through Paystack is never deleted (founder's call,
- * 30 Sept 2026), nor a project someone has been paid for.
+ * These protect ledger rows that cannot be cleanly taken back (money already
+ * paid out to someone, a bonus already processed) and work in flight; money
+ * coming IN, through Paystack or by hand, is only ever a warning.
  */
 export function cleanupRefusals(f: CleanupFacts): string[] {
   const out: string[] = [];
-  if (f.paystackMoney > 0) {
-    out.push(`${f.code} received ${formatNaira(f.paystackMoney)} through Paystack, so it stays in the books.`);
-  }
   const flagPaid = !f.isProBono && (f.paidFlags.worker || f.paidFlags.ambassador || f.paidFlags.parent);
   if (f.paidPayoutAmount > 0 || flagPaid) {
     const who = [
@@ -96,6 +96,10 @@ export interface CleanupWarningInput {
   flagged: boolean;
   signals: string[];
   otherMoney: number;
+  /** Confirmed or held Paystack money on the project. */
+  paystackMoney: number;
+  /** Pots this selection's deletion leaves below zero. */
+  potsGoingNegative: { label: string; from: number; to: number }[];
   hasWorker: boolean;
   hasLineage: boolean;
   aiSpendKept: number;
@@ -105,12 +109,16 @@ export interface CleanupWarningInput {
 export function cleanupWarnings(w: CleanupWarningInput): string[] {
   const out: string[] = [];
   if (!w.flagged && w.signals.length === 0) out.push(CLEANUP_TEXT.noSignal);
+  if (w.paystackMoney > 0) {
+    out.push(`${formatNaira(w.paystackMoney)} paid through Paystack leaves revenue and the buckets. If any of it was real money, it is still in your Paystack balance.`);
+  }
   if (w.otherMoney > 0) out.push(`${formatNaira(w.otherMoney)} recorded as paid by hand leaves revenue and the buckets.`);
+  for (const pot of w.potsGoingNegative) out.push(`The ${pot.label} pot goes from ${formatNaira(pot.from)} to ${formatNaira(pot.to)}.`);
   if (["DELIVERED", "COMPLETED", "SUPERVISOR_CORRECTIONS"].includes(w.status)) out.push("It has already been delivered.");
   if (w.hasWorker) out.push("A specialist is assigned to it; it disappears from their list.");
   if (w.hasLineage) out.push("It is linked to another project (a follow-on order); that link is removed.");
   for (const t of w.tierDrops) out.push(`${t.name} drops from ${t.from} to ${t.to}.`);
-  if (w.aiSpendKept > 0) out.push(`${formatNaira(w.aiSpendKept, { decimals: true })} of Claude spend stays in AI usage and Expenses: that money was really spent.`);
+  if (w.aiSpendKept > 0) out.push(`${formatNaira(w.aiSpendKept, { decimals: true })} of Claude spend stays in AI usage: that money was really spent.`);
   return out;
 }
 
@@ -197,8 +205,11 @@ export function mentionsProject(text: string | null | undefined, code: string): 
 
 /** Stored on `DeletedProject.summary` and shown in the history. Amounts in naira. */
 export interface DeletionSummary {
-  payments: { paymentId: string; type: string; source: string; status: string; amount: number; direction: string }[];
+  /** `reference` is kept so Paystack's own record of a deleted payment can still be matched. */
+  payments: { paymentId: string; type: string; source: string; status: string; amount: number; direction: string; reference?: string | null }[];
   buckets: { operationsReserve: number; growthFund: number; reinvestmentFund: number; founderDistribution: number; retained: number };
+  /** What left each pot (the bucket's earmarked sub-ledger). */
+  pots?: { potKey: string; label: string; amount: number }[];
   payouts: { leg: string; recipientName: string; amount: number; status: string }[];
   expenses: { category: string; amount: number }[];
   referral: { ambassadorName: string; status: string; action: "deleted" | "unlinked" } | null;
@@ -237,7 +248,7 @@ export function summaryLine(s: DeletionSummary): string {
 export const CLEANUP_TEXT = {
   pageTitle: "Test data",
   pageIntro:
-    "Delete projects that were only ever tests, so they stop counting in revenue, the buckets, commissions and ambassador tiers. Only you can delete. A deleted project is gone for good: its payments, bucket amounts, unpaid payouts, commission lines, referral and files go with it. Claude spend stays, because that money was really spent.",
+    "Delete projects that were only ever tests, so they stop counting in revenue, the buckets and pots, commissions and ambassador tiers. Only you can delete. A deleted project is gone for good: its payments, bucket and pot amounts, unpaid payouts, commission lines, referral and files go with it. Claude spend stays, because that money was really spent.",
   flaggedHeading: "Flagged as tests",
   flaggedEmpty: "Nobody has flagged a project yet. The COO, and anyone you appoint below, can flag one from its page or the account menu.",
   othersHeading: "All other projects",

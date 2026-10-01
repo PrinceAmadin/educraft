@@ -10,6 +10,7 @@ import { ambassadorTier } from "@/lib/ambassadors/tier-utils";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import { quarterKeyOf } from "@/lib/command-center/derive";
 import { revalidateCommandCenter } from "@/lib/services/command-center/cache";
+import { listPots } from "@/lib/services/finance/pots";
 import { notifyFinance, notifyRole } from "@/lib/services/notifications";
 import {
   CLEANUP_TEXT,
@@ -36,7 +37,7 @@ import { formatNaira } from "@/lib/utils";
  * A deletion is one transaction per project, under the project's row lock,
  * that removes every row the project put anywhere and puts the figures back
  * as if it never existed: the month's bucket mirrors are given back, the
- * bucket ledger, allocation log, payout records, commission expenses,
+ * bucket ledger, its pot ledger, allocation log, payout records, commission expenses,
  * payments and referral go, every ambassador it touched is recounted (and a
  * tier it alone earned is taken back, history included), then the project
  * itself (everything that cascades) and, when it was their last, the client.
@@ -107,10 +108,12 @@ type LoadedProject = Prisma.ProjectGetPayload<{ select: typeof projectSelect }>;
 interface Footprint {
   project: LoadedProject;
   facts: CleanupFacts;
-  payments: { id: string; paymentId: string; type: string; direction: string; status: string; source: string; amount: number; receiptBlobPath: string | null }[];
+  payments: { id: string; paymentId: string; type: string; direction: string; status: string; source: string; amount: number; reference: string | null; receiptBlobPath: string | null }[];
   payouts: { id: string; leg: string; recipientType: string; recipientId: string; recipientName: string; amount: number; status: string }[];
   allocations: { id: string; month: string; retainedAmount: number; operationsReserve: number; growthFund: number; reinvestmentFund: number; founderDistribution: number }[];
   expenses: { id: string; category: string; amount: number }[];
+  /** What the project put into each pot (the bucket's earmarked sub-ledger), summed per pot. */
+  pots: { potKey: string; amount: number }[];
   referral: { id: string; ambassadorId: string; status: string; source: string; convertedAt: Date | null; ambassadorName: string } | null;
   files: number;
   aiSpend: number;
@@ -129,7 +132,7 @@ async function loadFootprints(client: Db, ids: string[], now: Date): Promise<Map
 
   const [projects, payments, payouts, allocations, expenses, referrals, ai, runs, checkpoints, researchJobs, briefs, qaRuns, chapterChecks, fileCounts, refPdfs, sourcePdfs] = await Promise.all([
     client.project.findMany({ where: { id: { in: ids } }, select: projectSelect }),
-    client.payment.findMany({ where, select: { id: true, projectId: true, paymentId: true, type: true, direction: true, status: true, source: true, amount: true, receiptBlobPath: true } }),
+    client.payment.findMany({ where, select: { id: true, projectId: true, paymentId: true, type: true, direction: true, status: true, source: true, amount: true, reference: true, receiptBlobPath: true } }),
     client.payoutRecord.findMany({ where, select: { id: true, projectId: true, leg: true, recipientType: true, recipientId: true, recipientName: true, amount: true, status: true } }),
     client.bucketAllocationLog.findMany({ where, select: { id: true, projectId: true, month: true, retainedAmount: true, operationsReserve: true, growthFund: true, reinvestmentFund: true, founderDistribution: true } }),
     client.expense.findMany({ where, select: { id: true, projectId: true, category: true, amount: true } }),
@@ -157,6 +160,20 @@ async function loadFootprints(client: Db, ids: string[], now: Date): Promise<Map
     ? await client.payoutRecord.findMany({ where: { bonusKey: { in: bonusKeys }, status: { notIn: ["CANCELLED", "REVERSED"] } }, select: { bonusKey: true } })
     : [];
   const processedBonuses = new Set(bonuses.map((b) => b.bonusKey));
+  // Pot rows are keyed to the allocation they split from; a row may carry no project id of its own.
+  const potRows = await client.potTransaction.findMany({
+    where: { OR: [{ projectId: { in: ids } }, { allocationId: { in: allocations.map((a) => a.id) } }] },
+    select: { projectId: true, allocationId: true, potKey: true, amount: true },
+  });
+  const projectOfAllocation = new Map(allocations.map((a) => [a.id, a.projectId]));
+  const potsBy = new Map<string, Map<string, number>>();
+  for (const r of potRows) {
+    const owner = r.projectId ?? (r.allocationId ? projectOfAllocation.get(r.allocationId) : undefined);
+    if (!owner) continue;
+    const perPot = potsBy.get(owner) ?? new Map<string, number>();
+    perPot.set(r.potKey, (perPot.get(r.potKey) ?? 0) + r.amount);
+    potsBy.set(owner, perPot);
+  }
   const flaggerIds = projects.map((p) => p.testFlaggedById).filter((x): x is string => Boolean(x));
   const flaggerNames = await namesFor(client, flaggerIds);
 
@@ -224,6 +241,7 @@ async function loadFootprints(client: Db, ids: string[], now: Date): Promise<Map
       payouts: outs,
       allocations: allocationsBy.get(p.id) ?? [],
       expenses: expensesBy.get(p.id) ?? [],
+      pots: [...(potsBy.get(p.id) ?? new Map<string, number>())].map(([potKey, amount]) => ({ potKey, amount: Math.round(amount * 100) / 100 })).filter((x) => x.amount !== 0),
       referral: referral ? { id: referral.id, ambassadorId: referral.ambassadorId, status: referral.status, source: referral.source, convertedAt: referral.convertedAt, ambassadorName: referral.ambassador.fullName } : null,
       // Stored files: uploads and copies, reference PDFs, judgment PDFs and the payment receipts.
       files: (filesBy.get(p.id) ?? 0) + (refPdfsBy.get(p.id) ?? 0) + (sourcePdfsBy.get(p.id) ?? 0) + pays.filter((x) => x.receiptBlobPath).length,
@@ -355,6 +373,7 @@ export interface CleanupPreview extends CleanupRow {
   removes: {
     payments: { paymentId: string; label: string; amount: number }[];
     buckets: DeletionSummary["buckets"];
+    pots: { potKey: string; label: string; amount: number }[];
     payouts: { label: string; amount: number }[];
     expenses: { label: string; amount: number }[];
     referral: string | null;
@@ -406,6 +425,26 @@ export async function previewDeletion(codes: string[], now: Date = new Date()): 
     }
   }
 
+  // Pots the selection leaves below zero (a test payment's share may already have been spent or reset against).
+  const deletable = list.filter((f) => cleanupRefusals(f.facts).length === 0);
+  const potViews = list.some((f) => f.pots.length) ? await listPots() : [];
+  const potLabel = (key: string) => potViews.find((v) => v.key === key)?.label ?? key;
+  const leaving = new Map<string, number>();
+  for (const f of deletable) for (const x of f.pots) leaving.set(x.potKey, (leaving.get(x.potKey) ?? 0) + x.amount);
+  const negativePots = new Map<string, { label: string; from: number; to: number }>();
+  for (const v of potViews) {
+    const out = leaving.get(v.key) ?? 0;
+    const to = Math.round(v.balance - out);
+    // `|| 0`: a balance of -0.01 rounds to minus zero, which would print as "-₦0".
+    if (out > 0 && to < 0) negativePots.set(v.key, { label: v.label, from: Math.round(v.balance) || 0, to });
+  }
+  // Said once, on the first project that draws on the pot.
+  const potWarningFor = new Map<string, { label: string; from: number; to: number }[]>();
+  for (const [key, warning] of negativePots) {
+    const first = deletable.find((f) => f.pots.some((x) => x.potKey === key && x.amount > 0));
+    if (first) potWarningFor.set(first.project.id, [...(potWarningFor.get(first.project.id) ?? []), warning]);
+  }
+
   return list
     .map((f): CleanupPreview => {
       const row = toRow(f);
@@ -423,6 +462,8 @@ export async function previewDeletion(codes: string[], now: Date = new Date()): 
           flagged: Boolean(p.testFlaggedAt),
           signals: row.signals,
           otherMoney: f.facts.otherMoney,
+          paystackMoney: f.facts.paystackMoney,
+          potsGoingNegative: potWarningFor.get(p.id) ?? [],
           hasWorker: Boolean(p.workerId),
           hasLineage: Boolean(p.parentProjectId) || p._count.childProjects > 0,
           aiSpendKept: f.aiSpend,
@@ -431,6 +472,7 @@ export async function previewDeletion(codes: string[], now: Date = new Date()): 
         removes: {
           payments: f.payments.map((x) => ({ paymentId: x.paymentId, label: paymentLabel(x), amount: x.amount })),
           buckets: bucketTotals(f.allocations),
+          pots: f.pots.map((x) => ({ potKey: x.potKey, label: potLabel(x.potKey), amount: x.amount })),
           payouts: f.payouts.map((o) => ({ label: `${legLabel(o.leg)} · ${o.recipientName} · ${o.status.toLowerCase()}`, amount: o.amount })),
           expenses: f.expenses.map((e) => ({ label: e.category, amount: e.amount })),
           referral: f.referral
@@ -529,6 +571,7 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
   if (!found) throw new CleanupError(`${code} no longer exists.`, 404);
   const projectDbId = found.id;
   const files = await storedFilesOf(projectDbId);
+  const potLabels = new Map((await listPots().catch(() => [])).map((v) => [v.key, v.label]));
   const now = new Date();
 
   const outcome = await db.$transaction(
@@ -572,6 +615,18 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
           ],
         },
       });
+      // The pot ledger sits one level under the buckets: its rows go with the allocations they split from,
+      // so every pot still adds up to its bucket.
+      await tx.potTransaction.deleteMany({
+        where: {
+          OR: [
+            { projectId: projectDbId },
+            { allocationId: { in: f.allocations.map((a) => a.id) } },
+            { paymentId: { in: f.payments.map((x) => x.id) } },
+            { expenseId: { in: f.expenses.map((e) => e.id) } },
+          ],
+        },
+      });
       await tx.bucketAllocationLog.deleteMany({ where: { projectId: projectDbId } });
 
       // Payout records go outright (a cancelled one left behind would read as a bonus), then the commission lines.
@@ -579,7 +634,7 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
       await tx.refundRecord.deleteMany({ where: { projectId: projectDbId } });
       await tx.expense.deleteMany({ where: { projectId: projectDbId } });
 
-      // Payments (only hand-recorded, system or unpaid Paystack rows are left after the refusals).
+      // Payments, whatever their source: where money came from never blocks the founder (1 Oct 2026).
       await tx.payment.deleteMany({ where: { projectId: projectDbId } });
 
       // The referral: an entry the HOG logged by hand goes back to their pending list; one the order created goes.
@@ -640,8 +695,9 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
       }
 
       const summary: DeletionSummary = {
-        payments: f.payments.map((x) => ({ paymentId: x.paymentId, type: x.type, source: x.source, status: x.status, amount: x.amount, direction: x.direction })),
+        payments: f.payments.map((x) => ({ paymentId: x.paymentId, type: x.type, source: x.source, status: x.status, amount: x.amount, direction: x.direction, reference: x.reference })),
         buckets: bucketTotals(f.allocations),
+        pots: f.pots.map((x) => ({ potKey: x.potKey, label: potLabels.get(x.potKey) ?? x.potKey, amount: x.amount })),
         payouts: f.payouts.map((o) => ({ leg: o.leg, recipientName: o.recipientName, amount: o.amount, status: o.status })),
         expenses: f.expenses.map((e) => ({ category: e.category, amount: e.amount })),
         referral: f.referral ? { ambassadorName: f.referral.ambassadorName, status: f.referral.status, action: f.referral.source === "HOG" ? "unlinked" : "deleted" } : null,
@@ -674,6 +730,20 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
           deletedByName: actor.name,
         },
       });
+
+      // A deletion that took money out of the books is a finance event: it shows in the cashflow change history.
+      if (f.payments.length || f.allocations.length || f.payouts.length) {
+        await tx.cashflowAuditLog.create({
+          data: {
+            actorUserId: actor.userId,
+            action: "deleted_test_project",
+            entityType: "Project",
+            entityId: p.projectId,
+            beforeJson: summary as unknown as Prisma.InputJsonValue,
+            reason,
+          },
+        });
+      }
 
       return { summary, clientDeleted, clientUserId: p.client.userId };
     },

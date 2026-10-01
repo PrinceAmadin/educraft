@@ -190,6 +190,7 @@ function PreviewItem({ preview: p }: { preview: CleanupPreview }) {
   const lines: { label: string; amount?: number }[] = [
     ...r.payments.map((x) => ({ label: `Payment ${x.paymentId} · ${x.label}`, amount: x.amount })),
     ...(r.buckets.retained ? [{ label: "EduCraft's share in the four buckets", amount: r.buckets.retained }] : []),
+    ...r.pots.map((x) => ({ label: `Pot · ${x.label}`, amount: x.amount })),
     ...r.payouts.map((x) => ({ label: `Payout · ${x.label}`, amount: x.amount })),
     ...r.expenses.map((x) => ({ label: `Expense · ${x.label}`, amount: x.amount })),
     ...(r.referral ? [{ label: r.referral }] : []),

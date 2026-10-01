@@ -54,9 +54,10 @@ const facts = (over: Partial<CleanupFacts>): CleanupFacts => ({ ...base, ...over
 
 check("a plain test project can be deleted", cleanupRefusals(base).length === 0, cleanupRefusals(base));
 check("an unpaid Paystack checkout (pending) does not block", cleanupRefusals(facts({ paystackMoney: 0 })).length === 0);
-const paystack = cleanupRefusals(facts({ code: "EC-00007", paystackMoney: 31500 }));
-check("confirmed Paystack money blocks (founder's call)", paystack.length === 1 && paystack[0].includes("₦31,500") && paystack[0].includes("Paystack"), paystack);
-check("money recorded by hand does not block (it is a warning)", cleanupRefusals(facts({ otherMoney: 40500 })).length === 0);
+// Founder, 1 Oct 2026: where money came from never blocks; only the founder can delete, and that is the safeguard.
+check("confirmed Paystack money does not block (test checkouts look the same)", cleanupRefusals(facts({ code: "EC-00007", paystackMoney: 31500 })).length === 0);
+check("money recorded by hand does not block either", cleanupRefusals(facts({ otherMoney: 40500 })).length === 0);
+check("Paystack and hand-recorded money together still do not block", cleanupRefusals(facts({ paystackMoney: 1575, otherMoney: 40500 })).length === 0);
 check("a PAID payout record blocks", cleanupRefusals(facts({ paidPayoutAmount: 9000 })).some((r) => r.includes("already been paid") && r.includes("₦9,000")));
 check("a paid worker flag blocks", cleanupRefusals(facts({ paidFlags: { worker: true, ambassador: false, parent: false } })).some((r) => r.includes("the specialist")));
 check("a paid ambassador flag blocks", cleanupRefusals(facts({ paidFlags: { worker: false, ambassador: true, parent: false } })).some((r) => r.includes("the ambassador")));
@@ -69,7 +70,7 @@ const busy = cleanupRefusals(facts({ runningWork: ["a chapter run", "the report 
 check("live work blocks, named once", busy.length === 1 && busy[0].includes("a chapter run") && busy[0].includes("Stop it"), busy);
 check(
   "every reason is listed together",
-  cleanupRefusals(facts({ paystackMoney: 1575, paidPayoutAmount: 100, bonusCounted: true, runningWork: ["the research run"] })).length === 4
+  cleanupRefusals(facts({ paystackMoney: 1575, paidPayoutAmount: 100, bonusCounted: true, runningWork: ["the research run"] })).length === 3
 );
 
 // ── Signals and warnings ────────────────────────────────────────────────────
@@ -81,12 +82,30 @@ check("example.com is a signal", testSignals({ code: "EC-00006", title: "Editing
 check("'Attestation' is not a test", testSignals({ code: "EC-00011", title: "Attestation of contests", clientName: "Ada", clientEmail: "ada@gmail.com" }).length === 0);
 check("a real-looking project has no signal", testSignals({ code: "EC-00002", title: "Developing a Cybersecurity Framework", clientName: "OYEWOLE EBENEZER", clientEmail: "o@gmail.com" }).length === 0);
 
-const quiet = cleanupWarnings({ code: "EC-00002", status: "IN_PROGRESS", flagged: false, signals: [], otherMoney: 40500, hasWorker: true, hasLineage: false, aiSpendKept: 4228.33, tierDrops: [{ name: "Emmanuel", from: "Silver", to: "Bronze" }] });
+const quiet = cleanupWarnings({
+  code: "EC-00002",
+  status: "IN_PROGRESS",
+  flagged: false,
+  signals: [],
+  otherMoney: 40500,
+  paystackMoney: 31500,
+  potsGoingNegative: [{ label: "Claude API", from: 0, to: -3163 }],
+  hasWorker: true,
+  hasLineage: false,
+  aiSpendKept: 4228.33,
+  tierDrops: [{ name: "Emmanuel", from: "Silver", to: "Bronze" }],
+});
 check("no flag and no signal says so", quiet[0] === CLEANUP_TEXT.noSignal);
 check("hand-recorded money is warned", quiet.some((w) => w.includes("₦40,500")));
+check("Paystack money is warned, with where real money would still be", quiet.some((w) => w.includes("₦31,500") && w.includes("Paystack") && w.includes("still in your Paystack balance")));
+check("a pot left below zero is warned with both figures", quiet.some((w) => w.includes("Claude API pot") && w.includes("₦0") && w.includes("3,163")));
 check("a tier drop is warned", quiet.some((w) => w.includes("Silver to Bronze")));
 check("AI spend is kept and says so", quiet.some((w) => w.includes("stays in AI usage")));
-check("a flagged project gets no 'nothing marks it' line", !cleanupWarnings({ code: "EC-00004", status: "CANCELLED", flagged: true, signals: [], otherMoney: 0, hasWorker: false, hasLineage: false, aiSpendKept: 0, tierDrops: [] }).includes(CLEANUP_TEXT.noSignal));
+check("a flagged project gets no 'nothing marks it' line", !cleanupWarnings({ code: "EC-00004", status: "CANCELLED", flagged: true, signals: [], otherMoney: 0, paystackMoney: 0, potsGoingNegative: [], hasWorker: false, hasLineage: false, aiSpendKept: 0, tierDrops: [] }).includes(CLEANUP_TEXT.noSignal));
+check(
+  "a project with no money gets no money warning",
+  cleanupWarnings({ code: "EC-00004", status: "CANCELLED", flagged: true, signals: [], otherMoney: 0, paystackMoney: 0, potsGoingNegative: [], hasWorker: false, hasLineage: false, aiSpendKept: 0, tierDrops: [] }).length === 0
+);
 
 // ── Confirmation ────────────────────────────────────────────────────────────
 
@@ -135,7 +154,7 @@ check("empty text", !mentionsProject(null, "EC-00001"));
 
 const summary: DeletionSummary = {
   payments: [
-    { paymentId: "EC-PAY-00007", type: "CLIENT_DOWNPAYMENT", source: "MANUAL", status: "Confirmed", amount: 36000, direction: "INFLOW" },
+    { paymentId: "EC-PAY-00007", type: "CLIENT_DOWNPAYMENT", source: "MANUAL", status: "Confirmed", amount: 36000, direction: "INFLOW", reference: "TRF-1" },
     { paymentId: "EC-PAY-00008", type: "CLIENT_BALANCE", source: "PAYSTACK", status: "Pending", amount: 44000, direction: "INFLOW" },
     { paymentId: "EC-PAY-00009", type: "REFUND", source: "SYSTEM", status: "Confirmed", amount: 6000, direction: "OUTFLOW" },
   ],
@@ -149,6 +168,10 @@ const summary: DeletionSummary = {
   aiSpendKept: 12.5,
 };
 check("revenue removed = confirmed inflows less refunds (pending ignored)", revenueRemoved(summary) === 30000, revenueRemoved(summary));
+check(
+  "confirmed Paystack money counts as revenue removed",
+  revenueRemoved({ payments: [{ paymentId: "EC-PAY-00004", type: "CLIENT_DOWNPAYMENT", source: "PAYSTACK", status: "Confirmed", amount: 31500, direction: "INFLOW", reference: "INTAKE-x" }] }) === 31500
+);
 check("summary line names the money", summaryLine(summary).startsWith("Removed ₦30,000 revenue, ₦14,400 from the buckets"), summaryLine(summary));
 check(
   "an empty project says so",

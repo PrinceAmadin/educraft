@@ -113,6 +113,7 @@ const AUDITED: { file: string; fn: string; action: string }[] = [
   { file: "src/lib/services/settings.ts", fn: "updateGeneralSettings", action: "changed_hq_contact" },
   { file: "src/lib/services/finance/buckets.ts", fn: "manualAdjustment", action: "bucket_adjustment" },
   { file: "src/lib/services/finance/refunds.ts", fn: "processRefund", action: "processed_refund" },
+  { file: "src/lib/services/project-cleanup.ts", fn: "deleteOne", action: "deleted_test_project" },
   { file: "src/lib/services/finance/cashflow-tick.ts", fn: "runCashflowTick", action: "CRON_FAILURE" },
 ];
 for (const a of AUDITED) {

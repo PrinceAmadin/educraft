@@ -299,6 +299,12 @@ async function creditReference(reference: string): Promise<CreditReferenceResult
  * checkout paid late) is never credited to anything: finance is told to
  * refund it from the Paystack dashboard.
  */
+/** The references of the payments a deletion record lists (`DeletionSummary.payments`). */
+function deletedPaymentReferences(summary: unknown): Set<string> {
+  const payments = (summary as { payments?: { reference?: string | null }[] } | null)?.payments;
+  return new Set((Array.isArray(payments) ? payments : []).map((p) => p?.reference).filter((r): r is string => Boolean(r)));
+}
+
 async function alertIfDeletedProject(reference: string, verified: PaystackTransactionData): Promise<void> {
   if (verified.status !== "success") return;
   const code = projectCodeFromReference(reference);
@@ -307,8 +313,10 @@ async function alertIfDeletedProject(reference: string, verified: PaystackTransa
   if (code) match.push({ projectCode: code });
   if (projectDbId) match.push({ projectDbId });
   if (match.length === 0) return;
-  const deleted = await db.deletedProject.findFirst({ where: { OR: match }, select: { projectCode: true } });
+  const deleted = await db.deletedProject.findFirst({ where: { OR: match }, select: { projectCode: true, summary: true } });
   if (!deleted) return;
+  // A payment that was already in the books when the founder deleted the project is known money, not a late one.
+  if (deletedPaymentReferences(deleted.summary).has(reference)) return;
   console.warn(`[paystack] ${reference}: paid for ${deleted.projectCode}, a deleted test project; nothing credited`);
   await notifyFinance({
     title: "Payment for a deleted project",
@@ -823,6 +831,15 @@ export async function getPaystackReconciliation(daysBack = 30): Promise<Paystack
     : [];
   const ourByRef = new Map(ours.map((p) => [p.reference, p]));
 
+  // A payment the founder deleted with its test project is accounted for: nothing to sync.
+  const unmatched = references.filter((r) => !ourByRef.has(r));
+  const deletedRefs = new Set<string>();
+  if (unmatched.length) {
+    const codes = [...new Set(unmatched.map((r) => projectCodeFromReference(r)).filter((c): c is string => Boolean(c)))];
+    const tombstones = await db.deletedProject.findMany({ where: { projectCode: { in: codes } }, select: { summary: true } });
+    for (const t of tombstones) for (const r of deletedPaymentReferences(t.summary)) deletedRefs.add(r);
+  }
+
   const rows: ReconciliationRow[] = data.map((t) => {
     const our = ourByRef.get(t.reference);
     return {
@@ -831,7 +848,7 @@ export async function getPaystackReconciliation(daysBack = 30): Promise<Paystack
       amount: t.amount / 100,
       channel: t.channel,
       paidAt: t.paid_at,
-      ourStatus: (our?.status as ReconciliationRow["ourStatus"] | undefined) ?? "Missing",
+      ourStatus: (our?.status as ReconciliationRow["ourStatus"] | undefined) ?? (deletedRefs.has(t.reference) ? "Deleted" : "Missing"),
     };
   });
 

@@ -41,6 +41,9 @@ export function DeletedHistory({ rows }: { rows: DeletedRow[] }) {
                   </Item>
                 ) : null}
                 {s.buckets.retained ? <Item label="Taken out of the buckets">{formatNaira(s.buckets.retained)}</Item> : null}
+                {s.pots?.length ? (
+                  <Item label="Taken out of the pots">{s.pots.map((x) => `${x.label} ${formatNaira(x.amount)}`).join(", ")}</Item>
+                ) : null}
                 {s.payouts.length ? (
                   <Item label="Payout records removed">{s.payouts.map((p) => `${p.recipientName} ${formatNaira(p.amount)}`).join(", ")}</Item>
                 ) : null}

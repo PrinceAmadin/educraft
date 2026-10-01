@@ -55,7 +55,7 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
           <li key={r.reference} className="surface p-4 sm:flex sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                {r.projectCode ? (
+                {r.projectCode && r.ourStatus !== "Deleted" ? (
                   <Link
                     href={`/admin/projects/${r.projectCode}`}
                     className="text-sm font-semibold text-foreground hover:text-primary focus-visible:outline-none focus-visible:underline"
@@ -63,7 +63,7 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
                     {r.projectCode}
                   </Link>
                 ) : (
-                  <span className="text-sm font-semibold text-foreground">Unknown project</span>
+                  <span className="text-sm font-semibold text-foreground">{r.projectCode ?? "Unknown project"}</span>
                 )}
                 <span
                   className={cn(
@@ -71,7 +71,7 @@ export function ReconciliationTable({ rows }: { rows: ReconciliationRow[] }) {
                     inSync ? "bg-success/12 text-success" : "bg-danger/12 text-danger"
                   )}
                 >
-                  {r.ourStatus}
+                  {r.ourStatus === "Deleted" ? "Deleted test project" : r.ourStatus}
                 </span>
                 {r.channel ? (
                   <span className="rounded-full bg-elevated px-2 py-0.5 text-[11px] text-muted-foreground">
