@@ -2401,6 +2401,24 @@ model RefundRecord {
   @@index([projectId])
 }
 
+/// A weekly financial statement (Phase 7, super admin + CFO). The assembled
+/// figures live in `data` (JSON); the PDF and spreadsheet are rendered from it
+/// on demand, so there is nothing to store or keep in step. One per ISO week.
+model FinancialStatement {
+  id            String   @id @default(cuid())
+  weekStart     DateTime
+  weekEnd       DateTime
+  isoWeek       String   @unique
+  generatedById String
+  generatedAt   DateTime @default(now())
+  notes         String?
+  data          Json
+  /// When the Sunday auto-email went out (so it is sent at most once a week).
+  autoEmailedAt DateTime?
+
+  @@index([weekStart])
+}
+
 // ─── CASHFLOW STRUCTURE (super-admin editable, versioned) ───────────────
 
 /// One immutable snapshot of the whole commission and bucket structure

@@ -4,6 +4,7 @@ import { currentRunner } from "@/lib/generation/orchestrator-view";
 import { dueBatches } from "@/lib/finance/payout-schedule";
 import { buildDueBatches, finalizeDueBatches, sendBankReminders } from "@/lib/services/finance/payout-batches";
 import { sendCancelReminders } from "@/lib/services/finance/refunds";
+import { sendWeeklyStatement } from "@/lib/services/finance/weekly-statement";
 
 /**
  * The cashflow tick (Phase 5): the heartbeat that builds the batches due today,
@@ -66,6 +67,7 @@ export interface CashflowTickReport {
   finalised: number;
   remindersSent: number;
   cancelRemindersSent: number;
+  weeklyStatementSent: number;
 }
 
 /** One tick: build due batches, finalise any whose window has closed, send the reminders. */
@@ -78,5 +80,7 @@ export async function runCashflowTick(now: Date = new Date()): Promise<CashflowT
   const remindersSent = due.length ? (await sendBankReminders(now)).sent : 0;
   // Once a day (self-gated): the cancelled-with-money-in decision reminders (decision 6).
   const cancelRemindersSent = (await sendCancelReminders(now).catch(() => ({ sent: 0 }))).sent;
-  return { built, finalised, remindersSent, cancelRemindersSent };
+  // Once a week (self-gated): the completed week's financial statement email (Phase 7).
+  const weeklyStatementSent = (await sendWeeklyStatement(now).catch(() => ({ sent: 0 }))).sent;
+  return { built, finalised, remindersSent, cancelRemindersSent, weeklyStatementSent };
 }

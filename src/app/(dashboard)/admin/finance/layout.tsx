@@ -12,6 +12,7 @@ const FINANCE_TABS: FinanceTab[] = [
   { href: "/admin/finance/expenses", label: "Expenses" },
   { href: "/admin/finance/ai-usage", label: "AI usage" },
   { href: "/admin/finance/reports", label: "Reports" },
+  { href: "/admin/finance/statements", label: "Statements" },
 ];
 
 /**
