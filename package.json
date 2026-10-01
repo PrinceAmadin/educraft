@@ -63,7 +63,8 @@
     "pots:backfill": "dotenv -e .env.local -- tsx scripts/pots-backfill.ts",
     "pots:reset-claude": "dotenv -e .env.local -- tsx scripts/reset-claude-pot.ts",
     "orchestrator:schedule": "dotenv -e .env.local -- tsx scripts/setup-orchestrator-schedule.ts",
-    "cashflow:schedule": "dotenv -e .env.local -- tsx scripts/setup-cashflow-schedule.ts"
+    "cashflow:schedule": "dotenv -e .env.local -- tsx scripts/setup-cashflow-schedule.ts",
+    "email:test": "dotenv -e .env.local -- tsx scripts/send-test-emails.ts"
   },
   "prisma": {
     "seed": "dotenv -e .env.local -- tsx prisma/seed.ts"

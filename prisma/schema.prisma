@@ -2467,6 +2467,29 @@ model CashflowAuditLog {
   @@index([createdAt])
 }
 
+/// One upserted row per scheduled job (e.g. "cashflow-tick"): the last run, its
+/// outcome and the last error. The CEO's Command Center reads it to warn when a
+/// cron has gone quiet (>25h) or failed. Pre-launch hardening (Item 3).
+model CronHealthLog {
+  job        String   @id
+  lastRunAt  DateTime
+  lastStatus String   @default("ok") // ok | error
+  lastError  String?
+  updatedAt  DateTime @updatedAt
+}
+
+/// A per-user, per-action rolling-window rate limiter for finance mutations.
+/// One row per (userId:action); the window resets when it expires. Postgres so
+/// it holds across serverless instances. Pre-launch hardening (Item 7).
+model RateLimit {
+  key         String   @id // "<userId>:<action>"
+  windowStart DateTime
+  count       Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([windowStart])
+}
+
 /// The COO's monthly payout list, submitted to the CFO. One row per month,
 /// re-submitting adds a revision.
 model PayoutSubmission {

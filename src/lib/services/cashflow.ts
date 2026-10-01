@@ -278,7 +278,36 @@ export async function republishCashflow(versionNumber: number, actorId: string):
   return publishCashflow({ structure: v.structure, reason: `Republished from version ${versionNumber}`, actorId });
 }
 
-/** The founder's audit trail for the cashflow settings, newest first. */
-export async function listCashflowAudit(limit = 50) {
-  return db.cashflowAuditLog.findMany({ orderBy: { createdAt: "desc" }, take: limit });
+export interface AuditEntry {
+  id: string;
+  action: string;
+  entityType: string;
+  reason: string | null;
+  createdAt: string;
+  actorName: string;
+}
+
+/** The audit trail for the money settings (SA + CFO), newest first, with actor names resolved. */
+export async function listCashflowAudit(limit = 100): Promise<AuditEntry[]> {
+  const rows = await db.cashflowAuditLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { id: true, action: true, entityType: true, reason: true, createdAt: true, actorUserId: true },
+  });
+  const ids = [...new Set(rows.map((r) => r.actorUserId))].filter((id) => id && id !== "seed" && id !== "tick" && id !== "system");
+  const users = ids.length ? await db.user.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true, email: true, execProfile: { select: { fullName: true } } } }) : [];
+  const nameOf = (id: string) => {
+    if (id === "seed") return "The seed";
+    if (id === "tick" || id === "system") return "The system";
+    const u = users.find((x) => x.id === id);
+    return u?.execProfile?.fullName ?? u?.displayName ?? u?.email ?? id;
+  };
+  return rows.map((r) => ({
+    id: r.id,
+    action: r.action,
+    entityType: r.entityType,
+    reason: r.reason,
+    createdAt: r.createdAt.toISOString(),
+    actorName: nameOf(r.actorUserId),
+  }));
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { BatchError, undoPayoutBatch } from "@/lib/services/finance/payout-batches";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const maxDuration = 120;
 export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "payout-batch", 5);
+  if (limited) return limited;
   try {
     const result = await undoPayoutBatch(params.id, guard.session.userId);
     return NextResponse.json(result);

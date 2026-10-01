@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { badRequest, requireAdmin, requireAdminRoles, serverError } from "@/lib/api";
+import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { createExpenseSchema, expenseListParamsSchema } from "@/lib/validations/expenses";
 import { createExpense, getMonthlyExpenseSummary, listExpenses } from "@/lib/services/expenses";
 import { currentMonthKey } from "@/lib/services/finance/surplus";
@@ -22,8 +23,10 @@ export async function GET(req: NextRequest) {
 
 /** Log an expense against a bucket. Over ₦50,000 it waits for the founder unless the founder logged it. */
 export async function POST(req: NextRequest) {
-  const guard = await requireAdmin();
+  const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "pot-spend", 20);
+  if (limited) return limited;
 
   let body: unknown;
   try {

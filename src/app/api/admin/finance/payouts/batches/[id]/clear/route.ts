@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { BatchError, clearPayoutBatch } from "@/lib/services/finance/payout-batches";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +21,8 @@ const schema = z.object({
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "payout-batch", 5);
+  if (limited) return limited;
 
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest("Please check the form", parsed.error.flatten());

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { badRequest, requireSuperAdmin, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { CashflowPublishError, publishCashflow } from "@/lib/services/cashflow";
 import { refreshAllTiers } from "@/lib/services/ambassador-platform/conversions";
 import { revalidateCommandCenter } from "@/lib/services/command-center/cache";
@@ -13,6 +14,8 @@ import { publishCashflowSchema, toStructure } from "@/lib/validations/cashflow";
 export async function POST(req: NextRequest) {
   const guard = await requireSuperAdmin();
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "cashflow-settings", 10);
+  if (limited) return limited;
   let body: unknown;
   try {
     body = await req.json();

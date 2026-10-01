@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { CommandCenter } from "@/components/command-center/CommandCenter";
+import { CronHealthCard } from "@/components/command-center/CronHealthCard";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { cronHealth } from "@/lib/services/finance/cron-health";
 import { firstName } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Command Center" };
@@ -16,6 +18,8 @@ export const dynamic = "force-dynamic";
 export default async function AdminDashboardPage() {
   const session = await auth();
   const greetingName = firstName(session?.user?.name, "there");
+  const now = Date.now();
+  const crons = await cronHealth(new Date(now)).catch(() => []);
 
   return (
     <div className="space-y-8 sm:space-y-10">
@@ -23,6 +27,7 @@ export default async function AdminDashboardPage() {
         title={`Welcome back, ${greetingName}`}
         description="Here is where EduCraft stands today."
       />
+      <CronHealthCard lines={crons} now={now} />
       <CommandCenter />
     </div>
   );

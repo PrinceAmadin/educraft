@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { claudeTopUpSchema } from "@/lib/validations/expenses";
 import { ExpenseError, logClaudeTopUp } from "@/lib/services/expenses";
 import { getCreditBalance } from "@/lib/services/ai-usage";
@@ -14,6 +15,8 @@ import { getClaudePot } from "@/lib/services/finance/pots";
 export async function POST(req: NextRequest) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "pot-spend", 20);
+  if (limited) return limited;
 
   const parsed = claudeTopUpSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return badRequest("Please check the form", parsed.error.flatten());

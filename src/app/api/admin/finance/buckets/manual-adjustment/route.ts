@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { manualAdjustmentSchema } from "@/lib/validations/finance-buckets";
 import { BucketError, manualAdjustment } from "@/lib/services/finance/buckets";
 
@@ -7,6 +8,8 @@ import { BucketError, manualAdjustment } from "@/lib/services/finance/buckets";
 export async function POST(req: NextRequest) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "pot-spend", 20);
+  if (limited) return limited;
 
   let body: unknown;
   try {

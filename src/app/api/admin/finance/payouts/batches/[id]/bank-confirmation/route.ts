@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { FinanceFileError, putFinanceFile } from "@/lib/services/finance/finance-files";
 
@@ -16,6 +17,8 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "payout-batch", 5);
+  if (limited) return limited;
 
   const batch = await db.payoutBatch.findUnique({ where: { id: params.id }, select: { id: true, status: true } });
   if (!batch) return NextResponse.json({ error: "Batch not found" }, { status: 404 });

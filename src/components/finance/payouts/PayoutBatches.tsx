@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { LuCircleAlert, LuLoaderCircle, LuTriangleAlert, LuUpload } from "react-icons/lu";
+import { LuCircleAlert, LuDownload, LuLoaderCircle, LuTriangleAlert, LuUpload } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -107,15 +107,31 @@ function BatchCard({ batch, canClear }: { batch: BatchView; canClear: boolean })
               <p className="mt-1 text-xs">They stay unpaid and get a reminder to add their details.</p>
             </div>
           ) : null}
+          {batch.payable.length > 0 ? (
+            <a
+              href={`/api/admin/finance/payouts/batches/${batch.id}/export?format=xlsx`}
+              className="mt-4 inline-flex min-h-9 w-full items-center justify-center gap-2 rounded-xl bg-input px-3 text-sm font-medium text-foreground hover:bg-zone"
+            >
+              <LuDownload className="size-4" aria-hidden />
+              Download bank list (Excel)
+            </a>
+          ) : null}
           {canClear ? (
-            <Button size="sm" className="mt-4 w-full" disabled={batch.payable.length === 0} onClick={() => setOpen(true)}>
+            <Button size="sm" className="mt-3 w-full" disabled={batch.payable.length === 0} onClick={() => setOpen(true)}>
               Clear payout
             </Button>
+          ) : null}
+          {batch.payable.length > 0 ? (
+            <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+              Verify these column names match your bank&apos;s bulk-transfer template before first use. Template requirements depend on your bank.
+            </p>
           ) : null}
           {open ? <ClearDialog batch={batch} onClose={() => setOpen(false)} /> : null}
         </>
       ) : batch.status === "CLEARED" ? (
         <ClearedState batch={batch} canClear={canClear} />
+      ) : batch.status === "NONE" ? (
+        <p className="mt-3 text-sm text-muted-foreground">No payouts {batch.cohort === "AMBASSADORS" ? "this week" : "this period"}.</p>
       ) : (
         <div className="mt-2">
           <p className="font-mono text-2xl font-medium tabular-nums text-foreground">{formatNaira(batch.payableTotal)}</p>

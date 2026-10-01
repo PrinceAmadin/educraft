@@ -185,19 +185,45 @@ export interface BatchView {
   bankConfirmationFileId: string | null;
 }
 
+/** An empty period that has never produced a batch — shown as "No payouts" and never persisted (Item 6). */
+function emptyBatchView(cohort: PayoutCohort, periodKey: string): BatchView {
+  return {
+    id: "",
+    cohort,
+    cohortLabel: COHORT_LABEL[cohort],
+    periodKey,
+    status: "NONE",
+    payable: [],
+    missingBank: [],
+    payableTotal: 0,
+    clearedAt: null,
+    emailsScheduledAt: null,
+    undoOpen: false,
+    emailsSentAt: null,
+    batchReference: null,
+    bankConfirmationFileId: null,
+  };
+}
+
 /** The current state of a cohort's batch: who is payable now, and who is held for missing bank details. */
 export async function getBatchView(cohort: PayoutCohort, builtBy: string, now: Date = new Date()): Promise<BatchView> {
   const found = dueBatches(now).find((d) => d.cohort === cohort);
   const due = found ? { cohort, periodKey: found.periodKey, periodStart: found.periodStart, periodEnd: found.periodEnd } : currentPeriod(cohort, now);
-  const id = await ensureBatch(due, builtBy);
-  const batch = await db.payoutBatch.findUniqueOrThrow({ where: { id } });
 
-  // Everything owed to this cohort that is not already in a batch.
+  // Read what is owed BEFORE creating anything: an empty period with no existing
+  // batch creates no row (Item 6) — the queue shows "No payouts this period".
+  const existing = await db.payoutBatch.findUnique({ where: { cohort_periodKey: { cohort, periodKey: due.periodKey } }, select: { id: true } });
   const owed = (await db.payoutRecord.findMany({
     where: { recipientType: { in: cohortTypes(cohort) }, status: UNPAID, batchId: null },
     select: RICH_SELECT,
     orderBy: { createdAt: "asc" },
   })) as RichRecord[];
+
+  if (!existing && owed.length === 0) return emptyBatchView(cohort, due.periodKey);
+
+  const id = await ensureBatch(due, builtBy);
+  const batch = await db.payoutBatch.findUniqueOrThrow({ where: { id } });
+
   // Plus whatever this batch already cleared (so a CLEARED view still shows what was paid).
   const paid = (await db.payoutRecord.findMany({ where: { batchId: id }, select: RICH_SELECT, orderBy: { createdAt: "asc" } })) as RichRecord[];
 
@@ -520,6 +546,50 @@ export async function batchHistory(limit = 20): Promise<BatchHistoryRow[]> {
   }));
 }
 
+export interface BankExportRow {
+  recipientType: string;
+  name: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  amount: number;
+}
+export interface BankExport {
+  cohortLabel: string;
+  periodKey: string;
+  rows: BankExportRow[];
+}
+
+/**
+ * The per-recipient bank list for a bulk transfer (Item 4): a READY batch's
+ * payable recipients (or, once cleared, exactly who was paid), each with full
+ * bank details. The CFO downloads this to feed the bank. Only recipients with
+ * complete bank details appear — the held ones never do.
+ */
+export async function batchBankRows(batchId: string): Promise<BankExport | null> {
+  const batch = await db.payoutBatch.findUnique({ where: { id: batchId }, select: { cohort: true, periodKey: true, status: true } });
+  if (!batch) return null;
+  const cohort = batch.cohort as PayoutCohort;
+  const records = (
+    batch.status === "READY"
+      ? await db.payoutRecord.findMany({ where: { recipientType: { in: cohortTypes(cohort) }, status: UNPAID, batchId: null }, select: RICH_SELECT, orderBy: { createdAt: "asc" } })
+      : await db.payoutRecord.findMany({ where: { batchId }, select: RICH_SELECT, orderBy: { createdAt: "asc" } })
+  ) as RichRecord[];
+  const groups = (await groupRecipients(records)).filter((g) => g.hasBank);
+  return {
+    cohortLabel: COHORT_LABEL[cohort],
+    periodKey: batch.periodKey,
+    rows: groups.map((g) => ({
+      recipientType: g.recipientType,
+      name: g.bank?.accountName?.trim() || g.name,
+      bankName: g.bank?.bankName ?? "",
+      accountNumber: g.bank?.accountNumber ?? "",
+      accountName: g.bank?.accountName ?? "",
+      amount: g.total,
+    })),
+  };
+}
+
 export interface PayoutQueue {
   cohorts: BatchView[];
   history: BatchHistoryRow[];
@@ -533,12 +603,26 @@ export async function getPayoutQueue(builtBy: string, schedulerQuiet: boolean, n
   return { cohorts, history: await batchHistory(20), schedulerQuiet };
 }
 
-/** Build the batches due today (so they appear in the queue), skipping FOUNDERS. */
+/** Build the batches due today (so they appear in the queue), skipping FOUNDERS and empty periods. */
 export async function buildDueBatches(now: Date = new Date()): Promise<{ built: number }> {
   let built = 0;
   for (const due of dueBatches(now)) {
     if (due.cohort === "FOUNDERS") continue; // founder draws are distributed on their own page
-    await ensureBatch({ cohort: due.cohort as PayoutCohort, periodKey: due.periodKey, periodStart: due.periodStart, periodEnd: due.periodEnd }, "tick");
+    const cohort = due.cohort as PayoutCohort;
+    const owedCount = await db.payoutRecord.count({ where: { recipientType: { in: cohortTypes(cohort) }, status: UNPAID, batchId: null } });
+    if (owedCount === 0) {
+      // Nothing owed this period: create no batch row, log the skip once (Item 6).
+      const gateKey = `batch_skipped:${cohort}:${due.periodKey}`;
+      const already = await db.setting.findUnique({ where: { key: gateKey }, select: { key: true } });
+      if (!already) {
+        await db.setting.create({ data: { key: gateKey, value: now.toISOString() } }).catch(() => undefined);
+        await db.cashflowAuditLog
+          .create({ data: { actorUserId: "system", action: "BATCH_SKIPPED_EMPTY_WEEK", entityType: "PayoutBatch", entityId: `${cohort}:${due.periodKey}`, afterJson: { cohort, periodKey: due.periodKey } } })
+          .catch(() => undefined);
+      }
+      continue;
+    }
+    await ensureBatch({ cohort, periodKey: due.periodKey, periodStart: due.periodStart, periodEnd: due.periodEnd }, "tick");
     built += 1;
   }
   return { built };

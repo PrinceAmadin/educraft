@@ -384,7 +384,8 @@ export async function sendCancelReminders(now: Date = new Date()): Promise<{ sen
   const { sendMail } = await import("@/lib/mailer");
   const { mayNotify } = await import("@/lib/qa-scope");
 
-  const today = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
+  const { watDateKey } = await import("@/lib/ambassadors/weeks");
+  const today = watDateKey(now); // WAT day, so "once a day" flips at midnight WAT, not 01:00
   const gateKey = `cancel_reminder_ran:${today}`;
   const already = await db.setting.findUnique({ where: { key: gateKey }, select: { key: true } });
   if (already) return { sent: 0 };

@@ -113,6 +113,8 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/team", roles: ["SUPER_ADMIN"] },
   { prefix: "/api/admin/settings/bank", roles: ALL_EXECS },
   { prefix: "/api/admin/settings", roles: ["SUPER_ADMIN"] },
+  // The money-settings change history: readable by the founder and the CFO (longer prefix wins over the cashflow row).
+  { prefix: "/api/admin/cashflow/audit", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   // The cashflow structure: read by every executive, published (POST) by the founder only.
   { prefix: "/api/admin/cashflow", roles: ["SUPER_ADMIN"], readOnly: ["CO_CEO_CFO", "HOG", "COO"] },
   // The COO's own corner of the payout engine: their worker list and its submission.

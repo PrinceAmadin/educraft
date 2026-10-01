@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { badRequest, requireAdminRoles, serverError } from "@/lib/api";
+import { rateLimited } from "@/lib/rate-limit";
 import { db } from "@/lib/db";
 import { getRefundPreview, processRefund, RefundError } from "@/lib/services/finance/refunds";
 import type { RefundStage } from "@/lib/finance/refund-rules";
@@ -13,6 +14,8 @@ export const maxDuration = 60;
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "refund", 5);
+  if (limited) return limited;
   try {
     return NextResponse.json(await getRefundPreview(params.id));
   } catch (error) {
@@ -25,6 +28,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const guard = await requireAdminRoles(["CO_CEO_CFO"]);
   if (!guard.ok) return guard.response;
+  const limited = await rateLimited(guard.session.userId, "refund", 5);
+  if (limited) return limited;
 
   let form: FormData;
   try {

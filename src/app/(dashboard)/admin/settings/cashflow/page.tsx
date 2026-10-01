@@ -4,7 +4,8 @@ import { auth } from "@/lib/auth";
 import { canAccessRoute, homeForRole } from "@/lib/rbac";
 import { SettingsTabs } from "@/components/settings/SettingsTabs";
 import { CashflowEditor } from "@/components/settings/cashflow/CashflowEditor";
-import { getActiveCashflowOrNull, level1KeysWithRecords, listCashflowVersions, minServiceDownpayment } from "@/lib/services/cashflow";
+import { AuditHistory } from "@/components/settings/cashflow/AuditHistory";
+import { getActiveCashflowOrNull, level1KeysWithRecords, listCashflowAudit, listCashflowVersions, minServiceDownpayment } from "@/lib/services/cashflow";
 import { listStaffForAssignment } from "@/lib/services/cashflow-staff";
 
 export const metadata: Metadata = { title: "EduCraft Cashflow" };
@@ -19,13 +20,16 @@ export default async function CashflowSettingsPage() {
   if (!session?.user) redirect("/login");
   if (!canAccessRoute(session.user.role, "/admin/settings/cashflow")) redirect(homeForRole(session.user.role));
   const readOnly = session.user.role !== "SUPER_ADMIN";
+  // The audit trail is the founder's and the CFO's (matrix: "Audit log read = CEO, CFO").
+  const canSeeAudit = session.user.role === "SUPER_ADMIN" || session.user.role === "CO_CEO_CFO";
 
-  const [active, history, keysWithRecords, minDownpayment, staff] = await Promise.all([
+  const [active, history, keysWithRecords, minDownpayment, staff, audit] = await Promise.all([
     getActiveCashflowOrNull(),
     listCashflowVersions(),
     level1KeysWithRecords(),
     minServiceDownpayment(),
     listStaffForAssignment(),
+    canSeeAudit ? listCashflowAudit() : Promise.resolve([]),
   ]);
 
   return (
@@ -53,6 +57,8 @@ export default async function CashflowSettingsPage() {
           No cashflow version has been published yet. Run <code className="font-mono">npm run cashflow:seed -- --apply</code> to publish version 1 (the manual&apos;s numbers).
         </p>
       )}
+
+      {canSeeAudit ? <AuditHistory entries={audit} /> : null}
     </div>
   );
 }

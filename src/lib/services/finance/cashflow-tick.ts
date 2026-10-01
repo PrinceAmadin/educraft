@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { currentRunner } from "@/lib/generation/orchestrator-view";
 import { dueBatches } from "@/lib/finance/payout-schedule";
 import { buildDueBatches, finalizeDueBatches, sendBankReminders } from "@/lib/services/finance/payout-batches";
+import { recordCronRun } from "@/lib/services/finance/cron-health";
 import { sendCancelReminders } from "@/lib/services/finance/refunds";
 import { sendWeeklyStatement } from "@/lib/services/finance/weekly-statement";
 
@@ -72,15 +73,24 @@ export interface CashflowTickReport {
 
 /** One tick: build due batches, finalise any whose window has closed, send the reminders. */
 export async function runCashflowTick(now: Date = new Date()): Promise<CashflowTickReport> {
-  const due = dueBatches(now);
-  const built = (await buildDueBatches(now)).built;
-  // Always, every minute: a batch cleared ten minutes ago now has its emails sent.
-  const finalised = (await finalizeDueBatches(now)).finalised;
-  // Only on build days (the EmailLog guard keeps it to once per period even then).
-  const remindersSent = due.length ? (await sendBankReminders(now)).sent : 0;
-  // Once a day (self-gated): the cancelled-with-money-in decision reminders (decision 6).
-  const cancelRemindersSent = (await sendCancelReminders(now).catch(() => ({ sent: 0 }))).sent;
-  // Once a week (self-gated): the completed week's financial statement email (Phase 7).
-  const weeklyStatementSent = (await sendWeeklyStatement(now).catch(() => ({ sent: 0 }))).sent;
-  return { built, finalised, remindersSent, cancelRemindersSent, weeklyStatementSent };
+  try {
+    const due = dueBatches(now);
+    const built = (await buildDueBatches(now)).built;
+    // Always, every minute: a batch cleared ten minutes ago now has its emails sent.
+    const finalised = (await finalizeDueBatches(now)).finalised;
+    // Only on build days (the EmailLog guard keeps it to once per period even then).
+    const remindersSent = due.length ? (await sendBankReminders(now)).sent : 0;
+    // Once a day (self-gated): the cancelled-with-money-in decision reminders (decision 6).
+    const cancelRemindersSent = (await sendCancelReminders(now).catch(() => ({ sent: 0 }))).sent;
+    // Once a week (self-gated): the completed week's financial statement email (Phase 7).
+    const weeklyStatementSent = (await sendWeeklyStatement(now).catch(() => ({ sent: 0 }))).sent;
+    await recordCronRun("cashflow-tick", now, "ok", null);
+    return { built, finalised, remindersSent, cancelRemindersSent, weeklyStatementSent };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await recordCronRun("cashflow-tick", now, "error", message);
+    // One CRON_FAILURE audit row so the failure is visible beyond the logs (Item 3).
+    await db.cashflowAuditLog.create({ data: { actorUserId: "system", action: "CRON_FAILURE", entityType: "CronHealthLog", entityId: "cashflow-tick", reason: message.slice(0, 500) } }).catch(() => undefined);
+    throw error;
+  }
 }

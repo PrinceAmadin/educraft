@@ -19,6 +19,7 @@ import {
 } from "@/lib/services/ai-usage";
 import { getClaudePot } from "@/lib/services/finance/pots";
 import { ClaudePotCard } from "@/components/finance/ai-usage/ClaudePotCard";
+import { SendTestEmailButton } from "@/components/finance/ai-usage/SendTestEmailButton";
 import { cn, formatNaira } from "@/lib/utils";
 import { AlertThresholdForm, MonthlySummaryCard, PerProjectCostTable, PerSubsystemBreakdown } from "./token-panels";
 
@@ -58,6 +59,8 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
       />
 
       <AiBalanceCard balance={balance} canEdit={session?.user?.role === "SUPER_ADMIN"} />
+
+      {canEditThreshold ? <SendTestEmailButton /> : null}
 
       {/* Phase 4: the Claude API pot — cash set aside for Claude, and logging a top-up that raises the balance above. */}
       <ClaudePotCard pot={claudePot} canLogTopUp={canLogTopUp} />
