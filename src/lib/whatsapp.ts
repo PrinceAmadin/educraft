@@ -27,6 +27,15 @@ export function educraftWaLink(whatsapp: string, message: string): string {
   return waLink(whatsapp, message);
 }
 
+/** The pre-filled WhatsApp welcome the HOG sends a newly approved ambassador. No emoji. */
+export function ambassadorWelcomeWaMessage(fullName: string, groupInviteUrl?: string | null): string {
+  const hi = `Welcome to EduCraft, ${greetingName(fullName)}! Your ambassador application has been approved — we're glad to have you on the team.`;
+  const group = groupInviteUrl
+    ? `\n\nJoin the EduCraft ambassador WhatsApp group here: ${groupInviteUrl}\nThis link opens only on your device, so please keep it to yourself.`
+    : "";
+  return `${hi}${group}`;
+}
+
 /** "OYEWOLE Tunde" -> "Oyewole": a greeting shouldn't shout. */
 export function greetingName(fullName: string): string {
   const word = fullName.trim().split(/\s+/)[0] ?? "";

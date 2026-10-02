@@ -27,6 +27,8 @@ export const directoryQuerySchema = z.object({
   near: z.enum(["1"]).optional().catch(undefined),
   /** Silver or above with no sub-team yet (and not a Sub themselves). */
   ready: z.enum(["1"]).optional().catch(undefined),
+  /** New ambassadors: joined 30+ days ago, never converted (the HOG's review list). */
+  newNoClient: z.enum(["1"]).optional().catch(undefined),
 });
 export type DirectoryQuery = z.infer<typeof directoryQuerySchema>;
 

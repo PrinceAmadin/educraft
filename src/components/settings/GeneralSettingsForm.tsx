@@ -70,6 +70,7 @@ export function GeneralSettingsForm({
       accountNumber: settings.accountNumber,
       accountName: settings.accountName,
       alertEmails: settings.alertEmails,
+      ambassadorGroupUrl: settings.ambassadorGroupUrl,
       fxRateMarginPercent: settings.fxRateMarginPercent,
       fxRateManualOverride: settings.fxRateManualOverride,
     },
@@ -201,6 +202,21 @@ export function GeneralSettingsForm({
           </Field>
           <Field label="Address" htmlFor="hqAddress" error={errors.hqAddress?.message} hint="Shown in the site footer. Optional.">
             <Input id="hqAddress" disabled={!canEditPricing} {...register("hqAddress")} />
+          </Field>
+          <Field
+            label="Ambassador WhatsApp group link"
+            htmlFor="ambassadorGroupUrl"
+            error={errors.ambassadorGroupUrl?.message}
+            hint="The group every approved ambassador's device-locked invite opens. Change it and every ambassador link follows."
+            className="sm:col-span-2"
+          >
+            <Input
+              id="ambassadorGroupUrl"
+              inputMode="url"
+              placeholder="https://chat.whatsapp.com/…"
+              disabled={!canEditPricing}
+              {...register("ambassadorGroupUrl")}
+            />
           </Field>
         </div>
       </FormSection>

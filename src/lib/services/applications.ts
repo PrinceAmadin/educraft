@@ -14,6 +14,7 @@ import { ambassadorWelcomeEmail } from "@/lib/emails/ambassador-welcome";
 import { applicationRejectedEmail } from "@/lib/emails/application-decision";
 import { alertAmbassadorApplication } from "@/lib/services/team-alerts";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
+import { ensureGroupInvite } from "@/lib/services/ambassador-group";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 import type { SendFn } from "@/lib/services/client-otp";
 import type { AmbassadorApplicationInput, EditApplicationInput } from "@/lib/validations/application";
@@ -137,11 +138,8 @@ export async function submitApplication(
         otherUniversity: universityId ? null : input.otherUniversity || null,
         department: input.department || null,
         level: input.level || null,
-        reachRoles: input.reachRoles,
-        reachSize: input.reachSize,
-        reachGroups: input.reachGroups.trim(),
-        expectedReferrals: input.expectedReferrals,
-        firstWeekPlan: input.firstWeekPlan.trim(),
+        // The reach/strategy questions were removed Oct 2026 — those columns are
+        // left null (and the admin review treats such rows as it does legacy ones).
         bankName: input.bankName.trim(),
         accountNumber: input.accountNumber.trim(),
         accountName: input.accountName.trim(),
@@ -451,7 +449,16 @@ export async function approveApplication(
   applicationId: string,
   reviewerId: string,
   universityIdOverride?: string
-): Promise<{ ambassadorId: string; referralCode: string; slotCode: string }> {
+): Promise<{
+  ambassadorId: string;
+  referralCode: string;
+  slotCode: string;
+  fullName: string;
+  /** The ambassador's phone, for the HOG's pre-filled WhatsApp welcome. */
+  ambassadorPhone: string | null;
+  /** The ambassador's device-locked group link, for the email and the HOG's message. */
+  groupInviteUrl: string | null;
+}> {
   const application = await db.ambassadorApplication.findUnique({
     where: { id: applicationId },
     select: {
@@ -569,11 +576,22 @@ export async function approveApplication(
   // transaction (kept short); a failure only delays it to the next recount.
   await recountAmbassador(db, ambassador.id).catch((err) => console.error("[exec-tier] recount after approval failed", err));
 
-  // Welcome email: slot ID, their client link, and how to sign in. A failed
-  // send never undoes the approval — the admin can message them from Tracking.
+  // The live site, never localhost: the links are opened on the applicant's phone.
+  const base = siteUrl();
+
+  // Their device-locked WhatsApp group link. A failure here must not undo the
+  // approval — the HOG can mint one later from the ambassador's page.
+  let groupInviteUrl: string | null = null;
+  try {
+    const token = await ensureGroupInvite(ambassador.id, reviewerId);
+    groupInviteUrl = `${base}/ambassador-group/${token}`;
+  } catch (err) {
+    console.error("[approveApplication] group invite failed:", err);
+  }
+
+  // Welcome email: slot ID, their client link, the group link, and how to sign
+  // in. A failed send never undoes the approval — the HOG can message them.
   if (application.email) {
-    // The live site, never localhost: the link is opened on the applicant's phone.
-    const base = siteUrl();
     const mail = ambassadorWelcomeEmail({
       fullName: application.fullName,
       slotCode: claimed,
@@ -583,6 +601,7 @@ export async function approveApplication(
       loginUrl: `${base}/ambassador`,
       hasLogin: Boolean(application.userId),
       provisionalUntil: ambassador.provisionalUntil,
+      groupInviteUrl,
     });
     const sent = await sendMail({ to: application.email, ...mail });
     if (!sent.ok) console.error("[approveApplication] welcome email failed:", sent.error);
@@ -595,7 +614,14 @@ export async function approveApplication(
     link: `/admin/ambassadors/${ambassador.id}`,
   });
 
-  return { ambassadorId: ambassador.id, referralCode: ambassador.referralCode, slotCode: claimed };
+  return {
+    ambassadorId: ambassador.id,
+    referralCode: ambassador.referralCode,
+    slotCode: claimed,
+    fullName: application.fullName,
+    ambassadorPhone: application.phone,
+    groupInviteUrl,
+  };
 }
 
 export async function rejectApplication(

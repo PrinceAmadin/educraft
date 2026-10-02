@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { phoneSchema } from "@/lib/validations/clients";
-import { REACH_ROLES, REACH_SIZES } from "@/lib/constants";
 
-const values = <T extends readonly { value: string }[]>(opts: T) =>
-  opts.map((o) => o.value) as [string, ...string[]];
+// The reach/strategy questions (reachRoles, reachSize, reachGroups,
+// expectedReferrals, firstWeekPlan) were removed Oct 2026 (HOG's call): they
+// invited fabrication and gave no real signal — the HOG judges ambassadors on
+// what they actually do. The columns stay on AmbassadorApplication so an
+// application submitted while they were live still reads in full; nothing
+// writes them any more.
 
 export const ambassadorApplicationSchema = z
   .object({
@@ -19,30 +22,6 @@ export const ambassadorApplicationSchema = z
     otherUniversity: z.string().trim().max(120).optional().or(z.literal("")),
     department: z.string().trim().max(120).optional().or(z.literal("")),
     level: z.string().trim().max(40).optional().or(z.literal("")),
-    // ── What they can reach ──
-    reachRoles: z.array(z.enum(values(REACH_ROLES))).min(1, "Pick at least one, or 'None of these yet'"),
-    reachSize: z.enum(values(REACH_SIZES), { errorMap: () => ({ message: "Pick how many you can reach" }) }),
-    reachGroups: z
-      .string()
-      .trim()
-      .min(5, "Name at least one group or page")
-      .max(200, "Keep it under 200 characters"),
-    // ── What they commit to ──
-    // Empty must stay empty: z.coerce.number() reads "" as 0, so a blank box
-    // would pass as an honest "nobody" and the required marker would be a lie.
-    expectedReferrals: z.preprocess(
-      (v) => (v === "" || v == null ? undefined : v),
-      z.coerce
-        .number({ required_error: "Enter a number", invalid_type_error: "Enter a number" })
-        .int("Enter a whole number")
-        .min(0, "Enter a number")
-        .max(500, "Enter a realistic number")
-    ),
-    firstWeekPlan: z
-      .string()
-      .trim()
-      .min(20, "One sentence is enough — at least 20 characters")
-      .max(200, "Keep it under 200 characters"),
     // Payment details — used to pay commission, so held to the same bar as
     // the original ambassador app: a real bank, a 10-digit account number.
     bankName: z.string().trim().min(2, "Select or enter your bank").max(80),

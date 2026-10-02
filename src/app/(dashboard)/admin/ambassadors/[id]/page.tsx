@@ -20,6 +20,9 @@ import { RoleChip } from "@/components/layout/RoleChip";
 import { execRoleOfAmbassador } from "@/lib/services/executives";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralLinkCard } from "@/components/ambassadors/ReferralLinkCard";
+import { AmbassadorGroupLink } from "@/components/ambassadors/AmbassadorGroupLink";
+import { getGroupInvite } from "@/lib/services/ambassador-group";
+import { siteUrl } from "@/lib/site-url";
 import { AmbassadorControls } from "@/components/ambassadors/AmbassadorControls";
 import { ParentAssignment } from "@/components/ambassadors/ParentAssignment";
 import { MessageAmbassadorButton } from "@/components/ambassadors/MessageAmbassadorButton";
@@ -57,7 +60,7 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole] = await Promise.all([
+  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole, groupInviteView] = await Promise.all([
     listParentCandidates(ambassador.id),
     getActiveCashflow(),
     getLinkedWorker(ambassador.userId),
@@ -69,8 +72,12 @@ export default async function AmbassadorDetailPage({
     getDirectoryDetail(ambassador.id),
     listSubCandidates(ambassador.id),
     execRoleOfAmbassador(ambassador.id),
+    getGroupInvite(ambassador.id),
   ]);
   if (!platform) notFound();
+  const groupInvite = groupInviteView
+    ? { ...groupInviteView, boundAt: groupInviteView.boundAt?.toISOString() ?? null, url: `${siteUrl()}/ambassador-group/${groupInviteView.token}` }
+    : null;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
   // What a Core earns on this ambassador's jobs by default: the ambassador total less their tier rate.
   const defaultParentRate = coreOverrideFor(ratePercentForTier(ambassador.tier, active.structure.tiers), active.structure);
@@ -246,6 +253,8 @@ export default async function AmbassadorDetailPage({
       ) : (
       <>
       <ReferralLinkCard code={ambassador.referralCode} />
+
+      <AmbassadorGroupLink ambassadorId={ambassador.id} initial={groupInvite} />
 
       <ParentAssignment
         ambassadorId={ambassador.id}

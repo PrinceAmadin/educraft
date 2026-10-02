@@ -247,6 +247,24 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
   return lookup.ok ? lookup.account : null;
 }
 
+/**
+ * Is this email or ID a worker/ambassador application still under review?
+ * Read-only, reuses the same detection the forgot-password flow uses, and
+ * returns only "pending" vs "other" — so it leaks nothing the public
+ * `/api/portal/otp/request` endpoint doesn't already expose. Used by the login
+ * page to tell a pending applicant their application is being reviewed instead
+ * of the generic "wrong password" (the password sign-in path can't tell the
+ * two apart, since an inactive login and a wrong password both return null).
+ */
+export async function classifyLoginIdentifier(input: string): Promise<"pending" | "other"> {
+  try {
+    const lookup = await lookupAccount(input);
+    return !lookup.ok && lookup.status === "pending" ? "pending" : "other";
+  } catch {
+    return "other";
+  }
+}
+
 export async function requestPortalCode(opts: {
   identifier: string;
   ip: string;

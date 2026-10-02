@@ -49,6 +49,8 @@ export interface AttentionCounts {
   platinumBonus: number;
   readySubTeams: number;
   renewalsDue: number;
+  /** New ambassadors who joined 30+ days ago and have never brought a client. */
+  newNoClient30: number;
 }
 
 export interface WeekPoint {
@@ -156,6 +158,9 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
 
   // ── Needs attention ──
   const inactive60 = ambassadors.filter((a) => activityStatus(a, now) === "INACTIVE").length;
+  // New ambassadors past their first 30 days with no conversion ever — the HOG
+  // reviews these (the silent provisional sweep flags them once in-app too).
+  const newNoClient30 = ambassadors.filter((a) => a.lifetimeConversions === 0 && a.createdAt <= d30).length;
   const nearPromotion = ambassadors.filter((a) => {
     const left = toNextTier(a.tier, a.lifetimeConversions, s.tiers);
     return left != null && left > 0 && left <= 2;
@@ -188,7 +193,7 @@ export async function getAmbassadorDashboard(now: Date = new Date()): Promise<Am
       monthLabel: monthLabel(month),
     },
     tiers,
-    attention: { inactive60, nearPromotion, platinumBonus, readySubTeams, renewalsDue },
+    attention: { inactive60, nearPromotion, platinumBonus, readySubTeams, renewalsDue, newNoClient30 },
     weekly,
     rhythm,
     spotlight,

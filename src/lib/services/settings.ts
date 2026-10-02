@@ -23,6 +23,7 @@ const KEYS = {
   accountNumber: "company_account_number",
   accountName: "company_account_name",
   alertEmails: "alert_emails",
+  ambassadorGroupUrl: "ambassador_whatsapp_group_url",
   fxMargin: FX_RATE_SETTING_KEYS.marginPercent,
   fxManualOverride: FX_RATE_SETTING_KEYS.manualOverride,
   fxManualOverrideSetAt: FX_RATE_SETTING_KEYS.manualOverrideSetAt,
@@ -44,6 +45,8 @@ const DEFAULTS = {
   accountName: "",
   /** The founder's own Gmail: a different account from the sender, so alerts land in the inbox. */
   alertEmails: "amadinprince26@gmail.com",
+  /** The ambassador WhatsApp group every approved ambassador's device-locked link opens. */
+  ambassadorGroupUrl: "https://chat.whatsapp.com/D7Cp4C9jA2uLddpUyy0WPr",
 };
 
 export interface GeneralSettings {
@@ -60,6 +63,8 @@ export interface GeneralSettings {
   accountName: string;
   /** The founder's inboxes, comma-separated: every team alert (the COO and HOG get theirs at their login email). */
   alertEmails: string;
+  /** The WhatsApp group invite URL new ambassadors' device-locked links open. Super Admin only. */
+  ambassadorGroupUrl: string;
   /** Margin % applied on top of the base ₦/$ rate (0–20). */
   fxRateMarginPercent: number;
   /** Manual override for the base ₦/$ rate; empty string when unset. */
@@ -103,6 +108,7 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
     accountNumber: s[KEYS.accountNumber]?.trim() || DEFAULTS.accountNumber,
     accountName: s[KEYS.accountName]?.trim() || DEFAULTS.accountName,
     alertEmails: splitEmailList(s[KEYS.alertEmails] ?? "").join(", ") || DEFAULTS.alertEmails,
+    ambassadorGroupUrl: s[KEYS.ambassadorGroupUrl]?.trim() || DEFAULTS.ambassadorGroupUrl,
     fxRateMarginPercent: clampMargin(num(s[KEYS.fxMargin], DEFAULT_FX_MARGIN_PERCENT)),
     fxRateManualOverride: s[KEYS.fxManualOverride] ?? "",
     fxRateSnapshot,
@@ -134,6 +140,8 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
   if (input.accountName !== undefined) writes.push({ key: KEYS.accountName, value: input.accountName });
   if (input.alertEmails !== undefined)
     writes.push({ key: KEYS.alertEmails, value: splitEmailList(input.alertEmails).join(", ") });
+  if (input.ambassadorGroupUrl !== undefined)
+    writes.push({ key: KEYS.ambassadorGroupUrl, value: input.ambassadorGroupUrl.trim() });
 
   if (input.fxRateMarginPercent !== undefined)
     writes.push({ key: KEYS.fxMargin, value: String(clampMargin(input.fxRateMarginPercent)) });
@@ -181,4 +189,14 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
 
   if (contactChanges.length > 0) revalidateHqContact();
   return { contactChanges };
+}
+
+/**
+ * The WhatsApp group URL a new ambassador's device-locked link redirects to.
+ * Read at request time by the wrapper, so changing it (Super Admin only, on
+ * Settings > General) updates where every ambassador's link points at once.
+ */
+export async function getAmbassadorGroupUrl(): Promise<string> {
+  const row = await db.setting.findUnique({ where: { key: KEYS.ambassadorGroupUrl } });
+  return row?.value?.trim() || DEFAULTS.ambassadorGroupUrl;
 }

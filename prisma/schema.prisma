@@ -945,7 +945,14 @@ model Ambassador {
   /// Stamped when their first referred downpayment is confirmed.
   activatedAt         DateTime?
   /// Stamped when the "days left" warning went out, so it sends once.
+  /// Retired Oct 2026: the ambassador no longer sees a countdown (HOG's call),
+  /// so no warning is sent. Kept for rows written while it was live.
   provisionalWarnedAt DateTime?
+  /// Stamped the first time the silent 30-day sweep reports this new ambassador
+  /// to the HOG for having brought no client (Oct 2026). Nothing is changed
+  /// automatically any more — the HOG decides each one's fate — and this makes
+  /// the one-time notification idempotent across sweep runs.
+  provisionalReviewNotifiedAt DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -973,6 +980,9 @@ model Ambassador {
   /// Jobs this ambassador earns a parent-commission on, referred by one of
   /// their sub-ambassadors.
   subReferredProjects  Project[] @relation("ProjectParentAmbassador")
+  /// Device-locked WhatsApp group invites minted for them (Oct 2026). At most
+  /// one is active (OPEN/BOUND) at a time; regenerating revokes the old one.
+  groupInvites         AmbassadorGroupInvite[]
 
   // ── Phase 3 (Ambassador Platform) ──
   /// Cached from AmbassadorReferral: submitted referrals, conversions (a
@@ -1394,6 +1404,33 @@ model ProBonoInvite {
 
   project Project?
 
+  @@index([status])
+}
+
+// ─── AMBASSADOR GROUP INVITE ────────────────────────────
+// A device-locked WhatsApp group link for one ambassador (Oct 2026). Same
+// first-device-binding pattern as ProBonoInvite: the first browser to open
+// /ambassador-group/{token} is bound to it (deviceHash = sha256 of a random
+// cookie value) and any other device is refused. The link is a wrapper — at
+// "ready" it redirects to the CURRENT group URL from Settings, so the CEO can
+// change the group link and every wrapper follows. The HOG/CEO can reset the
+// device, revoke, or regenerate (new token) for an ambassador.
+
+model AmbassadorGroupInvite {
+  id           String     @id @default(cuid())
+  /// Unguessable URL token: /ambassador-group/{token}
+  token        String     @unique
+  ambassadorId String
+  ambassador   Ambassador @relation(fields: [ambassadorId], references: [id], onDelete: Cascade)
+  /// OPEN (not bound yet), BOUND (locked to a device), REVOKED
+  status       String     @default("OPEN")
+  /// sha256 of the device cookie of the first browser that opened the link.
+  deviceHash   String?
+  boundAt      DateTime?
+  createdById  String?
+  createdAt    DateTime   @default(now())
+
+  @@index([ambassadorId])
   @@index([status])
 }
 

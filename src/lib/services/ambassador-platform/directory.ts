@@ -139,6 +139,10 @@ export async function listDirectory(q: DirectoryQuery, now: Date = new Date()): 
     });
   }
   if (q.ready) filtered = filtered.filter((r) => !r.parent && r.subCount === 0 && isEligibleForSubTeam(r.tier));
+  if (q.newNoClient) {
+    const cutoff = now.getTime() - 30 * 86_400_000;
+    filtered = filtered.filter((r) => r.lifetimeConversions === 0 && new Date(r.joinedAt).getTime() <= cutoff);
+  }
 
   const sort = q.sort ?? "conversions";
   const dir = q.dir ?? (sort === "name" ? "asc" : "desc");

@@ -1,35 +1,30 @@
 import { db } from "@/lib/db";
-import { PROVISIONAL_WARN_DAYS, provisionalDaysLeft } from "@/lib/ambassador";
-import { releaseSlotFor } from "@/lib/services/ambassador-roster";
-import { notifyAdmins, notifyUsers } from "@/lib/services/notifications";
-import { provisionalLapsedEmail, provisionalReminderEmail } from "@/lib/emails/ambassador-provisional";
-import { getHqContact } from "@/lib/services/hq-contact";
+import { notifyGrowth } from "@/lib/services/notifications";
 import type { SendFn } from "@/lib/services/ambassador-weekly-report";
 
 /**
- * The provisional-slot sweep.
+ * The provisional-slot sweep — silent, non-destructive (Oct 2026, HOG's call).
  *
- * A new ambassador holds their slot for 30 days. One confirmed order and it is
- * theirs (see `graduateProvisional`); none, and this releases it so the next
- * applicant can have it. A reminder goes out once, nine days before.
+ * A new ambassador still has a 30-day window to bring their first confirmed
+ * order, but NOTHING happens automatically any more: the ambassador never sees
+ * a countdown, their status is never changed and their slot is never released.
+ * When the window passes with no confirmed order, this simply reports the new
+ * ambassador to the Head of Growth ONCE, and the HOG decides whether to keep,
+ * pause or remove them. Every fate of an ambassador is a human decision.
  *
- * The lapse deliberately does NOT switch off their login: since "the email is
- * the person", that login may also carry their own client orders, and
- * deactivating it would lock a paying client out of their own dashboard. The
- * portal guard already refuses a non-Active ambassador profile, which is all
- * that is needed here.
+ * `provisionalReviewNotifiedAt` makes the report idempotent: each new ambassador
+ * is flagged (atomically) and reported exactly once, even if the sweep runs
+ * again or two runs overlap. A confirmed order sets `activatedAt` elsewhere, so
+ * an ambassador who converts before the window passes is never reported.
  */
-
-export const SWEEP_DAY_KEY = "ambassador_provisional_sweep_day";
 
 export interface ProvisionalSweepResult {
   day: string;
-  warned: number;
-  lapsed: number;
+  /** New ambassadors reported to the HOG this run. */
+  flagged: number;
   failed: number;
   failures: { ambassadorId: string; error: string }[];
-  names: { warned: string[]; lapsed: string[] };
-  skipped?: string;
+  names: string[];
   dryRun: boolean;
 }
 
@@ -37,132 +32,73 @@ const selection = {
   id: true,
   ambassadorId: true,
   fullName: true,
-  email: true,
-  userId: true,
-  legacySlotId: true,
-  provisionalUntil: true,
 } as const;
 
 const dayKey = (now: Date) => now.toISOString().slice(0, 10);
 
 export async function runProvisionalSweep(opts: {
-  send: SendFn;
-  siteUrl: string;
+  /** Accepted for the cron route's call signature; no email is sent any more. */
+  send?: SendFn;
+  siteUrl?: string;
   dry?: boolean;
   force?: boolean;
   now?: Date;
 }): Promise<ProvisionalSweepResult> {
   const now = opts.now ?? new Date();
   const day = dayKey(now);
-  const warnFrom = new Date(now.getTime() + PROVISIONAL_WARN_DAYS * 86_400_000);
 
-  const [toWarn, toLapse] = await Promise.all([
-    db.ambassador.findMany({
-      where: {
-        activatedAt: null,
-        provisionalWarnedAt: null,
-        provisionalUntil: { gt: now, lte: warnFrom },
-        status: "Active",
-      },
-      select: selection,
-    }),
-    db.ambassador.findMany({
-      where: { activatedAt: null, provisionalUntil: { lte: now }, status: "Active" },
-      select: selection,
-    }),
-  ]);
+  // New ambassadors whose 30-day window has passed with no confirmed order and
+  // who have not been reported yet.
+  const toFlag = await db.ambassador.findMany({
+    where: {
+      activatedAt: null,
+      provisionalUntil: { lte: now },
+      status: "Active",
+      provisionalReviewNotifiedAt: null,
+    },
+    select: selection,
+  });
 
   const base: ProvisionalSweepResult = {
     day,
-    warned: toWarn.length,
-    lapsed: toLapse.length,
+    flagged: toFlag.length,
     failed: 0,
     failures: [],
-    names: { warned: toWarn.map((a) => a.fullName), lapsed: toLapse.map((a) => a.fullName) },
+    names: toFlag.map((a) => a.fullName),
     dryRun: Boolean(opts.dry),
   };
 
   if (opts.dry) return base;
-  if (toWarn.length === 0 && toLapse.length === 0) return base;
-
-  // Claim the day before sending, so a retried cron delivery cannot email the
-  // same people twice; release it again if nothing actually went out.
-  const already = await db.setting.findUnique({ where: { key: SWEEP_DAY_KEY } });
-  if (already?.value === day && !opts.force) {
-    return { ...base, skipped: "Today's sweep already ran." };
-  }
-  await db.setting.upsert({
-    where: { key: SWEEP_DAY_KEY },
-    create: { key: SWEEP_DAY_KEY, value: day },
-    update: { value: day },
-  });
+  if (toFlag.length === 0) return base;
 
   const fail = (id: string, err: unknown) => {
     base.failed += 1;
     base.failures.push({ ambassadorId: id, error: err instanceof Error ? err.message : String(err) });
   };
 
-  // EduCraft's line for the email footers, read once for the whole sweep.
-  const hq = await getHqContact();
-
-  for (const a of toWarn) {
+  // Claim each one atomically: only the run that flips the flag reports it, so
+  // the HOG hears about each new ambassador exactly once.
+  const reported: string[] = [];
+  for (const a of toFlag) {
     try {
-      const daysLeft = provisionalDaysLeft(a.provisionalUntil!, now);
-      if (a.email && a.legacySlotId) {
-        const mail = provisionalReminderEmail({
-          fullName: a.fullName,
-          daysLeft,
-          referralLink: `${opts.siteUrl}/EduCraftA/${a.legacySlotId}`,
-          dashboardUrl: `${opts.siteUrl}/ambassador`,
-          hq,
-        });
-        const sent = await opts.send({ to: a.email, ...mail });
-        if (!sent.ok) fail(a.ambassadorId, sent.error ?? "send failed");
-      }
-      if (a.userId) {
-        await notifyUsers([a.userId], {
-          title: `${daysLeft} day${daysLeft === 1 ? "" : "s"} left to confirm your slot`,
-          message: "One confirmed order from someone you referred makes your ambassador slot permanent.",
-          type: "warning",
-          link: "/ambassador",
-        });
-      }
-      await db.ambassador.update({ where: { id: a.id }, data: { provisionalWarnedAt: now } });
-    } catch (err) {
-      fail(a.ambassadorId, err);
-    }
-  }
-
-  for (const a of toLapse) {
-    try {
-      await db.$transaction(async (tx) => {
-        // Claim it first: only the run that flips the status does the release.
-        const claimed = await tx.ambassador.updateMany({
-          where: { id: a.id, activatedAt: null, status: "Active" },
-          data: { status: "Lapsed", provisionalUntil: null },
-        });
-        if (claimed.count === 0) return;
-        if (a.legacySlotId) await releaseSlotFor(tx, a.legacySlotId);
+      const claimed = await db.ambassador.updateMany({
+        where: { id: a.id, provisionalReviewNotifiedAt: null },
+        data: { provisionalReviewNotifiedAt: now },
       });
-
-      if (a.email) {
-        const mail = provisionalLapsedEmail({ fullName: a.fullName, applyUrl: `${opts.siteUrl}/apply`, hq });
-        const sent = await opts.send({ to: a.email, ...mail });
-        if (!sent.ok) fail(a.ambassadorId, sent.error ?? "send failed");
-      }
+      if (claimed.count === 1) reported.push(a.fullName);
     } catch (err) {
       fail(a.ambassadorId, err);
     }
   }
 
-  if (toLapse.length > 0) {
-    await notifyAdmins({
-      title: `${toLapse.length} ambassador slot${toLapse.length === 1 ? "" : "s"} released`,
-      message: `${toLapse.map((a) => a.fullName).join(", ")} brought no confirmed order in 30 days.`,
+  if (reported.length > 0) {
+    await notifyGrowth({
+      title: `${reported.length} new ambassador${reported.length === 1 ? "" : "s"} brought no client in 30 days`,
+      message: `${reported.join(", ")} — their first 30 days have passed with no confirmed order. Nothing has changed automatically: review each one and decide whether to keep, pause or remove them.`,
       type: "info",
-      link: "/admin/ambassadors",
+      link: "/admin/ambassadors/list?newNoClient=1",
     });
   }
 
-  return base;
+  return { ...base, flagged: reported.length, names: reported };
 }

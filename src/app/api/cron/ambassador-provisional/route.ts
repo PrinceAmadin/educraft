@@ -1,8 +1,6 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, serverError } from "@/lib/api";
-import { mailerConfigured, sendMail } from "@/lib/mailer";
-import { siteUrl as liveSiteUrl } from "@/lib/site-url";
 import { runProvisionalSweep } from "@/lib/services/ambassador-provisional";
 
 export const dynamic = "force-dynamic";
@@ -22,20 +20,17 @@ function hasValidCronSecret(req: NextRequest): boolean {
 /**
  * GET /api/cron/ambassador-provisional
  *
- *   (cron)      warns ambassadors whose 30-day window is nearly up, and
- *               releases the slot of anyone whose window has passed with no
- *               confirmed order
- *   ?dry=true   counts who would be warned and who would lapse, sends and
- *               changes nothing (cron secret or admin session)
- *   ?force=true run again on a day that already ran (cron secret only)
+ *   (cron)      reports to the Head of Growth any new ambassador whose 30-day
+ *               window has passed with no confirmed order — silent and
+ *               non-destructive: nothing about the ambassador is changed
+ *   ?dry=true   counts who would be reported, changes nothing (cron secret or
+ *               admin session)
  *
- * Sending requires CRON_SECRET; without it this route refuses, so nobody can
- * release slots by guessing the URL.
+ * Running requires CRON_SECRET; without it this route refuses, so nobody can
+ * trigger the report by guessing the URL.
  */
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
-  // Email links always point at the live site, whichever deployment runs this.
-  const siteUrl = liveSiteUrl();
 
   try {
     const dry = q.get("dry") === "true";
@@ -54,17 +49,9 @@ export async function GET(req: NextRequest) {
         );
       }
       if (!cron) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      if (!mailerConfigured()) {
-        return NextResponse.json({ error: "Email is not set up (GMAIL_APP_PASSWORD)." }, { status: 503 });
-      }
     }
 
-    const result = await runProvisionalSweep({
-      dry,
-      force: q.get("force") === "true" && cron,
-      siteUrl,
-      send: sendMail,
-    });
+    const result = await runProvisionalSweep({ dry });
     console.log("[provisional-sweep]", JSON.stringify({ ...result, failures: result.failures.length }));
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

@@ -8,7 +8,7 @@ import {
   getAmbassadorByUserId,
   getAmbassadorDashboard,
 } from "@/lib/services/ambassador-portal";
-import { isProvisional, provisionalDaysLeft, referralLink } from "@/lib/ambassador";
+import { referralLink } from "@/lib/ambassador";
 import {
   PAYING_CLIENTS_HINT,
   PAYING_CLIENTS_LABEL,
@@ -62,18 +62,6 @@ export default async function AmbassadorDashboardPage() {
       </div>
 
       <CadenceNotice>Your commission is owed the moment someone you referred pays their downpayment, and paid out every Saturday to the bank account on your profile.</CadenceNotice>
-
-      {isProvisional(ambassador) ? (
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl bg-gold/10 px-4 py-3">
-          <span className="text-sm font-semibold text-gold">
-            {provisionalDaysLeft(ambassador.provisionalUntil!)} day
-            {provisionalDaysLeft(ambassador.provisionalUntil!) === 1 ? "" : "s"} left to confirm your slot
-          </span>
-          <span className="text-sm text-muted-foreground">
-            Your slot becomes permanently yours once the first order from someone you referred is paid.
-          </span>
-        </div>
-      ) : null}
 
       <ReferralShareCard code={data.referralCode} link={link} qrDataUrl={qrDataUrl} />
 

@@ -14,6 +14,8 @@ export function ambassadorWelcomeEmail(input: {
   hasLogin: boolean;
   /** The date their provisional slot runs out, if the rule applies to them. */
   provisionalUntil?: Date | null;
+  /** Their device-locked WhatsApp group link, if one was minted. Opens only on the first device they open it with. */
+  groupInviteUrl?: string | null;
 }): { subject: string; html: string; text: string } {
   const first = input.fullName.trim().split(/\s+/)[0] || input.fullName;
   const subject = "Welcome to the EduCraft ambassador programme";
@@ -31,6 +33,8 @@ export function ambassadorWelcomeEmail(input: {
     ? "Sign in to your dashboard with your email and password."
     : "We will send your dashboard login separately.";
 
+  const groupUrl = input.groupInviteUrl?.trim() || null;
+
   const text = [
     `Hi ${first},`,
     "",
@@ -41,6 +45,14 @@ export function ambassadorWelcomeEmail(input: {
     "",
     "Share this link with students. When they open it, WhatsApp opens with a message that already says you referred them.",
     "",
+    ...(groupUrl
+      ? [
+          "Join the ambassador WhatsApp group:",
+          groupUrl,
+          "This link opens only on the first device you open it with — it is yours alone, so please don't share it.",
+          "",
+        ]
+      : []),
     provisionalLine ?? "",
     provisionalLine ? "" : "",
     loginLine,
@@ -64,6 +76,15 @@ export function ambassadorWelcomeEmail(input: {
       <p style="margin:0;font-size:14px;word-break:break-all"><a href="${escapeHtml(input.referralLink)}" style="color:#0D9488;text-decoration:none;font-weight:600">${escapeHtml(input.referralLink)}</a></p>
     </div>
     <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#0F172A">Share this link with students. When they open it, WhatsApp opens with a message that already says you referred them.</p>
+    ${
+      groupUrl
+        ? `<div style="margin:0 0 20px;padding:16px 18px;background:#F1F3F5;border-radius:12px">
+      <p style="margin:0 0 10px;font-size:15px;line-height:1.6;color:#0F172A">Join the EduCraft ambassador WhatsApp group:</p>
+      <p style="margin:0 0 10px"><a href="${escapeHtml(groupUrl)}" style="display:inline-block;padding:12px 22px;background:#0D9488;color:#FFFFFF;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none">Join the group</a></p>
+      <p style="margin:0;font-size:12px;line-height:1.6;color:#64748B">This link opens only on the first device you open it with — it is yours alone, so please don't share it.</p>
+    </div>`
+        : ""
+    }
     ${
       provisionalLine
         ? `<p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(provisionalLine)}</p>`

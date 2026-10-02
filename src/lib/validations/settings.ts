@@ -54,6 +54,16 @@ export const generalSettingsSchema = z.object({
   accountName: text(120),
   /** Who gets the new-application and paid-order emails. Super Admin only. */
   alertEmails: emailList.optional(),
+  /** The WhatsApp group invite link new ambassadors' device-locked links open. Super Admin only. */
+  ambassadorGroupUrl: z
+    .string()
+    .trim()
+    .max(200)
+    .refine(
+      (raw) => raw === "" || /^https:\/\/chat\.whatsapp\.com\/[A-Za-z0-9]+$/.test(raw),
+      "Enter a WhatsApp group invite link (https://chat.whatsapp.com/…)",
+    )
+    .optional(),
   /** Margin on top of the auto-fetched ₦/$ rate, in percent (0–20). Super Admin only. */
   fxRateMarginPercent: z.coerce.number().min(0, "0–20").max(20, "0–20").optional(),
   /** Optional manual override of the base ₦/$ rate. Empty string clears it. Super Admin only. */

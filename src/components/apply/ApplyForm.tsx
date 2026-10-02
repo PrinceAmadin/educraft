@@ -6,19 +6,18 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { CheckboxRow } from "@/components/forms/CheckboxRow";
 import { Field } from "@/components/forms/Field";
 import { FormSection } from "@/components/forms/FormSection";
 import { StepShell } from "@/components/forms/StepShell";
 import { OTHER_UNIVERSITY, UniversityCombobox, type UniversityOption } from "@/components/forms/UniversityCombobox";
-import { ACADEMIC_LEVELS, NIGERIAN_BANKS, REACH_ROLES, REACH_SIZES } from "@/lib/constants";
+import { ACADEMIC_LEVELS, NIGERIAN_BANKS } from "@/lib/constants";
 import { ambassadorApplicationSchema, type AmbassadorApplicationInput } from "@/lib/validations/application";
 
 const STEPS = [
   { id: "about", label: "About you" },
   { id: "login", label: "Your login" },
-  { id: "campus", label: "Your campus & reach" },
+  { id: "campus", label: "Your campus" },
   { id: "payment", label: "Payment & agreement" },
 ];
 
@@ -26,17 +25,7 @@ const STEPS = [
 const STEP_FIELDS: (keyof AmbassadorApplicationInput)[][] = [
   ["fullName", "phone"],
   ["email", "password", "confirmPassword"],
-  [
-    "universityId",
-    "otherUniversity",
-    "department",
-    "level",
-    "reachRoles",
-    "reachSize",
-    "reachGroups",
-    "expectedReferrals",
-    "firstWeekPlan",
-  ],
+  ["universityId", "otherUniversity", "department", "level"],
   ["bankName", "accountNumber", "accountName", "agreeTerms", "emailCode"],
 ];
 
@@ -81,11 +70,6 @@ export function ApplyForm({
       otherUniversity: "",
       department: "",
       level: "",
-      reachRoles: [],
-      reachSize: undefined,
-      reachGroups: "",
-      expectedReferrals: undefined,
-      firstWeekPlan: "",
       bankName: "",
       accountNumber: "",
       accountName: "",
@@ -278,84 +262,6 @@ export function ApplyForm({
                 </Field>
               </div>
             </FormSection>
-
-            <FormSection
-              title="Your reach"
-              description="Who you can actually get this in front of. Numbers and names, not adjectives."
-            >
-              <div className="space-y-1.5">
-                <p className="text-sm font-medium text-foreground">
-                  Which of these are you? <span className="text-danger">*</span>
-                </p>
-                <div className="space-y-2">
-                  {REACH_ROLES.map((role) => (
-                    <CheckboxRow key={role.value} value={role.value} {...register("reachRoles")}>
-                      {role.label}
-                    </CheckboxRow>
-                  ))}
-                </div>
-                {errors.reachRoles ? (
-                  <p className="text-xs text-danger">{errors.reachRoles.message as string}</p>
-                ) : null}
-              </div>
-
-              <Field
-                label="How many final-year students can you reach directly this month?"
-                required
-                htmlFor="a-reach-size"
-                error={errors.reachSize?.message as string | undefined}
-                hint="Directly means you can message or speak to them without going through anyone."
-              >
-                <Select id="a-reach-size" {...register("reachSize")}>
-                  <option value="">Choose one</option>
-                  {REACH_SIZES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              <Field
-                label="Name the groups or pages you would post in."
-                required
-                htmlFor="a-reach-groups"
-                error={errors.reachGroups?.message as string | undefined}
-              >
-                <Textarea
-                  id="a-reach-groups"
-                  rows={2}
-                  maxLength={200}
-                  placeholder="e.g. ME 2026 class group (312 members), FUPRE Engineering Students' Association page"
-                  {...register("reachGroups")}
-                />
-              </Field>
-            </FormSection>
-
-            <FormSection
-              title="Your first 30 days"
-              description="A new slot is provisional: one confirmed order inside 30 days makes it permanently yours."
-            >
-              <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
-                <Field
-                  label="How many final-year students do you expect to bring in your first 30 days?"
-                  required
-                  htmlFor="a-expected"
-                  error={errors.expectedReferrals?.message as string | undefined}
-                  hint="A real number you'd stand behind — we check it at 30 days."
-                >
-                  <Input id="a-expected" inputMode="numeric" autoComplete="off" {...register("expectedReferrals")} />
-                </Field>
-                <Field
-                  label="What is the first thing you'll do in week one?"
-                  required
-                  htmlFor="a-week-one"
-                  error={errors.firstWeekPlan?.message as string | undefined}
-                >
-                  <Textarea id="a-week-one" rows={2} maxLength={200} {...register("firstWeekPlan")} />
-                </Field>
-              </div>
-            </FormSection>
           </div>,
 
           <div key="payment" className="space-y-8">
@@ -397,9 +303,7 @@ export function ApplyForm({
             <FormSection title="Agreement">
               <CheckboxRow {...register("agreeTerms")}>
                 I agree to represent EduCraft accurately, and understand my commission rate depends on my tier and is
-                paid to the account above after a referred client&apos;s order is confirmed. I understand my slot is
-                provisional for the first 30 days: if no order I referred is confirmed in that time, the slot is
-                released for another applicant.
+                paid to the account above after a referred client&apos;s order is confirmed.
               </CheckboxRow>
               {errors.agreeTerms ? <p className="mt-1.5 text-xs text-danger">{errors.agreeTerms.message}</p> : null}
             </FormSection>

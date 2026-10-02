@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { ACADEMIC_LEVELS, REACH_ROLES } from "@/lib/constants";
 import { flagLabel, reachSizeLabel } from "@/lib/ambassador-score";
+import { ambassadorWelcomeWaMessage, toWaNumber, waLink } from "@/lib/whatsapp";
 import { formatDate } from "@/lib/utils";
 import { editApplicationSchema, type EditApplicationInput } from "@/lib/validations/application";
 import type { ApplicationRow } from "@/lib/services/applications";
@@ -39,6 +40,10 @@ export function ApplicationReview({
   >(null);
   const [universityId, setUniversityId] = React.useState("");
   const [note, setNote] = React.useState("");
+  // After an approval: the pre-filled WhatsApp welcome for the HOG to send. We
+  // try to open it automatically, but also show a one-tap link, because a
+  // window.open after an await is blocked on many phones.
+  const [approved, setApproved] = React.useState<{ name: string; waUrl: string | null } | null>(null);
 
   async function run(id: string, action: "approve" | "reject", body: unknown) {
     setBusy(id);
@@ -49,9 +54,26 @@ export function ApplicationReview({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const data = (await res.json().catch(() => null)) as {
+        error?: string;
+        fullName?: string;
+        ambassadorPhone?: string | null;
+        groupInviteUrl?: string | null;
+      } | null;
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(data?.error ?? "That action could not be completed.");
+      }
+      // On approval, open a pre-filled WhatsApp chat with the new ambassador so
+      // the HOG can welcome them and send the group link (the welcome email is
+      // sent automatically; there is no WhatsApp API to send it for us).
+      if (action === "approve") {
+        const num = data?.ambassadorPhone ? toWaNumber(data.ambassadorPhone) : null;
+        const waUrl = num ? waLink(num, ambassadorWelcomeWaMessage(data?.fullName ?? "there", data?.groupInviteUrl)) : null;
+        if (waUrl) window.open(waUrl, "_blank", "noopener"); // convenience on desktop; the panel link is the reliable path
+        setApproved({ name: data?.fullName ?? "the ambassador", waUrl });
+        setUniversityId("");
+        router.refresh();
+        return;
       }
       setModal(null);
       setNote("");
@@ -167,9 +189,58 @@ export function ApplicationReview({
         ))}
       </ul>
 
-      <Dialog open={modal !== null} onOpenChange={(o) => !o && setModal(null)}>
+      <Dialog
+        open={modal !== null || approved !== null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setModal(null);
+            setApproved(null);
+          }
+        }}
+      >
         <DialogContent className={modal?.action === "edit" ? "max-w-xl" : undefined}>
-          {modal?.action === "edit" ? (
+          {approved ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{approved.name} is now an ambassador</DialogTitle>
+                <DialogDescription>
+                  Their welcome email (with the group link) has been sent. Send them a WhatsApp welcome too — the
+                  message and group link are already typed.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                {approved.waUrl ? (
+                  <a
+                    href={approved.waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <LuCheck className="size-4" aria-hidden />
+                    Message them on WhatsApp
+                  </a>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No valid WhatsApp number on file, so we couldn&apos;t open a chat. You can message them from their
+                    ambassador page.
+                  </p>
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setModal(null);
+                      setApproved(null);
+                    }}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : modal?.action === "edit" ? (
             <EditApplicationForm
               row={modal.row}
               universities={universities}
