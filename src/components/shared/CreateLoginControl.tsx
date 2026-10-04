@@ -21,18 +21,26 @@ import { createLoginSchema, type CreateLoginInput } from "@/lib/validations/port
  * Grants portal access — creates the User row and links it back to the
  * worker/ambassador profile. Without this there is no way for either role to
  * ever sign in (the profile's `userId` had nothing that ever set it).
+ *
+ * When `canLink` is set, the record's email already belongs to a login (the same
+ * person holding another role, e.g. an executive): we link onto that one login
+ * instead of creating a second set of credentials, so no password is asked for.
  */
 export function CreateLoginControl({
   endpoint,
   hasLogin,
   prefillEmail,
+  canLink = false,
 }: {
   endpoint: string;
   hasLogin: boolean;
   prefillEmail: string;
+  canLink?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
+  const [linking, setLinking] = React.useState(false);
+  const [linkError, setLinkError] = React.useState<string | null>(null);
 
   if (hasLogin) {
     return (
@@ -40,6 +48,42 @@ export function CreateLoginControl({
         <CircleCheck className="size-3.5" aria-hidden />
         Portal login active
       </span>
+    );
+  }
+
+  if (canLink) {
+    const linkNow = async () => {
+      setLinkError(null);
+      setLinking(true);
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: prefillEmail, link: true }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? "Could not link the login.");
+        }
+        router.refresh();
+      } catch (err) {
+        setLinkError(err instanceof Error ? err.message : "Could not link the login.");
+        setLinking(false);
+      }
+    };
+    return (
+      <div className="inline-flex flex-col items-start gap-1">
+        <Button type="button" size="sm" variant="outline" onClick={linkNow} disabled={linking}>
+          {linking ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <KeyRound className="size-4" aria-hidden />}
+          Link to existing login
+        </Button>
+        {linkError ? (
+          <p className="flex items-start gap-1.5 text-xs text-danger">
+            <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            {linkError}
+          </p>
+        ) : null}
+      </div>
     );
   }
 

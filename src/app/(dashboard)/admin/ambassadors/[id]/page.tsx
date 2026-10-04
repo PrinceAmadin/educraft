@@ -79,6 +79,12 @@ export default async function AmbassadorDetailPage({
     ? { ...groupInviteView, boundAt: groupInviteView.boundAt?.toISOString() ?? null, url: `${siteUrl()}/ambassador-group/${groupInviteView.token}` }
     : null;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
+  // No login yet, but this email already belongs to one (the same person holding
+  // another role, e.g. an executive): offer to link onto it, not create a second.
+  const canLinkLogin =
+    !ambassador.userId && ambassador.email
+      ? Boolean(await db.user.findUnique({ where: { email: ambassador.email.toLowerCase() }, select: { id: true } }))
+      : false;
   // What a Core earns on this ambassador's jobs by default: the ambassador total less their tier rate.
   const defaultParentRate = coreOverrideFor(ratePercentForTier(ambassador.tier, active.structure.tiers), active.structure);
   const ambassadorTotalLabel = percentLabel(ambassadorTotalRate(active.structure));
@@ -146,6 +152,7 @@ export default async function AmbassadorDetailPage({
               endpoint={`/api/admin/ambassadors/${ambassador.id}/login`}
               hasLogin={Boolean(ambassador.userId)}
               prefillEmail={ambassador.email ?? ""}
+              canLink={canLinkLogin}
             />
             <SuspendControl ambassadorId={ambassador.id} fullName={ambassador.fullName} status={ambassador.status} />
             <AmbassadorControls

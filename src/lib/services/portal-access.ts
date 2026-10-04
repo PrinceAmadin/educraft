@@ -9,6 +9,12 @@ import type { CreateLoginInput } from "@/lib/validations/portal-access";
  * assigned a worker or ambassador role could actually sign in. Found while
  * running the Day 18 "assign worker -> worker sees it in their portal" check
  * against a fresh worker: there was no way to get them a login at all.
+ *
+ * When the email already belongs to a login — the same person holding another
+ * role, including an executive (one Gmail = one login, every role switchable) —
+ * we LINK the record onto that login instead of creating a second set of
+ * credentials. Email is unique, so a match is always the same person; the
+ * existing password and role are left untouched.
  */
 export class PortalAccessError extends Error {}
 
@@ -17,6 +23,18 @@ export async function createWorkerLogin(workerId: string, input: CreateLoginInpu
   if (!worker) throw new PortalAccessError("Worker not found");
   if (worker.userId) throw new PortalAccessError("This worker already has a login");
 
+  const existing = await db.user.findUnique({
+    where: { email: input.email },
+    select: { id: true, workerProfile: { select: { id: true } } },
+  });
+
+  if (existing) {
+    if (existing.workerProfile) throw new PortalAccessError("That login already has a worker profile");
+    await db.worker.update({ where: { id: workerId }, data: { userId: existing.id } });
+    return;
+  }
+
+  if (!input.password) throw new PortalAccessError("A password is required to create a new login");
   const passwordHash = await bcrypt.hash(input.password, 12);
   try {
     await db.$transaction(async (tx) => {
@@ -45,6 +63,18 @@ export async function createAmbassadorLogin(
   if (!ambassador) throw new PortalAccessError("Ambassador not found");
   if (ambassador.userId) throw new PortalAccessError("This ambassador already has a login");
 
+  const existing = await db.user.findUnique({
+    where: { email: input.email },
+    select: { id: true, ambassadorProfile: { select: { id: true } } },
+  });
+
+  if (existing) {
+    if (existing.ambassadorProfile) throw new PortalAccessError("That login already has an ambassador profile");
+    await db.ambassador.update({ where: { id: ambassadorId }, data: { userId: existing.id } });
+    return;
+  }
+
+  if (!input.password) throw new PortalAccessError("A password is required to create a new login");
   const passwordHash = await bcrypt.hash(input.password, 12);
   try {
     await db.$transaction(async (tx) => {

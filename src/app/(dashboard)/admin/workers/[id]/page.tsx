@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { LuPhone, LuMail, LuGraduationCap } from "react-icons/lu";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { getWorkerDetail } from "@/lib/services/workers";
 import { getWorkerProfileOps } from "@/lib/services/operations/workers-ops";
 import { getLinkedAmbassador } from "@/lib/services/linked-profiles";
@@ -46,6 +47,12 @@ export default async function WorkerDetailPage({ params, searchParams }: { param
 
   const { worker, metrics } = data;
   const linked = await getLinkedAmbassador(worker.userId);
+  // No login yet, but this email already belongs to one (the same person holding
+  // another role, e.g. an executive): offer to link onto it, not create a second.
+  const canLink =
+    !worker.userId && worker.email
+      ? Boolean(await db.user.findUnique({ where: { email: worker.email.toLowerCase() }, select: { id: true } }))
+      : false;
   const isSuperAdmin = session?.user?.role === "SUPER_ADMIN";
   const wa = toWaNumber(worker.phone);
 
@@ -98,7 +105,7 @@ export default async function WorkerDetailPage({ params, searchParams }: { param
                 notes: worker.notes,
               }}
             />
-            <CreateLoginControl endpoint={`/api/admin/workers/${worker.id}/login`} hasLogin={Boolean(worker.userId)} prefillEmail={worker.email ?? ""} />
+            <CreateLoginControl endpoint={`/api/admin/workers/${worker.id}/login`} hasLogin={Boolean(worker.userId)} prefillEmail={worker.email ?? ""} canLink={canLink} />
             <WorkerStatusControl workerId={worker.id} current={worker.status} />
             {isSuperAdmin ? <DeleteWorkerButton workerId={worker.id} fullName={worker.fullName} /> : null}
           </div>

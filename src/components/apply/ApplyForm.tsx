@@ -179,7 +179,7 @@ export function ApplyForm({
           <div key="login" className="space-y-8">
             <FormSection
               title="Your dashboard login"
-              description="You will use these to sign in to your own ambassador dashboard once you are approved. Already a worker? Use the same email: we will ask for a code and you keep your current password."
+              description="You will use these to sign in to your own ambassador dashboard once you are approved. Already have an EduCraft login (worker, or a staff account)? Use the same email: we will ask for a code and you keep your current password."
             >
               <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
                 <Field label="Email" required htmlFor="a-email" error={errors.email?.message} className="sm:col-span-2">

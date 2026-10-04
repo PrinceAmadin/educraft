@@ -228,7 +228,7 @@ export function WorkerApplyForm() {
           <div key="account" className="space-y-8">
             <FormSection
               title="Account setup"
-              description="Set the password you'll use to sign in once approved. Already an ambassador? Use the same email: we will ask for a code and you keep your current password."
+              description="Set the password you'll use to sign in once approved. Already have an EduCraft login (ambassador, or a staff account)? Use the same email: we will ask for a code and you keep your current password."
             >
               <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
                 <Field label="Password" required htmlFor="w-password" error={errors.password?.message}>

@@ -359,10 +359,12 @@ async function spendCode(email: string, codeInput: string, ip: string): Promise<
 
 /**
  * Applying with an email that already has a login: a worker applying as an
- * ambassador, an ambassador applying as a worker, or a client applying as
- * either. Returns that login when it is active and does not already hold the
- * profile applied for; the application then attaches to it (no new password,
- * no second login) once the emailed code proves the applicant owns the inbox.
+ * ambassador, an ambassador applying as a worker, a client applying as either,
+ * or an executive applying for a worker/ambassador role on their HQ email (one
+ * Gmail = one login, every role switchable). Returns that login when it is
+ * active and does not already hold the profile applied for; the application then
+ * attaches to it (no new password, no second login) once the emailed code
+ * proves the applicant owns the inbox.
  */
 export async function findLoginForApplication(email: string, kind: "AMBASSADOR" | "WORKER"): Promise<{ userId: string; fullName: string } | null> {
   const address = realEmail(email);
@@ -376,11 +378,19 @@ export async function findLoginForApplication(email: string, kind: "AMBASSADOR" 
       displayName: true,
       workerProfile: { select: { fullName: true, status: true } },
       ambassadorProfile: { select: { fullName: true, status: true } },
+      execProfile: { select: { fullName: true } },
     },
   });
-  if (!user || !user.isActive || !isPersonRole(user.role)) return null;
+  if (!user || !user.isActive) return null;
   const already = kind === "AMBASSADOR" ? user.ambassadorProfile : user.workerProfile;
   if (already) return null;
+  // An executive (staff) login holding another role on the same Gmail: attach
+  // the new profile to it. markEmailProved still leaves staff alone, so this
+  // never pulls client orders onto a staff login.
+  if (isStaffRole(user.role)) {
+    return { userId: user.id, fullName: user.execProfile?.fullName ?? user.displayName ?? "there" };
+  }
+  if (!isPersonRole(user.role)) return null;
   // A client login: their orders are the other profile.
   if (user.role === "CLIENT") return { userId: user.id, fullName: user.displayName ?? "there" };
   const has = kind === "AMBASSADOR" ? user.workerProfile : user.ambassadorProfile;
