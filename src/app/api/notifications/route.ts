@@ -10,7 +10,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limitParam = Number(req.nextUrl.searchParams.get("limit"));
+  const raw = req.nextUrl.searchParams.get("limit");
+  const limitParam = raw === null ? NaN : Number(raw);
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 50) : 10;
 
   try {

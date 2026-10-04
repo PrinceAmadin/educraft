@@ -9,24 +9,9 @@ import {
   DropdownMenuContent,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { cn, timeAgo } from "@/lib/utils";
+import { NotificationBody, type NotificationView } from "@/components/notifications/NotificationItem";
 
-interface Item {
-  id: string;
-  title: string;
-  message: string;
-  type: string;
-  link: string | null;
-  read: boolean;
-  createdAt: string;
-}
-
-const DOT: Record<string, string> = {
-  urgent: "bg-danger",
-  warning: "bg-gold",
-  success: "bg-success",
-  info: "bg-primary",
-};
+type Item = NotificationView;
 
 export function NotificationBell() {
   const [items, setItems] = React.useState<Item[]>([]);
@@ -35,7 +20,7 @@ export function NotificationBell() {
 
   const load = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/notifications", { cache: "no-store" });
+      const res = await fetch("/api/notifications?limit=8", { cache: "no-store" });
       if (!res.ok) return;
       const data = (await res.json()) as { items: Item[]; unread: number };
       setItems(data.items ?? []);
@@ -109,52 +94,44 @@ export function NotificationBell() {
           <p className="px-3 py-8 text-center text-sm text-muted-foreground">You&apos;re all caught up</p>
         ) : (
           <ul className="max-h-[24rem] divide-y divide-border overflow-y-auto">
-            {items.map((n) => {
-              const body = (
-                <div className="flex gap-2.5">
-                  <span
-                    className={cn(
-                      "mt-1.5 size-2 shrink-0 rounded-full",
-                      n.read ? "bg-transparent" : DOT[n.type] ?? "bg-primary"
-                    )}
-                    aria-hidden
-                  />
-                  <div className="min-w-0">
-                    <p className={cn("text-sm", n.read ? "text-muted-foreground" : "text-foreground")}>
-                      {n.title}
-                    </p>
-                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.message}</p>
-                    <p className="mt-0.5 text-[11px] text-subtle">{timeAgo(n.createdAt)}</p>
-                  </div>
-                </div>
-              );
-              return (
-                <li key={n.id}>
-                  {n.link ? (
-                    <Link
-                      href={n.link}
-                      onClick={() => {
-                        if (!n.read) void markRead(n.id);
-                        setOpen(false);
-                      }}
-                      className="block px-3 py-2.5 transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
-                    >
-                      {body}
-                    </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => !n.read && markRead(n.id)}
-                      className="block w-full px-3 py-2.5 text-left transition-colors hover:bg-elevated"
-                    >
-                      {body}
-                    </button>
-                  )}
-                </li>
-              );
-            })}
+            {items.map((n) => (
+              <li key={n.id}>
+                {n.link ? (
+                  <Link
+                    href={n.link}
+                    onClick={() => {
+                      if (!n.read) void markRead(n.id);
+                      setOpen(false);
+                    }}
+                    className="block px-3 py-2.5 transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
+                  >
+                    <NotificationBody n={n} />
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => !n.read && markRead(n.id)}
+                    className="block w-full px-3 py-2.5 text-left transition-colors hover:bg-elevated"
+                  >
+                    <NotificationBody n={n} />
+                  </button>
+                )}
+              </li>
+            ))}
           </ul>
         )}
+
+        {items.length > 0 ? (
+          <div className="border-t border-border">
+            <Link
+              href="/notifications"
+              onClick={() => setOpen(false)}
+              className="block px-3 py-2.5 text-center text-sm font-medium text-primary transition-colors hover:bg-elevated focus-visible:bg-elevated focus-visible:outline-none"
+            >
+              View all notifications
+            </Link>
+          </div>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

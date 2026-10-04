@@ -126,6 +126,47 @@ export async function listForUser(
   };
 }
 
+export async function listUserNotificationsPaged(
+  userId: string,
+  page = 1,
+  pageSize = 20
+): Promise<{
+  rows: NotificationRow[];
+  total: number;
+  page: number;
+  pageCount: number;
+  unread: number;
+}> {
+  const current = Math.max(1, Math.floor(page) || 1);
+  const [rows, total, unread] = await db.$transaction([
+    db.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      skip: (current - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        title: true,
+        message: true,
+        type: true,
+        link: true,
+        read: true,
+        createdAt: true,
+      },
+    }),
+    db.notification.count({ where: { userId } }),
+    db.notification.count({ where: { userId, read: false } }),
+  ]);
+
+  return {
+    rows: rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+    total,
+    page: current,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    unread,
+  };
+}
+
 export async function markRead(id: string, userId: string): Promise<void> {
   await db.notification.updateMany({ where: { id, userId }, data: { read: true } });
 }

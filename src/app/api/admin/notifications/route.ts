@@ -10,8 +10,9 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
-  const raw = Number(new URL(req.url).searchParams.get("limit"));
-  const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 50) : 20;
+  const rawLimit = new URL(req.url).searchParams.get("limit");
+  const parsed = rawLimit === null ? NaN : Number(rawLimit);
+  const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 50) : 20;
   try {
     return NextResponse.json(await listForUser(guard.session.userId, limit), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
