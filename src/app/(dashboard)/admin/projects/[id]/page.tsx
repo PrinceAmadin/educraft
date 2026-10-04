@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { canVerifyPayments } from "@/lib/rbac";
 import { getProjectDetail } from "@/lib/services/projects";
 import { listAllocatableAmbassadors } from "@/lib/services/ambassador-commission";
+import { listRepriceServices } from "@/lib/services/finance/reprice";
 import { ProjectDetailHeader } from "@/components/projects/ProjectDetailHeader";
 import { ProjectTestControls } from "@/components/cleanup/ProjectTestControls";
 import { displayNameOf } from "@/lib/services/project-cleanup";
@@ -79,7 +80,7 @@ export default async function ProjectDetailPage({
   const reportProject = isReportTemplate(project.service.intakeFormTemplate);
   // Chapter review: a finished chapter with no AI draft gets one now (normally made when it was written).
   if (reportProject) await ensureChapterDrafts(project.id).catch((error) => console.warn("[chapter review] drafts not checked", error instanceof Error ? error.message : error));
-  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary, generation, prelims] = await Promise.all([
+  const [researchSummary, unreadFromClient, deliverables, ops, expected, modeCard, pauses, secondary, generation, prelims, repriceServices] = await Promise.all([
     getResearchSummary(project.id),
     db.projectMessage.count({ where: { projectId: project.id, authorSide: "CLIENT", readAt: null } }),
     listDeliverablesForAdmin(project.id),
@@ -95,6 +96,8 @@ export default async function ProjectDetailPage({
     reportProject ? generationDashboardFor(project.id) : Promise.resolve(null),
     // D7b: the acknowledgement, abstract and abbreviations the page writer adds to a full report.
     reportProject ? getPreliminaryPagesView(project.id) : Promise.resolve(null),
+    // Super admin only: the services + options the reprice dialog offers.
+    session?.user?.role === "SUPER_ADMIN" ? listRepriceServices() : Promise.resolve([]),
   ]);
   const adminBase = `/api/admin/projects/${encodeURIComponent(project.projectId)}`;
   // The HOG's leg under the cashflow version this project was created under.
@@ -205,6 +208,8 @@ export default async function ProjectDetailPage({
           ambassadors={ambassadors}
           canProBono={isSuperAdmin}
           canVerify={canVerifyPayments(session?.user?.role)}
+          canReprice={isSuperAdmin}
+          repriceServices={repriceServices}
         />,
     },
     {

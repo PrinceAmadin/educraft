@@ -4,9 +4,11 @@ import { PaymentVerification } from "@/components/projects/PaymentVerification";
 import { AmbassadorAllocation } from "@/components/projects/AmbassadorAllocation";
 import { MarkProBono } from "@/components/projects/MarkProBono";
 import { ProcessRefundDialog } from "@/components/projects/ProcessRefundDialog";
+import { RepriceDialog, type RepriceCurrent } from "@/components/projects/RepriceDialog";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectDetail } from "@/lib/services/projects";
 import type { AllocatableAmbassador } from "@/lib/services/ambassador-commission";
+import type { RepriceServiceOption } from "@/lib/services/finance/reprice";
 
 function PaymentStatusPill({ status, date }: { status: string; date?: Date | null }) {
   if (status === "Verified") {
@@ -71,6 +73,8 @@ export function FinancialsTab({
   ambassadors,
   canProBono = false,
   canVerify = true,
+  canReprice = false,
+  repriceServices = [],
 }: {
   project: ProjectDetail;
   ambassadors: AllocatableAmbassador[];
@@ -78,6 +82,9 @@ export function FinancialsTab({
   canProBono?: boolean;
   /** Founder and CFO: may verify a marked payment here. The COO marks paid and finance confirms. */
   canVerify?: boolean;
+  /** Super admin: may change the service / option / price and re-apply the money paid. */
+  canReprice?: boolean;
+  repriceServices?: RepriceServiceOption[];
 }) {
   if (project.isProBono) {
     return (
@@ -102,6 +109,48 @@ export function FinancialsTab({
   // Cancelled and refunded jobs earn no commission, so there's nothing to allocate.
   const closed = project.status === "CANCELLED" || project.status === "REFUNDED";
 
+  // Show each leg's share only while the legs still sum to the total (a reprice
+  // can leave an overpaid project where they don't — then the % would mislead).
+  const legPercents =
+    f.total > 0 && f.downpaymentAmount + f.balanceAmount === f.total
+      ? (() => {
+          const down = Math.round((f.downpaymentAmount / f.total) * 100);
+          return { down: ` (${down}%)`, balance: ` (${100 - down}%)` };
+        })()
+      : { down: "", balance: "" };
+
+  // Money actually in — confirmed client inflows less confirmed refunds (projectNetInflow's rule).
+  const moneyIn = Math.round(
+    project.payments.reduce((sum, p) => {
+      if (p.status !== "Confirmed") return sum;
+      if (p.direction === "INFLOW" && (p.type === "CLIENT_DOWNPAYMENT" || p.type === "CLIENT_BALANCE")) return sum + p.amount;
+      if (p.direction === "OUTFLOW" && p.type === "REFUND") return sum - p.amount;
+      return sum;
+    }, 0)
+  );
+  const repriceCurrent: RepriceCurrent = {
+    serviceId: project.serviceId,
+    serviceVariantId: project.serviceVariantId,
+    chapters: (project.additionalData as { chapters?: number[] } | null)?.chapters ?? [],
+    price: project.price,
+    isExpressDelivery: project.isExpressDelivery,
+    downpaymentVerified: project.downpaymentStatus === "Verified",
+    balanceVerified: project.balanceStatus === "Verified",
+    moneyIn,
+    downpaymentAmount: project.downpaymentAmount,
+    workerPayoutRate: project.workerPayoutRate,
+    workerPayoutPaid: project.workerPayoutPaid,
+    currentWorkerPayout: project.workerPayout,
+    ambassadorId: project.ambassadorId,
+    ambassadorCommRate: project.ambassadorCommRate,
+    ambassadorCommPaid: project.ambassadorCommPaid,
+    currentAmbassadorCommission: project.ambassadorCommission,
+    parentAmbassadorId: project.parentAmbassadorId,
+    parentCommRate: project.parentCommRate,
+    parentCommPaid: project.parentCommPaid,
+    currentParentCommission: project.parentCommission,
+  };
+
   return (
     <div className="space-y-10">
       <section aria-labelledby="fin-price">
@@ -112,10 +161,10 @@ export function FinancialsTab({
           {formatNaira(f.total)}
         </p>
         <div className="mt-4 divide-y divide-border/80">
-          <Line label="Downpayment (45%)" amount={f.downpaymentAmount}>
+          <Line label={`Downpayment${legPercents.down}`} amount={f.downpaymentAmount}>
             <PaymentStatusPill status={f.downpaymentStatus} date={project.downpaymentDate} />
           </Line>
-          <Line label="Balance (55%)" amount={f.balanceAmount}>
+          <Line label={`Balance${legPercents.balance}`} amount={f.balanceAmount}>
             <PaymentStatusPill status={f.balanceStatus} date={project.balanceDate} />
           </Line>
         </div>
@@ -225,6 +274,18 @@ export function FinancialsTab({
               : "Refund the client. Pick how far the work had gone; it reverses the commissions you choose and pays the worker for chapters delivered."}
           </p>
           <ProcessRefundDialog projectCode={project.projectId} cancelled={project.status === "CANCELLED"} />
+        </section>
+      ) : null}
+
+      {canReprice && !closed ? (
+        <section className="space-y-2">
+          <h3 className="text-[15px] font-semibold text-foreground">Change service or price</h3>
+          <p className="text-[13px] text-muted-foreground">
+            Priced the wrong service (e.g. billed for data analysis on an implementation project)? Change the
+            service or option here. The money already paid is re-applied to the new price — an overpaid
+            downpayment reduces the balance still owed.
+          </p>
+          <RepriceDialog projectCode={project.projectId} services={repriceServices} current={repriceCurrent} />
         </section>
       ) : null}
 
