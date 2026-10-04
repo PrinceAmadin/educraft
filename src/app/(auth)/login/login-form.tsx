@@ -54,18 +54,18 @@ export function LoginForm() {
 
     if (!result || result.error) {
       // A pending applicant's login is inactive, which the sign-in path can't
-      // tell from a wrong password — so ask the server which it is and say so.
+      // tell from a wrong password — so ask the server which it is. A pending
+      // applicant is sent to their own "under review" page, not shown an error.
       try {
         const res = await fetch("/api/login/classify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ identifier: values.email }),
         });
-        const data = (await res.json().catch(() => null)) as { status?: string } | null;
+        const data = (await res.json().catch(() => null)) as { status?: string; kind?: string } | null;
         if (data?.status === "pending") {
-          setFormError(
-            "You've applied to be an EduCraft ambassador — your application is being reviewed. We'll email you once it's approved, then sign in here with the password you chose when you applied.",
-          );
+          const type = data.kind === "worker" ? "worker" : "ambassador";
+          router.push(`/login/pending?type=${type}`);
           return;
         }
       } catch {

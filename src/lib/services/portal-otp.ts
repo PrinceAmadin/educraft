@@ -88,14 +88,15 @@ type Refusal = Exclude<CodeRequestStatus, "sent" | "wait">;
 
 type Lookup =
   | { ok: true; account: PortalAccount; typedEmail: boolean }
-  | { ok: false; status: Refusal }
+  /** `pendingKind` is set only when `status` is "pending": which application is under review. */
+  | { ok: false; status: Refusal; pendingKind?: "ambassador" | "worker" }
   /** Not a worker or ambassador, but a client has this email: send a client code instead. */
   | { ok: false; status: "client"; email: string };
 
 /** Why no code was sent: logged (Vercel runtime logs) and told to the caller as `status`. */
-function refuse(status: Refusal, reason: string): Lookup {
+function refuse(status: Refusal, reason: string, pendingKind?: "ambassador" | "worker"): Lookup {
   console.warn(`[portal-otp] no code sent (${status}): ${reason}`);
-  return { ok: false, status };
+  return { ok: false, status, pendingKind };
 }
 
 const sameEmail = (email: string) => ({ email: { equals: email, mode: "insensitive" as const } });
@@ -192,7 +193,8 @@ async function lookupAccount(input: string): Promise<Lookup> {
     db.workerApplication.count({ where: { userId: user.id, status: "PENDING" } }),
     db.ambassadorApplication.count({ where: { userId: user.id, status: "PENDING" } }),
   ]);
-  if (pendingWorker || pendingAmbassador) return refuse("pending", "that email's login belongs to an application under review");
+  if (pendingWorker || pendingAmbassador)
+    return refuse("pending", "that email's login belongs to an application under review", pendingAmbassador ? "ambassador" : "worker");
   if (user.workerProfile || user.ambassadorProfile) return refuse("needs_admin", "that email's login is inactive and holds a different profile");
   return found({ ...base, loginEmail: email, userId: user.id, reclaim: true });
 }
@@ -235,7 +237,8 @@ async function classifyNoActiveProfile(email: string, typedEmail: boolean): Prom
     db.ambassadorApplication.count({ where: { status: "PENDING", OR: [sameEmail(email), ...ownLogin] } }),
     db.client.count({ where: sameEmail(email) }),
   ]);
-  if (pendingWorker || pendingAmbassador) return refuse("pending", "an application with that email is under review");
+  if (pendingWorker || pendingAmbassador)
+    return refuse("pending", "an application with that email is under review", pendingAmbassador ? "ambassador" : "worker");
   // Only a real client record, never a bare leftover login: the client code needs one.
   if (clients) return { ok: false, status: "client", email };
   return refuse("not_registered", "no worker, ambassador, application or client has that email");
@@ -256,12 +259,17 @@ async function findAccount(input: string): Promise<PortalAccount | null> {
  * of the generic "wrong password" (the password sign-in path can't tell the
  * two apart, since an inactive login and a wrong password both return null).
  */
-export async function classifyLoginIdentifier(input: string): Promise<"pending" | "other"> {
+export async function classifyLoginIdentifier(
+  input: string,
+): Promise<{ status: "pending" | "other"; kind?: "ambassador" | "worker" }> {
   try {
     const lookup = await lookupAccount(input);
-    return !lookup.ok && lookup.status === "pending" ? "pending" : "other";
+    if (!lookup.ok && lookup.status === "pending") {
+      return { status: "pending", kind: lookup.pendingKind };
+    }
+    return { status: "other" };
   } catch {
-    return "other";
+    return { status: "other" };
   }
 }
 

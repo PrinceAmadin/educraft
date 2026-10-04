@@ -9,9 +9,11 @@ export const dynamic = "force-dynamic";
  * Public. The login page calls this ONLY after a failed password sign-in, to
  * tell a pending applicant "your application is under review" instead of the
  * generic "wrong password" (the sign-in path can't distinguish an inactive
- * login from a wrong password). It returns only "pending" vs "other", which the
- * public `/api/portal/otp/request` endpoint already exposes, so it leaks
- * nothing new; the per-IP cap stops it being used to test lists of emails.
+ * login from a wrong password). It returns "pending" vs "other" plus, when
+ * pending, which application it is ("ambassador"/"worker") so the page can word
+ * itself correctly — all of which the public `/api/portal/otp/request` endpoint
+ * already exposes, so it leaks nothing new; the per-IP cap stops it being used
+ * to test lists of emails.
  */
 const schema = z.object({ identifier: z.string().trim().min(1).max(160) });
 
@@ -34,6 +36,6 @@ export async function POST(req: NextRequest) {
   const ok = await checkRateLimit(`ip:${clientIp(req)}`, "login-classify", 20, 60_000);
   if (!ok) return NextResponse.json({ status: "other" });
 
-  const status = await classifyLoginIdentifier(parsed.data.identifier);
-  return NextResponse.json({ status }, { headers: { "Cache-Control": "no-store" } });
+  const result = await classifyLoginIdentifier(parsed.data.identifier);
+  return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
 }

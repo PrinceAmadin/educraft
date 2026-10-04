@@ -28,8 +28,8 @@ export function SignedInNotice({ email, roleLabel }: { email: string; roleLabel:
           where you left off.
         </p>
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <Button asChild size="lg" className="flex-1">
+      <div className="flex flex-col gap-3">
+        <Button asChild size="lg" className="w-full">
           <Link href="/dashboard">
             Go to my dashboard
             <LuArrowRight className="size-4" aria-hidden />
@@ -39,7 +39,7 @@ export function SignedInNotice({ email, roleLabel }: { email: string; roleLabel:
           type="button"
           size="lg"
           variant="outline"
-          className="flex-1"
+          className="w-full"
           disabled={busy}
           onClick={() => {
             setBusy(true);

@@ -13,7 +13,7 @@
  */
 
 // Bump when a cached shell asset changes without its URL changing (icons are cache-first).
-const VERSION = "v2";
+const VERSION = "v3";
 const STATIC = `ec-static-${VERSION}`;
 const PAGES_PREFIX = "ec-pages-"; // + userId
 const META = "ec-meta";
