@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm";
 import { TIER_KEYS, TIER_LABELS } from "@/lib/finance/cashflow-types";
 import { formatNaira } from "@/lib/utils";
 
@@ -128,11 +129,19 @@ export function HistoryFilters() {
 /** "Process Qn bonuses" — appears once the quarter has ended and something is locked in. */
 export function ProcessBonusesButton({ quarter, label, amount }: { quarter: string; label: string; amount: number }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<{ created: number; skipped: number; amount: number } | null>(null);
   async function run() {
-    if (!window.confirm(`Process ${label} bonuses? ${formatNaira(amount)} of locked-in bonuses become pending payouts in the finance queue.`)) return;
+    if (
+      !(await confirm({
+        title: `Process ${label} bonuses?`,
+        description: `${formatNaira(amount)} of locked-in bonuses become pending payouts in the finance queue.`,
+        confirmLabel: "Process bonuses",
+      }))
+    )
+      return;
     setBusy(true);
     setError(null);
     try {
@@ -171,10 +180,18 @@ export function ProcessBonusesButton({ quarter, label, amount }: { quarter: stri
 /** "Grant extension?" — one week, once per ambassador per quarter. */
 export function ExtendChallengeButton({ ambassadorId, quarter, name }: { ambassadorId: string; quarter: string; name: string }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   async function run() {
-    if (!window.confirm(`Give ${name} one extra week on the ${quarter} challenge? This is their only extension this quarter.`)) return;
+    if (
+      !(await confirm({
+        title: `Give ${name} one extra week on the ${quarter} challenge?`,
+        description: "This is their only extension this quarter.",
+        confirmLabel: "Grant extension",
+      }))
+    )
+      return;
     setBusy(true);
     setError(null);
     try {

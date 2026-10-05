@@ -4,6 +4,7 @@ import * as React from "react";
 import { LuCheck, LuCopy, LuLoaderCircle, LuRefreshCw, LuSmartphone, LuUsers, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useConfirm } from "@/components/ui/confirm";
 import { formatDate } from "@/lib/utils";
 
 export interface GroupInviteState {
@@ -29,14 +30,33 @@ export function AmbassadorGroupLink({
   ambassadorId: string;
   initial: GroupInviteState | null;
 }) {
+  const confirm = useConfirm();
   const [invite, setInvite] = React.useState<GroupInviteState | null>(initial);
   const [busy, setBusy] = React.useState<Action | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
 
   async function act(action: Action) {
-    if (action === "revoke" && !confirm("Revoke this ambassador's group link? It stops working on their device.")) return;
-    if (action === "regenerate" && invite && !confirm("Replace the current link with a new one? The old link stops working.")) return;
+    if (
+      action === "revoke" &&
+      !(await confirm({
+        title: "Revoke this ambassador's group link?",
+        description: "It stops working on their device.",
+        confirmLabel: "Revoke",
+        tone: "danger",
+      }))
+    )
+      return;
+    if (
+      action === "regenerate" &&
+      invite &&
+      !(await confirm({
+        title: "Replace the current link with a new one?",
+        description: "The old link stops working.",
+        confirmLabel: "Replace link",
+      }))
+    )
+      return;
     setBusy(action);
     setError(null);
     try {

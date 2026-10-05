@@ -21,6 +21,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
+import { useAlert } from "@/components/ui/confirm";
 import type { ProjectListRow } from "@/lib/services/projects";
 
 /** Pipeline statuses where assign/reassign is possible at all. */
@@ -46,6 +47,7 @@ interface RowAction {
 function useRowActions(row: ProjectListRow) {
   const router = useRouter();
   const { data: session } = useSession();
+  const alert = useAlert();
   // Verifying is a finance act (founder, CFO); everyone else marks paid and finance confirms.
   const canVerify = canVerifyPayments(session?.user?.role);
   const [busy, setBusy] = React.useState(false);
@@ -56,8 +58,7 @@ function useRowActions(row: ProjectListRow) {
       const res = await fetch(`/api/admin/projects/${row.projectId}/${path}`, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        // eslint-disable-next-line no-alert
-        alert(body?.error ?? "That action could not be completed.");
+        await alert({ title: "That action could not be completed.", description: body?.error });
       }
       router.refresh();
     } finally {

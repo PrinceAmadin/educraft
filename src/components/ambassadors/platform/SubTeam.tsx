@@ -7,6 +7,7 @@ import { LuCircleAlert, LuLoaderCircle, LuUserMinus, LuUserPlus, LuUsers } from 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ActivityBadge } from "@/components/ambassadors/platform/ActivityBadge";
 import { MAX_SUB_AMBASSADORS } from "@/lib/commission";
@@ -50,6 +51,7 @@ export function SubTeam({
   subTeamThreshold: string;
 }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -74,7 +76,15 @@ export function SubTeam({
   }
 
   async function remove(subId: string, name: string) {
-    if (!window.confirm(`Remove ${name} from ${coreName}'s team? Past commission is kept; future jobs stop paying the Core override.`)) return;
+    if (
+      !(await confirm({
+        title: `Remove ${name} from ${coreName}'s team?`,
+        description: "Past commission is kept; future jobs stop paying the Core override.",
+        confirmLabel: "Remove",
+        tone: "danger",
+      }))
+    )
+      return;
     setBusy(subId);
     setError(null);
     try {

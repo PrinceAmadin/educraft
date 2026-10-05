@@ -4,17 +4,26 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { LuChevronDown, LuLoaderCircle, LuRotateCcw } from "react-icons/lu";
 import type { VersionSummary } from "@/lib/services/cashflow";
+import { useConfirm } from "@/components/ui/confirm";
 import { cn, formatDate } from "@/lib/utils";
 
 /** Every published version, newest first: who, when, why, how many projects run under it, and what changed. */
 export function VersionHistory({ history, canRepublish = false }: { history: VersionSummary[]; canRepublish?: boolean }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [open, setOpen] = React.useState<number | null>(null);
   const [busy, setBusy] = React.useState<number | null>(null);
   const [error, setError] = React.useState<{ n: number; message: string } | null>(null);
 
   async function republish(n: number) {
-    if (!window.confirm(`Republish version ${n} as the new active version? It becomes the next version number; the history is kept.`)) return;
+    if (
+      !(await confirm({
+        title: `Republish version ${n} as the new active version?`,
+        description: "It becomes the next version number; the history is kept.",
+        confirmLabel: "Republish",
+      }))
+    )
+      return;
     setBusy(n);
     setError(null);
     try {

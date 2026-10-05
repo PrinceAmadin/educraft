@@ -11,6 +11,7 @@ import { CopyLinkButton } from "@/components/ambassadors/CopyLinkButton";
 import { SchoolChip, StatusPill } from "@/components/ambassadors/RosterBoard";
 import { SlotDialog } from "@/components/ambassadors/SlotDialog";
 import { RoleChip } from "@/components/layout/RoleChip";
+import { useConfirm } from "@/components/ui/confirm";
 import type { RosterRow } from "@/lib/services/ambassador-roster";
 
 const CODE_LABEL: Record<RosterKind, (code: string) => string> = {
@@ -39,6 +40,7 @@ export function RosterManageTable({
   showLink?: boolean;
 }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [q, setQ] = React.useState("");
   const [editing, setEditing] = React.useState<RosterRow | null>(null);
   const [resetting, setResetting] = React.useState<string | null>(null);
@@ -54,7 +56,15 @@ export function RosterManageTable({
     const extra = row.ambassadorId
       ? " Their HQ record, jobs and payouts are kept, but this link stops crediting them."
       : "";
-    if (!window.confirm(`Empty ${label}? The slot becomes vacant for the next applicant.${extra}`)) return;
+    if (
+      !(await confirm({
+        title: `Empty ${label}?`,
+        description: `The slot becomes vacant for the next applicant.${extra}`,
+        confirmLabel: "Empty slot",
+        tone: "danger",
+      }))
+    )
+      return;
     setResetting(row.code);
     setNotice(null);
     try {

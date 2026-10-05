@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/forms/Field";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm";
 import { CONTENT_PICKER_LABELS, CONTENT_TYPES, type ContentType, type MilestoneKey } from "@/lib/ambassadors/content-types";
 
 /** Today's date in Lagos (UTC+1), YYYY-MM-DD. */
@@ -100,6 +101,7 @@ export function LogContentButton({ defaultType = "MONDAY_FLIER" }: { defaultType
 /** Undo a post logged by mistake. */
 export function UndoLogButton({ id, label }: { id: string; label: string }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [busy, setBusy] = React.useState(false);
   return (
     <button
@@ -109,7 +111,7 @@ export function UndoLogButton({ id, label }: { id: string; label: string }) {
       title="Logged by mistake? Undo"
       className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-elevated hover:text-foreground disabled:opacity-50"
       onClick={async () => {
-        if (!window.confirm(`Remove "${label}" from the log?`)) return;
+        if (!(await confirm({ title: `Remove "${label}" from the log?`, confirmLabel: "Remove", tone: "danger" }))) return;
         setBusy(true);
         await fetch(`/api/admin/ambassadors/content-log/${id}`, { method: "DELETE" });
         setBusy(false);

@@ -12,6 +12,7 @@ import { Field } from "@/components/forms/Field";
 import { FormSection } from "@/components/forms/FormSection";
 import { FormActions } from "@/components/forms/FormActions";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm";
 import { DEPARTMENTS, MODE_NAMES, getDegreeFromDepartment, type ResearchModeNumber, type SectionKey } from "@/lib/generation/department-map";
 import {
   MODE_SHORT,
@@ -126,6 +127,7 @@ function modeLine(n: ResearchModeNumber): string {
  */
 export function ModeCard({ initial }: { initial: ModeCardData }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [card, setCard] = React.useState(initial);
   const [form, setForm] = React.useState<Form>(() => formFrom(initial));
   const [busy, setBusy] = React.useState<"approve" | "save" | "reopen" | BriefAction | "add" | "remove" | null>(null);
@@ -312,11 +314,15 @@ export function ModeCard({ initial }: { initial: ModeCardData }) {
    * is on screen; Draft again asks first, because it replaces the aim and objectives (and any
    * edits). A check needs a valid aim and objectives, so it is refused here before any call.
    */
-  const briefAction = (action: BriefAction) => {
+  const briefAction = async (action: BriefAction) => {
     const mode = form.modeNumber ? `Mode ${form.modeNumber}` : "the saved mode";
     if (
       action === "redraft_objectives" &&
-      !window.confirm(`Draft the aim and objectives again for ${mode}? The current aim and objectives, including your edits, are replaced.`)
+      !(await confirm({
+        title: `Draft the aim and objectives again for ${mode}?`,
+        description: "The current aim and objectives, including your edits, are replaced.",
+        confirmLabel: "Draft again",
+      }))
     )
       return;
     if (action === "check_objectives" && !locked && brief?.status === "READY") {

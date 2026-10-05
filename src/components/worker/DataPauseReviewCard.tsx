@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { COUNT_VALUE_TEXT } from "@/lib/generation/count-placeholders";
 import { DataFilesPicker } from "@/components/files/DataFilesPicker";
 import { DataFormFields } from "@/components/forms/DataFormFields";
+import { useConfirm } from "@/components/ui/confirm";
 import type { UploadedRef } from "@/lib/files/upload-client";
 import { humanSize } from "@/lib/files/upload-client";
 import type { PauseReviewView } from "@/lib/services/data-pause";
@@ -36,6 +37,7 @@ export function DataPauseReviewCard({
   isAdmin?: boolean;
 }) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [view, setView] = React.useState(initial);
   const [answers, setAnswers] = React.useState<Record<string, string>>(initial.answers ?? {});
   const [ticked, setTicked] = React.useState<Set<string>>(() => defaultTicks(initial));
@@ -318,8 +320,16 @@ export function DataPauseReviewCard({
             variant="ghost"
             size="sm"
             disabled={busy !== null}
-            onClick={() => {
-              if (window.confirm("Cancel this data request? The report stops waiting for it and nothing from it reaches the chapters.")) {
+            onClick={async () => {
+              if (
+                await confirm({
+                  title: "Cancel this data request?",
+                  description: "The report stops waiting for it and nothing from it reaches the chapters.",
+                  confirmLabel: "Cancel request",
+                  cancelLabel: "Keep waiting",
+                  tone: "danger",
+                })
+              ) {
                 void act({ action: "cancel", pauseId: view.id }, "cancel");
               }
             }}

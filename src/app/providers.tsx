@@ -4,6 +4,7 @@ import * as React from "react";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { PwaProvider } from "@/components/pwa/PwaProvider";
+import { ConfirmProvider } from "@/components/ui/confirm";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -15,7 +16,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
         disableTransitionOnChange
         storageKey="educraft:theme"
       >
-        <PwaProvider>{children}</PwaProvider>
+        <PwaProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </PwaProvider>
       </ThemeProvider>
     </SessionProvider>
   );
