@@ -24,6 +24,8 @@ const KEYS = {
   accountName: "company_account_name",
   alertEmails: "alert_emails",
   ambassadorGroupUrl: "ambassador_whatsapp_group_url",
+  ambassadorReferralMessage: "ambassador_referral_message",
+  ambassadorCoreMessage: "ambassador_core_message",
   fxMargin: FX_RATE_SETTING_KEYS.marginPercent,
   fxManualOverride: FX_RATE_SETTING_KEYS.manualOverride,
   fxManualOverrideSetAt: FX_RATE_SETTING_KEYS.manualOverrideSetAt,
@@ -47,6 +49,10 @@ const DEFAULTS = {
   alertEmails: "amadinprince26@gmail.com",
   /** The ambassador WhatsApp group every approved ambassador's device-locked link opens. */
   ambassadorGroupUrl: "https://chat.whatsapp.com/D7Cp4C9jA2uLddpUyy0WPr",
+  /** The WhatsApp message a general or sub ambassador's link pre-fills; {AMBASSADOR} becomes the ambassador's name. */
+  ambassadorReferralMessage: "Hi EduCraft! I was referred by {AMBASSADOR}. I'd like to place an order on the following Services:",
+  /** The WhatsApp message a Core ambassador's recruitment link pre-fills; {AMBASSADOR} becomes the ambassador's name. */
+  ambassadorCoreMessage: "Hi EduCraft! I was brought in by {AMBASSADOR}. I'd love to know more about the EduCraft Ambassadorship Program and how I can be a part of the brand.",
 };
 
 export interface GeneralSettings {
@@ -65,6 +71,10 @@ export interface GeneralSettings {
   alertEmails: string;
   /** The WhatsApp group invite URL new ambassadors' device-locked links open. Super Admin only. */
   ambassadorGroupUrl: string;
+  /** The WhatsApp message a general or sub ambassador's link pre-fills ({AMBASSADOR} = the ambassador's name). Super Admin only. */
+  ambassadorReferralMessage: string;
+  /** The WhatsApp message a Core ambassador's recruitment link pre-fills ({AMBASSADOR} = the ambassador's name). Super Admin only. */
+  ambassadorCoreMessage: string;
   /** Margin % applied on top of the base ₦/$ rate (0–20). */
   fxRateMarginPercent: number;
   /** Manual override for the base ₦/$ rate; empty string when unset. */
@@ -109,6 +119,8 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
     accountName: s[KEYS.accountName]?.trim() || DEFAULTS.accountName,
     alertEmails: splitEmailList(s[KEYS.alertEmails] ?? "").join(", ") || DEFAULTS.alertEmails,
     ambassadorGroupUrl: s[KEYS.ambassadorGroupUrl]?.trim() || DEFAULTS.ambassadorGroupUrl,
+    ambassadorReferralMessage: s[KEYS.ambassadorReferralMessage]?.trim() || DEFAULTS.ambassadorReferralMessage,
+    ambassadorCoreMessage: s[KEYS.ambassadorCoreMessage]?.trim() || DEFAULTS.ambassadorCoreMessage,
     fxRateMarginPercent: clampMargin(num(s[KEYS.fxMargin], DEFAULT_FX_MARGIN_PERCENT)),
     fxRateManualOverride: s[KEYS.fxManualOverride] ?? "",
     fxRateSnapshot,
@@ -142,6 +154,10 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
     writes.push({ key: KEYS.alertEmails, value: splitEmailList(input.alertEmails).join(", ") });
   if (input.ambassadorGroupUrl !== undefined)
     writes.push({ key: KEYS.ambassadorGroupUrl, value: input.ambassadorGroupUrl.trim() });
+  if (input.ambassadorReferralMessage !== undefined)
+    writes.push({ key: KEYS.ambassadorReferralMessage, value: input.ambassadorReferralMessage.trim() });
+  if (input.ambassadorCoreMessage !== undefined)
+    writes.push({ key: KEYS.ambassadorCoreMessage, value: input.ambassadorCoreMessage.trim() });
 
   if (input.fxRateMarginPercent !== undefined)
     writes.push({ key: KEYS.fxMargin, value: String(clampMargin(input.fxRateMarginPercent)) });
@@ -199,4 +215,21 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
 export async function getAmbassadorGroupUrl(): Promise<string> {
   const row = await db.setting.findUnique({ where: { key: KEYS.ambassadorGroupUrl } });
   return row?.value?.trim() || DEFAULTS.ambassadorGroupUrl;
+}
+
+/**
+ * The two WhatsApp messages the ambassador links pre-fill, read at request time
+ * by the redirect handler. `{AMBASSADOR}` in each is replaced with the
+ * ambassador's name (see `fillAmbassadorMessage`). Editing them (Super Admin
+ * only, on Settings > General) changes every ambassador link at once.
+ */
+export async function getAmbassadorLinkMessages(): Promise<{ referral: string; core: string }> {
+  const rows = await db.setting.findMany({
+    where: { key: { in: [KEYS.ambassadorReferralMessage, KEYS.ambassadorCoreMessage] } },
+  });
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return {
+    referral: byKey[KEYS.ambassadorReferralMessage]?.trim() || DEFAULTS.ambassadorReferralMessage,
+    core: byKey[KEYS.ambassadorCoreMessage]?.trim() || DEFAULTS.ambassadorCoreMessage,
+  };
 }

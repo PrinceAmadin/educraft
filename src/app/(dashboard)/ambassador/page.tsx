@@ -9,6 +9,7 @@ import {
   getAmbassadorDashboard,
 } from "@/lib/services/ambassador-portal";
 import { referralLink } from "@/lib/ambassador";
+import { getAmbassadorLink } from "@/lib/services/ambassador-analytics";
 import {
   PAYING_CLIENTS_HINT,
   PAYING_CLIENTS_LABEL,
@@ -46,8 +47,16 @@ export default async function AmbassadorDashboardPage() {
     );
   }
 
-  const data = await getAmbassadorDashboard(ambassador.id);
-  const link = referralLink(originFromHeaders(), data.referralCode);
+  const [data, slotLink] = await Promise.all([
+    getAmbassadorDashboard(ambassador.id),
+    getAmbassadorLink(ambassador.id),
+  ]);
+  const origin = originFromHeaders();
+  // The ambassador shares their /EduCraftA/{slot} link, which sends clients
+  // straight to EduCraft's WhatsApp. Ambassadors created without a slot fall
+  // back to the ?ref= intake link so they still have a working one.
+  const link = slotLink ? `${origin}${slotLink.linkPath}` : referralLink(origin, data.referralCode);
+  const linkLabel = slotLink ? slotLink.slotCode : data.referralCode;
   const qrDataUrl = await QRCode.toDataURL(link, { margin: 1, width: 224 });
 
   const { progress } = data;
@@ -63,7 +72,7 @@ export default async function AmbassadorDashboardPage() {
 
       <CadenceNotice>Your commission is owed the moment someone you referred pays their downpayment, and paid out every Saturday to the bank account on your profile.</CadenceNotice>
 
-      <ReferralShareCard code={data.referralCode} link={link} qrDataUrl={qrDataUrl} />
+      <ReferralShareCard code={linkLabel} link={link} qrDataUrl={qrDataUrl} />
 
       <div className="grid grid-cols-2 gap-x-6 gap-y-7 lg:grid-cols-4 lg:gap-x-8">
         <StatsCard

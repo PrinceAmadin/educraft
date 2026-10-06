@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { LuCircleAlert, LuLoaderCircle, LuLock, LuTriangleAlert } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/forms/Field";
 import { FormActions } from "@/components/forms/FormActions";
@@ -71,6 +72,8 @@ export function GeneralSettingsForm({
       accountName: settings.accountName,
       alertEmails: settings.alertEmails,
       ambassadorGroupUrl: settings.ambassadorGroupUrl,
+      ambassadorReferralMessage: settings.ambassadorReferralMessage,
+      ambassadorCoreMessage: settings.ambassadorCoreMessage,
       fxRateMarginPercent: settings.fxRateMarginPercent,
       fxRateManualOverride: settings.fxRateManualOverride,
     },
@@ -264,6 +267,35 @@ export function GeneralSettingsForm({
           </div>
         </DialogContent>
       </Dialog>
+
+      <FormSection
+        title="Ambassador link messages"
+        description={
+          canEditPricing
+            ? "The WhatsApp message each ambassador link pre-fills. Write {AMBASSADOR} where the ambassador's name should go — the system fills in each ambassador's own name automatically. A change updates every ambassador link at once."
+            : "Only the founder (Super Admin) can change the ambassador link messages."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="grid grid-cols-1 gap-5">
+          <Field
+            label="Referral message (general & sub links)"
+            htmlFor="ambassadorReferralMessage"
+            error={errors.ambassadorReferralMessage?.message}
+            hint="Opens when someone uses a normal ambassador's link. Use {AMBASSADOR} for the ambassador's name. Leave empty to reset to the default."
+          >
+            <Textarea id="ambassadorReferralMessage" disabled={!canEditPricing} {...register("ambassadorReferralMessage")} />
+          </Field>
+          <Field
+            label="Core recruiting message (/ECCA links)"
+            htmlFor="ambassadorCoreMessage"
+            error={errors.ambassadorCoreMessage?.message}
+            hint="Opens when someone uses a Core ambassador's recruitment link. Use {AMBASSADOR} for the ambassador's name. Leave empty to reset to the default."
+          >
+            <Textarea id="ambassadorCoreMessage" disabled={!canEditPricing} {...register("ambassadorCoreMessage")} />
+          </Field>
+        </div>
+      </FormSection>
 
       <FormSection
         title="Bank details"

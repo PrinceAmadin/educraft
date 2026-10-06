@@ -33,6 +33,7 @@ import { db } from "@/lib/db";
 import { CreateLoginControl } from "@/components/shared/CreateLoginControl";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { AdminAnalytics } from "@/components/ambassador-analytics/AdminAnalytics";
+import { getAmbassadorLink } from "@/lib/services/ambassador-analytics";
 import { cn, formatDate, formatNaira } from "@/lib/utils";
 import { isProvisional, provisionalDaysLeft } from "@/lib/ambassador";
 import type { ProjectStatus } from "@prisma/client";
@@ -60,7 +61,7 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole, groupInviteView] = await Promise.all([
+  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole, groupInviteView, slotLink] = await Promise.all([
     listParentCandidates(ambassador.id),
     getActiveCashflow(),
     getLinkedWorker(ambassador.userId),
@@ -73,6 +74,7 @@ export default async function AmbassadorDetailPage({
     listSubCandidates(ambassador.id),
     execRoleOfAmbassador(ambassador.id),
     getGroupInvite(ambassador.id),
+    getAmbassadorLink(ambassador.id),
   ]);
   if (!platform) notFound();
   const groupInvite = groupInviteView
@@ -259,7 +261,7 @@ export default async function AmbassadorDetailPage({
         />
       ) : (
       <>
-      <ReferralLinkCard code={ambassador.referralCode} />
+      <ReferralLinkCard code={slotLink ? slotLink.slotCode : ambassador.referralCode} path={slotLink?.linkPath} />
 
       <AmbassadorGroupLink ambassadorId={ambassador.id} initial={groupInvite} />
 

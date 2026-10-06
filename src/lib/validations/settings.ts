@@ -64,6 +64,26 @@ export const generalSettingsSchema = z.object({
       "Enter a WhatsApp group invite link (https://chat.whatsapp.com/…)",
     )
     .optional(),
+  /** WhatsApp message a general or sub ambassador's link pre-fills. {AMBASSADOR} = the ambassador's name. Super Admin only. */
+  ambassadorReferralMessage: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (raw) => raw === "" || raw.includes("{AMBASSADOR}"),
+      "Include {AMBASSADOR} where the ambassador's name should appear",
+    )
+    .optional(),
+  /** WhatsApp message a Core ambassador's recruitment link pre-fills. {AMBASSADOR} = the ambassador's name. Super Admin only. */
+  ambassadorCoreMessage: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (raw) => raw === "" || raw.includes("{AMBASSADOR}"),
+      "Include {AMBASSADOR} where the ambassador's name should appear",
+    )
+    .optional(),
   /** Margin on top of the auto-fetched ₦/$ rate, in percent (0–20). Super Admin only. */
   fxRateMarginPercent: z.coerce.number().min(0, "0–20").max(20, "0–20").optional(),
   /** Optional manual override of the base ₦/$ rate. Empty string clears it. Super Admin only. */

@@ -6,17 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { referralLink } from "@/lib/ambassador";
 
-export function ReferralLinkCard({ code }: { code: string }) {
-  const [link, setLink] = React.useState(`/intake?ref=${code}`);
+export function ReferralLinkCard({ code, path }: { code: string; path?: string }) {
+  const [link, setLink] = React.useState(path ?? `/intake?ref=${code}`);
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
     try {
-      setLink(referralLink(window.location.origin, code));
+      setLink(path ? `${window.location.origin}${path}` : referralLink(window.location.origin, code));
     } catch {
       /* keep the relative fallback */
     }
-  }, [code]);
+  }, [code, path]);
 
   async function copy() {
     try {

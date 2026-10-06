@@ -5,6 +5,8 @@ import { recordClick } from "@/lib/click-tracking/record-click";
 import { db } from "@/lib/db";
 import { waLink } from "@/lib/whatsapp";
 import { getHqContact } from "@/lib/services/hq-contact";
+import { getAmbassadorLinkMessages } from "@/lib/services/settings";
+import { fillAmbassadorMessage } from "@/lib/ambassador-panel/referral-message";
 
 /**
  * Referral links → WhatsApp, exactly as the original `api/redirect.ts`:
@@ -67,7 +69,8 @@ a{display:inline-block;margin-top:22px;color:#0D9488;font-weight:600;text-decora
 export async function referralResponse(kind: ReferralKind, rawId: string, req: Request) {
   const id = decodeURIComponent(rawId ?? "").trim();
   // EduCraft's line, from the HQ contact settings: every ambassador link opens this number.
-  const hq = await getHqContact();
+  // The pre-filled message templates are editable by the super admin on Settings > General.
+  const [hq, messages] = await Promise.all([getHqContact(), getAmbassadorLinkMessages()]);
   const errorPage = (title: string, body: string, status: number) => errorPageWith(title, body, status, hq.whatsappUrl);
   if (!id) return errorPage("Invalid link", "No ambassador ID was provided.", 400);
 
@@ -78,13 +81,7 @@ export async function referralResponse(kind: ReferralKind, rawId: string, req: R
     const core = await db.ambassadorSlot.findFirst({ where: { kind: "CORE", code }, select: { code: true, name: true } });
     if (!core) return errorPage("Link not found", "This Core Ambassador link does not exist.", 404);
     trackClick(core.code, req);
-    return NextResponse.redirect(
-      wa(
-        number,
-        `Hi EduCraft! I was brought in by ${core.name}. I'd love to know more about the EduCraft Ambassadorship Program and how I can be a part of the brand.`
-      ),
-      302
-    );
+    return NextResponse.redirect(wa(number, fillAmbassadorMessage(messages.core, core.name)), 302);
   }
 
   if (kind === "ecsa") {
@@ -96,10 +93,7 @@ export async function referralResponse(kind: ReferralKind, rawId: string, req: R
     });
     if (!sub) return errorPage("Link not found", "This Sub-Ambassador link does not exist.", 404);
     trackClick(sub.code, req);
-    const message =
-      sub.vacant || !sub.name
-        ? "Hi EduCraft! I'd like to place an order on the following Services:"
-        : `Hi EduCraft! I was referred by ${sub.name}. I'd like to place an order on the following Services:`;
+    const message = fillAmbassadorMessage(messages.referral, sub.vacant ? null : sub.name);
     return NextResponse.redirect(wa(number, message), 302);
   }
 
@@ -113,9 +107,6 @@ export async function referralResponse(kind: ReferralKind, rawId: string, req: R
     return errorPage("Link not found", "This ambassador link does not exist. Please contact EduCraft.", 404);
   }
   trackClick(slot.code, req);
-  const message =
-    slot.vacant || !slot.name
-      ? "Hi EduCraft! I'd like to place an order on the following Services:"
-      : `Hi EduCraft! I was referred by ${slot.name}. I'd like to place an order on the following Services:`;
+  const message = fillAmbassadorMessage(messages.referral, slot.vacant ? null : slot.name);
   return NextResponse.redirect(wa(number, message), 302);
 }
