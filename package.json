@@ -36,6 +36,7 @@
     "feed:backfill": "dotenv -e .env.local -- tsx scripts/backfill-client-feed.ts",
     "finance:backfill": "dotenv -e .env.local -- tsx scripts/finance-backfill.ts",
     "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",
+    "ambassadors:tour-backfill": "dotenv -e .env.local -- tsx scripts/ambassador-tour-backfill.ts",
     "research:tokenize": "dotenv -e .env.local -- tsx scripts/research-tokenize.ts",
     "research:group": "dotenv -e .env.local -- tsx scripts/research-group.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",
@@ -59,13 +60,20 @@
     "check:reprice": "tsx scripts/check-reprice.ts",
     "check:statement": "tsx scripts/check-statement.ts",
     "check:pots": "tsx scripts/check-pots.ts",
+    "check:tour": "tsx scripts/check-tour.ts",
     "cashflow:seed": "dotenv -e .env.local -- tsx scripts/cashflow-seed.ts",
     "payouts:backfill": "dotenv -e .env.local -- tsx scripts/payouts-backfill.ts",
     "pots:backfill": "dotenv -e .env.local -- tsx scripts/pots-backfill.ts",
     "pots:reset-claude": "dotenv -e .env.local -- tsx scripts/reset-claude-pot.ts",
     "orchestrator:schedule": "dotenv -e .env.local -- tsx scripts/setup-orchestrator-schedule.ts",
     "cashflow:schedule": "dotenv -e .env.local -- tsx scripts/setup-cashflow-schedule.ts",
-    "email:test": "dotenv -e .env.local -- tsx scripts/send-test-emails.ts"
+    "email:test": "dotenv -e .env.local -- tsx scripts/send-test-emails.ts",
+    "demo:seed": "dotenv -e .env.demo -- tsx scripts/demo-seed.ts",
+    "demo:seed-ambassador": "dotenv -e .env.demo -- tsx scripts/demo-seed-ambassador.ts",
+    "demo:terminate": "dotenv -e .env.demo -- tsx scripts/demo-terminate.ts",
+    "demo:dev": "dotenv -e .env.demo -- next dev",
+    "demo:migrate": "dotenv -e .env.demo -- prisma migrate deploy",
+    "demo:base": "dotenv -e .env.demo -- tsx prisma/seed.ts"
   },
   "prisma": {
     "seed": "dotenv -e .env.local -- tsx prisma/seed.ts"

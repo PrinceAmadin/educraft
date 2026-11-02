@@ -15,6 +15,7 @@ import { applicationRejectedEmail } from "@/lib/emails/application-decision";
 import { alertAmbassadorApplication } from "@/lib/services/team-alerts";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
 import { ensureGroupInvite } from "@/lib/services/ambassador-group";
+import { getAmbassadorTourVideo } from "@/lib/services/settings";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 import type { SendFn } from "@/lib/services/client-otp";
 import type { AmbassadorApplicationInput, EditApplicationInput } from "@/lib/validations/application";
@@ -592,6 +593,8 @@ export async function approveApplication(
   // Welcome email: slot ID, their client link, the group link, and how to sign
   // in. A failed send never undoes the approval — the HOG can message them.
   if (application.email) {
+    // Only promise the tour if one is actually configured.
+    const hasTour = Boolean((await getAmbassadorTourVideo()).videoUrl);
     const mail = ambassadorWelcomeEmail({
       fullName: application.fullName,
       slotCode: claimed,
@@ -602,6 +605,7 @@ export async function approveApplication(
       hasLogin: Boolean(application.userId),
       provisionalUntil: ambassador.provisionalUntil,
       groupInviteUrl,
+      hasTour,
     });
     const sent = await sendMail({ to: application.email, ...mail });
     if (!sent.ok) console.error("[approveApplication] welcome email failed:", sent.error);

@@ -10,6 +10,7 @@ import {
 } from "@/lib/services/ambassador-portal";
 import { referralLink } from "@/lib/ambassador";
 import { getAmbassadorLink } from "@/lib/services/ambassador-analytics";
+import { getTourStateForUser } from "@/lib/services/ambassador-tour";
 import {
   PAYING_CLIENTS_HINT,
   PAYING_CLIENTS_LABEL,
@@ -20,6 +21,7 @@ import { StatsCard } from "@/components/dashboard/StatsCard";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { ReferralShareCard } from "@/components/ambassadors/ReferralShareCard";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { TourSection } from "@/components/ambassador/tour/TourSection";
 import { CadenceNotice } from "@/components/shared/CadenceNotice";
 import { firstName, formatNaira } from "@/lib/utils";
 
@@ -47,9 +49,10 @@ export default async function AmbassadorDashboardPage() {
     );
   }
 
-  const [data, slotLink] = await Promise.all([
+  const [data, slotLink, tour] = await Promise.all([
     getAmbassadorDashboard(ambassador.id),
     getAmbassadorLink(ambassador.id),
+    getTourStateForUser(session!.user.id),
   ]);
   const origin = originFromHeaders();
   // The ambassador shares their /EduCraftA/{slot} link, which sends clients
@@ -140,6 +143,18 @@ export default async function AmbassadorDashboardPage() {
           />
         </div>
       </section>
+
+      {/* The tutorial video, after the first watch. Renders nothing until the
+          founder has uploaded one on Settings > General. */}
+      {tour.videoUrl ? (
+        <TourSection
+          videoUrl={tour.videoUrl}
+          posterUrl={tour.posterUrl}
+          chapters={tour.chapters}
+          watchedAt={tour.watchedAt ? tour.watchedAt.toISOString() : null}
+          durationSeconds={tour.durationSeconds}
+        />
+      ) : null}
     </div>
   );
 }

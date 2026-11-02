@@ -953,6 +953,20 @@ model Ambassador {
   /// automatically any more — the HOG decides each one's fate — and this makes
   /// the one-time notification idempotent across sweep runs.
   provisionalReviewNotifiedAt DateTime?
+  /// The ambassador tutorial video (Nov 2026). A new ambassador cannot use
+  /// the portal until they have watched it once; the gate is simply
+  /// `tourVersion != TOUR_VERSION`. Every ambassador that existed when it
+  /// shipped was stamped by `ambassadors:tour-backfill`, so only people
+  /// approved afterwards ever meet it. Bumping TOUR_VERSION re-gates everyone.
+  tourVersion         String?
+  tourWatchedAt       DateTime?
+  /// Furthest point reached, in whole seconds — what the gate resumes from.
+  tourSecondsWatched  Int       @default(0)
+  /// The video length as the browser reported it, so "watched enough" is
+  /// judged against the cut they actually saw.
+  tourDurationSeconds Int?
+  /// First time they pressed play: lets the HOG see who opened it and stopped.
+  tourStartedAt       DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 

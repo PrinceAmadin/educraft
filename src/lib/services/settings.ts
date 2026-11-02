@@ -26,6 +26,8 @@ const KEYS = {
   ambassadorGroupUrl: "ambassador_whatsapp_group_url",
   ambassadorReferralMessage: "ambassador_referral_message",
   ambassadorCoreMessage: "ambassador_core_message",
+  ambassadorTourVideoUrl: "ambassador_tour_video_url",
+  ambassadorTourPosterUrl: "ambassador_tour_poster_url",
   fxMargin: FX_RATE_SETTING_KEYS.marginPercent,
   fxManualOverride: FX_RATE_SETTING_KEYS.manualOverride,
   fxManualOverrideSetAt: FX_RATE_SETTING_KEYS.manualOverrideSetAt,
@@ -53,6 +55,16 @@ const DEFAULTS = {
   ambassadorReferralMessage: "Hi EduCraft! I was referred by {AMBASSADOR}. I'd like to place an order on the following Services:",
   /** The WhatsApp message a Core ambassador's recruitment link pre-fills; {AMBASSADOR} becomes the ambassador's name. */
   ambassadorCoreMessage: "Hi EduCraft! I was brought in by {AMBASSADOR}. I'd love to know more about the EduCraft Ambassadorship Program and how I can be a part of the brand.",
+  /**
+   * The tutorial video every new ambassador watches once. Empty by default and
+   * empty is meaningful: with no video the gate never appears and the
+   * dashboard section renders nothing, so the structure ships before the film
+   * is made. Never serve it from /public/images — the service worker caches
+   * that folder and its cacheFirst is range-unaware, which breaks seeking.
+   */
+  ambassadorTourVideoUrl: "",
+  /** Poster frame shown before play. Empty = the browser's own first frame. */
+  ambassadorTourPosterUrl: "",
 };
 
 export interface GeneralSettings {
@@ -75,6 +87,10 @@ export interface GeneralSettings {
   ambassadorReferralMessage: string;
   /** The WhatsApp message a Core ambassador's recruitment link pre-fills ({AMBASSADOR} = the ambassador's name). Super Admin only. */
   ambassadorCoreMessage: string;
+  /** The ambassador tutorial video; empty = no tour anywhere. Super Admin only. */
+  ambassadorTourVideoUrl: string;
+  /** Its poster frame; empty = the browser's own. Super Admin only. */
+  ambassadorTourPosterUrl: string;
   /** Margin % applied on top of the base ₦/$ rate (0–20). */
   fxRateMarginPercent: number;
   /** Manual override for the base ₦/$ rate; empty string when unset. */
@@ -121,6 +137,8 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
     ambassadorGroupUrl: s[KEYS.ambassadorGroupUrl]?.trim() || DEFAULTS.ambassadorGroupUrl,
     ambassadorReferralMessage: s[KEYS.ambassadorReferralMessage]?.trim() || DEFAULTS.ambassadorReferralMessage,
     ambassadorCoreMessage: s[KEYS.ambassadorCoreMessage]?.trim() || DEFAULTS.ambassadorCoreMessage,
+    ambassadorTourVideoUrl: s[KEYS.ambassadorTourVideoUrl]?.trim() || DEFAULTS.ambassadorTourVideoUrl,
+    ambassadorTourPosterUrl: s[KEYS.ambassadorTourPosterUrl]?.trim() || DEFAULTS.ambassadorTourPosterUrl,
     fxRateMarginPercent: clampMargin(num(s[KEYS.fxMargin], DEFAULT_FX_MARGIN_PERCENT)),
     fxRateManualOverride: s[KEYS.fxManualOverride] ?? "",
     fxRateSnapshot,
@@ -158,6 +176,10 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
     writes.push({ key: KEYS.ambassadorReferralMessage, value: input.ambassadorReferralMessage.trim() });
   if (input.ambassadorCoreMessage !== undefined)
     writes.push({ key: KEYS.ambassadorCoreMessage, value: input.ambassadorCoreMessage.trim() });
+  if (input.ambassadorTourVideoUrl !== undefined)
+    writes.push({ key: KEYS.ambassadorTourVideoUrl, value: input.ambassadorTourVideoUrl.trim() });
+  if (input.ambassadorTourPosterUrl !== undefined)
+    writes.push({ key: KEYS.ambassadorTourPosterUrl, value: input.ambassadorTourPosterUrl.trim() });
 
   if (input.fxRateMarginPercent !== undefined)
     writes.push({ key: KEYS.fxMargin, value: String(clampMargin(input.fxRateMarginPercent)) });
@@ -215,6 +237,27 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
 export async function getAmbassadorGroupUrl(): Promise<string> {
   const row = await db.setting.findUnique({ where: { key: KEYS.ambassadorGroupUrl } });
   return row?.value?.trim() || DEFAULTS.ambassadorGroupUrl;
+}
+
+/**
+ * The ambassador tutorial video and its poster, read at request time by the
+ * portal gate and the dashboard section. No URL = no tour: the gate never
+ * shows and the section renders nothing, which is how this ships before the
+ * video exists.
+ *
+ * The file lives in the public Blob store (or any https host), never in
+ * /public/images: the service worker cache-firsts that folder and answers a
+ * Range request with a full 200, which breaks video seeking.
+ */
+export async function getAmbassadorTourVideo(): Promise<{ videoUrl: string; posterUrl: string }> {
+  const rows = await db.setting.findMany({
+    where: { key: { in: [KEYS.ambassadorTourVideoUrl, KEYS.ambassadorTourPosterUrl] } },
+  });
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return {
+    videoUrl: byKey[KEYS.ambassadorTourVideoUrl]?.trim() || DEFAULTS.ambassadorTourVideoUrl,
+    posterUrl: byKey[KEYS.ambassadorTourPosterUrl]?.trim() || DEFAULTS.ambassadorTourPosterUrl,
+  };
 }
 
 /**

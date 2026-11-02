@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { LuInbox } from "react-icons/lu";
+import Link from "next/link";
+import { LuArrowRight, LuInbox } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getAmbassadorByUserId, getAmbassadorProfile } from "@/lib/services/ambassador-portal";
 import { AmbassadorBankForm } from "@/components/ambassadors/AmbassadorBankForm";
@@ -9,6 +10,8 @@ import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { referralLink } from "@/lib/ambassador";
 import { PAYING_CLIENTS_HINT, tierProgressLine } from "@/lib/ambassador-copy";
+import { TOUR_TEXT } from "@/lib/ambassador-tour";
+import { getAmbassadorTourVideo } from "@/lib/services/settings";
 import { formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "My profile" };
@@ -28,7 +31,10 @@ export default async function AmbassadorProfilePage() {
     return <EmptyState icon={LuInbox} title="No ambassador profile" description="Contact an admin." />;
   }
 
-  const { profile, progress, rate, nextRate, rates, ladder } = await getAmbassadorProfile(ambassador.id);
+  const [{ profile, progress, rate, nextRate, rates, ladder }, tourVideo] = await Promise.all([
+    getAmbassadorProfile(ambassador.id),
+    getAmbassadorTourVideo(),
+  ]);
   const link = referralLink(origin(), profile.referralCode);
 
   return (
@@ -111,6 +117,17 @@ export default async function AmbassadorProfilePage() {
           />
         </div>
       </section>
+
+      {/* The tour itself lives on the dashboard; this is the signpost to it. */}
+      {tourVideo.videoUrl ? (
+        <Link
+          href="/ambassador#how-it-works"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-primary underline-offset-4 hover:underline"
+        >
+          {TOUR_TEXT.watchLabel} again
+          <LuArrowRight className="size-4" aria-hidden />
+        </Link>
+      ) : null}
     </div>
   );
 }

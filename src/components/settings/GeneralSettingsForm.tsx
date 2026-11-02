@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Field } from "@/components/forms/Field";
 import { FormActions } from "@/components/forms/FormActions";
 import { FormSection } from "@/components/forms/FormSection";
+import { TourVideoUpload } from "@/components/settings/TourVideoUpload";
 import { generalSettingsSchema, splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 import type { GeneralSettings } from "@/lib/services/settings";
 import { hqContactChanges, type HqContactChange } from "@/lib/hq-contact-rules";
@@ -57,6 +58,7 @@ export function GeneralSettingsForm({
     handleSubmit,
     reset,
     watch,
+    setValue,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<GeneralSettingsInput>({
     resolver: zodResolver(generalSettingsSchema),
@@ -74,6 +76,8 @@ export function GeneralSettingsForm({
       ambassadorGroupUrl: settings.ambassadorGroupUrl,
       ambassadorReferralMessage: settings.ambassadorReferralMessage,
       ambassadorCoreMessage: settings.ambassadorCoreMessage,
+      ambassadorTourVideoUrl: settings.ambassadorTourVideoUrl,
+      ambassadorTourPosterUrl: settings.ambassadorTourPosterUrl,
       fxRateMarginPercent: settings.fxRateMarginPercent,
       fxRateManualOverride: settings.fxRateManualOverride,
     },
@@ -294,6 +298,61 @@ export function GeneralSettingsForm({
           >
             <Textarea id="ambassadorCoreMessage" disabled={!canEditPricing} {...register("ambassadorCoreMessage")} />
           </Field>
+        </div>
+      </FormSection>
+
+      <FormSection
+        title="Ambassador tutorial video"
+        description={
+          canEditPricing
+            ? "The tour every new ambassador must watch once before they can use their dashboard, and can rewatch from it afterwards. Leave both blank and there is no tour at all: no pop-up, and nothing on the dashboard."
+            : "Only the founder (Super Admin) can change the ambassador tutorial video."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="grid grid-cols-1 gap-5">
+          <Field
+            label="Video file"
+            htmlFor="ambassadorTourVideoUrl"
+            error={errors.ambassadorTourVideoUrl?.message}
+            hint="Upload the finished mp4, or paste an https link to one hosted elsewhere. Changing it does not make anyone watch again — that is a code change (TOUR_VERSION), on purpose."
+          >
+            <Input
+              id="ambassadorTourVideoUrl"
+              inputMode="url"
+              placeholder="No video yet"
+              disabled={!canEditPricing}
+              {...register("ambassadorTourVideoUrl")}
+            />
+          </Field>
+          {canEditPricing ? (
+            <TourVideoUpload
+              label="Upload the video"
+              kind="video"
+              onUploaded={(url) => setValue("ambassadorTourVideoUrl", url, { shouldDirty: true })}
+            />
+          ) : null}
+          <Field
+            label="Poster frame"
+            htmlFor="ambassadorTourPosterUrl"
+            error={errors.ambassadorTourPosterUrl?.message}
+            hint="The still shown before it plays. Optional — without one the browser uses its own first frame."
+          >
+            <Input
+              id="ambassadorTourPosterUrl"
+              inputMode="url"
+              placeholder="Optional"
+              disabled={!canEditPricing}
+              {...register("ambassadorTourPosterUrl")}
+            />
+          </Field>
+          {canEditPricing ? (
+            <TourVideoUpload
+              label="Upload a poster image"
+              kind="poster"
+              onUploaded={(url) => setValue("ambassadorTourPosterUrl", url, { shouldDirty: true })}
+            />
+          ) : null}
         </div>
       </FormSection>
 

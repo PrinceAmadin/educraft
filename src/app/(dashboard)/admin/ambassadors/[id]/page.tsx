@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { LuPhone, LuMail, LuBuilding2, LuBellRing, LuCalendarClock } from "react-icons/lu";
+import { LuPhone, LuMail, LuBuilding2, LuBellRing, LuCalendarClock, LuMonitorPlay } from "react-icons/lu";
 import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
 import { getDirectoryDetail, listSubCandidates } from "@/lib/services/ambassador-platform/directory";
 import { DirectoryProfile } from "@/components/ambassadors/platform/DirectoryProfile";
@@ -195,6 +195,23 @@ export default async function AmbassadorDetailPage({
               optedOut={ambassador.weeklyEmailOptOut}
               active={ambassador.status === "Active"}
             />
+          </Field>
+          <Field icon={LuMonitorPlay} label="Tutorial video">
+            {ambassador.tourWatchedAt ? (
+              <>
+                Watched
+                <span className="block text-xs text-muted-foreground">{formatDate(ambassador.tourWatchedAt)}</span>
+              </>
+            ) : ambassador.tourStartedAt ? (
+              <>
+                Started, not finished
+                <span className="block text-xs text-muted-foreground">
+                  Opened {formatDate(ambassador.tourStartedAt)}
+                </span>
+              </>
+            ) : (
+              <span className="text-subtle">Not watched</span>
+            )}
           </Field>
           <Field icon={LuBuilding2} label="University">
             {ambassador.university?.name ?? "—"}

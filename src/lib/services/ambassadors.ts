@@ -186,6 +186,8 @@ const detailSelect = {
   provisionalUntil: true,
   activatedAt: true,
   provisionalWarnedAt: true,
+  tourWatchedAt: true,
+  tourStartedAt: true,
   bankName: true,
   accountNumber: true,
   accountName: true,

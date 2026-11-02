@@ -28,6 +28,21 @@ const emailList = z
 const blank = z.literal("");
 const text = (max: number) => z.string().trim().max(max).optional().or(blank);
 
+/** An https link, or blank. http is refused: these are embedded in the app. */
+const httpsUrl = (max: number, message: string) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .refine((raw) => {
+      if (raw === "") return true;
+      try {
+        return new URL(raw).protocol === "https:";
+      } catch {
+        return false;
+      }
+    }, message);
+
 /**
  * Every field optional — the form only sends what the signed-in role is
  * allowed to change, and `updateGeneralSettings` only writes keys present in
@@ -84,6 +99,10 @@ export const generalSettingsSchema = z.object({
       "Include {AMBASSADOR} where the ambassador's name should appear",
     )
     .optional(),
+  /** The ambassador tutorial video. Blank = no tour at all. Super Admin only. */
+  ambassadorTourVideoUrl: httpsUrl(600, "Enter an https link to the video file, or leave it blank").optional(),
+  /** Its poster frame. Blank = the browser's own first frame. Super Admin only. */
+  ambassadorTourPosterUrl: httpsUrl(600, "Enter an https link to the poster image, or leave it blank").optional(),
   /** Margin on top of the auto-fetched ₦/$ rate, in percent (0–20). Super Admin only. */
   fxRateMarginPercent: z.coerce.number().min(0, "0–20").max(20, "0–20").optional(),
   /** Optional manual override of the base ₦/$ rate. Empty string clears it. Super Admin only. */

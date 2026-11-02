@@ -16,3 +16,13 @@ export type ReferralFilter = "all" | "paying" | "waiting";
 export const referralFilterSchema = z.object({
   filter: z.enum(["all", "paying", "waiting"]).optional().catch(undefined),
 });
+
+/**
+ * How far the ambassador has watched the tutorial video. Both figures come
+ * from the browser's own `<video>` element; the service clamps the position to
+ * the duration and refuses an absurd length, so a wrong number proves nothing.
+ */
+export const tourProgressSchema = z.object({
+  secondsWatched: z.coerce.number().finite().min(0).max(4 * 60 * 60),
+  durationSeconds: z.coerce.number().finite().positive().max(4 * 60 * 60),
+});

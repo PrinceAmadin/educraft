@@ -1,4 +1,5 @@
 import { escapeHtml } from "@/lib/mailer";
+import { TOUR_TEXT } from "@/lib/ambassador-tour";
 
 /**
  * Sent when an admin approves an ambassador application: their slot ID, the
@@ -16,6 +17,8 @@ export function ambassadorWelcomeEmail(input: {
   provisionalUntil?: Date | null;
   /** Their device-locked WhatsApp group link, if one was minted. Opens only on the first device they open it with. */
   groupInviteUrl?: string | null;
+  /** True when a tutorial video is configured, so the tour really is waiting. */
+  hasTour?: boolean;
 }): { subject: string; html: string; text: string } {
   const first = input.fullName.trim().split(/\s+/)[0] || input.fullName;
   const subject = "Welcome to the EduCraft ambassador programme";
@@ -34,6 +37,9 @@ export function ambassadorWelcomeEmail(input: {
     : "We will send your dashboard login separately.";
 
   const groupUrl = input.groupInviteUrl?.trim() || null;
+
+  // Only promised when there is actually a video to watch.
+  const tourLine = input.hasTour && input.hasLogin ? TOUR_TEXT.emailLine : null;
 
   const text = [
     `Hi ${first},`,
@@ -56,6 +62,7 @@ export function ambassadorWelcomeEmail(input: {
     provisionalLine ?? "",
     provisionalLine ? "" : "",
     loginLine,
+    tourLine ?? "",
     input.hasLogin ? `Dashboard: ${input.loginUrl}` : "",
     "",
     "EduCraft, Academic & Technical Documentation Experts",
@@ -91,6 +98,11 @@ export function ambassadorWelcomeEmail(input: {
         : ""
     }
     <p style="margin:0 0 ${input.hasLogin ? "20" : "24"}px;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(loginLine)}</p>
+    ${
+      tourLine
+        ? `<p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(tourLine)}</p>`
+        : ""
+    }
     ${
       input.hasLogin
         ? `<p style="margin:0 0 24px"><a href="${escapeHtml(input.loginUrl)}" style="display:inline-block;padding:12px 22px;background:#0D9488;color:#FFFFFF;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none">Open my dashboard</a></p>`
