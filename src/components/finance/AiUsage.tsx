@@ -470,7 +470,7 @@ export function AiProjectSearch() {
               title="Timeline"
               rows={project.timeline.map((t, i) => ({
                 label: `${i + 1}. ${t.step}`,
-                sub: `${new Date(t.at).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · ${(t.durationMs / 1000).toFixed(1)}s${t.status === "error" ? " · failed" : ""}`,
+                sub: `${new Date(t.at).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · ${(t.durationMs / 1000).toFixed(1)}s${t.status === "timeout" ? " · timed out (cost estimated)" : t.status === "error" ? " · failed" : ""}`,
                 value: formatNaira(t.cost),
               }))}
             />

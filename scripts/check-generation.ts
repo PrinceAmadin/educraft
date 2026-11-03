@@ -366,7 +366,7 @@ check("answer: small parts still need 50 words", /fewer than the 50/.test(nonAns
 // is asked again inline, at most twice, without counting against the four-in-a-row failure cap. The
 // classifier below reads output_tokens + body length; a reply above BOTH lines is not "structurally
 // empty" and the normal failure path runs.
-const usage = (outputTokens: number): ClaudeUsage => ({ inputTokens: 0, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, webSearchRequests: 0 });
+const usage = (outputTokens: number): ClaudeUsage => ({ inputTokens: 0, outputTokens, thinkingTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, webSearchRequests: 0 });
 const streamResult = (text: string, outputTokens: number): ClaudeStreamResult => ({ text, toolCalls: [], stopReason: "end_turn", model: "claude-sonnet-5", usage: usage(outputTokens), attempts: 1 });
 check("empty reply: 0 tokens, 0 chars is structurally empty", isStructuralEmpty(streamResult("", 0)));
 check("empty reply: thinking-only (17 output tokens, 0 chars) is structurally empty", isStructuralEmpty(streamResult("", 17)));

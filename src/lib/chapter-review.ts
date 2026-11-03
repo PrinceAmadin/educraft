@@ -297,6 +297,7 @@ export const CHAPTER_REVIEW_TEXT = {
     uncheckedNote: "The quality check could not run on this chapter. Read it through with care; the COO has been told.",
     warningsIntro: "Also look at:",
     beingChecked: (chapter: number) => `Chapter ${chapter} is written and is being checked before it comes to you.`,
+    beingRepaired: (chapter: number) => `Chapter ${chapter} did not pass its check. The points at fault are being fixed in place, then it is checked again.`,
     beingRewritten: (chapter: number) => `Chapter ${chapter} did not pass its check and is being written again.`,
     staffChecking: (chapter: number) => `Chapter ${chapter} is written and is being checked. The specialist gets the draft once it passes (or after two rewrites).`,
     uploadChecking: "Your version is being checked. It goes to the COO for approval once it passes.",

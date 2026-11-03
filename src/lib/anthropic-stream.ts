@@ -14,17 +14,26 @@ export interface ClaudeUsage {
   /** Uncached input tokens. */
   inputTokens: number;
   outputTokens: number;
+  /**
+   * The part of outputTokens spent on extended thinking. Billed at the output
+   * rate like any other output token, so on a chapter part — where thinking
+   * runs to half or two thirds of the output at the default effort — this is
+   * the single biggest line on the bill. It is measured only so that effort
+   * can be tuned against evidence; the reasoning itself is discarded.
+   */
+  thinkingTokens: number;
   cacheWriteTokens: number;
   cacheReadTokens: number;
   webSearchRequests: number;
 }
 
-export const ZERO_USAGE: ClaudeUsage = { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, webSearchRequests: 0 };
+export const ZERO_USAGE: ClaudeUsage = { inputTokens: 0, outputTokens: 0, thinkingTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, webSearchRequests: 0 };
 
 export function addUsage(a: ClaudeUsage, b: ClaudeUsage): ClaudeUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
+    thinkingTokens: a.thinkingTokens + b.thinkingTokens,
     cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
     cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
     webSearchRequests: a.webSearchRequests + b.webSearchRequests,
@@ -179,8 +188,10 @@ export class AnthropicStreamAccumulator {
     const write = num(u.cache_creation_input_tokens);
     const read = num(u.cache_read_input_tokens);
     const searches = num(u.server_tool_use?.web_search_requests);
+    const thinking = num(u.output_tokens_details?.thinking_tokens);
     if (input !== null) this.usage.inputTokens = input;
     if (output !== null) this.usage.outputTokens = Math.max(this.usage.outputTokens, output);
+    if (thinking !== null) this.usage.thinkingTokens = Math.max(this.usage.thinkingTokens, thinking);
     if (write !== null) this.usage.cacheWriteTokens = write;
     if (read !== null) this.usage.cacheReadTokens = read;
     if (searches !== null) this.usage.webSearchRequests = searches;
@@ -190,6 +201,18 @@ export class AnthropicStreamAccumulator {
 /** Rough output tokens for streamed text (Sonnet 5 averages about 3 characters of English prose per token). */
 export function estimateOutputTokens(text: string): number {
   return Math.ceil(text.length / 3);
+}
+
+/**
+ * Rough input tokens for a prompt we sent but never got a usage report for (a
+ * timed-out or dropped call). About 4 characters per token: input carries JSON
+ * schemas and reference lists, which pack denser than prose. Used only so that
+ * such a call is not recorded as free, when Anthropic almost certainly
+ * processed and billed it. Deliberately an under-estimate rather than a guess
+ * in our own favour.
+ */
+export function estimateInputTokens(...parts: string[]): number {
+  return Math.ceil(parts.reduce((n, p) => n + p.length, 0) / 4);
 }
 
 /** Statuses worth another try: rate limit, overload and server-side errors. */

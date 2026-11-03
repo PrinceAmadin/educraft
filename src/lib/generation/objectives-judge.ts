@@ -72,6 +72,8 @@ export async function judgeObjectives(input: ObjectivesCheckInput, usage: AiUsag
     const reply = await callClaudeForJson<unknown>({
       model: JUDGE_MODEL,
       effort: "medium",
+      // The retry re-sends within seconds; the cached system then costs 0.05x.
+      cacheSystem: true,
       system: OBJECTIVES_CHECK_TEXT.system,
       user,
       toolName: "record_objectives_check",

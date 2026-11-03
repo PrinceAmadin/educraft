@@ -153,7 +153,15 @@ export const GENERATION_TEXT = {
   /** Endnote styles (MODE_A / MODE_B): each part ends with the notes its markers use. */
   partNotes: (continuing: boolean) =>
     `End this part with an [ENDNOTES] line, then one line per note whose marker (^1, ^2 …) appears in this part, written as 3. Full note text${continuing ? ", numbered on from the notes in the parts above" : ", numbered from 1"}. Put it after this part's last section and before any [AGENT REPORT].`,
-  partInstruction: (p: { chapter: number; part: number; parts: number; lines: string[]; firstHeading: string; stopAt: string; continuing: boolean; last: boolean; notes?: boolean }) =>
+  /**
+   * Sent only on a silent retry of a structurally empty reply (the model spent
+   * its tokens thinking and wrote nothing — about 1 part call in 8 in the D9
+   * test). The retry used to re-send the identical prompt with no steer, and
+   * paid the same failure again often enough to matter.
+   */
+  writeNow:
+    "Your previous reply to this exact instruction spent its tokens without writing the sections. Begin the text itself at once — the first line of your reply is the heading named above — and keep any deliberation brief.",
+  partInstruction: (p: { chapter: number; part: number; parts: number; lines: string[]; firstHeading: string; stopAt: string; continuing: boolean; last: boolean; notes?: boolean; nudge?: boolean }) =>
     [
       `WRITE PART ${p.part} OF ${p.parts}`,
       `Write these sections of Chapter ${p.chapter}, complete and in order:`,
@@ -165,6 +173,7 @@ export const GENERATION_TEXT = {
         ? `This is the last part of the chapter. Stop when ${p.stopAt} is complete, then add the [AGENT REPORT] if the chapter instructions ask for an end-of-chapter report.`
         : `Stop when ${p.stopAt} is complete. Do not begin anything later in the plan, and do not add a closing summary or transition that the plan does not have.`,
       ...(p.notes ? [GENERATION_TEXT.partNotes(p.continuing)] : []),
+      ...(p.nudge ? [GENERATION_TEXT.writeNow] : []),
       REPLY_WITH_TEXT,
       "Follow every instruction above, and the output format in the brief.",
     ].join("\n"),
@@ -379,7 +388,7 @@ export function writesEndnotes(placement: unknown): boolean {
   return placement === "MODE_A" || placement === "MODE_B";
 }
 
-export function partInstruction(plan: ChapterPlan, index: number, chapter: number, opts: { notes?: boolean } = {}): string {
+export function partInstruction(plan: ChapterPlan, index: number, chapter: number, opts: { notes?: boolean; nudge?: boolean } = {}): string {
   const part = plan.parts[index];
   const units = partUnits(plan, part);
   const lines = units.map((u) => {
@@ -487,6 +496,8 @@ export function partUserBlocks(p: {
   attachments?: AttachmentBlock[];
   /** The chapter cites in endnotes (MODE_A / MODE_B): the part ends with its [ENDNOTES] block. */
   notes?: boolean;
+  /** A silent retry of an empty reply: the instruction tells the model to write at once. After the last cache point, so the cache holds. */
+  nudge?: boolean;
 }): UserBlock[] {
   const written = p.plan.parts.slice(0, p.partIndex);
   const texts = p.partialOutput ? (splitParts(p.partialOutput, written.map((w) => w.chars ?? 0)) ?? [p.partialOutput]) : [];
@@ -501,7 +512,7 @@ export function partUserBlocks(p: {
         ...(i === texts.length - 1 ? { cache_control: CACHED } : {}),
       }),
     ),
-    { type: "text", text: partInstruction(p.plan, p.partIndex, p.chapter, { notes: p.notes }) },
+    { type: "text", text: partInstruction(p.plan, p.partIndex, p.chapter, { notes: p.notes, nudge: p.nudge }) },
   ];
 }
 

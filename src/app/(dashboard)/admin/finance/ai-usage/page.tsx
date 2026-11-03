@@ -17,7 +17,8 @@ import {
   getUsageSummary,
   parsePeriod,
 } from "@/lib/services/ai-usage";
-import { getClaudePot } from "@/lib/services/finance/pots";
+import { getClaudeBurnVsFunding, getClaudePot } from "@/lib/services/finance/pots";
+import { BurnVsFundingCard } from "@/components/finance/ai-usage/BurnVsFundingCard";
 import { ClaudePotCard } from "@/components/finance/ai-usage/ClaudePotCard";
 import { SendTestEmailButton } from "@/components/finance/ai-usage/SendTestEmailButton";
 import { cn, formatNaira } from "@/lib/utils";
@@ -31,7 +32,7 @@ const num = (n: number) => new Intl.NumberFormat("en-NG").format(n);
 
 export default async function AiUsagePage({ searchParams }: { searchParams: { period?: string } }) {
   const period = parsePeriod(searchParams.period);
-  const [session, balance, summary, subsystems, workers, anomalies, monthly, subsystemBreakdown, perProject, claudePot] = await Promise.all([
+  const [session, balance, summary, subsystems, workers, anomalies, monthly, subsystemBreakdown, perProject, claudePot, burnVsFunding] = await Promise.all([
     auth(),
     getCreditBalance(),
     getUsageSummary(period),
@@ -42,6 +43,7 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
     getSubsystemBreakdown("month"),
     getPerProjectCosts("month"),
     getClaudePot(),
+    getClaudeBurnVsFunding(),
   ]);
   const canEditThreshold = session?.user?.role === "SUPER_ADMIN";
   const canLogTopUp = session?.user?.role === "SUPER_ADMIN" || session?.user?.role === "CO_CEO_CFO";
@@ -64,6 +66,9 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
 
       {/* Phase 4: the Claude API pot — cash set aside for Claude, and logging a top-up that raises the balance above. */}
       <ClaudePotCard pot={claudePot} canLogTopUp={canLogTopUp} />
+
+      {/* The reconciliation the pot never had: actual Claude burn beside what the month's projects funded. */}
+      <BurnVsFundingCard data={burnVsFunding} />
 
       {/* D10: monthly summary + threshold sit at the top so the founder sees where the month is heading first. */}
       <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">

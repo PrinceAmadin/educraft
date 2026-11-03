@@ -39,6 +39,7 @@ import { alertReportReady, alertReportStopped } from "@/lib/services/team-alerts
 import { openDataPause } from "@/lib/services/data-pause";
 import { runSecondaryDataFetch, SecondaryDataError, summarizeSecondaryDataFailure } from "@/lib/services/secondary-data";
 import { maxRewritesSetting, requestChapterCheck } from "@/lib/services/chapter-gate";
+import { ChapterRepairError, maxRepairsSetting, repairChapterText } from "@/lib/services/chapter-repair";
 import { gateFactFrom } from "@/lib/quality/chapter-gate";
 import { isAiDraft } from "@/lib/chapter-review";
 import { ModeNotApprovedError } from "@/lib/services/mode-errors";
@@ -201,7 +202,7 @@ const PROJECT_FACTS = {
   researchJob: { select: { status: true } },
   qaReview: { select: { qualityRunAt: true, qualityRunLockedUntil: true, qualityPassed: true, qualityScore: true, qualityTotal: true, autoSubmittedAt: true } },
   generationCheckpoints: {
-    select: { id: true, chapterNumber: true, status: true, lockedUntil: true, lastStepAt: true, lastProgressAt: true, createdAt: true, startedAt: true, completedAt: true, errorMessage: true, outputHash: true, gateRewriteNo: true },
+    select: { id: true, chapterNumber: true, status: true, lockedUntil: true, lastStepAt: true, lastProgressAt: true, createdAt: true, startedAt: true, completedAt: true, errorMessage: true, outputHash: true, gateRewriteNo: true, gateRepairNo: true },
   },
   // Chapter gate: the check of each chapter's AI text.
   chapterChecks: {
@@ -228,7 +229,7 @@ const PROJECT_FACTS = {
 
 type ProjectFacts = Prisma.ProjectGetPayload<{ select: typeof PROJECT_FACTS }>;
 
-function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date, maxRewrites?: number): OrchestratorFacts {
+function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date, maxRewrites?: number, maxRepairs?: number): OrchestratorFacts {
   const chapters = expectedChapters({ serviceCode: p.service.serviceCode, additionalData: p.additionalData, chapterCount: p.chapterCount });
   const review = reportReview(
     p.deliverables.map((d) => ({ kind: d.kind, chapter: d.chapter, archived: d.archivedAt != null, changeNote: d.changeNote, versions: d.versions.map((v) => ({ ...v, fileName: v.file.fileName })) })),
@@ -245,6 +246,7 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date, maxRewrites
         chapter: c.chapterNumber,
         outputHash: c.outputHash,
         gateRewriteNo: c.gateRewriteNo,
+        gateRepairNo: c.gateRepairNo,
         check: c.outputHash ? (p.chapterChecks.find((k) => k.chapterNumber === c.chapterNumber && k.textHash === c.outputHash) ?? null) : null,
         mode,
         pauses: p.pauses,
@@ -298,6 +300,7 @@ function factsFrom(run: OrchestratorRun, p: ProjectFacts, now: Date, maxRewrites
     review: { pending: review.pending, approvedAt: Object.fromEntries(review.approvedAt) },
     chapterGate,
     ...(maxRewrites !== undefined ? { maxRewrites } : {}),
+    ...(maxRepairs !== undefined ? { maxRepairs } : {}),
   };
 }
 
@@ -614,6 +617,27 @@ async function perform(ctx: Ctx, action: Action): Promise<Outcome> {
       return { again: false };
     }
 
+    case "REPAIR_CHAPTER": {
+      // One short call that patches the stored text in place (~₦30–60), instead of a
+      // rewrite re-paying the chapter's plan and every part. It holds no slot. The
+      // attempt counter moves inside the service, so a repair that fixes nothing
+      // falls through to a rewrite after MAX_GATE_REPAIRS tries.
+      const reason = gateReason("REPAIRING", action.chapter);
+      if ((run.status === "GENERATING" || run.status === "QUEUED") && run.reason !== reason) await update(run.id, { reason, reasonDetail: null });
+      try {
+        await repairChapterText(project.id, action.chapter);
+        // Check the repaired text straight away rather than waiting a tick.
+        await requestChapterCheck(project.id, action.chapter, "AI_TEXT");
+      } catch (error) {
+        const transient = error instanceof ChapterRepairError && error.transient;
+        console.warn(
+          `${TAG} ${code}: Chapter ${action.chapter} was not repaired${transient ? " this time" : ""}`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+      return { again: false };
+    }
+
     case "REWRITE_CHAPTER":
       if (run.status === "STOPPED") return { again: false };
       if (holdsSlot(run.status)) {
@@ -723,7 +747,7 @@ async function processRun(runId: string, depth: number): Promise<string[]> {
   const done: string[] = [];
   let projectStatus: ProjectStatus | null = null;
   let watching = false;
-  const maxRewrites = await maxRewritesSetting();
+  const [maxRewrites, maxRepairs] = await Promise.all([maxRewritesSetting(), maxRepairsSetting()]);
   try {
     for (let step = 0; step < STEPS_PER_RUN; step++) {
       const run = await db.orchestratorRun.findUnique({ where: { id: runId } });
@@ -733,7 +757,7 @@ async function processRun(runId: string, depth: number): Promise<string[]> {
       projectStatus = project.status;
       // Taken after the reads: a chapter that finished while they ran must not look later than "now".
       const now = new Date();
-      const facts = factsFrom(run, project, now, maxRewrites);
+      const facts = factsFrom(run, project, now, maxRewrites, maxRepairs);
       const action = decide(facts);
       watching = action.kind === "WRITING" || action.kind === "KICK" || facts.checkpoints.some((c) => ACTIVE_STATUSES.includes(c.status));
       done.push(action.kind);
@@ -809,8 +833,8 @@ async function startClaimed(claim: { id: string; chapter: number }, depth: numbe
     const project = run ? await db.project.findUnique({ where: { id: run.projectId }, select: PROJECT_FACTS }) : null;
     if (!run || !project) return;
     // The facts may have moved since the run queued: the rules are asked once more before a credit is spent.
-    const maxRewrites = await maxRewritesSetting();
-    const facts = factsFrom(run, project, now, maxRewrites);
+    const [maxRewrites, maxRepairs] = await Promise.all([maxRewritesSetting(), maxRepairsSetting()]);
+    const facts = factsFrom(run, project, now, maxRewrites, maxRepairs);
     const action = decide(facts);
     if (action.kind === "NEED_SLOT") await startChapter({ run, project, depth }, action.chapter);
     else await perform({ run, project, facts, depth, now }, action);

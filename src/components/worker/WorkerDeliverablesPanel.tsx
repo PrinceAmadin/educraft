@@ -171,7 +171,13 @@ function DeliverableRow({ projectCode, deliverable: d }: { projectCode: string; 
       </div>
       {review ? (
         <p className="text-[13px] text-muted-foreground">
-          {gateStage === "checking" ? t.beingChecked(d.chapter ?? 0) : gateStage === "rewriting" ? t.beingRewritten(d.chapter ?? 0) : CHAPTER_REVIEW_TEXT.specialistLine[review.state]}
+          {gateStage === "checking"
+            ? t.beingChecked(d.chapter ?? 0)
+            : gateStage === "repairing"
+              ? t.beingRepaired(d.chapter ?? 0)
+              : gateStage === "rewriting"
+                ? t.beingRewritten(d.chapter ?? 0)
+                : CHAPTER_REVIEW_TEXT.specialistLine[review.state]}
         </p>
       ) : null}
 

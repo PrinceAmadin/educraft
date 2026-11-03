@@ -20,6 +20,7 @@ import {
   StreamErrorEvent,
   ZERO_USAGE,
   addUsage,
+  estimateInputTokens,
   isRetryableErrorType,
   isRetryableStatus,
   retryDelayMs,
@@ -169,32 +170,51 @@ async function callClaudeForJsonOnce<T>({
   } catch (error) {
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     if (usage) {
-      await logAiUsage({ ...usage, model, inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, webSearchRequests: 0, durationMs: Date.now() - startedAt, status: "error" });
+      // We never saw a usage report, but a call that timed out after minutes was
+      // almost certainly processed and billed. Logging zero made the AI usage
+      // page under-report real spend, so record an estimate of what we sent and
+      // mark the row "timeout" so a reader can tell it from a measurement.
+      await logAiUsage({
+        ...usage,
+        model,
+        inputTokens: timedOut ? estimateInputTokens(system, user, JSON.stringify(inputSchema)) : 0,
+        outputTokens: 0,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 0,
+        webSearchRequests: 0,
+        durationMs: Date.now() - startedAt,
+        status: timedOut ? "timeout" : "error",
+      });
     }
     throw new AnthropicError(timedOut ? `Claude did not answer within ${Math.round(timeoutMs / 1000)} seconds` : `Claude could not be reached (${error instanceof Error ? error.message : String(error)})`);
   }
 
+  // Work out the outcome BEFORE logging. The log used to be written here with
+  // `status: res.ok`, which recorded a refusal and a reply that called no tool
+  // as successes — the two failures that cost the most, because each one is
+  // paid for and then asked again.
+  const refused = json?.stop_reason === "refusal";
+  const block = res.ok && !refused ? (json?.content ?? []).find((c: any) => c.type === "tool_use" && c.name === toolName) : null;
   if (usage) {
     await logAiUsage({
       ...usage,
       model: json?.model ?? model,
       inputTokens: json?.usage?.input_tokens ?? 0,
       outputTokens: json?.usage?.output_tokens ?? 0,
+      thinkingTokens: json?.usage?.output_tokens_details?.thinking_tokens ?? 0,
       cacheWriteTokens: json?.usage?.cache_creation_input_tokens ?? 0,
       cacheReadTokens: json?.usage?.cache_read_input_tokens ?? 0,
       webSearchRequests: json?.usage?.server_tool_use?.web_search_requests ?? 0,
       durationMs: Date.now() - startedAt,
-      status: res.ok ? "success" : "error",
+      status: res.ok && !refused && block ? "success" : "error",
     });
   }
   if (!res.ok) {
     throw new AnthropicError(json?.error?.message || `Claude API error (${res.status})`);
   }
-  if (json?.stop_reason === "refusal") {
+  if (refused) {
     throw new AnthropicError(`Claude declined the request${json?.stop_details?.category ? ` (${json.stop_details.category})` : ""}`);
   }
-
-  const block = (json?.content ?? []).find((c: any) => c.type === "tool_use" && c.name === toolName);
   if (!block) {
     if (unforced) throw new NoToolCallError("Claude answered without calling the tool");
     throw new AnthropicError("Claude did not return the expected structured response");
@@ -316,7 +336,16 @@ export async function callClaudeWithWebSearch<T>({
       // Timed out or the connection dropped: searches may have run and been billed.
       out.incomplete = true;
       if (usage) {
-        await logAiUsage({ ...usage, model: MODEL, inputTokens: 0, outputTokens: 0, durationMs: Date.now() - startedAt, status: "error" });
+        // Same correction as the JSON path: a dropped search call was still billed,
+        // and its searches cost $10 per 1,000 on top of the tokens.
+        await logAiUsage({
+          ...usage,
+          model: MODEL,
+          inputTokens: estimateInputTokens(system, JSON.stringify(messages)),
+          outputTokens: 0,
+          durationMs: Date.now() - startedAt,
+          status: "timeout",
+        });
       }
       throw new WebSearchCallError(`The web search call did not finish: ${error instanceof Error ? error.message : String(error)}`, out.searchesUsed, true);
     }
@@ -330,6 +359,7 @@ export async function callClaudeWithWebSearch<T>({
         model: json?.model ?? MODEL,
         inputTokens: json?.usage?.input_tokens ?? 0,
         outputTokens: json?.usage?.output_tokens ?? 0,
+        thinkingTokens: json?.usage?.output_tokens_details?.thinking_tokens ?? 0,
         cacheWriteTokens: json?.usage?.cache_creation_input_tokens ?? 0,
         cacheReadTokens: json?.usage?.cache_read_input_tokens ?? 0,
         webSearchRequests: searches,
@@ -621,6 +651,7 @@ async function streamOnce(input: ClaudeStreamInput): Promise<Omit<ClaudeStreamRe
         model: acc.model ?? MODEL,
         inputTokens: acc.usage.inputTokens,
         outputTokens: acc.usage.outputTokens,
+        thinkingTokens: acc.usage.thinkingTokens,
         cacheWriteTokens: acc.usage.cacheWriteTokens,
         cacheReadTokens: acc.usage.cacheReadTokens,
         webSearchRequests: acc.usage.webSearchRequests,

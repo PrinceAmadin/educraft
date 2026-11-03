@@ -2,7 +2,8 @@ import { db } from "@/lib/db";
 import { getUsdToNairaRate } from "@/lib/fx-rate";
 import { balanceAsOf, claudePotUnsustainable } from "@/lib/finance/pot-health";
 import { getActiveCashflow } from "@/lib/services/cashflow";
-import { getPotBalances } from "@/lib/services/finance/buckets";
+import { getPotBalances, monthKeyOf } from "@/lib/services/finance/buckets";
+import { bucketShareOfRevenue, nairaPercent, potSplit } from "@/lib/finance/commission-config";
 
 /**
  * Tracked pots inside a bucket (Phase 4). A pot's balance is the signed sum of
@@ -109,4 +110,54 @@ export async function potMovements(fromMonth: string, toMonth: string): Promise<
     map.set(r.potKey, cur);
   }
   return [...map.values()];
+}
+
+export interface ClaudeBurnVsFunding {
+  /** UTC month key, the finance convention (monthKeyOf). */
+  month: string;
+  /** What Claude actually cost this month: every AiUsageLog row's frozen naira. */
+  burnNaira: number;
+  /** What the month's project allocations actually put INTO the claude_api pot (INFLOW rows only; adjustments are corrections, not funding). */
+  fundedNaira: number;
+  /** Projects with any Claude spend this month — includes reports still mid-generation, so the average is approximate and says so on screen. */
+  projectsWithSpend: number;
+  avgBurnPerProject: number;
+  /** What ONE standard referred ₦70,000 report puts into the pot under the ACTIVE structure (the per-report budget the burn is judged against). */
+  fundedPerStandardReport: number;
+  referencePrice: number;
+}
+
+const REFERENCE_REPORT_PRICE = 70_000;
+
+/**
+ * Burn against funding — the reconciliation that did not exist when the pot
+ * went to −₦19,643 unnoticed. Actual Claude spend (AiUsageLog) and the pot's
+ * funding (PotTransaction inflows from the retained-share allocation) are two
+ * independent series; this is the one place they are read side by side.
+ */
+export async function getClaudeBurnVsFunding(now: Date = new Date()): Promise<ClaudeBurnVsFunding> {
+  const month = monthKeyOf(now);
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const [active, burnAgg, inflowAgg, spenders] = await Promise.all([
+    getActiveCashflow(),
+    db.aiUsageLog.aggregate({ where: { createdAt: { gte: from, lt: to } }, _sum: { costNaira: true } }),
+    db.potTransaction.aggregate({ where: { potKey: "claude_api", month, type: "INFLOW" }, _sum: { amount: true } }),
+    db.aiUsageLog.findMany({ where: { createdAt: { gte: from, lt: to }, projectId: { not: null } }, select: { projectId: true }, distinct: ["projectId"] }),
+  ]);
+  const s = active.structure;
+  const opsOfRevenue = bucketShareOfRevenue("OPERATIONS_RESERVE", s);
+  const bucketDelta = nairaPercent(REFERENCE_REPORT_PRICE, opsOfRevenue);
+  const fundedPerStandardReport = potSplit(bucketDelta, "OPERATIONS_RESERVE", s).get("claude_api") ?? 0;
+  const burnNaira = Math.round((burnAgg._sum.costNaira ?? 0) * 100) / 100;
+  const projectsWithSpend = spenders.length;
+  return {
+    month,
+    burnNaira,
+    fundedNaira: Math.round(inflowAgg._sum.amount ?? 0),
+    projectsWithSpend,
+    avgBurnPerProject: projectsWithSpend ? Math.round((burnNaira / projectsWithSpend) * 100) / 100 : 0,
+    fundedPerStandardReport,
+    referencePrice: REFERENCE_REPORT_PRICE,
+  };
 }

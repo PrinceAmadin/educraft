@@ -32,6 +32,8 @@ import {
   failureLines,
   MAX_CHECK_ERRORS,
   gateFactFrom,
+  repairsSettingAllowed,
+  REPAIRS_SETTING,
   rewritePolicy,
   rewritesAllowed,
   REWRITES_SETTING,
@@ -497,10 +499,10 @@ export async function maxRewritesSetting(): Promise<number> {
 
 /** Where one chapter's AI text stands, and its check (the draft waits until the step is "handover"). */
 export async function aiTextStep(projectDbId: string, chapter: number): Promise<{ step: ChapterGateStep; check: ChapterCheckRow | null; rewritesUsed: number } | null> {
-  const [cp, project, maxRewrites] = await Promise.all([
+  const [cp, project, maxRewrites, repairsSetting] = await Promise.all([
     db.generationCheckpoint.findUnique({
       where: { projectId_chapterNumber: { projectId: projectDbId, chapterNumber: chapter } },
-      select: { status: true, outputHash: true, gateRewriteNo: true },
+      select: { status: true, outputHash: true, gateRewriteNo: true, gateRepairNo: true },
     }),
     db.project.findUnique({
       where: { id: projectDbId },
@@ -513,6 +515,7 @@ export async function aiTextStep(projectDbId: string, chapter: number): Promise<
       },
     }),
     maxRewritesSetting(),
+    db.setting.findUnique({ where: { key: REPAIRS_SETTING }, select: { value: true } }).catch(() => null),
   ]);
   if (cp?.status !== "COMPLETED" || !project) return null;
   const check = cp.outputHash
@@ -525,12 +528,13 @@ export async function aiTextStep(projectDbId: string, chapter: number): Promise<
     chapter,
     outputHash: cp.outputHash,
     gateRewriteNo: cp.gateRewriteNo,
+    gateRepairNo: cp.gateRepairNo,
     check,
     mode: project.researchMode?.isLocked ? project.researchMode.modeNumber : null,
     pauses: project.pauses,
     hasDataset: project._count.files > 0,
   });
-  const step = chapterGateStep(fact, { now: new Date(), maxRewrites, policy: rewritePolicy(project.orchestratorRun, project.status) });
+  const step = chapterGateStep(fact, { now: new Date(), maxRewrites, maxRepairs: repairsSettingAllowed(repairsSetting?.value), policy: rewritePolicy(project.orchestratorRun, project.status) });
   return { step, check: check ? toCheckRow(check) : null, rewritesUsed: cp.gateRewriteNo };
 }
 

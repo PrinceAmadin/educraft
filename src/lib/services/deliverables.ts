@@ -25,7 +25,7 @@ import { documentReadyMessage, toWaNumber, waLink } from "@/lib/whatsapp";
 import { recordUpdate } from "@/lib/services/client-updates";
 import { notifyClient, clientProjectPath } from "@/lib/services/client-notify";
 import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
-import { chapterGateStep, checkView, failureLines, gateFactFrom, rewritePolicy, rewritesAllowed, REWRITES_SETTING, type AiTextView, type CheckView } from "@/lib/quality/chapter-gate";
+import { chapterGateStep, checkView, failureLines, gateFactFrom, repairsSettingAllowed, REPAIRS_SETTING, rewritePolicy, rewritesAllowed, REWRITES_SETTING, type AiTextView, type CheckView } from "@/lib/quality/chapter-gate";
 import type { QualityItem } from "@/lib/quality/types";
 import { deliverIfFinalReleased, transitionProject } from "@/lib/services/projects";
 
@@ -299,11 +299,11 @@ function toVersionView(v: Prisma.DeliverableVersionGetPayload<{ select: typeof v
  */
 async function chapterGateViews(projectDbId: string, rows: LoadedDeliverable[], withCost: boolean): Promise<{ uploads: Map<string, CheckView>; aiText: Map<number, AiTextView> }> {
   const uploadIds = rows.filter((d) => d.kind === "CHAPTER").flatMap((d) => d.versions.filter((v) => !isAiDraft(v)).map((v) => v.id));
-  const [uploadRows, checkpoints, aiRows, project, setting] = await Promise.all([
+  const [uploadRows, checkpoints, aiRows, project, setting, repairsSetting] = await Promise.all([
     uploadIds.length
       ? db.chapterCheck.findMany({ where: { projectId: projectDbId, subject: "UPLOAD", versionId: { in: uploadIds } }, orderBy: { createdAt: "desc" } })
       : Promise.resolve([]),
-    db.generationCheckpoint.findMany({ where: { projectId: projectDbId }, select: { chapterNumber: true, status: true, outputHash: true, gateRewriteNo: true } }),
+    db.generationCheckpoint.findMany({ where: { projectId: projectDbId }, select: { chapterNumber: true, status: true, outputHash: true, gateRewriteNo: true, gateRepairNo: true } }),
     db.chapterCheck.findMany({ where: { projectId: projectDbId, subject: "AI_TEXT" } }),
     db.project.findUnique({
       where: { id: projectDbId },
@@ -316,6 +316,7 @@ async function chapterGateViews(projectDbId: string, rows: LoadedDeliverable[], 
       },
     }),
     db.setting.findUnique({ where: { key: REWRITES_SETTING }, select: { value: true } }).catch(() => null),
+    db.setting.findUnique({ where: { key: REPAIRS_SETTING }, select: { value: true } }).catch(() => null),
   ]);
   const uploads = new Map<string, CheckView>();
   for (const r of uploadRows) if (r.versionId && !uploads.has(r.versionId)) uploads.set(r.versionId, checkView(r, withCost));
@@ -336,14 +337,15 @@ async function chapterGateViews(projectDbId: string, rows: LoadedDeliverable[], 
       chapter: cp.chapterNumber,
       outputHash: cp.outputHash,
       gateRewriteNo: cp.gateRewriteNo,
+      gateRepairNo: cp.gateRepairNo,
       check: row,
       mode: project.researchMode?.isLocked ? project.researchMode.modeNumber : null,
       pauses: project.pauses,
       hasDataset: project._count.files > 0,
     });
-    const step = chapterGateStep(fact, { now, maxRewrites, policy });
+    const step = chapterGateStep(fact, { now, maxRewrites, maxRepairs: repairsSettingAllowed(repairsSetting?.value), policy });
     aiText.set(cp.chapterNumber, {
-      stage: step.kind === "handover" ? "settled" : step.kind === "rewrite" ? "rewriting" : "checking",
+      stage: step.kind === "handover" ? "settled" : step.kind === "repair" ? "repairing" : step.kind === "rewrite" ? "rewriting" : "checking",
       rewritesUsed: cp.gateRewriteNo,
       check: row && row.status !== "RUNNING" ? checkView(row, withCost) : null,
     });

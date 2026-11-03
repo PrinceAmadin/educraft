@@ -757,10 +757,20 @@ function neutralize(s: string): string {
 
 const orDefault = (v: string | null | undefined, fallback: string) => (v?.trim() ? neutralize(v.trim()) : fallback);
 
-/** An abstract on one line; a runaway one (a mis-parsed full text) is cut at 4,000 characters. */
+/**
+ * An abstract on one line, cut at ABSTRACT_PROMPT_CHARS. It was 4,000 — by far
+ * the largest item in the project block (50–70 references × up to 4,000 chars,
+ * re-sent on every call of a run) while EduCraft's own readers of the same
+ * abstracts use less: Tier-2 classification 600, curation 500, the support
+ * check 700 (3 Nov 2026). 800 keeps a whole OpenAlex abstract in almost every
+ * case (they run 150–300 words) and now only trims mis-parsed full texts; the
+ * chapter gate validates that quality holds. Affects newly started runs only —
+ * a checkpoint freezes its prompt.
+ */
+export const ABSTRACT_PROMPT_CHARS = 800;
 function abstractText(raw: string): string {
   const s = raw.replace(/\s+/g, " ").trim();
-  return s.length > 4000 ? `${s.slice(0, 4000).replace(/\s+\S*$/, "")} …` : s;
+  return s.length > ABSTRACT_PROMPT_CHARS ? `${s.slice(0, ABSTRACT_PROMPT_CHARS).replace(/\s+\S*$/, "")} …` : s;
 }
 
 /** The system writes "Chapter-based order: …" into specialInstructions itself; it is not a client instruction. */

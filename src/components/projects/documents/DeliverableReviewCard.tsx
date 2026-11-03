@@ -164,7 +164,13 @@ export function DeliverableReviewCard({
           </div>
           {d.review ? (
             <p className="mt-1 text-[13px] text-foreground">
-              {gateStage === "checking" ? CHAPTER_REVIEW_TEXT.check.staffChecking(d.chapter ?? 0) : gateStage === "rewriting" ? CHAPTER_REVIEW_TEXT.check.beingRewritten(d.chapter ?? 0) : CHAPTER_REVIEW_TEXT.staffLine[d.review.state]}
+              {gateStage === "checking"
+                ? CHAPTER_REVIEW_TEXT.check.staffChecking(d.chapter ?? 0)
+                : gateStage === "repairing"
+                  ? CHAPTER_REVIEW_TEXT.check.beingRepaired(d.chapter ?? 0)
+                  : gateStage === "rewriting"
+                    ? CHAPTER_REVIEW_TEXT.check.beingRewritten(d.chapter ?? 0)
+                    : CHAPTER_REVIEW_TEXT.staffLine[d.review.state]}
             </p>
           ) : null}
           <p className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
@@ -614,7 +620,7 @@ function ChapterReviewPanel({
         <ChapterCheckResult
           check={d.aiText?.check ?? null}
           checking={d.aiText?.stage === "checking"}
-          label={d.aiText?.stage === "rewriting" ? "Being written again after its check" : "Quality check of the AI text"}
+          label={d.aiText?.stage === "repairing" ? "Being fixed in place after its check" : d.aiText?.stage === "rewriting" ? "Being written again after its check" : "Quality check of the AI text"}
           audience="staff"
           checkUrl={d.aiText?.stage === "checking" && !d.aiText.check ? checkUrl : null}
           checkBody={{ subject: "AI_TEXT" }}

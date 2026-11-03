@@ -29,6 +29,12 @@ async function logsSince(from: Date): Promise<AiUsageLog[]> {
 }
 
 const sum = (rows: AiUsageLog[], pick: (r: AiUsageLog) => number) => rows.reduce((s, r) => s + pick(r), 0);
+// ONE definition of "tokens" for every panel: the whole prompt (uncached +
+// cache reads + cache writes) plus the output. costNaira always included the
+// cache side, so panels that counted only inputTokens + outputTokens showed
+// token counts that did not match their own cost column.
+const allTokens = (r: AiUsageLog) => r.inputTokens + r.cacheReadTokens + r.cacheWriteTokens + r.outputTokens;
+const promptTokens = (r: AiUsageLog) => r.inputTokens + r.cacheReadTokens + r.cacheWriteTokens;
 const round = (n: number, dp = 2) => Math.round(n * 10 ** dp) / 10 ** dp;
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -56,9 +62,10 @@ export async function getUsageSummary(period: UsagePeriod) {
   return {
     period,
     calls: rows.length,
-    failedCalls: rows.filter((r) => r.status === "error").length,
+    // "timeout" rows (a call we never got an answer for, cost estimated) are failures too.
+    failedCalls: rows.filter((r) => r.status !== "success").length,
     totalCost: round(totalCost),
-    inputTokens: sum(rows, (r) => r.inputTokens),
+    inputTokens: sum(rows, promptTokens),
     outputTokens: sum(rows, (r) => r.outputTokens),
     projectCount: projects.size,
     avgCostPerProject: round(projects.size ? totalCost / projects.size : 0),
@@ -75,7 +82,7 @@ export async function getUsageBySubsystem(period: UsagePeriod) {
     const label = r.chapterNumber ? `${r.subsystem} · Ch. ${r.chapterNumber}` : `${r.subsystem} · ${r.step}`;
     const g = groups.get(label) ?? { label, cost: 0, tokens: 0, calls: 0 };
     g.cost += r.costNaira;
-    g.tokens += r.inputTokens + r.outputTokens;
+    g.tokens += allTokens(r);
     g.calls += 1;
     groups.set(label, g);
   }
@@ -123,7 +130,7 @@ export async function getUsageByWorker(period: UsagePeriod) {
         code: workerById.get(id)?.workerId ?? "",
         name: workerById.get(id)?.fullName ?? "Unknown worker",
         projects: perProject.size,
-        tokens: sum(wRows, (r) => r.inputTokens + r.outputTokens),
+        tokens: sum(wRows, allTokens),
         cost: round(total),
         avgCostPerProject: round(avg),
         mostExpensive: topId ? { code: codeById.get(topId) ?? topId, cost: round(topCost) } : null,
@@ -296,7 +303,7 @@ export async function getUsageAnomalies(period: UsagePeriod = "month"): Promise<
     }
   }
 
-  const failed = rows.filter((r) => r.status === "error");
+  const failed = rows.filter((r) => r.status !== "success");
   if (failed.length > 0) {
     out.push({
       kind: "failed_calls",
@@ -509,7 +516,7 @@ export async function getPerProjectCosts(period: UsagePeriod = "month"): Promise
   for (const r of rows) {
     if (!r.projectId) continue;
     const b = byId.get(r.projectId) ?? { input: 0, output: 0, cost: 0 };
-    b.input += r.inputTokens;
+    b.input += promptTokens(r);
     b.output += r.outputTokens;
     b.cost += r.costNaira;
     byId.set(r.projectId, b);
@@ -557,7 +564,7 @@ export async function getSubsystemBreakdown(period: UsagePeriod = "month"): Prom
   for (const r of rows) {
     const key = classifySubsystem(r.subsystem);
     const g = groups.get(key) ?? { tokens: 0, cost: 0, calls: 0 };
-    g.tokens += r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWriteTokens;
+    g.tokens += allTokens(r);
     g.cost += r.costNaira;
     g.calls += 1;
     groups.set(key, g);

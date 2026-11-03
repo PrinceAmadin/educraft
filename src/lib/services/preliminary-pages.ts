@@ -243,6 +243,9 @@ async function callAbstract(system: string, user: string, projectDbId: string, s
     inputSchema: ABSTRACT_TOOL_SCHEMA,
     model: SUPERVISOR_FACING_MODEL,
     effort: "medium",
+    // The word-count retry (abstract_retry) and the _notool second try re-send
+    // within seconds; the cached system then costs 0.05x instead of full price.
+    cacheSystem: true,
     maxTokens: 16_000,
     timeoutMs: 140_000,
     usage: { subsystem: SUBSYSTEM, step, projectId: projectDbId },

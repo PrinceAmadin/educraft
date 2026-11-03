@@ -7,8 +7,15 @@
  * orchestrator's rules and the screens read it.
  *
  * - Pass bar: every check that applies to the chapter passes. Warnings never block.
- * - A failing AI chapter is rewritten with its failures in the brief, at most
- *   MAX_GATE_REWRITES times; then the draft goes to the specialist with what is left.
+ * - A failing AI chapter is REPAIRED first (3 Nov 2026): when every failure can
+ *   be fixed in place — a banned phrase, a table never referred to, an invented
+ *   citation — one short call patches the existing text (~₦30–60) instead of a
+ *   rewrite re-paying the plan and every part (₦450–2,200; on the two real
+ *   client reports, EC-00002 and EC-00010, rewrites were ~60% of all AI spend).
+ * - Only when a failure needs new text (a missing section, a short chapter), or
+ *   repairs are exhausted, is it rewritten with its failures in the brief, at
+ *   most MAX_GATE_REWRITES times; then the draft goes to the specialist with
+ *   what is left.
  * - A person's upload must pass before the COO approves it (the founder may approve anyway, with a reason).
  */
 
@@ -19,6 +26,8 @@ import type { CheckResult, QualityItem } from "./types";
 export const CHAPTER_GATE_VERSION = "cg-1";
 /** Automatic rewrites of one chapter (founder: up to 2). The Setting `chapter_check_rewrites` can lower it. */
 export const MAX_GATE_REWRITES = 2;
+/** Surgical repairs of one chapter's text before a rewrite is considered. The Setting `chapter_check_repairs` can lower it. */
+export const MAX_GATE_REPAIRS = 2;
 /** Check runs that end in an error before the draft is handed over unchecked (and the founder told). */
 export const MAX_CHECK_ERRORS = 3;
 /** A check that has not finished in this long is taken again. */
@@ -36,6 +45,29 @@ export const TEXT_DRIVEN_FORMATTING: ReadonlySet<string> = new Set(["H4", "P2", 
 
 export function isRewritable(item: Pick<QualityItem, "id" | "layer">): boolean {
   return item.layer !== "formatting" || TEXT_DRIVEN_FORMATTING.has(item.id);
+}
+
+/**
+ * Failures a surgical repair can fix where the text stands, without writing the
+ * chapter again: a VOICE finding carries its own verbatim quote to replace; REF
+ * swaps an unverified citation for one on the list (or removes it and softens
+ * the sentence); ST14/ST15 insert the referring or defining sentence a table,
+ * figure or equation lacks; the text-driven formatting rules reword the line at
+ * fault. NOT repairable: a missing required section (ST3–ST7), objectives that
+ * are not word-for-word (ST8), a chapter far off its plan (ST11), structure
+ * (ST13), a leftover placeholder (ST16 — repair cannot invent data), and every
+ * builder-owned formatting rule (not the text's fault at all).
+ */
+export const REPAIRABLE_IDS: ReadonlySet<string> = new Set(["VOICE", "REF", "ST14", "ST15", ...TEXT_DRIVEN_FORMATTING]);
+
+export function repairableItem(item: Pick<QualityItem, "id" | "layer">): boolean {
+  if (item.layer === "formatting") return TEXT_DRIVEN_FORMATTING.has(item.id);
+  return REPAIRABLE_IDS.has(item.id);
+}
+
+/** A failed check is repairable only when EVERY failure is: patching half the problems cannot make it pass. */
+export function allRepairable(failures: Pick<QualityItem, "id" | "layer">[]): boolean {
+  return failures.length > 0 && failures.every(repairableItem);
 }
 
 export interface ChapterGateResult {
@@ -93,8 +125,10 @@ export interface ChapterGateFact {
   outputHash: string | null;
   /** Automatic rewrites already made of this chapter. */
   rewritesUsed: number;
-  /** The check of the current text, if there is one. */
-  check: { status: CheckStatus; lockedUntil: Date | null; attempts: number; rewritable: boolean | null; lines: string[] } | null;
+  /** Surgical repairs already made of this chapter's text (GenerationCheckpoint.gateRepairNo). Absent = 0. */
+  repairsUsed?: number;
+  /** The check of the current text, if there is one. `allRepairable` absent = false (no repair considered). */
+  check: { status: CheckStatus; lockedUntil: Date | null; attempts: number; rewritable: boolean | null; allRepairable?: boolean; lines: string[] } | null;
   /** Why this chapter may not be rewritten (a data pause after it, a Mode 5 dataset built from it), or null. */
   barred: string | null;
 }
@@ -108,6 +142,7 @@ export type RewritePolicy = "now" | "later" | "never";
 export type ChapterGateStep =
   | { kind: "check" }
   | { kind: "wait" }
+  | { kind: "repair"; lines: string[] }
   | { kind: "rewrite"; lines: string[] }
   | { kind: "handover"; outcome: "passed" | "failed" | "unchecked" };
 
@@ -124,23 +159,30 @@ export function rewriteBar(f: { chapter: number; mode: number | null; pauses: { 
 }
 
 /**
- * The one rule for a chapter's AI text: check it, wait for its check, rewrite it,
- * or hand the draft to the specialist. The orchestrator acts on it; the draft is
- * only made once it says "handover".
+ * The one rule for a chapter's AI text: check it, wait for its check, repair it,
+ * rewrite it, or hand the draft to the specialist. The orchestrator acts on it;
+ * the draft is only made once it says "handover".
  */
-export function chapterGateStep(f: ChapterGateFact, ctx: { now: Date; maxRewrites: number; policy: RewritePolicy }): ChapterGateStep {
+export function chapterGateStep(f: ChapterGateFact, ctx: { now: Date; maxRewrites: number; maxRepairs?: number; policy: RewritePolicy }): ChapterGateStep {
   const c = f.outputHash ? f.check : null;
   if (!c) return { kind: "check" };
   if (c.status === "RUNNING") return c.lockedUntil && c.lockedUntil.getTime() > ctx.now.getTime() ? { kind: "wait" } : { kind: "check" };
   if (c.status === "ERROR") return c.attempts >= MAX_CHECK_ERRORS ? { kind: "handover", outcome: "unchecked" } : { kind: "check" };
   if (c.status === "PASSED") return { kind: "handover", outcome: "passed" };
+  // Surgical repair first: when every failure can be fixed in place, one short
+  // call patches the existing text instead of a rewrite re-paying the plan and
+  // every part. A repair edits the text where it stands, so the rewrite bars (a
+  // data pause whose blanks a NEW text would bring back, the Mode 5 dataset
+  // built from this chapter) deliberately do not apply to it.
+  const canRepair = (c.allRepairable ?? false) && (f.repairsUsed ?? 0) < (ctx.maxRepairs ?? MAX_GATE_REPAIRS);
+  if (canRepair && ctx.policy !== "never") return ctx.policy === "now" ? { kind: "repair", lines: c.lines } : { kind: "wait" };
   const canRewrite = c.rewritable !== false && !f.barred && f.rewritesUsed < ctx.maxRewrites;
   if (!canRewrite || ctx.policy === "never") return { kind: "handover", outcome: "failed" };
   return ctx.policy === "now" ? { kind: "rewrite", lines: c.lines } : { kind: "wait" };
 }
 
 /** The first written chapter, lowest number first, whose AI text is not settled yet (null = every one is handed over). */
-export function nextGateStep(facts: ChapterGateFact[], ctx: { now: Date; maxRewrites: number; policy: RewritePolicy }): { chapter: number; step: Exclude<ChapterGateStep, { kind: "handover" }> } | null {
+export function nextGateStep(facts: ChapterGateFact[], ctx: { now: Date; maxRewrites: number; maxRepairs?: number; policy: RewritePolicy }): { chapter: number; step: Exclude<ChapterGateStep, { kind: "handover" }> } | null {
   for (const f of [...facts].sort((a, b) => a.chapter - b.chapter)) {
     const step = chapterGateStep(f, ctx);
     if (step.kind !== "handover") return { chapter: f.chapter, step };
@@ -155,6 +197,14 @@ export function rewritesAllowed(setting: string | null | undefined): number {
 }
 
 export const REWRITES_SETTING = "chapter_check_rewrites";
+
+/** The Setting `chapter_check_repairs` ("0" switches surgical repairs off), at most MAX_GATE_REPAIRS. */
+export function repairsSettingAllowed(setting: string | null | undefined): number {
+  const n = Number(setting);
+  return setting == null || setting === "" || !Number.isFinite(n) ? MAX_GATE_REPAIRS : Math.max(0, Math.min(MAX_GATE_REPAIRS, Math.floor(n)));
+}
+
+export const REPAIRS_SETTING = "chapter_check_repairs";
 
 const HELD = new Set(["ON_HOLD", "DISPUTED", "AWAITING_CLIENT_INPUT", "NEW", "DOWNPAYMENT_VERIFIED", "REQUIREMENTS_CONFIRMED", "ASSIGNED"]);
 const WORKING = new Set(["IN_PROGRESS", "REVISION_NEEDED"]);
@@ -193,9 +243,9 @@ export function checkView(row: { status: CheckStatus; passedCount: number | null
   };
 }
 
-/** Where a chapter's AI text stands, for its card: being checked, being rewritten, or settled (its check). */
+/** Where a chapter's AI text stands, for its card: being checked, repaired in place, written again, or settled (its check). */
 export interface AiTextView {
-  stage: "checking" | "rewriting" | "settled";
+  stage: "checking" | "repairing" | "rewriting" | "settled";
   rewritesUsed: number;
   check: CheckView | null;
 }
@@ -205,17 +255,27 @@ export function gateFactFrom(a: {
   chapter: number;
   outputHash: string | null;
   gateRewriteNo: number;
+  gateRepairNo?: number;
   check: { status: CheckStatus; lockedUntil: Date | null; attempts: number; rewritable: boolean | null; failures: unknown } | null;
   mode: number | null;
   pauses: { afterChapter: number; status: string }[];
   hasDataset: boolean;
 }): ChapterGateFact {
+  const failures = Array.isArray(a.check?.failures) ? (a.check!.failures as QualityItem[]) : [];
   return {
     chapter: a.chapter,
     outputHash: a.outputHash,
     rewritesUsed: a.gateRewriteNo,
+    repairsUsed: a.gateRepairNo ?? 0,
     check: a.check
-      ? { status: a.check.status, lockedUntil: a.check.lockedUntil, attempts: a.check.attempts, rewritable: a.check.rewritable, lines: failureLines(Array.isArray(a.check.failures) ? (a.check.failures as QualityItem[]) : []) }
+      ? {
+          status: a.check.status,
+          lockedUntil: a.check.lockedUntil,
+          attempts: a.check.attempts,
+          rewritable: a.check.rewritable,
+          allRepairable: allRepairable(failures),
+          lines: failureLines(failures),
+        }
       : null,
     barred: rewriteBar({ chapter: a.chapter, mode: a.mode, pauses: a.pauses, hasDataset: a.hasDataset }),
   };

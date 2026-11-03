@@ -149,7 +149,9 @@ const AIM_SCHEMA = {
 export class ObjectivesDraftError extends Error {}
 
 /** Opus 5.5 at medium effort: room for its thinking before the tool call, and a cap inside the 300 s a function may run. */
-const OPUS_CALL = { model: SUPERVISOR_FACING_MODEL, effort: "medium", maxTokens: 16_000, timeoutMs: 140_000 } as const;
+// cacheSystem: the _notool / _retry second try re-sends the whole prompt within
+// seconds; with the system cached it re-reads it at 0.05x instead of re-paying it.
+const OPUS_CALL = { model: SUPERVISOR_FACING_MODEL, effort: "medium", maxTokens: 16_000, timeoutMs: 140_000, cacheSystem: true } as const;
 
 /**
  * Drafts the aim and the objectives; one retry when the reply breaks the

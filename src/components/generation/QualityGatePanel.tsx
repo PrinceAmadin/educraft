@@ -387,7 +387,7 @@ function Failures({
               <p className="text-sm text-foreground">
                 {reviewed(chapter)
                   ? `The specialist has reviewed Chapter ${chapter}, so it is not written again. These failures go to them as your correction notes; the approved version stays in use until you approve their correction.`
-                  : `This rewrites Chapter ${chapter} from scratch with these failures in its brief, and replaces the current text. It spends Claude credits (about ₦100–700 for a chapter).`}
+                  : `This rewrites Chapter ${chapter} from scratch — a new plan and every part again — and replaces the current text. It spends Claude credits (about ₦450–2,200 for a chapter; measured on real reports). Small faults (a banned phrase, a table never referred to, a wrong citation) are fixed far cheaper by the automatic in-place repair, which runs on its own when the chapter's check fails.`}
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" onClick={() => (reviewed(chapter) ? onReturn(chapter) : onRegenerate(chapter))} disabled={busy !== null}>

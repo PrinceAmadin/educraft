@@ -1485,7 +1485,15 @@ model AiUsageLog {
   /// Uncached input tokens (usage.input_tokens).
   inputTokens   Int      @default(0)
   outputTokens  Int      @default(0)
-  /// Prompt-cache writes and reads (usage.cache_creation_input_tokens / cache_read_input_tokens), billed at 1.25x and 0.1x the input price.
+  /// Of outputTokens, the part spent on extended thinking
+  /// (usage.output_tokens_details.thinking_tokens). Billed at the output rate
+  /// and, until this column existed, invisible — it is the largest single
+  /// output line on a chapter part and the reason effort is worth tuning.
+  thinkingTokens Int     @default(0)
+  /// True when the call went through the Message Batches API (half price on
+  /// every token), so the cost report can tell batched spend from live spend.
+  batch         Boolean  @default(false)
+  /// Prompt-cache writes and reads (usage.cache_creation_input_tokens / cache_read_input_tokens), billed at 1.25x (5-minute) or 2x (1-hour) on a write and the model's own rate on a read (0.1x, but 0.05x on Opus 5.5 / Sonnet 5.5).
   cacheWriteTokens Int   @default(0)
   cacheReadTokens  Int   @default(0)
   /// Anthropic web searches (usage.server_tool_use.web_search_requests), $10 per 1,000 on top of the tokens.
@@ -1493,12 +1501,19 @@ model AiUsageLog {
   costUsd       Float    @default(0)
   costNaira     Float    @default(0)
   durationMs    Int      @default(0)
-  status        String   @default("success") // success | error
+  /// success | error | timeout. A "timeout" is a call we never got an answer
+  /// for: Anthropic most likely processed and billed it, so the row carries an
+  /// ESTIMATED input cost rather than a silent zero.
+  status        String   @default("success")
   createdAt     DateTime @default(now())
 
   @@index([createdAt])
   @@index([projectId])
   @@index([workerId])
+  // Every per-subsystem / per-step / per-model panel in services/ai-usage.ts
+  // was a full table scan reduced in JS before these two.
+  @@index([subsystem, step])
+  @@index([model])
 }
 
 // ─── REPORT PRODUCTION (Phase D) ────────────────────────
@@ -1788,6 +1803,9 @@ model GenerationCheckpoint {
   /// Chapter gate: how many automatic rewrites led to this text (0 = the first text). Carried +1 when a rewrite
   /// re-creates the row; a rewrite asked for by a person starts again at 0.
   gateRewriteNo Int     @default(0)
+  /// Chapter gate: surgical repairs made on this row's text in place (3 Nov 2026). Counted up on every repair
+  /// attempt, applied or not, so a repair that fixes nothing cannot loop; a rewrite re-creates the row at 0.
+  gateRepairNo  Int     @default(0)
 
   // Totals over every Claude call of this run, failed attempts included.
   inputTokens      Int   @default(0)

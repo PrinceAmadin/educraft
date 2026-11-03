@@ -51,6 +51,13 @@ export { QUALITY_SUBSYSTEM, CHAPTER_CHECK_STEPS };
 const RUN_LEASE_MS = 5 * 60_000;
 const AI_CONCURRENCY = 4;
 const HISTORY_KEPT = 10;
+/**
+ * Total generations one chapter may be paid for (the first write, the gate's
+ * automatic rewrites, and human re-generations together), counted as successful
+ * plan calls in the usage log. Past it, the failures go to the specialist as
+ * correction notes — a seventh rewrite has never fixed what six did not.
+ */
+export const MAX_CHAPTER_GENERATIONS = 6;
 
 export class QualityGateError extends Error {
   constructor(
@@ -526,6 +533,23 @@ export async function regenerateChapterForQuality(
   const failures = (project.qaReview?.failuresJson as unknown as QualityItem[] | null) ?? [];
   const lines = failureLinesForChapter(failures, chapter);
   if (!lines.length) throw new QualityGateError(`The latest quality check found no failure in Chapter ${chapter}. Run the check again first.`, 409, "NO_FAILURES_FOR_CHAPTER");
+
+  // 3 Nov 2026: this path used to be UNCAPPED — it omits gateRewrite, so the
+  // automatic counter restarts at 0 and MAX_GATE_REWRITES never binds; every
+  // click re-paid the chapter's plan and every part (₦450–2,200). Each plan
+  // call is one generation of the chapter, so count them from the usage log
+  // (first write + automatic rewrites + these), and past the cap the chapter
+  // goes to the specialist instead of being paid for again.
+  const generations = await db.aiUsageLog.count({
+    where: { projectId: project.id, subsystem: "chapter_generation", step: "plan", chapterNumber: chapter, status: "success" },
+  });
+  if (generations >= MAX_CHAPTER_GENERATIONS) {
+    throw new QualityGateError(
+      `Chapter ${chapter} has been generated ${generations} times already. Another rewrite is unlikely to fix what is left — return it to the specialist with the failures as correction notes instead.`,
+      409,
+      "REGEN_LIMIT",
+    );
+  }
 
   const [settings, previous, dataset] = await Promise.all([
     getApprovedModeSettings(project.id),

@@ -197,7 +197,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
   const title = input.prompt.project.projectTitle?.trim();
   if (!title) throw new GenerationError("The project needs a title before chapters are generated.", true, "NO_TITLE");
 
-  const assembled = await loadChapterPrompt(input.prompt);
+  const [assembled, effortSetting] = await Promise.all([loadChapterPrompt(input.prompt), generationEffortSetting()]);
   const briefText = buildChapterBrief({
     chapter,
     projectTitle: title,
@@ -317,7 +317,9 @@ export async function startChapterGeneration(input: StartChapterInput) {
           promptText: assembled.text,
           briefText,
           promptMeta: promptMeta as Prisma.InputJsonValue,
-          options: (input.options ?? {}) as Prisma.InputJsonValue,
+          // The effort Setting is frozen in at start (a caller's explicit effort wins),
+          // so every call of the run sends the same effort and the cache holds.
+          options: { ...(input.options ?? {}), ...(effortSetting && !input.options?.effort ? { effort: effortSetting } : {}) } as Prisma.InputJsonValue,
           requestedById: input.requestedById ?? null,
           lastProgressAt: new Date(),
           // Chapter gate: an automatic rewrite counts on from the text it replaces; anything a person asks for starts again at 0.
@@ -403,6 +405,27 @@ export function systemBlocks(cp: Pick<GenerationCheckpoint, "promptText" | "prom
 }
 
 /** Calls Claude and adds the call's tokens and cost (failed attempts too) to the run's totals. */
+/**
+ * Setting `generation_effort` (3 Nov 2026): Claude's effort for chapter plans
+ * and parts. Absent or invalid = the key is omitted and the API default (high)
+ * applies — exactly the old behaviour. The founder lowers it to "medium" or
+ * "low" after a gate-validated pilot: by EduCraft's own measurement thinking is
+ * half to two thirds of a part's output tokens at the default, billed at the
+ * output rate and then discarded, so this is the single biggest cost lever on
+ * the 65% of spend that is chapter generation. Frozen onto the checkpoint at
+ * start (options.effort), so a run never changes effort mid-way — a mid-run
+ * change would invalidate the messages cache. No screen yet, like
+ * `generation_paused`: set the Setting row directly.
+ */
+export const GENERATION_EFFORT_SETTING = "generation_effort";
+const GENERATION_EFFORTS = new Set(["low", "medium", "high"]);
+
+async function generationEffortSetting(): Promise<ClaudeEffort | null> {
+  const row = await db.setting.findUnique({ where: { key: GENERATION_EFFORT_SETTING }, select: { value: true } }).catch(() => null);
+  const v = row?.value?.trim().toLowerCase();
+  return v && GENERATION_EFFORTS.has(v) ? (v as ClaudeEffort) : null;
+}
+
 async function callClaude(cp: GenerationCheckpoint, input: Omit<ClaudeStreamInput, "system" | "tools" | "effort">): Promise<ClaudeStreamResult> {
   try {
     const result = await streamClaude({ ...input, system: systemBlocks(cp), tools: [PLAN_TOOL], effort: options(cp).effort });
@@ -487,7 +510,13 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
 
   const wordsBefore = plan.parts.slice(0, k).reduce((n, p) => n + (p.words ?? 0), 0);
   const notes = writesEndnotes((cp.promptMeta as { citationPlacement?: unknown } | null)?.citationPlacement);
-  const user = partUserBlocks({ briefText: cp.briefText, plan, partialOutput: cp.partialOutput, chapter, partIndex: k, attachments: await dataAttachments(cp), notes });
+  const attachments = await dataAttachments(cp);
+  // Rebuilt per attempt: a silent retry adds GENERATION_TEXT.writeNow to the final
+  // instruction block — the one block after the last cache point, so the retry
+  // still reads the whole cached prefix. The empty replies it answers were the
+  // model spending its tokens on thinking; re-sending the identical prompt paid
+  // the same failure again often enough to matter (1 in 8 part calls, D9).
+  const userFor = (retry: number) => partUserBlocks({ briefText: cp.briefText, plan, partialOutput: cp.partialOutput, chapter, partIndex: k, attachments, notes, nudge: retry > 0 });
 
   // Live progress: the streaming text is saved every few thousand characters, one write at a time.
   let draft = "";
@@ -525,7 +554,7 @@ async function writePart(cp: GenerationCheckpoint, ctx: StepContext): Promise<{ 
     savedAt = Date.now();
     try {
       result = await callClaude(cp, {
-        user,
+        user: userFor(silentRetries),
         toolChoice: { type: "none" },
         maxTokens: partMaxTokens(part.targetWords, cp.failedSteps),
         deadline: ctx.deadline,
