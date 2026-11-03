@@ -1,14 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { LuMaximize, LuPause, LuPlay, LuVolume2, LuVolumeX } from "react-icons/lu";
+import { LuMaximize, LuPause, LuPlay, LuRotateCw, LuSmartphone, LuVolume2, LuVolumeX } from "react-icons/lu";
 import {
   MAX_CREDITED_JUMP_SECONDS,
   MAX_PLAYBACK_RATE,
   PROGRESS_SAVE_SECONDS,
   TOUR_CONTROLS,
+  TOUR_TEXT,
   advanceProgress,
   formatTimestamp,
+  rotateHintTimes,
+  rotateHintVisible,
   watchedPercent,
 } from "@/lib/ambassador-tour";
 import { cn } from "@/lib/utils";
@@ -72,7 +75,43 @@ export function TourPlayer({
   const [progress, setProgress] = React.useState(initialSecondsWatched);
   const [position, setPosition] = React.useState(startAt);
 
+  // 85% of ambassadors are on a phone, and a 16:9 video in an upright column is
+  // small. They can turn the video instead of the phone (rotation lock, lying
+  // in bed), and a hint says so a few times while it would help.
+  const [rotated, setRotated] = React.useState(false);
+  const [portrait, setPortrait] = React.useState(false);
+  const [frameWidth, setFrameWidth] = React.useState(0);
+
   const gate = mode === "gate";
+
+  React.useEffect(() => {
+    const query = window.matchMedia("(orientation: portrait)");
+    const read = () => {
+      setPortrait(query.matches);
+      // They turned the phone itself: the layout is already wide, so take the
+      // manual rotation off rather than leaving the video on its side.
+      if (!query.matches) setRotated(false);
+    };
+    read();
+    query.addEventListener("change", read);
+    return () => query.removeEventListener("change", read);
+  }, []);
+
+  // The rotated frame is as tall as the upright one is wide multiplied out to
+  // 16:9, so the turned video fills it exactly.
+  React.useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setFrameWidth(frame.clientWidth));
+    observer.observe(frame);
+    setFrameWidth(frame.clientWidth);
+    return () => observer.disconnect();
+  }, []);
+
+  const rotatedLong = Math.round(frameWidth * (16 / 9));
+  const turned = rotated && frameWidth > 0;
+  const hintTimes = React.useMemo(() => rotateHintTimes(duration), [duration]);
+  const showHint = portrait && !rotated && playing && rotateHintVisible(position, hintTimes);
 
   // Let the chapter list drive the element, without exposing the ref itself.
   React.useEffect(() => {
@@ -187,6 +226,9 @@ export function TourPlayer({
   };
 
   const fullscreen = () => {
+    // Full screen is already big, and the two sizings would fight: the rotated
+    // frame is measured from the column width, not the screen.
+    setRotated(false);
     const frame = frameRef.current;
     const v = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
     if (frame?.requestFullscreen) void frame.requestFullscreen().catch(() => {});
@@ -197,7 +239,14 @@ export function TourPlayer({
 
   return (
     <div className="space-y-2">
-      <div ref={frameRef} className="relative aspect-video w-full overflow-hidden rounded-xl bg-slate-950">
+      <div
+        ref={frameRef}
+        className={cn(
+          "relative w-full overflow-hidden rounded-xl bg-slate-950",
+          turned ? null : "aspect-video"
+        )}
+        style={turned ? { height: rotatedLong } : undefined}
+      >
         <video
           ref={videoRef}
           src={src}
@@ -206,7 +255,16 @@ export function TourPlayer({
           playsInline
           controls={!gate}
           controlsList={gate ? "nodownload" : undefined}
-          className="size-full"
+          className={turned ? "absolute left-1/2 top-1/2 max-w-none" : "size-full"}
+          style={
+            turned
+              ? {
+                  width: rotatedLong,
+                  height: frameWidth,
+                  transform: "translate(-50%, -50%) rotate(90deg)",
+                }
+              : undefined
+          }
           onLoadedMetadata={onLoadedMetadata}
           onTimeUpdate={onTimeUpdate}
           onPlay={() => setPlaying(true)}
@@ -250,6 +308,31 @@ export function TourPlayer({
               <LuPlay className="size-7 translate-x-0.5" aria-hidden />
             </span>
           </button>
+        ) : null}
+
+        {/* Turn the video rather than the phone: for a phone on rotation lock,
+            or anyone lying down. Offered only while the phone is upright,
+            where it is the whole point. */}
+        {portrait ? (
+          <button
+            type="button"
+            onClick={() => setRotated((r) => !r)}
+            aria-label={rotated ? TOUR_CONTROLS.unrotate : TOUR_CONTROLS.rotate}
+            aria-pressed={rotated}
+            className="absolute right-2 top-2 grid size-11 place-items-center rounded-full bg-slate-950/65 text-white backdrop-blur-sm transition-colors hover:bg-slate-950/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+          >
+            <LuRotateCw className={cn("size-5", rotated ? "-rotate-90" : null)} aria-hidden />
+          </button>
+        ) : null}
+
+        {/* "Turn your phone sideways", a few times while it would help. */}
+        {showHint ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-3">
+            <p className="flex items-center gap-2 rounded-full bg-slate-950/80 px-3 py-2 text-[13px] font-medium text-white shadow-lift backdrop-blur-sm motion-safe:animate-in motion-safe:fade-in">
+              <LuSmartphone className="size-4 shrink-0 rotate-90" aria-hidden />
+              {TOUR_TEXT.rotateHint}
+            </p>
+          </div>
         ) : null}
       </div>
 

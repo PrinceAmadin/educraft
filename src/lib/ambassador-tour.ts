@@ -62,6 +62,8 @@ export const TOUR_TEXT = {
   resumedNote: "Picking up where you stopped.",
   loadError:
     "The tour could not load. Check your connection and reload the page — you will carry on from where you stopped.",
+  /** Shown a few times while the phone is held upright: the video is 16:9. */
+  rotateHint: "Turn your phone sideways for a bigger picture",
 
   /** The permanent section on the dashboard home. */
   sectionTitle: "How the ambassador platform works",
@@ -84,6 +86,8 @@ export const TOUR_CONTROLS = {
   unmute: "Unmute",
   fullscreen: "Full screen",
   progress: "How much of the tour you have watched",
+  rotate: "Turn the video sideways",
+  unrotate: "Turn the video back upright",
 } as const;
 
 /** "1:35", "12:04". */
@@ -192,3 +196,38 @@ export function advanceProgress(
  * would look broken rather than strict.
  */
 export const MAX_PLAYBACK_RATE = 2;
+
+// ── Watching it on a phone held upright ─────────────────────────────────────
+
+/** How long each "turn your phone" hint stays on screen. */
+export const ROTATE_HINT_VISIBLE_SECONDS = 6;
+
+/**
+ * When to show the "turn your phone sideways" hint, in seconds.
+ *
+ * A 16:9 tutorial in a portrait column is small, and most ambassadors are on a
+ * phone, so the hint appears a few times rather than once: just after they
+ * press play, and then a third and two thirds of the way through, for anyone
+ * who picked the phone up mid-video. It is only ever shown while the phone is
+ * actually upright and the video has not been turned.
+ *
+ * A hint that could not finish before the video ends is dropped, so the close
+ * is never interrupted.
+ */
+export function rotateHintTimes(durationSeconds: number): number[] {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
+  const times = [4];
+  if (durationSeconds >= 60) times.push(Math.round(durationSeconds / 3));
+  if (durationSeconds >= 150) times.push(Math.round((durationSeconds * 2) / 3));
+  return times.filter((t) => t + ROTATE_HINT_VISIBLE_SECONDS <= durationSeconds);
+}
+
+/**
+ * Whether a hint belongs on screen at this position. A function of the position
+ * alone, so there is no "already shown" bookkeeping to get wrong and rewinding
+ * simply shows it again.
+ */
+export function rotateHintVisible(position: number, times: readonly number[]): boolean {
+  if (!Number.isFinite(position)) return false;
+  return times.some((t) => position >= t && position < t + ROTATE_HINT_VISIBLE_SECONDS);
+}

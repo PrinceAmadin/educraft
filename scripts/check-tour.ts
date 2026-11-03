@@ -17,6 +17,7 @@ import { resolve } from "path";
 import {
   MAX_CREDITED_JUMP_SECONDS,
   PROGRESS_SAVE_SECONDS,
+  ROTATE_HINT_VISIBLE_SECONDS,
   TOUR_CHAPTERS,
   TOUR_CONTROLS,
   TOUR_TEXT,
@@ -27,6 +28,8 @@ import {
   formatTimestamp,
   needsTour,
   resumeAt,
+  rotateHintTimes,
+  rotateHintVisible,
   roughLength,
   tourComplete,
   watchedPercent,
@@ -207,6 +210,37 @@ expect(
 expect("the gate says what unlocks it", /watch/i.test(TOUR_TEXT.lockedHint), true);
 expect("the section is named as the founder asked", TOUR_TEXT.sectionTitle, "How the ambassador platform works");
 expect("the email line promises the tour at first sign-in", /sign in/i.test(TOUR_TEXT.emailLine), true);
+
+// ── The "turn your phone sideways" hint ─────────────────────────────────────
+// The real cut runs 6:59. A 16:9 tutorial in an upright phone column is small,
+// so the hint shows three times: after they press play, and a third and two
+// thirds of the way in.
+const REAL = 418.97;
+expect("each hint stays up for 6 s", ROTATE_HINT_VISIBLE_SECONDS, 6);
+expect("the real 6:59 cut gets three hints", rotateHintTimes(REAL), [4, 140, 279]);
+expect("the first comes just after play", rotateHintTimes(REAL)[0], 4);
+expect("a one-minute video gets two", rotateHintTimes(60), [4, 20]);
+expect("a 20-second clip gets one", rotateHintTimes(20), [4]);
+expect("a clip too short to finish a hint gets none", rotateHintTimes(8), []);
+expect("an unknown length gets none", rotateHintTimes(0), []);
+expect("NaN gets none", rotateHintTimes(Number.NaN), []);
+expect(
+  "no hint can be cut off by the end of the video",
+  rotateHintTimes(REAL).every((t) => t + ROTATE_HINT_VISIBLE_SECONDS <= REAL),
+  true
+);
+
+const hints = rotateHintTimes(REAL);
+expect("nothing on screen before the first hint", rotateHintVisible(3.9, hints), false);
+expect("on screen the moment it is due", rotateHintVisible(4, hints), true);
+expect("still on screen just before it expires", rotateHintVisible(9.9, hints), true);
+expect("gone once it has had its 6 s", rotateHintVisible(10, hints), false);
+expect("on screen again a third of the way in", rotateHintVisible(141, hints), true);
+expect("and two thirds of the way in", rotateHintVisible(280, hints), true);
+expect("nothing in between", rotateHintVisible(90, hints), false);
+expect("nothing at the close", rotateHintVisible(415, hints), false);
+expect("no hint when the length is unknown", rotateHintVisible(100, rotateHintTimes(0)), false);
+expect("rewinding shows it again (no bookkeeping to go stale)", rotateHintVisible(5, hints), true);
 
 // ── A NULL tourVersion must be matched explicitly ───────────────────────────
 // `NOT (tourVersion = '1')` is NULL in SQL for a row that has never been
