@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/dotenv-cli/cli.js",
+        "-e",
+        ".env.demo",
+        "--",
+        "node",
+        "node_modules/next/dist/bin/next",
+        "dev",
+        "-p",
+        "3000"
+      ],
+      "port": 3000
+    }
+  ]
+}

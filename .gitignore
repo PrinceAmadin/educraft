@@ -35,3 +35,10 @@ Educraft_Ambassador/
 
 # Throwaway QA scripts (live checks with test logins) — never committed
 scripts/tmp/
+.env.demo
+.demo-pgdata/
+video/
+
+# The finished tutorial video: 59 MB, lives in Vercel Blob, never in git
+EduCraft_Ambassador_Dashboard_Tutorial_16x9.mp4
+*.mp4
