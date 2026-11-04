@@ -7,6 +7,7 @@ import {
   LuArrowUp,
   LuCircleAlert,
   LuCircleCheck,
+  LuListChecks,
   LuLoaderCircle,
   LuPencil,
   LuPlus,
@@ -27,6 +28,7 @@ import { useConfirm } from "@/components/ui/confirm";
 import { Field } from "@/components/forms/Field";
 import { CheckboxRow } from "@/components/forms/CheckboxRow";
 import { TrainingVideoUpload } from "@/components/training/TrainingVideoUpload";
+import { QuizEditor } from "@/components/training/QuizEditor";
 import { episodeLabel, type TrainingAudience } from "@/lib/training/rules";
 import { roughLength } from "@/lib/training/video-rules";
 import { cn } from "@/lib/utils";
@@ -53,6 +55,8 @@ export interface ManagedEpisodeProps {
   durationSeconds: number | null;
   requiredForGate: boolean;
   isPublished: boolean;
+  quizPassPercent: number | null;
+  questionCount: number;
   watchedCount: number;
 }
 
@@ -81,6 +85,7 @@ export function TutorialsManager({
   const [problem, setProblem] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [editing, setEditing] = React.useState<ManagedEpisodeProps | null>(null);
+  const [quizFor, setQuizFor] = React.useState<ManagedEpisodeProps | null>(null);
 
   const rows = episodes.filter((e) => e.audience === audience).sort((a, b) => a.episodeNo - b.episodeNo);
 
@@ -285,6 +290,12 @@ export function TutorialsManager({
                 >
                   Reset who has watched this
                 </Button>
+                {episode.audience === "WORKER" ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setQuizFor(episode)}>
+                    <LuListChecks className="size-4" aria-hidden />
+                    {episode.questionCount > 0 ? `Quiz (${episode.questionCount})` : "Add a quiz"}
+                  </Button>
+                ) : null}
               </div>
             </li>
           ))}
@@ -309,6 +320,9 @@ export function TutorialsManager({
             router.refresh();
           }}
         />
+      ) : null}
+      {quizFor ? (
+        <QuizEditor episode={quizFor} onClose={() => setQuizFor(null)} onChanged={() => router.refresh()} />
       ) : null}
     </section>
   );

@@ -2,12 +2,19 @@ import { db } from "@/lib/db";
 import { execRoleOfWorker } from "@/lib/services/executives";
 import { resumeAt, watchComplete } from "@/lib/training/video-rules";
 import {
+  completedCount,
+  episodeComplete,
   episodeUnlocked,
   needsTrainingGate,
   nextRequired,
   playableEpisodes,
+  quizPassPercentFor,
+  scoreQuiz,
+  shuffled,
   watchedCount,
+  type EpisodeRule,
   type TrainingAudience,
+  type WatchRule,
 } from "@/lib/training/rules";
 
 /**
@@ -44,7 +51,45 @@ const EPISODE_SELECT = {
   durationSeconds: true,
   requiredForGate: true,
   isPublished: true,
+  quizPassPercent: true,
 } as const;
+
+type EpisodeRow = {
+  id: string;
+  episodeNo: number;
+  title: string;
+  description: string | null;
+  videoUrl: string;
+  posterUrl: string;
+  durationSeconds: number | null;
+  requiredForGate: boolean;
+  isPublished: boolean;
+  quizPassPercent: number | null;
+};
+
+type WatchRow = {
+  videoId: string;
+  secondsWatched: number;
+  watchedAt: Date | null;
+  startedAt: Date | null;
+  quizPassedAt: Date | null;
+};
+
+/** The set of episode ids (among `ids`) that carry at least one active quiz question. */
+async function quizEpisodeIds(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  const rows = await db.trainingQuizQuestion.groupBy({
+    by: ["videoId"],
+    where: { isActive: true, videoId: { in: ids } },
+    _count: { videoId: true },
+  });
+  return new Set(rows.filter((r) => r._count.videoId > 0).map((r) => r.videoId));
+}
+
+/** DB episodes as the rule functions see them, with `hasQuiz` filled in. */
+function asRules(episodes: readonly EpisodeRow[], quizIds: Set<string>): (EpisodeRow & EpisodeRule)[] {
+  return episodes.map((e) => ({ ...e, hasQuiz: quizIds.has(e.id) }));
+}
 
 export interface EpisodeView {
   id: string;
@@ -60,27 +105,19 @@ export interface EpisodeView {
   startAt: number;
   watchedAt: Date | null;
   startedAt: Date | null;
+  /** Phase 3: this episode has a quiz, and whether this viewer has passed it. */
+  hasQuiz: boolean;
+  quizPassedAt: Date | null;
+  /** Watched and (if it has a quiz) the quiz passed. */
+  complete: boolean;
   /** Worker series only: may this viewer play it yet? */
   unlocked: boolean;
 }
 
-function toViews(
-  episodes: {
-    id: string;
-    episodeNo: number;
-    title: string;
-    description: string | null;
-    videoUrl: string;
-    posterUrl: string;
-    durationSeconds: number | null;
-    requiredForGate: boolean;
-    isPublished: boolean;
-  }[],
-  watches: { videoId: string; secondsWatched: number; watchedAt: Date | null; startedAt: Date | null }[],
-  withUnlock: boolean
-): EpisodeView[] {
+function toViews(episodes: readonly EpisodeRow[], watches: WatchRow[], quizIds: Set<string>, withUnlock: boolean): EpisodeView[] {
   const byId = new Map(watches.map((w) => [w.videoId, w]));
-  return playableEpisodes(episodes).map((e) => {
+  const rules = asRules(episodes, quizIds);
+  return playableEpisodes(rules).map((e) => {
     const w = byId.get(e.id);
     return {
       id: e.id,
@@ -95,7 +132,10 @@ function toViews(
       startAt: resumeAt(w?.secondsWatched ?? 0, e.durationSeconds),
       watchedAt: w?.watchedAt ?? null,
       startedAt: w?.startedAt ?? null,
-      unlocked: withUnlock ? episodeUnlocked(e, episodes, watches) : true,
+      hasQuiz: e.hasQuiz ?? false,
+      quizPassedAt: w?.quizPassedAt ?? null,
+      complete: episodeComplete(e, watches),
+      unlocked: withUnlock ? episodeUnlocked(e, rules, watches) : true,
     };
   });
 }
@@ -110,20 +150,23 @@ export interface TutorialsState {
 
 /** The published COO tutorials with this login's own progress. */
 export async function getTutorialsState(userId: string): Promise<TutorialsState> {
-  const episodes = await db.trainingVideo.findMany({
+  const episodes = (await db.trainingVideo.findMany({
     where: { audience: "COO" satisfies TrainingAudience, isPublished: true },
     select: EPISODE_SELECT,
     orderBy: { episodeNo: "asc" },
-  });
+  })) as EpisodeRow[];
   const playable = playableEpisodes(episodes);
   if (playable.length === 0) return { episodes: [], watched: 0, total: 0 };
 
-  const watches = await db.trainingWatch.findMany({
+  // COO tutorials carry no quizzes, but reading the (empty) set keeps one code
+  // path; `watched` is the only count that matters on a library with no gate.
+  const quizIds = await quizEpisodeIds(playable.map((e) => e.id));
+  const watches = (await db.trainingWatch.findMany({
     where: { userId, videoId: { in: playable.map((e) => e.id) } },
-    select: { videoId: true, secondsWatched: true, watchedAt: true, startedAt: true },
-  });
+    select: { videoId: true, secondsWatched: true, watchedAt: true, startedAt: true, quizPassedAt: true },
+  })) as WatchRow[];
   return {
-    episodes: toViews(episodes, watches, false),
+    episodes: toViews(episodes, watches, quizIds, false),
     watched: watchedCount(episodes, watches),
     total: playable.length,
   };
@@ -132,16 +175,25 @@ export async function getTutorialsState(userId: string): Promise<TutorialsState>
 // ── The worker series ───────────────────────────────────────────────────────
 
 export interface WorkerTrainingState {
-  /** Held at the portal gate until the required episodes are watched. */
+  /** Held at the portal gate until the required episodes are complete. */
   gated: boolean;
   episodes: EpisodeView[];
-  /** The episode the gate plays next. Null once the series is complete. */
+  /** The episode the gate shows next. Null once the series is complete. */
   nextRequiredId: string | null;
+  /** Episodes watched, and episodes fully completed (watched + quiz). */
   watched: number;
+  completed: number;
   total: number;
 }
 
-const NO_TRAINING: WorkerTrainingState = { gated: false, episodes: [], nextRequiredId: null, watched: 0, total: 0 };
+const NO_TRAINING: WorkerTrainingState = {
+  gated: false,
+  episodes: [],
+  nextRequiredId: null,
+  watched: 0,
+  completed: 0,
+  total: 0,
+};
 
 /**
  * The worker series as it stands for this login. The published count is read
@@ -150,32 +202,37 @@ const NO_TRAINING: WorkerTrainingState = { gated: false, episodes: [], nextRequi
  * the series — his go-live switch.
  */
 export async function getWorkerTrainingState(userId: string): Promise<WorkerTrainingState> {
-  const episodes = await db.trainingVideo.findMany({
+  const episodes = (await db.trainingVideo.findMany({
     where: { audience: "WORKER" satisfies TrainingAudience, isPublished: true, videoUrl: { not: "" } },
     select: EPISODE_SELECT,
     orderBy: { episodeNo: "asc" },
-  });
+  })) as EpisodeRow[];
   if (playableEpisodes(episodes).length === 0) return NO_TRAINING;
 
   const worker = await db.worker.findUnique({ where: { userId }, select: { id: true } });
   if (!worker) return NO_TRAINING;
 
-  const watches = await db.trainingWatch.findMany({
-    where: { userId, videoId: { in: episodes.map((e) => e.id) } },
-    select: { videoId: true, secondsWatched: true, watchedAt: true, startedAt: true },
-  });
+  const [quizIds, watches] = await Promise.all([
+    quizEpisodeIds(episodes.map((e) => e.id)),
+    db.trainingWatch.findMany({
+      where: { userId, videoId: { in: episodes.map((e) => e.id) } },
+      select: { videoId: true, secondsWatched: true, watchedAt: true, startedAt: true, quizPassedAt: true },
+    }) as Promise<WatchRow[]>,
+  ]);
+  const rules = asRules(episodes, quizIds);
 
   // Only asked when the gate would otherwise fire: it catches the executives'
   // own worker records (the CEO's ECW-0001, the COO's ECW-0003).
-  const next = nextRequired(episodes, watches);
+  const next = nextRequired(rules, watches);
   const isExecutive = next ? (await execRoleOfWorker(worker.id)) != null : false;
 
   return {
-    gated: needsTrainingGate(episodes, watches, isExecutive),
-    episodes: toViews(episodes, watches, true),
+    gated: needsTrainingGate(rules, watches, isExecutive),
+    episodes: toViews(episodes, watches, quizIds, true),
     nextRequiredId: next?.id ?? null,
-    watched: watchedCount(episodes, watches),
-    total: playableEpisodes(episodes).length,
+    watched: watchedCount(rules, watches),
+    completed: completedCount(rules, watches),
+    total: playableEpisodes(rules).length,
   };
 }
 
@@ -221,15 +278,18 @@ export async function saveTrainingProgress(
   }
 
   if (opts.enforceOrder) {
-    const siblings = await db.trainingVideo.findMany({
+    const siblings = (await db.trainingVideo.findMany({
       where: { audience: episode.audience, isPublished: true },
       select: EPISODE_SELECT,
-    });
-    const watches = await db.trainingWatch.findMany({
+    })) as EpisodeRow[];
+    const quizIds = await quizEpisodeIds(siblings.map((e) => e.id));
+    const watches = (await db.trainingWatch.findMany({
       where: { userId, videoId: { in: siblings.map((e) => e.id) } },
-      select: { videoId: true, watchedAt: true },
-    });
-    if (!episodeUnlocked(episode, siblings, watches)) {
+      select: { videoId: true, watchedAt: true, quizPassedAt: true },
+    })) as WatchRule[];
+    const rules = asRules(siblings, quizIds);
+    const self = rules.find((e) => e.id === episode.id) ?? { ...episode, hasQuiz: quizIds.has(episode.id) };
+    if (!episodeUnlocked(self, rules, watches)) {
       throw new TrainingError("Finish the episodes before this one first", 403);
     }
   }
@@ -271,6 +331,240 @@ export async function saveTrainingProgress(
   return { watched: after?.watchedAt != null, secondsWatched: after?.secondsWatched ?? seconds };
 }
 
+// ── Quizzes (Phase 3) ───────────────────────────────────────────────────────
+
+type OptionText = { key: number; text: string };
+
+/** The quiz a worker takes: questions and options shuffled, the answer withheld. */
+export interface ViewerQuiz {
+  passPercent: number;
+  alreadyPassed: boolean;
+  questions: { id: string; prompt: string; options: OptionText[] }[];
+}
+
+function parseOptions(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((v) => String(v)) : [];
+}
+
+async function loadQuizEpisode(userId: string, videoId: string): Promise<{ passPercent: number; watched: boolean }> {
+  const episode = await db.trainingVideo.findUnique({
+    where: { id: videoId },
+    select: { id: true, audience: true, isPublished: true, videoUrl: true, quizPassPercent: true },
+  });
+  if (!episode || episode.audience !== "WORKER") throw new TrainingError("No such episode", 404);
+  if (!episode.isPublished || episode.videoUrl.trim() === "") throw new TrainingError("There is no episode to take", 409);
+  const watch = await db.trainingWatch.findUnique({
+    where: { videoId_userId: { videoId, userId } },
+    select: { watchedAt: true, quizPassedAt: true },
+  });
+  if (!watch?.watchedAt) throw new TrainingError("Watch the episode first", 403);
+  return { passPercent: quizPassPercentFor(episode), watched: true };
+}
+
+/** The quiz to show this worker, or empty questions if the episode has none. */
+export async function getQuizForViewer(userId: string, videoId: string): Promise<ViewerQuiz> {
+  const { passPercent } = await loadQuizEpisode(userId, videoId);
+  const watch = await db.trainingWatch.findUnique({
+    where: { videoId_userId: { videoId, userId } },
+    select: { quizPassedAt: true },
+  });
+  const questions = await db.trainingQuizQuestion.findMany({
+    where: { videoId, isActive: true },
+    orderBy: { sortOrder: "asc" },
+    select: { id: true, prompt: true, options: true },
+  });
+  return {
+    passPercent,
+    alreadyPassed: watch?.quizPassedAt != null,
+    questions: shuffled(questions).map((q) => ({
+      id: q.id,
+      prompt: q.prompt,
+      // Each option keeps its ORIGINAL index as the key the client submits, so
+      // the order on screen carries no information and nothing has to be
+      // remembered between serving and scoring.
+      options: shuffled(parseOptions(q.options).map((text, key) => ({ key, text }))),
+    })),
+  };
+}
+
+export interface QuizOutcome {
+  score: number;
+  total: number;
+  passed: boolean;
+  passPercent: number;
+  results: {
+    questionId: string;
+    prompt: string;
+    options: string[];
+    chosen: number | null;
+    correctIndex: number;
+    correct: boolean;
+    explanation: string | null;
+  }[];
+}
+
+/** Scores a worker's answers, records the attempt, and stamps the pass when earned. */
+export async function submitQuizAttempt(
+  userId: string,
+  videoId: string,
+  answers: Record<string, number>
+): Promise<QuizOutcome> {
+  const { passPercent } = await loadQuizEpisode(userId, videoId);
+  const questions = await db.trainingQuizQuestion.findMany({
+    where: { videoId, isActive: true },
+    orderBy: { sortOrder: "asc" },
+    select: { id: true, prompt: true, options: true, correctIndex: true, explanation: true },
+  });
+  if (questions.length === 0) throw new TrainingError("This episode has no quiz", 400);
+
+  const { score, total, passed } = scoreQuiz(
+    questions.map((q) => ({ id: q.id, correctIndex: q.correctIndex, isActive: true })),
+    answers,
+    passPercent
+  );
+  const now = new Date();
+
+  await db.trainingQuizAttempt.create({
+    data: { videoId, userId, answers, score, total, passed },
+  });
+  if (passed) {
+    // Claim the pass once: the first passing timestamp sticks, so a later
+    // weaker attempt cannot un-pass the episode.
+    await db.trainingWatch.updateMany({
+      where: { videoId, userId, quizPassedAt: null },
+      data: { quizPassedAt: now },
+    });
+  }
+
+  return {
+    score,
+    total,
+    passed,
+    passPercent,
+    results: questions.map((q) => {
+      const chosen = typeof answers[q.id] === "number" ? answers[q.id] : null;
+      return {
+        questionId: q.id,
+        prompt: q.prompt,
+        options: parseOptions(q.options),
+        chosen,
+        correctIndex: q.correctIndex,
+        correct: chosen === q.correctIndex,
+        explanation: q.explanation,
+      };
+    }),
+  };
+}
+
+// ── Quiz authoring (founder) ────────────────────────────────────────────────
+
+export interface QuizQuestionAdmin {
+  id: string;
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string | null;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+/** The questions on an episode, answers included — founder only. */
+export async function listQuizQuestions(videoId: string): Promise<QuizQuestionAdmin[]> {
+  const rows = await db.trainingQuizQuestion.findMany({
+    where: { videoId },
+    orderBy: { sortOrder: "asc" },
+  });
+  return rows.map((q) => ({
+    id: q.id,
+    prompt: q.prompt,
+    options: parseOptions(q.options),
+    correctIndex: q.correctIndex,
+    explanation: q.explanation,
+    isActive: q.isActive,
+    sortOrder: q.sortOrder,
+  }));
+}
+
+function validateQuestion(input: { prompt: string; options: string[]; correctIndex: number }): {
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+} {
+  const prompt = input.prompt.trim();
+  if (!prompt) throw new TrainingError("The question needs a prompt", 400);
+  const options = input.options.map((o) => o.trim()).filter((o) => o !== "");
+  if (options.length < 2 || options.length > 6) throw new TrainingError("A question needs between 2 and 6 answers", 400);
+  if (!Number.isInteger(input.correctIndex) || input.correctIndex < 0 || input.correctIndex >= options.length) {
+    throw new TrainingError("Mark which answer is correct", 400);
+  }
+  return { prompt, options, correctIndex: input.correctIndex };
+}
+
+export async function createQuizQuestion(
+  videoId: string,
+  input: { prompt: string; options: string[]; correctIndex: number; explanation?: string | null }
+): Promise<{ id: string }> {
+  const episode = await db.trainingVideo.findUnique({ where: { id: videoId }, select: { audience: true } });
+  if (!episode) throw new TrainingError("No such episode", 404);
+  if (episode.audience !== "WORKER") throw new TrainingError("Quizzes are for the worker series only", 400);
+  const clean = validateQuestion(input);
+  const last = await db.trainingQuizQuestion.findFirst({
+    where: { videoId },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true },
+  });
+  const row = await db.trainingQuizQuestion.create({
+    data: {
+      videoId,
+      prompt: clean.prompt,
+      options: clean.options,
+      correctIndex: clean.correctIndex,
+      explanation: input.explanation?.trim() || null,
+      sortOrder: (last?.sortOrder ?? 0) + 1,
+    },
+    select: { id: true },
+  });
+  return row;
+}
+
+export async function updateQuizQuestion(
+  questionId: string,
+  input: {
+    prompt?: string;
+    options?: string[];
+    correctIndex?: number;
+    explanation?: string | null;
+    isActive?: boolean;
+  }
+): Promise<void> {
+  const existing = await db.trainingQuizQuestion.findUnique({
+    where: { id: questionId },
+    select: { prompt: true, options: true, correctIndex: true },
+  });
+  if (!existing) throw new TrainingError("No such question", 404);
+  const data: Record<string, unknown> = {};
+  if (input.prompt !== undefined || input.options !== undefined || input.correctIndex !== undefined) {
+    const clean = validateQuestion({
+      prompt: input.prompt ?? existing.prompt,
+      options: input.options ?? parseOptions(existing.options),
+      correctIndex: input.correctIndex ?? existing.correctIndex,
+    });
+    data.prompt = clean.prompt;
+    data.options = clean.options;
+    data.correctIndex = clean.correctIndex;
+  }
+  if (input.explanation !== undefined) data.explanation = input.explanation?.trim() || null;
+  if (input.isActive !== undefined) data.isActive = input.isActive;
+  if (Object.keys(data).length === 0) return;
+  await db.trainingQuizQuestion.update({ where: { id: questionId }, data });
+}
+
+export async function deleteQuizQuestion(questionId: string): Promise<void> {
+  const existing = await db.trainingQuizQuestion.findUnique({ where: { id: questionId }, select: { id: true } });
+  if (!existing) throw new TrainingError("No such question", 404);
+  await db.trainingQuizQuestion.delete({ where: { id: questionId } });
+}
+
 // ── The founder's management ────────────────────────────────────────────────
 
 export interface ManagedEpisode {
@@ -284,6 +578,9 @@ export interface ManagedEpisode {
   durationSeconds: number | null;
   requiredForGate: boolean;
   isPublished: boolean;
+  quizPassPercent: number | null;
+  /** Active quiz questions on this episode (worker series only). */
+  questionCount: number;
   /** How many people have finished it (worker series: everyone; tutorials: the COO logins). */
   watchedCount: number;
 }
@@ -300,15 +597,21 @@ export async function getTrainingManagement(): Promise<{
   episodes: ManagedEpisode[];
   cooViewers: CooViewerState[];
 }> {
-  const [episodes, counts] = await Promise.all([
+  const [episodes, counts, questionCounts] = await Promise.all([
     db.trainingVideo.findMany({ select: EPISODE_SELECT, orderBy: [{ audience: "asc" }, { episodeNo: "asc" }] }),
     db.trainingWatch.groupBy({
       by: ["videoId"],
       where: { watchedAt: { not: null } },
       _count: { videoId: true },
     }),
+    db.trainingQuizQuestion.groupBy({
+      by: ["videoId"],
+      where: { isActive: true },
+      _count: { videoId: true },
+    }),
   ]);
   const countById = new Map(counts.map((c) => [c.videoId, c._count.videoId]));
+  const questionsById = new Map(questionCounts.map((c) => [c.videoId, c._count.videoId]));
 
   // The COO logins (the retired OPS_MANAGER counts as COO), for the
   // per-tutorial "has he watched it" line the founder asked for.
@@ -328,6 +631,7 @@ export async function getTrainingManagement(): Promise<{
     episodes: episodes.map((e) => ({
       ...e,
       audience: e.audience as TrainingAudience,
+      questionCount: questionsById.get(e.id) ?? 0,
       watchedCount: countById.get(e.id) ?? 0,
     })),
     cooViewers: cooUsers.map((u) => ({
@@ -377,6 +681,7 @@ export async function updateEpisode(
     posterUrl?: string;
     requiredForGate?: boolean;
     isPublished?: boolean;
+    quizPassPercent?: number;
   }
 ): Promise<void> {
   const episode = await db.trainingVideo.findUnique({ where: { id }, select: { id: true, videoUrl: true } });
@@ -399,6 +704,9 @@ export async function updateEpisode(
       ...(input.posterUrl !== undefined ? { posterUrl: input.posterUrl.trim() } : {}),
       ...(input.requiredForGate !== undefined ? { requiredForGate: input.requiredForGate } : {}),
       ...(input.isPublished !== undefined ? { isPublished: input.isPublished } : {}),
+      ...(input.quizPassPercent !== undefined
+        ? { quizPassPercent: Math.min(100, Math.max(1, Math.round(input.quizPassPercent))) }
+        : {}),
     },
   });
 }

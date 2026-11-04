@@ -13,10 +13,13 @@
  * Fails (exit 1) on any mismatch.
  */
 import {
+  DEFAULT_QUIZ_PASS_PERCENT,
   TRAINING_AUDIENCES,
   TRAINING_TEXT,
   TUTORIALS_TEXT,
   completeLine,
+  completedCount,
+  episodeComplete,
   episodeLabel,
   episodeUnlocked,
   isPlayable,
@@ -24,7 +27,10 @@ import {
   needsTrainingGate,
   nextRequired,
   playableEpisodes,
+  quizPassPercentFor,
+  scoreQuiz,
   seriesComplete,
+  shuffled,
   watchedCount,
   type EpisodeRule,
   type WatchRule,
@@ -93,6 +99,58 @@ expect(
   expect("an executive is never gated", needsTrainingGate(series, [], true), false);
   expect("inert with nothing published", needsTrainingGate([ep(1, { videoUrl: "" })], [], false), false);
   expect("watchedCount counts playable watched", watchedCount(series, watched("e1", "e3")), 2);
+}
+
+// ── Quizzes (Phase 3) ────────────────────────────────────────────────────────
+
+const passed = (videoId: string): WatchRule => ({ videoId, watchedAt: new Date(), quizPassedAt: new Date() });
+
+{
+  // An episode with a quiz is complete only once the quiz is passed.
+  const e = ep(1, { hasQuiz: true });
+  expect("watched-but-quiz-pending is not complete", episodeComplete(e, watched("e1")), false);
+  expect("watched + quiz passed is complete", episodeComplete(e, [passed("e1")]), true);
+  expect("a no-quiz episode is complete when watched", episodeComplete(ep(1), watched("e1")), true);
+  expect("an unwatched episode is never complete", episodeComplete(e, []), false);
+}
+
+{
+  // The quiz on episode 1 holds episode 2 until it is passed.
+  const series = [ep(1, { hasQuiz: true }), ep(2)];
+  expect("episode 2 stays locked while ep1 quiz is pending", episodeUnlocked(series[1], series, watched("e1")), false);
+  expect("episode 2 unlocks once ep1 quiz is passed", episodeUnlocked(series[1], series, [passed("e1")]), true);
+  expect("the gate stays on ep1 while its quiz is pending", nextRequired(series, watched("e1"))?.id, "e1");
+  expect("the gate moves to ep2 once ep1 is complete", nextRequired(series, [passed("e1")])?.id, "e2");
+  expect("gated while a quiz is pending", needsTrainingGate(series, watched("e1"), false), true);
+  expect("not gated once quiz passed and ep2 watched", needsTrainingGate(series, [passed("e1"), { videoId: "e2", watchedAt: new Date() }], false), false);
+  expect("watched counts the watch, completed waits for the quiz", [watchedCount(series, watched("e1")), completedCount(series, watched("e1"))], [1, 0]);
+  expect("completed counts a passed quiz episode", completedCount(series, [passed("e1")]), 1);
+}
+
+// ── Quiz scoring ─────────────────────────────────────────────────────────────
+
+const q = (id: string, correctIndex: number, isActive = true) => ({ id, correctIndex, isActive });
+
+expect("all correct passes at 80%", scoreQuiz([q("a", 1), q("b", 0)], { a: 1, b: 0 }, 80), { score: 2, total: 2, passed: true });
+expect("half wrong fails at 80%", scoreQuiz([q("a", 1), q("b", 0)], { a: 1, b: 1 }, 80), { score: 1, total: 2, passed: false });
+expect("exactly the pass mark passes", scoreQuiz([q("a", 0), q("b", 0), q("c", 0), q("d", 0), q("e", 1)], { a: 0, b: 0, c: 0, d: 0, e: 0 }, 80), { score: 4, total: 5, passed: true });
+expect("an unanswered question scores nothing", scoreQuiz([q("a", 1), q("b", 0)], { a: 1 }, 50), { score: 1, total: 2, passed: true });
+expect("inactive questions are ignored", scoreQuiz([q("a", 1), q("b", 0, false)], { a: 1 }, 80), { score: 1, total: 1, passed: true });
+expect("no active questions never 'passes'", scoreQuiz([q("a", 1, false)], {}, 80).passed, false);
+expect("the default pass mark is used", scoreQuiz([q("a", 0), q("b", 0)], { a: 0, b: 1 }).passed, false);
+expect("the default pass mark constant", DEFAULT_QUIZ_PASS_PERCENT, 80);
+expect("quizPassPercentFor: own value", quizPassPercentFor({ quizPassPercent: 60 }), 60);
+expect("quizPassPercentFor: default when null", quizPassPercentFor({ quizPassPercent: null }), 80);
+expect("quizPassPercentFor: clamped", [quizPassPercentFor({ quizPassPercent: 0 }), quizPassPercentFor({ quizPassPercent: 200 })], [1, 100]);
+
+// shuffled: a deterministic rng gives a known permutation, and no item is lost.
+{
+  const seq = [0.99, 0.0, 0.5];
+  let i = 0;
+  const rng = () => seq[i++ % seq.length];
+  const out = shuffled([1, 2, 3, 4], rng);
+  expect("shuffled keeps every item", out.slice().sort((a, b) => a - b), [1, 2, 3, 4]);
+  expect("shuffled leaves the input alone", [1, 2, 3].length, 3);
 }
 
 // ── Tracked-mode crediting (the COO tutorials) ──────────────────────────────

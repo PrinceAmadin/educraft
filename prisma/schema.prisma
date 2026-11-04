@@ -94,6 +94,7 @@ model User {
   workerApplicationsReviewed  WorkerApplication[]  @relation("WorkerApplicationReviewedBy")
   workerRecordsUpdated        Worker[]             @relation("WorkerUpdatedBy")
   trainingWatches             TrainingWatch[]
+  trainingQuizAttempts        TrainingQuizAttempt[]
 
   // Phase 4 (Operations Platform)
   projectNotes      ProjectNote[] @relation("ProjectNoteAuthor")
@@ -3047,10 +3048,56 @@ model TrainingVideo {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  watches TrainingWatch[]
+  watches       TrainingWatch[]
+  quizQuestions TrainingQuizQuestion[]
+  quizAttempts  TrainingQuizAttempt[]
 
   @@unique([audience, episodeNo])
   @@index([audience, isPublished])
+}
+
+/// A multiple-choice question on a worker training episode (Phase 3). The
+/// episode is complete only once it is watched AND a passing attempt exists,
+/// so an episode with active questions holds the gate until the worker passes.
+/// `correctIndex` is never sent to the client; the viewer submits the chosen
+/// option's original index and the server scores it.
+model TrainingQuizQuestion {
+  id           String        @id @default(cuid())
+  videoId      String
+  video        TrainingVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  prompt       String
+  /// The answer options, a JSON string array (2–6).
+  options      Json
+  /// Index into `options` of the correct answer.
+  correctIndex Int
+  /// Shown after submission, whether right or wrong.
+  explanation  String?
+  isActive     Boolean       @default(true)
+  sortOrder    Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([videoId, isActive])
+}
+
+/// One submitted quiz attempt, kept for the record. Unlimited attempts; the
+/// passing one also stamps `TrainingWatch.quizPassedAt`, which is what the
+/// gate reads.
+model TrainingQuizAttempt {
+  id        String        @id @default(cuid())
+  videoId   String
+  video     TrainingVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Chosen option index per question id: { "<questionId>": <index> }.
+  answers   Json
+  score     Int
+  total     Int
+  passed    Boolean
+  createdAt DateTime      @default(now())
+
+  @@index([videoId, userId])
+  @@index([userId])
 }
 
 /// One person's progress through one episode. Progress is the furthest

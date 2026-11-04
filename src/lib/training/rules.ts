@@ -21,6 +21,9 @@ export function isTrainingAudience(value: string | null | undefined): value is T
   return TRAINING_AUDIENCES.includes(value as TrainingAudience);
 }
 
+/** The default pass mark for an episode's quiz, when the episode sets none. */
+export const DEFAULT_QUIZ_PASS_PERCENT = 80;
+
 /** What the rules need to know about an episode. */
 export interface EpisodeRule {
   id: string;
@@ -28,12 +31,16 @@ export interface EpisodeRule {
   videoUrl: string;
   requiredForGate: boolean;
   isPublished: boolean;
+  /** Phase 3: the episode has ≥1 active quiz question. Absent = no quiz. */
+  hasQuiz?: boolean;
 }
 
 /** What the rules need to know about one person's progress on one episode. */
 export interface WatchRule {
   videoId: string;
   watchedAt: Date | string | null;
+  /** Phase 3: a passing quiz attempt exists. Absent = not passed. */
+  quizPassedAt?: Date | string | null;
 }
 
 /** An episode a viewer can actually watch: published, with a video uploaded. */
@@ -50,10 +57,26 @@ export function isWatched(watches: readonly WatchRule[], videoId: string): boole
   return watches.some((w) => w.videoId === videoId && w.watchedAt != null);
 }
 
+/** This episode's quiz has been passed by this person. */
+export function quizPassed(watches: readonly WatchRule[], videoId: string): boolean {
+  return watches.some((w) => w.videoId === videoId && w.quizPassedAt != null);
+}
+
+/**
+ * An episode is complete when it has been watched AND, if it has a quiz, the
+ * quiz has been passed. With no quiz this is just "watched", so every rule and
+ * fixture that predates quizzes behaves exactly as before.
+ */
+export function episodeComplete(episode: EpisodeRule, watches: readonly WatchRule[]): boolean {
+  if (!isWatched(watches, episode.id)) return false;
+  return !episode.hasQuiz || quizPassed(watches, episode.id);
+}
+
 /**
  * Whether this episode may be played yet: every REQUIRED playable episode
- * before it is watched. An optional episode never blocks the one after it, so
- * marking an episode "not required" really does make it skippable.
+ * before it is complete (watched, and its quiz passed if it has one). An
+ * optional episode never blocks the one after it, so marking an episode "not
+ * required" really does make it skippable.
  */
 export function episodeUnlocked(
   episode: EpisodeRule,
@@ -63,18 +86,18 @@ export function episodeUnlocked(
   if (!isPlayable(episode)) return false;
   return playableEpisodes(episodes)
     .filter((e) => e.episodeNo < episode.episodeNo && e.requiredForGate)
-    .every((e) => isWatched(watches, e.id));
+    .every((e) => episodeComplete(e, watches));
 }
 
-/** The first required episode still unwatched — what the gate plays next. Null = none left. */
+/** The first required episode not yet complete — what the gate shows next. Null = none left. */
 export function nextRequired<E extends EpisodeRule>(
   episodes: readonly E[],
   watches: readonly WatchRule[]
 ): E | null {
-  return playableEpisodes(episodes).find((e) => e.requiredForGate && !isWatched(watches, e.id)) ?? null;
+  return playableEpisodes(episodes).find((e) => e.requiredForGate && !episodeComplete(e, watches)) ?? null;
 }
 
-/** Every required playable episode watched. True when nothing is published, so the gate is inert until the founder publishes. */
+/** Every required playable episode complete. True when nothing is published, so the gate is inert until the founder publishes. */
 export function seriesComplete(episodes: readonly EpisodeRule[], watches: readonly WatchRule[]): boolean {
   return nextRequired(episodes, watches) == null;
 }
@@ -82,6 +105,67 @@ export function seriesComplete(episodes: readonly EpisodeRule[], watches: readon
 /** How many of the playable episodes this person has watched, for "x of N". */
 export function watchedCount(episodes: readonly EpisodeRule[], watches: readonly WatchRule[]): number {
   return playableEpisodes(episodes).filter((e) => isWatched(watches, e.id)).length;
+}
+
+/** How many of the playable episodes this person has fully completed (watched + quiz). */
+export function completedCount(episodes: readonly EpisodeRule[], watches: readonly WatchRule[]): number {
+  return playableEpisodes(episodes).filter((e) => episodeComplete(e, watches)).length;
+}
+
+// ── Quizzes ─────────────────────────────────────────────────────────────────
+
+/** What scoring needs to know about one question. */
+export interface QuizQuestionRule {
+  id: string;
+  correctIndex: number;
+  isActive: boolean;
+}
+
+export interface QuizResult {
+  score: number;
+  total: number;
+  passed: boolean;
+}
+
+/**
+ * Scores a set of answers against the active questions. `answers` maps a
+ * question id to the chosen option's ORIGINAL index (the index into the
+ * question's `options`, not the shuffled presentation order). A question left
+ * unanswered or answered wrong scores nothing.
+ */
+export function scoreQuiz(
+  questions: readonly QuizQuestionRule[],
+  answers: Readonly<Record<string, number>>,
+  passPercent: number = DEFAULT_QUIZ_PASS_PERCENT
+): QuizResult {
+  const active = questions.filter((q) => q.isActive);
+  const total = active.length;
+  const score = active.filter((q) => answers[q.id] === q.correctIndex).length;
+  const bar = Number.isFinite(passPercent) ? Math.min(100, Math.max(0, passPercent)) : DEFAULT_QUIZ_PASS_PERCENT;
+  // No questions is not a pass to be earned — such an episode simply has no
+  // quiz, and `episodeComplete` only consults the quiz when `hasQuiz` is true.
+  const passed = total > 0 && (score / total) * 100 >= bar;
+  return { score, total, passed };
+}
+
+/** The quiz pass mark for an episode: its own, or the default. */
+export function quizPassPercentFor(episode: { quizPassPercent?: number | null }): number {
+  const p = episode.quizPassPercent;
+  return p != null && Number.isFinite(p) ? Math.min(100, Math.max(1, p)) : DEFAULT_QUIZ_PASS_PERCENT;
+}
+
+/**
+ * A pure Fisher–Yates shuffle that takes its randomness as an argument, so the
+ * check script can pin it. The server passes `Math.random`; the result is a
+ * new array, the input is left alone.
+ */
+export function shuffled<T>(items: readonly T[], rand: () => number = Math.random): T[] {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 /**
@@ -157,6 +241,21 @@ export const TRAINING_TEXT = {
   watchedPrefix: "Watched",
   upNext: "Up next",
   noEpisodes: "Your training episodes will appear here once they are published.",
+
+  /** The quiz after a worker episode. */
+  quizTitle: "Quick check",
+  quizIntro: "A few questions on what you just watched. Answer them to unlock the next episode.",
+  quizSubmit: "Submit answers",
+  quizSubmitting: "Checking…",
+  quizPassed: "Passed — the next episode is open.",
+  quizFailed: "Not quite. Look over the answers below and try again.",
+  quizTryAgain: "Try again",
+  quizPending: "Quiz to pass",
+  quizCorrect: "Correct",
+  quizWrong: "Your answer was wrong",
+  quizRightAnswer: "Correct answer",
+  quizAnswerAll: "Answer every question before submitting.",
+  quizError: "That did not go through. Check your connection and try again.",
 
   /** The one line added to the approval email while a series is published. */
   emailLine:

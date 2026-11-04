@@ -31,7 +31,7 @@ export default async function WorkerTrainingPage() {
       ) : (
         <TrainingSeries
           episodes={training.episodes.map(toEpisodeProps)}
-          watched={training.watched}
+          completed={training.completed}
           total={training.total}
           nextRequiredId={training.nextRequiredId}
         />

@@ -20,21 +20,25 @@ export default async function WorkerPortalLayout({ children }: { children: React
   const isLast =
     current != null &&
     training != null &&
-    training.episodes.every((e) => e.id === current.id || !e.requiredForGate || e.watchedAt != null);
+    training.episodes.every((e) => e.id === current.id || !e.requiredForGate || e.complete);
 
   return (
     <>
       {training && current ? (
         <WorkerTrainingGate
+          // Re-mount for each episode so no watched/progress state carries over
+          // from the episode just finished (which would enable Next too early).
+          key={current.id}
           episode={toEpisodeProps(current)}
           episodes={training.episodes.map((e) => ({
             id: e.id,
             episodeNo: e.episodeNo,
             title: e.title,
-            watchedAt: e.watchedAt?.toISOString() ?? null,
-            unlocked: e.unlocked,
+            complete: e.complete,
+            hasQuiz: e.hasQuiz,
+            quizPassedAt: e.quizPassedAt?.toISOString() ?? null,
           }))}
-          watched={training.watched}
+          completed={training.completed}
           total={training.total}
           isLast={isLast}
         />
