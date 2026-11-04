@@ -896,6 +896,67 @@ model WorkerApplication {
   reviewedAt     DateTime?
   /// Set to the Worker.id created on approval.
   workerId       String?           @unique
+  /// Phase 4: the screening pipeline stage (SCREEN_SENT … FINAL_PASSED).
+  /// Null = the direct-approve flow (the default); set only when the COO or
+  /// founder opts this application into screening.
+  screeningStage String?
+  screening      ScreeningAssignment?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([status])
+}
+
+/// A founder-authored screening question (the bank). EYE = one paragraph a
+/// candidate marks AI or human; REL = a topic with ten sources to classify by
+/// relevance. REWRITE and FORMAT are reserved for a later phase.
+model ScreeningItem {
+  id          String   @id @default(cuid())
+  kind        String // "EYE" | "REL" | "REWRITE" | "FORMAT"
+  /// EYE: { text, source? }  REL: { topic, sources: [{title, authors?, year?, journal?, abstract?}] }
+  payload     Json
+  /// EYE: { isAI }  REL: { labels: RelevanceLabel[] }  — never sent to a candidate.
+  answerKey   Json
+  isActive    Boolean  @default(true)
+  notes       String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([kind, isActive])
+}
+
+/// One candidate's screening instance: the unguessable token IS the link, the
+/// drawn items, the answers and the automatic score. One per application.
+model ScreeningAssignment {
+  id             String            @id @default(cuid())
+  applicationId  String            @unique
+  application    WorkerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  /// 32-hex; the credential in /screen/{token}.
+  token          String            @unique
+  /// SENT | IN_PROGRESS | SUBMITTED
+  status         String            @default("SENT")
+  /// The Eye items drawn for this sitting, and the one relevance item.
+  eyeItemIds     String[]
+  relItemId      String?
+  /// { eye: { "<itemId>": { choice, tell } }, rel: { "<index>": label } }
+  answers        Json?
+  eyeCorrect     Int?
+  eyeTotal       Int?
+  relCorrect     Int?
+  relTotal       Int?
+  overallPercent Int?
+  /// PASS | FAIL | BORDERLINE (the automatic verdict).
+  outcome        String?
+  /// The COO's call on a borderline, or an override: PASS | FAIL.
+  reviewDecision String?
+  reviewNote     String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  sentById       String?
+  startedAt      DateTime?
+  submittedAt    DateTime?
+  deadlineAt     DateTime?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 

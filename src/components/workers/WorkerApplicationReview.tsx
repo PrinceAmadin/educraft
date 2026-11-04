@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LuCheck, LuCircleAlert, LuLoaderCircle, LuPencil, LuX } from "react-icons/lu";
+import { LuCheck, LuCircleAlert, LuLoaderCircle, LuListChecks, LuPencil, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/forms/Field";
@@ -24,14 +24,52 @@ import {
   type EditWorkerApplicationInput,
 } from "@/lib/validations/worker-application";
 import type { WorkerApplicationRow } from "@/lib/services/worker-applications";
+import type { ScreeningStatusLite } from "@/lib/services/screening";
 
-export function WorkerApplicationReview({ rows }: { rows: WorkerApplicationRow[] }) {
+const SCREEN_CHIP: Record<string, { label: string; tone: string }> = {
+  SENT: { label: "Screening sent", tone: "bg-zone text-muted-foreground" },
+  IN_PROGRESS: { label: "Screening started", tone: "bg-gold/15 text-gold" },
+  PASS: { label: "Screening passed", tone: "bg-success/15 text-success" },
+  FAIL: { label: "Screening failed", tone: "bg-danger/15 text-danger" },
+  BORDERLINE: { label: "Borderline — review", tone: "bg-gold/15 text-gold" },
+};
+
+export function WorkerApplicationReview({
+  rows,
+  screening,
+}: {
+  rows: WorkerApplicationRow[];
+  screening: Record<string, ScreeningStatusLite>;
+}) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [editing, setEditing] = React.useState<WorkerApplicationRow | null>(null);
   const [rejecting, setRejecting] = React.useState<WorkerApplicationRow | null>(null);
   const [note, setNote] = React.useState("");
+
+  async function sendScreening(id: string) {
+    setBusy(`screen-${id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/workers/applications/${id}/screening`, { method: "POST" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "Could not send the screening test.");
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the screening test.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function screenState(s: ScreeningStatusLite | undefined): { key: string; chip: { label: string; tone: string } } | null {
+    if (!s) return null;
+    const key = s.status === "SUBMITTED" ? s.reviewDecision ?? s.outcome ?? "BORDERLINE" : s.status;
+    return { key, chip: SCREEN_CHIP[key] ?? SCREEN_CHIP.SENT };
+  }
 
   async function run(id: string, action: "approve" | "reject", body: unknown = {}) {
     setBusy(id);
@@ -92,7 +130,43 @@ export function WorkerApplicationReview({ rows }: { rows: WorkerApplicationRow[]
                 ) : null}
               </div>
 
-              <div className="flex shrink-0 flex-wrap gap-2">
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {(() => {
+                  const s = screenState(screening[row.id]);
+                  if (s) {
+                    return (
+                      <span className="inline-flex items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${s.chip.tone}`}>
+                          {s.chip.label}
+                          {screening[row.id]?.overallPercent != null ? ` · ${screening[row.id]!.overallPercent}%` : ""}
+                        </span>
+                        {screening[row.id]?.status === "SUBMITTED" ? (
+                          <Link
+                            href={`/admin/workers/screening?a=${screening[row.id]!.assignmentId}`}
+                            className="text-xs font-medium text-primary hover:underline"
+                          >
+                            Review →
+                          </Link>
+                        ) : null}
+                      </span>
+                    );
+                  }
+                  return (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy !== null}
+                      onClick={() => sendScreening(row.id)}
+                    >
+                      {busy === `screen-${row.id}` ? (
+                        <LuLoaderCircle className="size-4 animate-spin" aria-hidden />
+                      ) : (
+                        <LuListChecks className="size-4" aria-hidden />
+                      )}
+                      Send screening test
+                    </Button>
+                  );
+                })()}
                 <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => setEditing(row)}>
                   <LuPencil className="size-4" aria-hidden />
                   Edit
