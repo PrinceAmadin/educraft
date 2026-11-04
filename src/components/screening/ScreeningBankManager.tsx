@@ -24,6 +24,7 @@ interface Settings {
   minutes: number;
   eyeCount: number;
   rewriteClaude: boolean;
+  formatCount: number;
 }
 interface Item {
   id: string;
@@ -218,6 +219,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved: () =
   const [minutes, setMinutes] = React.useState(String(settings.minutes));
   const [eyeCount, setEyeCount] = React.useState(String(settings.eyeCount));
   const [rewriteClaude, setRewriteClaude] = React.useState(settings.rewriteClaude);
+  const [formatCount, setFormatCount] = React.useState(String(settings.formatCount));
   const [busy, setBusy] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -230,7 +232,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved: () =
       const res = await fetch("/api/admin/settings/screening", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passPercent: Number(passPercent), borderlineMargin: Number(margin), minutes: Number(minutes), eyeCount: Number(eyeCount), rewriteClaude }),
+        body: JSON.stringify({ passPercent: Number(passPercent), borderlineMargin: Number(margin), minutes: Number(minutes), eyeCount: Number(eyeCount), rewriteClaude, formatCount: Number(formatCount) }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -261,6 +263,9 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved: () =
         </Field>
         <Field label="Paragraphs drawn" htmlFor="s-eye">
           <Input id="s-eye" type="number" min={1} max={50} value={eyeCount} onChange={(e) => setEyeCount(e.target.value)} />
+        </Field>
+        <Field label="Formatting faults" htmlFor="s-format" hint="0 switches the practical off">
+          <Input id="s-format" type="number" min={0} max={6} value={formatCount} onChange={(e) => setFormatCount(e.target.value)} />
         </Field>
       </div>
       <CheckboxRow checked={rewriteClaude} onChange={(e) => setRewriteClaude(e.target.checked)}>

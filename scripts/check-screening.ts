@@ -30,6 +30,7 @@ import {
   type RelevanceLabel,
 } from "../src/lib/screening/rules";
 import { REWRITE_MIN_PLANTED, bannedConstructions, scoreRewrite, validateRewriteItem } from "../src/lib/screening/rewrite";
+import { FORMAT_INJECTORS, FORMAT_INJECTOR_IDS } from "../src/lib/screening/format-test";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown) {
@@ -80,7 +81,9 @@ expect("rel unanswered scores nothing", scoreRelevance(correct, { 0: "CORE" }), 
 expect("overall equal weighting", overallScore({ eyeCorrect: 10, eyeTotal: 12, relCorrect: 8, relTotal: 10 }).overallPercent, Math.round((18 / 22) * 100));
 expect("overall with no questions is 0", overallScore({ eyeCorrect: 0, eyeTotal: 0, relCorrect: 0, relTotal: 0 }).overallPercent, 0);
 expect("a sitting with no rewrite scores exactly as before", overallScore({ eyeCorrect: 10, eyeTotal: 12, relCorrect: 8, relTotal: 10 }).rewriteTotal, 0);
+expect("a sitting with no formatting scores exactly as before", overallScore({ eyeCorrect: 10, eyeTotal: 12, relCorrect: 8, relTotal: 10 }).formatTotal, 0);
 expect("the rewrite is folded into the overall", overallScore({ eyeCorrect: 5, eyeTotal: 10, relCorrect: 5, relTotal: 10, rewriteCorrect: 4, rewriteTotal: 4 }).overallPercent, Math.round((14 / 24) * 100));
+expect("the formatting practical is folded into the overall", overallScore({ eyeCorrect: 5, eyeTotal: 10, relCorrect: 5, relTotal: 10, formatCorrect: 4, formatTotal: 6 }).overallPercent, Math.round((14 / 26) * 100));
 
 expect("clear pass at the bar", outcomeFor(70, 70, 10), "PASS");
 expect("above the bar passes", outcomeFor(85, 70, 10), "PASS");
@@ -170,6 +173,28 @@ throws("an Eye item with no isAI is refused", () => validateEyeItem({ text: "A l
   expect("a genuine AI paragraph is accepted and the note trimmed", [ok.payload.text === original.trim(), ok.payload.note], [true, "from a real submission"]);
 }
 
+// ── Formatting practical: each injector's "is it fixed?" reader ──────────────
+
+{
+  expect("the six formatting faults", FORMAT_INJECTOR_IDS, ["font", "size", "colour", "spacing", "align", "margin"]);
+  const by = (id: string) => FORMAT_INJECTORS.find((i) => i.id === id)!;
+  // Crafted fragments for each fault: a broken one (fault present) and a fixed one.
+  const run = (props: string) => `<w:p><w:pPr></w:pPr><w:r><w:rPr>${props}</w:rPr><w:t>text</w:t></w:r></w:p>`;
+  const para = (pPr: string) => `<w:p><w:pPr>${pPr}</w:pPr><w:r><w:t>text</w:t></w:r></w:p>`;
+
+  expect("font fault seen, fix cleared", [by("font").isFixed(run('<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>')), by("font").isFixed(run('<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>'))], [false, true]);
+  expect("size fault seen, fix cleared", [by("size").isFixed(run('<w:sz w:val="28"/>')), by("size").isFixed(run('<w:sz w:val="24"/>'))], [false, true]);
+  expect("size ignores complex-script size", by("size").isFixed(run('<w:sz w:val="24"/><w:szCs w:val="28"/>')), true);
+  expect("colour fault seen, fix cleared", [by("colour").isFixed(run('<w:color w:val="1F4E79"/>')), by("colour").isFixed(run('<w:color w:val="000000"/>'))], [false, true]);
+  expect("colour auto counts as black", by("colour").isFixed(run('<w:color w:val="auto"/>')), true);
+  expect("spacing fault seen, fix cleared", [by("spacing").isFixed(para('<w:spacing w:line="240" w:lineRule="auto"/>')), by("spacing").isFixed(para('<w:spacing w:line="480" w:lineRule="auto"/>'))], [false, true]);
+  expect("spacing with no line set is not a fault", by("spacing").isFixed(para("")), true);
+  expect("align fault seen, fix cleared", [by("align").isFixed(para('<w:jc w:val="left"/>')), by("align").isFixed(para('<w:jc w:val="both"/>'))], [false, true]);
+  expect("align with no jc set is not a fault", by("align").isFixed(para("")), true);
+  expect("margin fault seen, fix cleared", [by("margin").isFixed('<w:pgMar w:top="720" w:bottom="1440"/>'), by("margin").isFixed('<w:pgMar w:top="1440" w:bottom="1440"/>')], [false, true]);
+  expect("margin within tolerance passes", by("margin").isFixed('<w:pgMar w:top="1400"/>'), true);
+}
+
 // ── Wording ──────────────────────────────────────────────────────────────────
 
 const textValues = [
@@ -185,6 +210,12 @@ const textValues = [
   SCREENING_TEXT.rewriteParagraphLabel,
   SCREENING_TEXT.rewriteAnswerLabel,
   SCREENING_TEXT.rewritePlaceholder,
+  SCREENING_TEXT.formatTitle,
+  SCREENING_TEXT.formatBody,
+  SCREENING_TEXT.formatDownloadLabel,
+  SCREENING_TEXT.formatUploadLabel,
+  SCREENING_TEXT.formatUploaded,
+  SCREENING_TEXT.formatUploadError,
   SCREENING_TEXT.submitLabel,
   SCREENING_TEXT.doneTitle,
   SCREENING_TEXT.doneBody,

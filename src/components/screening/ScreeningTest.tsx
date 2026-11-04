@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { LuCircleAlert, LuCircleCheck, LuClock, LuLoaderCircle } from "react-icons/lu";
+import { LuCircleAlert, LuCircleCheck, LuClock, LuDownload, LuLoaderCircle } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import {
   RELEVANCE_LABELS,
@@ -29,6 +29,7 @@ interface View {
   eye: CandidateEye[];
   rel: CandidateRel | null;
   rewrite: { text: string } | null;
+  format: { faults: number; uploaded: boolean } | null;
 }
 
 /**
@@ -105,6 +106,9 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
   const [eye, setEye] = React.useState<Record<string, { choice: "AI" | "HUMAN"; tell: string }>>({});
   const [rel, setRel] = React.useState<Record<string, RelevanceLabel>>({});
   const [rewrite, setRewrite] = React.useState("");
+  const [formatUploaded, setFormatUploaded] = React.useState(view.format?.uploaded ?? false);
+  const [formatBusy, setFormatBusy] = React.useState(false);
+  const [formatProblem, setFormatProblem] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   const [remaining, setRemaining] = React.useState<number | null>(null);
@@ -117,7 +121,8 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
         const allEye = view.eye.every((e) => eye[e.id]?.choice);
         const allRel = !view.rel || view.rel.sources.every((_, i) => rel[String(i)]);
         const allRewrite = !view.rewrite || rewrite.trim().length > 0;
-        if (!allEye || !allRel || !allRewrite) {
+        const allFormat = !view.format || formatUploaded;
+        if (!allEye || !allRel || !allRewrite || !allFormat) {
           setProblem(SCREENING_TEXT.answerAll);
           return;
         }
@@ -145,8 +150,28 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
         setBusy(false);
       }
     },
-    [token, eye, rel, rewrite, view.eye, view.rel, view.rewrite, onSubmitted]
+    [token, eye, rel, rewrite, formatUploaded, view.eye, view.rel, view.rewrite, view.format, onSubmitted]
   );
+
+  const uploadFormat = async (file: File) => {
+    setFormatBusy(true);
+    setFormatProblem(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch(`/api/screen/${token}/format-upload`, { method: "POST", body });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => null)) as { error?: string } | null;
+        setFormatProblem(b?.error ?? SCREENING_TEXT.formatUploadError);
+        return;
+      }
+      setFormatUploaded(true);
+    } catch {
+      setFormatProblem(SCREENING_TEXT.formatUploadError);
+    } finally {
+      setFormatBusy(false);
+    }
+  };
 
   // Count the clock down and submit what they have when it runs out.
   React.useEffect(() => {
@@ -307,6 +332,53 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
               className="mt-1 w-full rounded-lg bg-card p-3 text-sm leading-relaxed text-foreground shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
+        </section>
+      ) : null}
+
+      {/* Part 4 — Fix the formatting */}
+      {view.format ? (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">{SCREENING_TEXT.formatTitle}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{SCREENING_TEXT.formatBody}</p>
+          </div>
+          <a
+            href={`/api/screen/${token}/format-file`}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-zone px-4 text-sm font-medium text-foreground transition-colors hover:bg-zone/70"
+          >
+            <LuDownload className="size-4" aria-hidden />
+            {SCREENING_TEXT.formatDownloadLabel}
+          </a>
+          <div className="rounded-xl bg-zone p-4">
+            <p className="meta-label">{SCREENING_TEXT.formatUploadLabel}</p>
+            <input
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              disabled={formatBusy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadFormat(f);
+                e.target.value = "";
+              }}
+              className="mt-2 block w-full text-sm text-foreground file:mr-3 file:min-h-[40px] file:cursor-pointer file:rounded-lg file:border-0 file:bg-card file:px-4 file:text-sm file:font-medium file:text-foreground file:shadow-soft"
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">{SCREENING_TEXT.formatUploadHint}</p>
+            {formatBusy ? (
+              <p className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> {SCREENING_TEXT.submitting}
+              </p>
+            ) : formatUploaded ? (
+              <p className="mt-2 flex items-center gap-2 text-sm text-primary">
+                <LuCircleCheck className="size-4" aria-hidden /> {SCREENING_TEXT.formatUploaded}
+              </p>
+            ) : null}
+            {formatProblem ? (
+              <p role="alert" className="mt-2 flex items-start gap-2 text-sm text-danger">
+                <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                {formatProblem}
+              </p>
+            ) : null}
+          </div>
         </section>
       ) : null}
 

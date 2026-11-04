@@ -100,14 +100,18 @@ export interface ScreeningScore {
   /** The rewrite test (0 of each when the bank has no rewrite paragraph). */
   rewriteCorrect: number;
   rewriteTotal: number;
+  /** The formatting practical (0 of each when it is switched off). */
+  formatCorrect: number;
+  formatTotal: number;
   /** Every question weighted the same. */
   overallPercent: number;
 }
 
 /**
  * Combines the tests into one percentage, each question weighted equally. The
- * rewrite is optional — its correct/total default to 0, so a sitting without a
- * rewrite paragraph scores exactly as it did before the test existed.
+ * rewrite and the formatting practical are optional — their correct/total
+ * default to 0, so a sitting without them scores exactly as it did before they
+ * existed.
  */
 export function overallScore(input: {
   eyeCorrect: number;
@@ -116,11 +120,15 @@ export function overallScore(input: {
   relTotal: number;
   rewriteCorrect?: number;
   rewriteTotal?: number;
+  formatCorrect?: number;
+  formatTotal?: number;
 }): ScreeningScore {
   const rewriteCorrect = input.rewriteCorrect ?? 0;
   const rewriteTotal = input.rewriteTotal ?? 0;
-  const total = input.eyeTotal + input.relTotal + rewriteTotal;
-  const correct = input.eyeCorrect + input.relCorrect + rewriteCorrect;
+  const formatCorrect = input.formatCorrect ?? 0;
+  const formatTotal = input.formatTotal ?? 0;
+  const total = input.eyeTotal + input.relTotal + rewriteTotal + formatTotal;
+  const correct = input.eyeCorrect + input.relCorrect + rewriteCorrect + formatCorrect;
   const overallPercent = total > 0 ? Math.round((correct / total) * 100) : 0;
   return {
     eyeCorrect: input.eyeCorrect,
@@ -129,6 +137,8 @@ export function overallScore(input: {
     relTotal: input.relTotal,
     rewriteCorrect,
     rewriteTotal,
+    formatCorrect,
+    formatTotal,
     overallPercent,
   };
 }
@@ -272,6 +282,15 @@ export const SCREENING_TEXT = {
   rewriteParagraphLabel: "The paragraph to rewrite",
   rewriteAnswerLabel: "Your rewrite",
   rewritePlaceholder: "Write your version here…",
+
+  formatTitle: "Part 4 — Fix the formatting",
+  formatBody:
+    "Download the Word document below. The writing is fine, but the formatting is wrong in a few places. Fix every one in Microsoft Word (or a compatible editor), save the file, and upload it here. Do not change the words — only the formatting.",
+  formatDownloadLabel: "Download the document",
+  formatUploadLabel: "Upload your fixed document",
+  formatUploadHint: "A Word document (.docx), up to 5 MB.",
+  formatUploaded: "Received. You can upload it again to replace it before you submit.",
+  formatUploadError: "That file did not upload. It must be a Word document (.docx) under 5 MB.",
 
   submitLabel: "Submit my answers",
   submitting: "Submitting…",

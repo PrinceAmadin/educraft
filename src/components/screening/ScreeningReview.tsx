@@ -97,6 +97,7 @@ interface Detail {
   eye: EyeRow[];
   rel: RelRow[];
   rewrite: RewriteDetail | null;
+  format: { correct: number; total: number; uploaded: boolean; remaining: { id: string; ruleId: string; label: string; fix: string }[] } | null;
 }
 
 export function ScreeningReviewDetailView({ detail }: { detail: Detail }) {
@@ -154,6 +155,7 @@ export function ScreeningReviewDetailView({ detail }: { detail: Detail }) {
             <p className="text-xs text-muted-foreground">
               Spot AI {detail.eyeCorrect}/{detail.eyeTotal} · Sources {detail.relCorrect}/{detail.relTotal}
               {detail.rewrite ? ` · Rewrite ${detail.rewriteCorrect ?? 0}/${detail.rewriteTotal ?? 0}` : ""}
+              {detail.format ? ` · Formatting ${detail.format.correct}/${detail.format.total}` : ""}
             </p>
           </div>
         </div>
@@ -262,6 +264,37 @@ export function ScreeningReviewDetailView({ detail }: { detail: Detail }) {
             </p>
           )}
           {detail.rewrite.rubric ? <p className="text-sm text-muted-foreground">{detail.rewrite.rubric}</p> : null}
+        </section>
+      ) : null}
+
+      {/* Part 4 — the formatting practical */}
+      {detail.format ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">
+            Formatting — {detail.format.correct}/{detail.format.total} faults fixed
+          </h2>
+          {!detail.format.uploaded ? (
+            <p className="flex items-start gap-2 text-sm text-danger">
+              <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              No document was uploaded.
+            </p>
+          ) : detail.format.remaining.length > 0 ? (
+            <div className="surface p-3">
+              <p className="meta-label">Still wrong in their document</p>
+              <ul className="mt-1 space-y-1.5">
+                {detail.format.remaining.map((r) => (
+                  <li key={r.id} className="flex items-start gap-2 text-sm">
+                    <LuCircleX className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
+                    <span className="min-w-0 flex-1 text-foreground">{r.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-success">
+              <LuCircleCheck className="size-4 shrink-0" aria-hidden /> Every planted fault was fixed.
+            </p>
+          )}
         </section>
       ) : null}
 

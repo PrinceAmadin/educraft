@@ -30,6 +30,7 @@ import {
 } from "@/lib/screening/rules";
 import { bannedConstructions, rewriteRulesLeft, scoreRewrite, validateRewriteItem } from "@/lib/screening/rewrite";
 import { runRewriteRubric } from "@/lib/screening/rewrite-rubric";
+import { FORMAT_INJECTOR_IDS, buildFormatTest, gradeFormatTest } from "@/lib/screening/format-test";
 
 /**
  * The Stage-1 worker screening: the question bank, a candidate's tokened test,
@@ -64,8 +65,10 @@ const SETTING_KEYS = {
   borderlineMargin: "screening_borderline_margin",
   minutes: "screening_minutes",
   eyeCount: "screening_eye_count",
-  /** Reserved for the rewrite test (next phase): Claude rubric scoring on/off. */
+  /** The optional Claude voice rubric on the rewrite test, on/off. */
   rewriteClaude: "screening_rewrite_claude",
+  /** How many formatting faults the practical plants; 0 switches the practical off. */
+  formatCount: "screening_format_count",
 } as const;
 
 export interface ScreeningSettings {
@@ -74,6 +77,7 @@ export interface ScreeningSettings {
   minutes: number;
   eyeCount: number;
   rewriteClaude: boolean;
+  formatCount: number;
 }
 
 export async function getScreeningSettings(): Promise<ScreeningSettings> {
@@ -89,6 +93,7 @@ export async function getScreeningSettings(): Promise<ScreeningSettings> {
     minutes: num(SETTING_KEYS.minutes, DEFAULT_SCREENING_MINUTES, 5, 240),
     eyeCount: num(SETTING_KEYS.eyeCount, DEFAULT_EYE_COUNT, 1, 50),
     rewriteClaude: byKey.get(SETTING_KEYS.rewriteClaude) === "true",
+    formatCount: num(SETTING_KEYS.formatCount, 0, 0, FORMAT_INJECTOR_IDS.length),
   };
 }
 
@@ -99,6 +104,7 @@ export async function updateScreeningSettings(input: Partial<ScreeningSettings>)
   if (input.minutes !== undefined) writes.push({ key: SETTING_KEYS.minutes, value: String(Math.round(input.minutes)) });
   if (input.eyeCount !== undefined) writes.push({ key: SETTING_KEYS.eyeCount, value: String(Math.round(input.eyeCount)) });
   if (input.rewriteClaude !== undefined) writes.push({ key: SETTING_KEYS.rewriteClaude, value: input.rewriteClaude ? "true" : "false" });
+  if (input.formatCount !== undefined) writes.push({ key: SETTING_KEYS.formatCount, value: String(Math.round(input.formatCount)) });
   await db.$transaction(writes.map((w) => db.setting.upsert({ where: { key: w.key }, create: w, update: { value: w.value } })));
 }
 
@@ -236,6 +242,8 @@ export async function sendScreening(applicationId: string, actorId: string): Pro
   const rewriteTotal = rewriteItem
     ? bannedConstructions(String(((rewriteItem.payload ?? {}) as { text?: string }).text ?? "")).length
     : 0;
+  // The formatting practical (when switched on): a random subset of the fixed fault menu.
+  const formatInjected = settings.formatCount > 0 ? drawItems(FORMAT_INJECTOR_IDS.map((id) => ({ id })), settings.formatCount).map((i) => i.id) : [];
   const token = crypto.randomBytes(16).toString("hex");
 
   await db.$transaction([
@@ -250,6 +258,8 @@ export async function sendScreening(applicationId: string, actorId: string): Pro
         eyeTotal: eyeItemIds.length,
         relTotal: relItemId ? RELEVANCE_SOURCE_COUNT : 0,
         rewriteTotal,
+        formatInjected,
+        formatTotal: formatInjected.length,
         sentById: actorId,
       },
     }),
@@ -290,6 +300,8 @@ export interface CandidateView {
   eye: CandidateEyeItem[];
   rel: CandidateRelItem | null;
   rewrite: CandidateRewriteItem | null;
+  /** The formatting practical: how many faults to fix, and whether a file has been uploaded. */
+  format: { faults: number; uploaded: boolean } | null;
 }
 
 async function loadAssignment(token: string) {
@@ -336,7 +348,36 @@ export async function getScreeningForCandidate(token: string): Promise<Candidate
     eye: eyeItemsFor(a.eyeItemIds, items),
     rel: rel ? relItemFor(rel.payload) : null,
     rewrite: rewrite && rewriteText ? { text: rewriteText } : null,
+    format: a.formatInjected.length > 0 ? { faults: a.formatInjected.length, uploaded: a.formatCorrect != null } : null,
   };
+}
+
+/** The broken formatting-test .docx for this sitting, built on demand from the planted faults. Null when there is none. */
+export async function getFormatFile(token: string): Promise<{ bytes: Buffer; filename: string } | null> {
+  const a = await loadAssignment(token);
+  if (!a || a.formatInjected.length === 0) return null;
+  const bytes = await buildFormatTest(a.formatInjected);
+  return { bytes, filename: "EduCraft formatting test.docx" };
+}
+
+/** Grades a candidate's fixed formatting document and records the result. Can be redone until they submit. */
+export async function gradeFormatUpload(token: string, buffer: Uint8Array): Promise<{ received: true }> {
+  const a = await loadAssignment(token);
+  if (!a) throw new ScreeningError("This link is not valid", 404);
+  if (a.status === "SUBMITTED") throw new ScreeningError("You have already finished this test", 409);
+  if (a.formatInjected.length === 0) throw new ScreeningError("This test has no formatting part", 409);
+  if (!a.startedAt) throw new ScreeningError("Start the test before uploading", 409);
+
+  const grade = await gradeFormatTest(buffer, a.formatInjected);
+  await db.screeningAssignment.updateMany({
+    where: { token, status: { not: "SUBMITTED" } },
+    data: {
+      formatCorrect: grade.correct,
+      formatTotal: grade.total,
+      formatRemaining: grade.remaining as unknown as Prisma.InputJsonValue,
+    },
+  });
+  return { received: true };
 }
 
 /** Starts the clock. Idempotent: re-starting keeps the first deadline. */
@@ -406,6 +447,9 @@ export async function submitScreening(token: string, answers: SubmitAnswers): Pr
     relTotal: relLabels.length,
     rewriteCorrect: rewriteScore?.correct ?? 0,
     rewriteTotal: rewriteScore?.total ?? 0,
+    // The formatting practical is graded when the file is uploaded; read what was stored.
+    formatCorrect: a.formatCorrect ?? 0,
+    formatTotal: a.formatTotal ?? a.formatInjected.length,
   });
   const settings = await getScreeningSettings();
   const outcome = outcomeFor(score.overallPercent, settings.passPercent, settings.borderlineMargin);
@@ -474,6 +518,13 @@ export interface ReviewRewrite {
   rubric: string | null;
 }
 
+export interface ReviewFormat {
+  correct: number;
+  total: number;
+  uploaded: boolean;
+  remaining: { id: string; ruleId: string; label: string; fix: string }[];
+}
+
 export interface ReviewDetail {
   assignmentId: string;
   applicationId: string;
@@ -494,6 +545,7 @@ export interface ReviewDetail {
   eye: ReviewEyeRow[];
   rel: ReviewRelRow[];
   rewrite: ReviewRewrite | null;
+  format: ReviewFormat | null;
 }
 
 /** The submitted sittings awaiting a decision: borderline first, then clear ones for the record. */
@@ -593,6 +645,16 @@ export async function getScreeningReviewDetail(assignmentId: string): Promise<Re
     };
   }
 
+  const format: ReviewFormat | null =
+    a.formatInjected.length > 0
+      ? {
+          correct: a.formatCorrect ?? 0,
+          total: a.formatTotal ?? a.formatInjected.length,
+          uploaded: a.formatCorrect != null,
+          remaining: Array.isArray(a.formatRemaining) ? (a.formatRemaining as unknown as ReviewFormat["remaining"]) : [],
+        }
+      : null;
+
   return {
     assignmentId: a.id,
     applicationId: a.application.id,
@@ -613,6 +675,7 @@ export async function getScreeningReviewDetail(assignmentId: string): Promise<Re
     eye,
     rel,
     rewrite,
+    format,
   };
 }
 

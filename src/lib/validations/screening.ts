@@ -35,6 +35,7 @@ export const updateScreeningSettingsSchema = z
     minutes: z.coerce.number().int().min(5).max(240).optional(),
     eyeCount: z.coerce.number().int().min(1).max(50).optional(),
     rewriteClaude: z.boolean().optional(),
+    formatCount: z.coerce.number().int().min(0).max(6).optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), "Nothing to change");
 

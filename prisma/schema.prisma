@@ -951,6 +951,11 @@ model ScreeningAssignment {
   rewriteTotal   Int?
   /// The optional Claude voice rubric's advisory line (only when screening_rewrite_claude is on).
   rewriteRubric  String?
+  /// Formatting practical: the fault ids planted in the broken .docx, how many the candidate cleared, and which remain.
+  formatInjected String[]
+  formatCorrect  Int?
+  formatTotal    Int?
+  formatRemaining Json?
   overallPercent Int?
   /// PASS | FAIL | BORDERLINE (the automatic verdict).
   outcome        String?
