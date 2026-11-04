@@ -69,6 +69,16 @@ interface RelRow {
   chosen: RelevanceLabel | null;
   right: boolean;
 }
+interface RewriteDetail {
+  original: string;
+  answer: string;
+  correct: number;
+  total: number;
+  remaining: number;
+  tooShort: boolean;
+  rulesLeft: { label: string; quote: string; fix: string }[];
+  rubric: string | null;
+}
 interface Detail {
   assignmentId: string;
   candidate: string;
@@ -80,10 +90,13 @@ interface Detail {
   eyeTotal: number | null;
   relCorrect: number | null;
   relTotal: number | null;
+  rewriteCorrect: number | null;
+  rewriteTotal: number | null;
   submittedAt: string | Date | null;
   topic: string | null;
   eye: EyeRow[];
   rel: RelRow[];
+  rewrite: RewriteDetail | null;
 }
 
 export function ScreeningReviewDetailView({ detail }: { detail: Detail }) {
@@ -140,6 +153,7 @@ export function ScreeningReviewDetailView({ detail }: { detail: Detail }) {
             <p className="font-mono text-lg font-semibold text-foreground">{detail.overallPercent ?? 0}%</p>
             <p className="text-xs text-muted-foreground">
               Spot AI {detail.eyeCorrect}/{detail.eyeTotal} · Sources {detail.relCorrect}/{detail.relTotal}
+              {detail.rewrite ? ` · Rewrite ${detail.rewriteCorrect ?? 0}/${detail.rewriteTotal ?? 0}` : ""}
             </p>
           </div>
         </div>
@@ -202,6 +216,52 @@ export function ScreeningReviewDetailView({ detail }: { detail: Detail }) {
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {/* Part 3 — the rewrite */}
+      {detail.rewrite ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">
+            Rewrite — {detail.rewrite.correct}/{detail.rewrite.total} tells cleared
+            {detail.rewrite.remaining > 0 ? `, ${detail.rewrite.remaining} still present` : ""}
+          </h2>
+          {detail.rewrite.tooShort ? (
+            <p className="flex items-start gap-2 text-sm text-danger">
+              <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              Too short to score — the content looks cut rather than rewritten.
+            </p>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="surface p-3">
+              <p className="meta-label">The AI paragraph</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{detail.rewrite.original}</p>
+            </div>
+            <div className="surface p-3">
+              <p className="meta-label">Their rewrite</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{detail.rewrite.answer || "—"}</p>
+            </div>
+          </div>
+          {detail.rewrite.rulesLeft.length > 0 ? (
+            <div className="surface p-3">
+              <p className="meta-label">Still in their rewrite</p>
+              <ul className="mt-1 space-y-1.5">
+                {detail.rewrite.rulesLeft.map((r, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm">
+                    <LuCircleX className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
+                    <span className="min-w-0 flex-1 text-foreground">
+                      <span className="font-medium">{r.label}:</span> &ldquo;{r.quote}&rdquo;
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="flex items-center gap-2 text-sm text-success">
+              <LuCircleCheck className="size-4 shrink-0" aria-hidden /> No banned constructions left in their rewrite.
+            </p>
+          )}
+          {detail.rewrite.rubric ? <p className="text-sm text-muted-foreground">{detail.rewrite.rubric}</p> : null}
         </section>
       ) : null}
 

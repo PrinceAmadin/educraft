@@ -29,6 +29,7 @@ import {
   type EyeItemKey,
   type RelevanceLabel,
 } from "../src/lib/screening/rules";
+import { REWRITE_MIN_PLANTED, bannedConstructions, scoreRewrite, validateRewriteItem } from "../src/lib/screening/rewrite";
 
 let failures = 0;
 function expect(label: string, actual: unknown, wanted: unknown) {
@@ -78,6 +79,8 @@ expect("rel unanswered scores nothing", scoreRelevance(correct, { 0: "CORE" }), 
 
 expect("overall equal weighting", overallScore({ eyeCorrect: 10, eyeTotal: 12, relCorrect: 8, relTotal: 10 }).overallPercent, Math.round((18 / 22) * 100));
 expect("overall with no questions is 0", overallScore({ eyeCorrect: 0, eyeTotal: 0, relCorrect: 0, relTotal: 0 }).overallPercent, 0);
+expect("a sitting with no rewrite scores exactly as before", overallScore({ eyeCorrect: 10, eyeTotal: 12, relCorrect: 8, relTotal: 10 }).rewriteTotal, 0);
+expect("the rewrite is folded into the overall", overallScore({ eyeCorrect: 5, eyeTotal: 10, relCorrect: 5, relTotal: 10, rewriteCorrect: 4, rewriteTotal: 4 }).overallPercent, Math.round((14 / 24) * 100));
 
 expect("clear pass at the bar", outcomeFor(70, 70, 10), "PASS");
 expect("above the bar passes", outcomeFor(85, 70, 10), "PASS");
@@ -133,6 +136,40 @@ throws("an Eye item with no isAI is refused", () => validateEyeItem({ text: "A l
   throws("a too-short topic is refused", () => validateRelevanceItem({ topic: "x", sources }, { labels }));
 }
 
+// ── Rewrite test ───────────────────────────────────────────────────────────────
+
+{
+  // A paragraph thick with AI tells: two stock openers, first person, hype.
+  const original =
+    "It is important to note that our organisation utilises cutting-edge, groundbreaking solutions. In today's rapidly evolving digital landscape, we believe these tools are essential.";
+  const planted = bannedConstructions(original).length;
+  expect("the test paragraph carries several banned constructions", planted >= 3, true);
+
+  // A clean recast: plain, specific, long enough, no tells.
+  const clean =
+    "The organisation uses modern software to manage its academic projects. The tools were chosen after comparing three options on cost and reliability across the 2024 session.";
+  const cleanScore = scoreRewrite(original, clean);
+  expect("a clean rewrite clears every tell", [cleanScore.remaining, cleanScore.correct, cleanScore.percent], [0, planted, 100]);
+  expect("a clean rewrite is not flagged too short", cleanScore.tooShort, false);
+
+  // One stock opener left behind: not a clean pass.
+  const withOpener =
+    "It is important to note that the organisation uses modern software, chosen carefully for its cost and its reliability across the whole academic session this year.";
+  const partial = scoreRewrite(original, withOpener);
+  expect("a leftover tell keeps remaining above zero", partial.remaining >= 1, true);
+  expect("a leftover tell scores below full marks", partial.percent < 100, true);
+
+  // Gaming by deletion: too short to count.
+  const tiny = scoreRewrite(original, "The org uses tools.");
+  expect("a cut-down rewrite is too short and scores zero", [tiny.tooShort, tiny.correct, tiny.percent], [true, 0, 0]);
+
+  // Bank validation: a clean paragraph has nothing to fix.
+  throws("a paragraph with no tells is refused as a rewrite item", () => validateRewriteItem({ text: clean }, {}));
+  expect("the planted minimum is at least two", REWRITE_MIN_PLANTED >= 2, true);
+  const ok = validateRewriteItem({ text: original, note: "  from a real submission  " }, {});
+  expect("a genuine AI paragraph is accepted and the note trimmed", [ok.payload.text === original.trim(), ok.payload.note], [true, "from a real submission"]);
+}
+
 // ── Wording ──────────────────────────────────────────────────────────────────
 
 const textValues = [
@@ -143,6 +180,11 @@ const textValues = [
   SCREENING_TEXT.eyeBody,
   SCREENING_TEXT.relTitle,
   SCREENING_TEXT.relBody,
+  SCREENING_TEXT.rewriteTitle,
+  SCREENING_TEXT.rewriteBody,
+  SCREENING_TEXT.rewriteParagraphLabel,
+  SCREENING_TEXT.rewriteAnswerLabel,
+  SCREENING_TEXT.rewritePlaceholder,
   SCREENING_TEXT.submitLabel,
   SCREENING_TEXT.doneTitle,
   SCREENING_TEXT.doneBody,

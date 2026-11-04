@@ -936,15 +936,21 @@ model ScreeningAssignment {
   token          String            @unique
   /// SENT | IN_PROGRESS | SUBMITTED
   status         String            @default("SENT")
-  /// The Eye items drawn for this sitting, and the one relevance item.
+  /// The Eye items drawn for this sitting, the one relevance item, the one rewrite item.
   eyeItemIds     String[]
   relItemId      String?
-  /// { eye: { "<itemId>": { choice, tell } }, rel: { "<index>": label } }
+  rewriteItemId  String?
+  /// { eye: { "<itemId>": { choice, tell } }, rel: { "<index>": label }, rewrite: "<text>" }
   answers        Json?
   eyeCorrect     Int?
   eyeTotal       Int?
   relCorrect     Int?
   relTotal       Int?
+  /// Rewrite test: banned constructions cleared out of those planted in the paragraph.
+  rewriteCorrect Int?
+  rewriteTotal   Int?
+  /// The optional Claude voice rubric's advisory line (only when screening_rewrite_claude is on).
+  rewriteRubric  String?
   overallPercent Int?
   /// PASS | FAIL | BORDERLINE (the automatic verdict).
   outcome        String?

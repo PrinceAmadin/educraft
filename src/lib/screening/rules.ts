@@ -7,11 +7,12 @@
  * instance (`ScreeningAssignment`) live in the database; this file only scores
  * them and holds the wording.
  *
- * This session ships the two self-scoring tests — the Eye test (spot AI) and
- * reference relevance (classify sources). The formatting practical and the
- * rewrite test (which lean on the chapter gate and the voice scan) are a later
- * phase; their `kind` values are reserved here so the bank and the stage
- * machine do not have to change when they land.
+ * The self-scoring tests: the Eye test (spot AI), reference relevance (classify
+ * sources) and the rewrite test (recast an AI-sounding paragraph, scored by the
+ * voice scan — see `rewrite.ts`, kept apart so this file stays free of the
+ * quality-layer import). The formatting practical (which leans on the chapter
+ * gate) is a later phase; its `kind` is reserved here so the bank and the stage
+ * machine do not have to change when it lands.
  */
 
 export const SCREENING_KINDS = ["EYE", "REL", "REWRITE", "FORMAT"] as const;
@@ -96,21 +97,40 @@ export interface ScreeningScore {
   eyeTotal: number;
   relCorrect: number;
   relTotal: number;
+  /** The rewrite test (0 of each when the bank has no rewrite paragraph). */
+  rewriteCorrect: number;
+  rewriteTotal: number;
   /** Every question weighted the same. */
   overallPercent: number;
 }
 
-/** Combines the two tests into one percentage, each question weighted equally. */
+/**
+ * Combines the tests into one percentage, each question weighted equally. The
+ * rewrite is optional — its correct/total default to 0, so a sitting without a
+ * rewrite paragraph scores exactly as it did before the test existed.
+ */
 export function overallScore(input: {
   eyeCorrect: number;
   eyeTotal: number;
   relCorrect: number;
   relTotal: number;
+  rewriteCorrect?: number;
+  rewriteTotal?: number;
 }): ScreeningScore {
-  const total = input.eyeTotal + input.relTotal;
-  const correct = input.eyeCorrect + input.relCorrect;
+  const rewriteCorrect = input.rewriteCorrect ?? 0;
+  const rewriteTotal = input.rewriteTotal ?? 0;
+  const total = input.eyeTotal + input.relTotal + rewriteTotal;
+  const correct = input.eyeCorrect + input.relCorrect + rewriteCorrect;
   const overallPercent = total > 0 ? Math.round((correct / total) * 100) : 0;
-  return { ...input, overallPercent };
+  return {
+    eyeCorrect: input.eyeCorrect,
+    eyeTotal: input.eyeTotal,
+    relCorrect: input.relCorrect,
+    relTotal: input.relTotal,
+    rewriteCorrect,
+    rewriteTotal,
+    overallPercent,
+  };
 }
 
 export type ScreeningOutcome = "PASS" | "FAIL" | "BORDERLINE";
@@ -245,6 +265,13 @@ export const SCREENING_TEXT = {
   relBody:
     "Here is a project topic and ten sources a student might cite. For each source, say how relevant it is to the topic.",
   relTopicLabel: "The project topic",
+
+  rewriteTitle: "Part 3 — Rewrite it in your own voice",
+  rewriteBody:
+    "The paragraph below reads like it was written by AI. Rewrite it the way a careful student would: plain, specific and direct, keeping the meaning but losing the stock phrases, filler and hype. Do not simply shorten it.",
+  rewriteParagraphLabel: "The paragraph to rewrite",
+  rewriteAnswerLabel: "Your rewrite",
+  rewritePlaceholder: "Write your version here…",
 
   submitLabel: "Submit my answers",
   submitting: "Submitting…",

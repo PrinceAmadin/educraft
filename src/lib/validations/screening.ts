@@ -8,6 +8,7 @@ export const screeningSubmitSchema = z.object({
     z.object({ choice: z.enum(["AI", "HUMAN"]), tell: z.string().trim().max(500).optional() })
   ),
   rel: z.record(z.string(), z.enum(RELEVANCE_LABELS)),
+  rewrite: z.string().trim().max(8000).optional(),
 });
 
 /** The founder creating a bank item. Per-kind validation runs server-side in `createScreeningItem`. */

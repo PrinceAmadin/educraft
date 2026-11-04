@@ -28,6 +28,7 @@ interface View {
   expired: boolean;
   eye: CandidateEye[];
   rel: CandidateRel | null;
+  rewrite: { text: string } | null;
 }
 
 /**
@@ -103,6 +104,7 @@ function Intro({ token, minutes, onStarted }: { token: string; minutes: number; 
 function InProgress({ token, view, onSubmitted }: { token: string; view: View; onSubmitted: () => void }) {
   const [eye, setEye] = React.useState<Record<string, { choice: "AI" | "HUMAN"; tell: string }>>({});
   const [rel, setRel] = React.useState<Record<string, RelevanceLabel>>({});
+  const [rewrite, setRewrite] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   const [remaining, setRemaining] = React.useState<number | null>(null);
@@ -114,7 +116,8 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
       if (!auto) {
         const allEye = view.eye.every((e) => eye[e.id]?.choice);
         const allRel = !view.rel || view.rel.sources.every((_, i) => rel[String(i)]);
-        if (!allEye || !allRel) {
+        const allRewrite = !view.rewrite || rewrite.trim().length > 0;
+        if (!allEye || !allRel || !allRewrite) {
           setProblem(SCREENING_TEXT.answerAll);
           return;
         }
@@ -126,7 +129,7 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
         const res = await fetch(`/api/screen/${token}/submit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ eye, rel }),
+          body: JSON.stringify({ eye, rel, rewrite: rewrite.trim() || undefined }),
         });
         if (!res.ok) {
           submittedRef.current = false;
@@ -142,7 +145,7 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
         setBusy(false);
       }
     },
-    [token, eye, rel, view.eye, view.rel, onSubmitted]
+    [token, eye, rel, rewrite, view.eye, view.rel, view.rewrite, onSubmitted]
   );
 
   // Count the clock down and submit what they have when it runs out.
@@ -279,6 +282,31 @@ function InProgress({ token, view, onSubmitted }: { token: string; view: View; o
               </li>
             ))}
           </ol>
+        </section>
+      ) : null}
+
+      {/* Part 3 — Rewrite */}
+      {view.rewrite ? (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">{SCREENING_TEXT.rewriteTitle}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{SCREENING_TEXT.rewriteBody}</p>
+          </div>
+          <div className="rounded-xl bg-zone p-4">
+            <p className="meta-label">{SCREENING_TEXT.rewriteParagraphLabel}</p>
+            <p className="mt-1 text-sm leading-relaxed text-foreground">{view.rewrite.text}</p>
+          </div>
+          <label className="block">
+            <span className="meta-label">{SCREENING_TEXT.rewriteAnswerLabel}</span>
+            <textarea
+              value={rewrite}
+              onChange={(e) => setRewrite(e.target.value)}
+              rows={8}
+              maxLength={8000}
+              placeholder={SCREENING_TEXT.rewritePlaceholder}
+              className="mt-1 w-full rounded-lg bg-card p-3 text-sm leading-relaxed text-foreground shadow-soft outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
         </section>
       ) : null}
 

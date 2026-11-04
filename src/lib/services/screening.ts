@@ -28,6 +28,8 @@ import {
   type RelevanceSource,
   type ScreeningKind,
 } from "@/lib/screening/rules";
+import { bannedConstructions, rewriteRulesLeft, scoreRewrite, validateRewriteItem } from "@/lib/screening/rewrite";
+import { runRewriteRubric } from "@/lib/screening/rewrite-rubric";
 
 /**
  * The Stage-1 worker screening: the question bank, a candidate's tokened test,
@@ -128,14 +130,14 @@ export async function listScreeningItems(kind?: ScreeningKind): Promise<BankItem
   }));
 }
 
-export async function countActiveItems(): Promise<{ eye: number; rel: number }> {
+export async function countActiveItems(): Promise<{ eye: number; rel: number; rewrite: number }> {
   const rows = await db.screeningItem.groupBy({
     by: ["kind"],
     where: { isActive: true },
     _count: { kind: true },
   });
   const byKind = new Map(rows.map((r) => [r.kind, r._count.kind]));
-  return { eye: byKind.get("EYE") ?? 0, rel: byKind.get("REL") ?? 0 };
+  return { eye: byKind.get("EYE") ?? 0, rel: byKind.get("REL") ?? 0, rewrite: byKind.get("REWRITE") ?? 0 };
 }
 
 export async function createScreeningItem(
@@ -191,6 +193,7 @@ function cleanItem(kind: ScreeningKind, payload: unknown, answerKey: unknown): {
   try {
     if (kind === "EYE") return validateEyeItem((payload ?? {}) as never, (answerKey ?? {}) as never);
     if (kind === "REL") return validateRelevanceItem((payload ?? {}) as never, (answerKey ?? {}) as never);
+    if (kind === "REWRITE") return validateRewriteItem((payload ?? {}) as never, answerKey);
     throw new ScreeningError("That question type is not available yet", 400);
   } catch (e) {
     if (e instanceof ScreeningError) throw e;
@@ -215,9 +218,10 @@ export async function sendScreening(applicationId: string, actorId: string): Pro
   if (application.screening) throw new ScreeningError("A screening test has already been sent", 409);
 
   const settings = await getScreeningSettings();
-  const [eyePool, relPool] = await Promise.all([
+  const [eyePool, relPool, rewritePool] = await Promise.all([
     db.screeningItem.findMany({ where: { kind: "EYE", isActive: true }, select: { id: true } }),
     db.screeningItem.findMany({ where: { kind: "REL", isActive: true }, select: { id: true } }),
+    db.screeningItem.findMany({ where: { kind: "REWRITE", isActive: true }, select: { id: true, payload: true } }),
   ]);
   if (eyePool.length === 0 || relPool.length === 0) {
     throw new ScreeningError("Add Eye-test and reference-relevance questions to the bank first", 409);
@@ -225,6 +229,13 @@ export async function sendScreening(applicationId: string, actorId: string): Pro
 
   const eyeItemIds = drawItems(eyePool, settings.eyeCount).map((i) => i.id);
   const relItemId = drawItems(relPool, 1)[0]?.id ?? null;
+  // The rewrite is optional: drawn only if the bank has one. Its total is the
+  // count of banned constructions planted in the paragraph (recomputed at submit).
+  const rewriteItem = rewritePool.length ? drawItems(rewritePool, 1)[0] : null;
+  const rewriteItemId = rewriteItem?.id ?? null;
+  const rewriteTotal = rewriteItem
+    ? bannedConstructions(String(((rewriteItem.payload ?? {}) as { text?: string }).text ?? "")).length
+    : 0;
   const token = crypto.randomBytes(16).toString("hex");
 
   await db.$transaction([
@@ -235,8 +246,10 @@ export async function sendScreening(applicationId: string, actorId: string): Pro
         status: "SENT",
         eyeItemIds,
         relItemId,
+        rewriteItemId,
         eyeTotal: eyeItemIds.length,
         relTotal: relItemId ? RELEVANCE_SOURCE_COUNT : 0,
+        rewriteTotal,
         sentById: actorId,
       },
     }),
@@ -265,6 +278,9 @@ export interface CandidateRelItem {
   topic: string;
   sources: RelevanceSource[];
 }
+export interface CandidateRewriteItem {
+  text: string;
+}
 
 export interface CandidateView {
   status: "SENT" | "IN_PROGRESS" | "SUBMITTED";
@@ -273,6 +289,7 @@ export interface CandidateView {
   expired: boolean;
   eye: CandidateEyeItem[];
   rel: CandidateRelItem | null;
+  rewrite: CandidateRewriteItem | null;
 }
 
 async function loadAssignment(token: string) {
@@ -302,11 +319,14 @@ export async function getScreeningForCandidate(token: string): Promise<Candidate
   if (!a) return null;
   const settings = await getScreeningSettings();
 
+  const ids = [...a.eyeItemIds, ...(a.relItemId ? [a.relItemId] : []), ...(a.rewriteItemId ? [a.rewriteItemId] : [])];
   const items = await db.screeningItem.findMany({
-    where: { id: { in: [...a.eyeItemIds, ...(a.relItemId ? [a.relItemId] : [])] } },
+    where: { id: { in: ids } },
     select: { id: true, kind: true, payload: true },
   });
   const rel = a.relItemId ? items.find((i) => i.id === a.relItemId) : null;
+  const rewrite = a.rewriteItemId ? items.find((i) => i.id === a.rewriteItemId) : null;
+  const rewriteText = rewrite ? String(((rewrite.payload ?? {}) as { text?: string }).text ?? "") : "";
 
   return {
     status: a.status as CandidateView["status"],
@@ -315,6 +335,7 @@ export async function getScreeningForCandidate(token: string): Promise<Candidate
     expired: sittingExpired(a.deadlineAt),
     eye: eyeItemsFor(a.eyeItemIds, items),
     rel: rel ? relItemFor(rel.payload) : null,
+    rewrite: rewrite && rewriteText ? { text: rewriteText } : null,
   };
 }
 
@@ -339,6 +360,8 @@ export async function startScreening(token: string): Promise<{ deadlineAt: Date 
 export interface SubmitAnswers {
   eye: Record<string, EyeAnswer>;
   rel: Record<string, RelevanceLabel>;
+  /** The candidate's rewrite of the AI paragraph (when the sitting has one). */
+  rewrite?: string;
 }
 
 /**
@@ -353,9 +376,10 @@ export async function submitScreening(token: string, answers: SubmitAnswers): Pr
   if (a.status === "SUBMITTED") throw new ScreeningError("You have already finished this test", 409);
   if (!a.startedAt) throw new ScreeningError("Start the test before submitting", 409);
 
+  const ids = [...a.eyeItemIds, ...(a.relItemId ? [a.relItemId] : []), ...(a.rewriteItemId ? [a.rewriteItemId] : [])];
   const items = await db.screeningItem.findMany({
-    where: { id: { in: [...a.eyeItemIds, ...(a.relItemId ? [a.relItemId] : [])] } },
-    select: { id: true, kind: true, answerKey: true },
+    where: { id: { in: ids } },
+    select: { id: true, kind: true, payload: true, answerKey: true },
   });
   const byId = new Map(items.map((i) => [i.id, i]));
 
@@ -369,11 +393,19 @@ export async function submitScreening(token: string, answers: SubmitAnswers): Pr
   const relLabels = relItem ? ((relItem.answerKey as { labels?: RelevanceLabel[] }).labels ?? []) : [];
   const relCorrect = relLabels.length > 0 ? scoreRelevance(relLabels, answers.rel ?? {}) : 0;
 
+  // Rewrite: score the candidate's recast against the paragraph's current text.
+  const rewriteItem = a.rewriteItemId ? byId.get(a.rewriteItemId) : null;
+  const rewriteOriginal = rewriteItem ? String(((rewriteItem.payload ?? {}) as { text?: string }).text ?? "") : "";
+  const rewriteAnswer = typeof answers.rewrite === "string" ? answers.rewrite : "";
+  const rewriteScore = rewriteItem ? scoreRewrite(rewriteOriginal, rewriteAnswer) : null;
+
   const score = overallScore({
     eyeCorrect,
     eyeTotal: eyeKeys.length,
     relCorrect,
     relTotal: relLabels.length,
+    rewriteCorrect: rewriteScore?.correct ?? 0,
+    rewriteTotal: rewriteScore?.total ?? 0,
   });
   const settings = await getScreeningSettings();
   const outcome = outcomeFor(score.overallPercent, settings.passPercent, settings.borderlineMargin);
@@ -388,6 +420,8 @@ export async function submitScreening(token: string, answers: SubmitAnswers): Pr
       eyeTotal: eyeKeys.length,
       relCorrect,
       relTotal: relLabels.length,
+      rewriteCorrect: rewriteScore?.correct ?? null,
+      rewriteTotal: rewriteScore?.total ?? null,
       overallPercent: score.overallPercent,
       outcome,
     },
@@ -398,6 +432,16 @@ export async function submitScreening(token: string, answers: SubmitAnswers): Pr
     where: { id: a.applicationId },
     data: { screeningStage: stageForOutcome(outcome) },
   });
+
+  // The optional voice rubric (off by default) runs after the response and
+  // stores one advisory line for the COO — it never changes the score above.
+  if (settings.rewriteClaude && rewriteItem && rewriteAnswer.trim()) {
+    waitUntil(
+      runRewriteRubric(rewriteOriginal, rewriteAnswer).then((line) => {
+        if (line) return db.screeningAssignment.update({ where: { token }, data: { rewriteRubric: line } }).then(() => undefined);
+      })
+    );
+  }
   return { submitted: true };
 }
 
@@ -419,6 +463,17 @@ export interface ReviewRelRow {
   right: boolean;
 }
 
+export interface ReviewRewrite {
+  original: string;
+  answer: string;
+  correct: number;
+  total: number;
+  remaining: number;
+  tooShort: boolean;
+  rulesLeft: { label: string; quote: string; fix: string }[];
+  rubric: string | null;
+}
+
 export interface ReviewDetail {
   assignmentId: string;
   applicationId: string;
@@ -432,10 +487,13 @@ export interface ReviewDetail {
   eyeTotal: number | null;
   relCorrect: number | null;
   relTotal: number | null;
+  rewriteCorrect: number | null;
+  rewriteTotal: number | null;
   submittedAt: Date | null;
   topic: string | null;
   eye: ReviewEyeRow[];
   rel: ReviewRelRow[];
+  rewrite: ReviewRewrite | null;
 }
 
 /** The submitted sittings awaiting a decision: borderline first, then clear ones for the record. */
@@ -482,8 +540,9 @@ export async function getScreeningReviewDetail(assignmentId: string): Promise<Re
   });
   if (!a) return null;
 
+  const ids = [...a.eyeItemIds, ...(a.relItemId ? [a.relItemId] : []), ...(a.rewriteItemId ? [a.rewriteItemId] : [])];
   const items = await db.screeningItem.findMany({
-    where: { id: { in: [...a.eyeItemIds, ...(a.relItemId ? [a.relItemId] : [])] } },
+    where: { id: { in: ids } },
     select: { id: true, kind: true, payload: true, answerKey: true },
   });
   const byId = new Map(items.map((i) => [i.id, i]));
@@ -516,6 +575,24 @@ export async function getScreeningReviewDetail(assignmentId: string): Promise<Re
     return { source: src, correct: relLabels[i], chosen, right: chosen === relLabels[i] };
   });
 
+  const rewriteItem = a.rewriteItemId ? byId.get(a.rewriteItemId) : null;
+  let rewrite: ReviewRewrite | null = null;
+  if (rewriteItem) {
+    const original = String(((rewriteItem.payload ?? {}) as { text?: string }).text ?? "");
+    const answer = typeof answers.rewrite === "string" ? answers.rewrite : "";
+    const score = scoreRewrite(original, answer);
+    rewrite = {
+      original,
+      answer,
+      correct: a.rewriteCorrect ?? score.correct,
+      total: a.rewriteTotal ?? score.total,
+      remaining: score.remaining,
+      tooShort: score.tooShort,
+      rulesLeft: answer.trim() ? rewriteRulesLeft(answer).map((r) => ({ label: r.label, quote: r.quote, fix: r.fix })) : [],
+      rubric: a.rewriteRubric,
+    };
+  }
+
   return {
     assignmentId: a.id,
     applicationId: a.application.id,
@@ -529,10 +606,13 @@ export async function getScreeningReviewDetail(assignmentId: string): Promise<Re
     eyeTotal: a.eyeTotal,
     relCorrect: a.relCorrect,
     relTotal: a.relTotal,
+    rewriteCorrect: a.rewriteCorrect,
+    rewriteTotal: a.rewriteTotal,
     submittedAt: a.submittedAt,
     topic: relPayload?.topic ?? null,
     eye,
     rel,
+    rewrite,
   };
 }
 

@@ -37,17 +37,20 @@ interface Item {
 export function ScreeningBankManager({ settings, items }: { settings: Settings; items: Item[] }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const [tab, setTab] = React.useState<"EYE" | "REL">("EYE");
+  const [tab, setTab] = React.useState<"EYE" | "REL" | "REWRITE">("EYE");
   const [busy, setBusy] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
   const [addingEye, setAddingEye] = React.useState(false);
   const [addingRel, setAddingRel] = React.useState(false);
+  const [addingRewrite, setAddingRewrite] = React.useState(false);
   const [editing, setEditing] = React.useState<Item | null>(null);
 
   const eye = items.filter((i) => i.kind === "EYE");
   const rel = items.filter((i) => i.kind === "REL");
+  const rewrite = items.filter((i) => i.kind === "REWRITE");
   const activeEye = eye.filter((i) => i.isActive).length;
   const activeRel = rel.filter((i) => i.isActive).length;
+  const activeRewrite = rewrite.filter((i) => i.isActive).length;
 
   async function call(url: string, init: RequestInit): Promise<boolean> {
     setBusy(true);
@@ -83,8 +86,8 @@ export function ScreeningBankManager({ settings, items }: { settings: Settings; 
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex gap-1.5" role="tablist" aria-label="Question type">
-            {(["EYE", "REL"] as const).map((k) => (
+          <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Question type">
+            {(["EYE", "REL", "REWRITE"] as const).map((k) => (
               <button
                 key={k}
                 type="button"
@@ -96,12 +99,20 @@ export function ScreeningBankManager({ settings, items }: { settings: Settings; 
                   tab === k ? "bg-primary text-primary-foreground" : "bg-zone text-muted-foreground hover:text-foreground"
                 )}
               >
-                {k === "EYE" ? `Spot the AI (${activeEye} active)` : `Reference relevance (${activeRel} active)`}
+                {k === "EYE"
+                  ? `Spot the AI (${activeEye} active)`
+                  : k === "REL"
+                    ? `Reference relevance (${activeRel} active)`
+                    : `Rewrite (${activeRewrite} active)`}
               </button>
             ))}
           </div>
-          <Button type="button" size="sm" onClick={() => (tab === "EYE" ? setAddingEye(true) : setAddingRel(true))}>
-            <LuPlus className="size-4" aria-hidden /> Add {tab === "EYE" ? "paragraph" : "relevance set"}
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => (tab === "EYE" ? setAddingEye(true) : tab === "REL" ? setAddingRel(true) : setAddingRewrite(true))}
+          >
+            <LuPlus className="size-4" aria-hidden /> Add {tab === "EYE" ? "paragraph" : tab === "REL" ? "relevance set" : "paragraph"}
           </Button>
         </div>
 
@@ -134,19 +145,40 @@ export function ScreeningBankManager({ settings, items }: { settings: Settings; 
               })}
             </ul>
           )
-        ) : rel.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No relevance sets yet. A sitting draws one.</p>
+        ) : tab === "REL" ? (
+          rel.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No relevance sets yet. A sitting draws one.</p>
+          ) : (
+            <ul className="divide-y divide-border/70">
+              {rel.map((item) => {
+                const p = item.payload as { topic?: string; sources?: unknown[] };
+                return (
+                  <li key={item.id} className="flex items-start gap-2 py-3">
+                    <p className={cn("min-w-0 flex-1 text-sm", item.isActive ? "text-foreground" : "text-muted-foreground")}>
+                      {p.topic}
+                      <span className="ml-2 text-xs text-muted-foreground">{(p.sources ?? []).length} sources</span>
+                    </p>
+                    <RowActions item={item} busy={busy} onEdit={() => setEditing(item)} onToggle={() => void toggleActive(item)} onRemove={() => void remove(item)} />
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        ) : rewrite.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No rewrite paragraphs yet. One is drawn per sitting when you add one; without any, the sitting is just the first two parts.</p>
         ) : (
           <ul className="divide-y divide-border/70">
-            {rel.map((item) => {
-              const p = item.payload as { topic?: string; sources?: unknown[] };
+            {rewrite.map((item) => {
+              const p = item.payload as { text?: string; note?: string | null };
               return (
-                <li key={item.id} className="flex items-start gap-2 py-3">
-                  <p className={cn("min-w-0 flex-1 text-sm", item.isActive ? "text-foreground" : "text-muted-foreground")}>
-                    {p.topic}
-                    <span className="ml-2 text-xs text-muted-foreground">{(p.sources ?? []).length} sources</span>
-                  </p>
-                  <RowActions item={item} busy={busy} onEdit={() => setEditing(item)} onToggle={() => void toggleActive(item)} onRemove={() => void remove(item)} />
+                <li key={item.id} className="py-3">
+                  <div className="flex items-start gap-2">
+                    <p className={cn("min-w-0 flex-1 text-sm", item.isActive ? "text-foreground" : "text-muted-foreground")}>
+                      {p.text}
+                      {p.note ? <span className="mt-0.5 block text-xs text-muted-foreground">Note: {p.note}</span> : null}
+                    </p>
+                    <RowActions item={item} busy={busy} onEdit={() => setEditing(item)} onToggle={() => void toggleActive(item)} onRemove={() => void remove(item)} />
+                  </div>
                 </li>
               );
             })}
@@ -158,6 +190,8 @@ export function ScreeningBankManager({ settings, items }: { settings: Settings; 
       {editing?.kind === "EYE" ? <EyeForm item={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} /> : null}
       {addingRel ? <RelForm onClose={() => setAddingRel(false)} onSaved={() => { setAddingRel(false); router.refresh(); }} /> : null}
       {editing?.kind === "REL" ? <RelForm item={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} /> : null}
+      {addingRewrite ? <RewriteForm onClose={() => setAddingRewrite(false)} onSaved={() => { setAddingRewrite(false); router.refresh(); }} /> : null}
+      {editing?.kind === "REWRITE" ? <RewriteForm item={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} /> : null}
     </div>
   );
 }
@@ -183,6 +217,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved: () =
   const [margin, setMargin] = React.useState(String(settings.borderlineMargin));
   const [minutes, setMinutes] = React.useState(String(settings.minutes));
   const [eyeCount, setEyeCount] = React.useState(String(settings.eyeCount));
+  const [rewriteClaude, setRewriteClaude] = React.useState(settings.rewriteClaude);
   const [busy, setBusy] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
   const [problem, setProblem] = React.useState<string | null>(null);
@@ -195,7 +230,7 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved: () =
       const res = await fetch("/api/admin/settings/screening", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passPercent: Number(passPercent), borderlineMargin: Number(margin), minutes: Number(minutes), eyeCount: Number(eyeCount) }),
+        body: JSON.stringify({ passPercent: Number(passPercent), borderlineMargin: Number(margin), minutes: Number(minutes), eyeCount: Number(eyeCount), rewriteClaude }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -228,6 +263,9 @@ function SettingsForm({ settings, onSaved }: { settings: Settings; onSaved: () =
           <Input id="s-eye" type="number" min={1} max={50} value={eyeCount} onChange={(e) => setEyeCount(e.target.value)} />
         </Field>
       </div>
+      <CheckboxRow checked={rewriteClaude} onChange={(e) => setRewriteClaude(e.target.checked)}>
+        Also run an AI voice rubric on each rewrite (costs a small Claude charge per sitting; the phrase-scan score stands either way, this only adds a note for you)
+      </CheckboxRow>
       {problem ? (
         <p role="alert" className="flex items-start gap-2 text-sm text-danger">
           <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
@@ -310,6 +348,75 @@ function EyeForm({ item, onClose, onSaved }: { item?: Item; onClose: () => void;
               Cancel
             </Button>
             <Button type="button" disabled={busy || text.trim().length < 40} onClick={() => void save()}>
+              {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
+              Save
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RewriteForm({ item, onClose, onSaved }: { item?: Item; onClose: () => void; onSaved: () => void }) {
+  const p = (item?.payload ?? {}) as { text?: string; note?: string | null };
+  const [text, setText] = React.useState(p.text ?? "");
+  const [note, setNote] = React.useState(p.note ?? "");
+  const [busy, setBusy] = React.useState(false);
+  const [problem, setProblem] = React.useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const url = item ? `/api/admin/settings/screening/${item.id}` : "/api/admin/settings/screening";
+      const payload = { text, note: note || null };
+      const res = await fetch(url, {
+        method: item ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item ? { payload, answerKey: {} } : { kind: "REWRITE", payload, answerKey: {} }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        setProblem(body?.error ?? "That did not save.");
+        return;
+      }
+      onSaved();
+    } catch {
+      setProblem("That did not save. Check your connection.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => (!o ? onClose() : null)}>
+      <DialogContent className="max-h-[92dvh] max-w-lg overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{item ? "Edit rewrite paragraph" : "Add a rewrite paragraph"}</DialogTitle>
+          <DialogDescription>
+            An AI-sounding paragraph for the candidate to recast in a plain voice. It has to carry real tells — a stock opener,
+            hype, a filler transition, meta-commentary or first person — or it will not save.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <Field label="The AI-sounding paragraph" htmlFor="rw-text" required>
+            <Textarea id="rw-text" value={text} onChange={(e) => setText(e.target.value)} rows={7} maxLength={4000} />
+          </Field>
+          <Field label="A private note" htmlFor="rw-note" hint="Only you see this, never the candidate. Optional.">
+            <Input id="rw-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
+          </Field>
+          {problem ? (
+            <p role="alert" className="flex items-start gap-2 text-sm text-danger">
+              <LuCircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              {problem}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={busy || text.trim().length < 60} onClick={() => void save()}>
               {busy ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : null}
               Save
             </Button>
