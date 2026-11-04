@@ -352,6 +352,12 @@ export async function approveWorkerApplication(
   // Welcome email with their worker ID and how to sign in. Sent after the
   // response and queued before anything else can throw; a failed send never
   // undoes the approval.
+  // The training line only while a series is actually published, like the
+  // ambassador welcome's tour line.
+  const hasTraining =
+    (await db.trainingVideo.count({
+      where: { audience: "WORKER", isPublished: true, videoUrl: { not: "" } },
+    })) > 0;
   const mail = workerApprovedEmail({
     fullName: application.fullName,
     workerCode: worker.workerId,
@@ -360,6 +366,7 @@ export async function approveWorkerApplication(
     // land on their ambassador dashboard. Signed out, it goes via /login.
     loginUrl: `${siteUrl()}/worker`,
     existingLogin: Boolean(login?.isActive),
+    hasTraining,
     hq: await getHqContact(),
   });
   waitUntil(

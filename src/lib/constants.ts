@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, FolderKanban, Users, Wallet, MousePointerClick, Trophy, User } from "lucide-react";
+import { LayoutDashboard, FolderKanban, GraduationCap, Users, Wallet, MousePointerClick, Trophy, User } from "lucide-react";
 import { adminHomeForRole, adminMobileNavForRole, adminNavForRole } from "@/lib/sidebar-config";
 
 export const APP_NAME = "EduCraft WorkBase";
@@ -222,6 +222,7 @@ export const WORKER_NAV: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/worker", icon: LayoutDashboard },
       { label: "My Projects", href: "/worker/projects", icon: FolderKanban, matchNested: true },
+      { label: "Training", href: "/worker/training", icon: GraduationCap },
       { label: "Earnings", href: "/worker/earnings", icon: Wallet },
       { label: "Profile", href: "/worker/profile", icon: User },
     ],
@@ -249,6 +250,9 @@ export const AMBASSADOR_NAV: NavSection[] = [
 export const WORKER_MOBILE_NAV: NavItem[] = [
   { label: "Home", href: "/worker", icon: LayoutDashboard },
   { label: "Projects", href: "/worker/projects", icon: FolderKanban, matchNested: true },
+  // The worker nav had a free fifth slot; Training takes it, so the series is
+  // reachable on phones without a More sheet (workers have none).
+  { label: "Training", href: "/worker/training", icon: GraduationCap },
   { label: "Earnings", href: "/worker/earnings", icon: Wallet },
   { label: "Profile", href: "/worker/profile", icon: User },
 ];

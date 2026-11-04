@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   LineChart,
   Megaphone,
+  MonitorPlay,
   MoreHorizontal,
   Package,
   Percent,
@@ -51,6 +52,9 @@ export const ADMIN_SIDEBAR: NavSection[] = [
       { label: "Client inbox", href: "/admin/client-inbox", icon: Inbox, roles: [SA, COO] },
       { label: "Clients", href: "/admin/clients", icon: Users, matchNested: true, roles: [SA, CFO, COO] },
       { label: "Workers", href: "/admin/workers", icon: UserCog, matchNested: true, roles: [SA, COO] },
+      // The COO's tutorial library ("How operations works"): his five slots are
+      // full, so on phones this lands in the More sheet automatically.
+      { label: "Tutorials", href: "/admin/tutorials", icon: MonitorPlay, matchNested: true, roles: [SA, COO] },
     ],
   },
   {

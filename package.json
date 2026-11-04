@@ -63,6 +63,8 @@
     "check:statement": "tsx scripts/check-statement.ts",
     "check:pots": "tsx scripts/check-pots.ts",
     "check:tour": "tsx scripts/check-tour.ts",
+    "check:training": "tsx scripts/check-training.ts",
+    "tutorials:seed-coo": "dotenv -e .env.local -- tsx scripts/seed-coo-tutorials.ts",
     "cashflow:seed": "dotenv -e .env.local -- tsx scripts/cashflow-seed.ts",
     "payouts:backfill": "dotenv -e .env.local -- tsx scripts/payouts-backfill.ts",
     "pots:backfill": "dotenv -e .env.local -- tsx scripts/pots-backfill.ts",

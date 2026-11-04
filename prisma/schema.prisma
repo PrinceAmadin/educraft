@@ -93,6 +93,7 @@ model User {
   workerApplication           WorkerApplication?  @relation("WorkerApplicationUser")
   workerApplicationsReviewed  WorkerApplication[]  @relation("WorkerApplicationReviewedBy")
   workerRecordsUpdated        Worker[]             @relation("WorkerUpdatedBy")
+  trainingWatches             TrainingWatch[]
 
   // Phase 4 (Operations Platform)
   projectNotes      ProjectNote[] @relation("ProjectNoteAuthor")
@@ -3016,4 +3017,62 @@ model PreliminaryPages {
   updatedAt         DateTime @updatedAt
 
   @@index([needsReview])
+}
+
+// ─── TRAINING VIDEOS (COO tutorials + the worker series) ──────────────
+// One table serves both audiences: the COO's "How operations works"
+// tutorials (a library, never a gate) and the worker training series (new
+// and current workers are held at a gate until every required episode is
+// watched). Episodes are data, not code, so the founder adds and replaces
+// them without a deploy; an episode with no videoUrl or isPublished=false
+// is the founder's draft and renders nowhere else.
+model TrainingVideo {
+  id              String  @id @default(cuid())
+  /// "COO" | "WORKER" — constants in src/lib/training/rules.ts.
+  audience        String
+  /// Order within the audience. Sequential unlock for workers follows it.
+  episodeNo       Int
+  title           String
+  description     String?
+  /// Public Blob store URL (training/ prefix). "" until uploaded.
+  videoUrl        String  @default("")
+  posterUrl       String  @default("")
+  /// As the browser reported it on first play; for "about N minutes" lines.
+  durationSeconds Int?
+  /// WORKER only: an unwatched required episode holds the portal gate.
+  requiredForGate Boolean @default(true)
+  isPublished     Boolean @default(false)
+  /// Phase 3 (quizzes): pass mark for this episode's quiz, when it has one.
+  quizPassPercent Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  watches TrainingWatch[]
+
+  @@unique([audience, episodeNo])
+  @@index([audience, isPublished])
+}
+
+/// One person's progress through one episode. Progress is the furthest
+/// point actually played (the ambassador tour's anti-skip rule); absence of
+/// a row means unwatched, so there is no version column and no NULL-`not`
+/// trap. Forcing a rewatch = the founder resets the episode's rows.
+model TrainingWatch {
+  id      String        @id @default(cuid())
+  videoId String
+  video   TrainingVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Furthest point reached, in whole seconds — what the player resumes from.
+  secondsWatched  Int @default(0)
+  durationSeconds Int?
+  /// First press of play; lets staff see who opened an episode and stopped.
+  startedAt DateTime?
+  /// Set once they pass WATCHED_FRACTION of the episode.
+  watchedAt DateTime?
+  /// Phase 3 (quizzes): set when a passing attempt exists.
+  quizPassedAt DateTime?
+
+  @@unique([videoId, userId])
+  @@index([userId])
 }

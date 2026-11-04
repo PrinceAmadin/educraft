@@ -44,7 +44,7 @@ expect("HOG sees exactly his tabs", labelsFor("HOG"), ["Ambassadors", "Growth", 
 expect(
   "COO sees exactly his tabs",
   labelsFor("COO"),
-  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Payouts", "Operations reports", "EduCraft Cashflow", "Bank details", "My earnings"]
+  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Tutorials", "Payouts", "Operations reports", "EduCraft Cashflow", "Bank details", "My earnings"]
 );
 expect("everyone opens EduCraft Cashflow, only the founder may publish", [EXEC_ROLES.map((r) => canAccessRoute(r, "/admin/settings/cashflow")), EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cashflow/publish", "POST")), EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cashflow", "GET"))], [[true, true, true, true], [true, false, false, false], [true, true, true, true]]);
 expect(

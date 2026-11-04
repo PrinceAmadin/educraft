@@ -6,6 +6,13 @@
  * home. Nothing here touches the database or the browser, so the check script
  * and the player share exactly one definition of "watched".
  *
+ * The watching mechanics (anti-skip, resume, rotate hints) are shared with the
+ * COO tutorials and the worker training series and live in
+ * `src/lib/training/video-rules.ts`; this file re-exports them under its
+ * original names so `check:tour`, the player and the gate are unchanged. What
+ * stays here is what is the tour's alone: the version, the chapters, the gate
+ * rule and the wording.
+ *
  * The wording lives here for the same reason `ambassador-copy.ts` exists: the
  * founder reviews what an ambassador reads in one file, and it cannot drift
  * apart across the gate, the section and the emails.
@@ -14,6 +21,29 @@
  * Blob store, or anywhere else https), so the structure ships before the video
  * exists and nothing renders until it does.
  */
+import { watchComplete, PLAYER_CONTROLS } from "@/lib/training/video-rules";
+
+export {
+  WATCHED_FRACTION,
+  PROGRESS_SAVE_SECONDS,
+  MAX_CREDITED_JUMP_SECONDS,
+  MAX_PLAYBACK_RATE,
+  ROTATE_HINT_VISIBLE_SECONDS,
+  formatTimestamp,
+  roughLength,
+  watchedPercent,
+  creditedDelta,
+  resumeAt,
+  advanceProgress,
+  rotateHintTimes,
+  rotateHintVisible,
+} from "@/lib/training/video-rules";
+
+/** Watched enough of the tour to be let through. */
+export const tourComplete = watchComplete;
+
+/** The player's own controls, named for screen readers. */
+export const TOUR_CONTROLS = PLAYER_CONTROLS;
 
 export interface TourChapter {
   title: string;
@@ -26,19 +56,6 @@ export interface TourChapter {
  * who finished the old one. Leave it alone when only re-uploading the same cut.
  */
 export const TOUR_VERSION = "1";
-
-/** Watched enough to continue. Not 100%: the last seconds are the sign-off. */
-export const WATCHED_FRACTION = 0.95;
-
-/** How often the player saves its position, so a dropped connection resumes. */
-export const PROGRESS_SAVE_SECONDS = 10;
-
-/**
- * The largest jump that can count as watching. A real `timeupdate` moves by a
- * fraction of a second; anything larger is a seek, a stall recovering or a
- * backgrounded tab, and credits nothing.
- */
-export const MAX_CREDITED_JUMP_SECONDS = 1.5;
 
 /**
  * The chapters, filled in from the approved script once the final cut is
@@ -78,61 +95,6 @@ export const TOUR_TEXT = {
     "A short tour of your dashboard is waiting the first time you sign in — it takes about six minutes and explains everything.",
 } as const;
 
-/** The player's own controls, named for screen readers. */
-export const TOUR_CONTROLS = {
-  play: "Play",
-  pause: "Pause",
-  mute: "Mute",
-  unmute: "Unmute",
-  fullscreen: "Full screen",
-  progress: "How much of the tour you have watched",
-  rotate: "Turn the video sideways",
-  unrotate: "Turn the video back upright",
-} as const;
-
-/** "1:35", "12:04". */
-export function formatTimestamp(seconds: number): string {
-  const whole = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const mins = Math.floor(whole / 60);
-  const secs = whole % 60;
-  return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-
-/** "about 6 minutes" — for the section, before the browser knows the duration. */
-export function roughLength(durationSeconds: number | null): string | null {
-  if (durationSeconds == null || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
-  const mins = Math.round(durationSeconds / 60);
-  return mins <= 1 ? "about a minute" : `about ${mins} minutes`;
-}
-
-/** 0–100, for the gate's progress line. A duration of 0 reads as 0, never NaN. */
-export function watchedPercent(secondsWatched: number, durationSeconds: number): number {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
-  const safe = Number.isFinite(secondsWatched) ? Math.max(0, secondsWatched) : 0;
-  return Math.min(100, Math.round((safe / durationSeconds) * 100));
-}
-
-/** Watched enough of it to be let through. */
-export function tourComplete(secondsWatched: number, durationSeconds: number): boolean {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return false;
-  if (!Number.isFinite(secondsWatched) || secondsWatched <= 0) return false;
-  return secondsWatched >= durationSeconds * WATCHED_FRACTION;
-}
-
-/**
- * How much of a `timeupdate` counts as watching.
- *
- * Only forward movement, and only small steps: dragging to the end, or the
- * `currentTime` being set from the console, moves far in one tick and earns
- * nothing. Rewinding earns nothing either — it is already paid for.
- */
-export function creditedDelta(previousTime: number, currentTime: number): number {
-  if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime)) return 0;
-  const step = currentTime - previousTime;
-  if (step <= 0) return 0;
-  return step <= MAX_CREDITED_JUMP_SECONDS ? step : 0;
-}
-
 /**
  * Whether this ambassador is held at the gate.
  *
@@ -151,83 +113,4 @@ export function needsTour(
   if (!hasVideo) return false;
   if (isExecutive) return false;
   return ambassador.tourVersion !== TOUR_VERSION;
-}
-
-/** Where the player picks up: never the last second, so it can still be finished. */
-export function resumeAt(secondsWatched: number, durationSeconds: number | null): number {
-  const safe = Number.isFinite(secondsWatched) ? Math.max(0, secondsWatched) : 0;
-  if (durationSeconds == null || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return safe;
-  return Math.min(safe, Math.max(0, durationSeconds - 1));
-}
-
-/**
- * The anti-skip rule, as one decision the player and `check:tour` share.
- *
- * Given where progress stands, where playback was and where it now is, it
- * answers: how far have they legitimately watched, and must the element be
- * pulled back?
- *
- * - normal playback (a small forward step past the furthest point) advances it;
- * - a jump well past the furthest point is a seek: nothing is earned and
- *   playback is clamped back to where it had got to;
- * - re-watching an earlier stretch earns nothing, because progress is the
- *   furthest point reached and not a running total. Watching the first minute
- *   twenty times still leaves you one minute in.
- */
-export function advanceProgress(
-  progress: number,
-  previousTime: number,
-  currentTime: number
-): { progress: number; clampTo: number | null } {
-  if (currentTime > progress + MAX_CREDITED_JUMP_SECONDS) {
-    return { progress, clampTo: progress };
-  }
-  const step = creditedDelta(previousTime, currentTime);
-  if (step > 0 && currentTime > progress) {
-    return { progress: currentTime, clampTo: null };
-  }
-  return { progress, clampTo: null };
-}
-
-/**
- * The fastest the gate's player will run. Watching at double speed is still
- * watching, so this is not a punishment; past it each `timeupdate` step grows
- * larger than `MAX_CREDITED_JUMP_SECONDS` and would earn nothing at all, which
- * would look broken rather than strict.
- */
-export const MAX_PLAYBACK_RATE = 2;
-
-// ── Watching it on a phone held upright ─────────────────────────────────────
-
-/** How long each "turn your phone" hint stays on screen. */
-export const ROTATE_HINT_VISIBLE_SECONDS = 6;
-
-/**
- * When to show the "turn your phone sideways" hint, in seconds.
- *
- * A 16:9 tutorial in a portrait column is small, and most ambassadors are on a
- * phone, so the hint appears a few times rather than once: just after they
- * press play, and then a third and two thirds of the way through, for anyone
- * who picked the phone up mid-video. It is only ever shown while the phone is
- * actually upright and the video has not been turned.
- *
- * A hint that could not finish before the video ends is dropped, so the close
- * is never interrupted.
- */
-export function rotateHintTimes(durationSeconds: number): number[] {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return [];
-  const times = [4];
-  if (durationSeconds >= 60) times.push(Math.round(durationSeconds / 3));
-  if (durationSeconds >= 150) times.push(Math.round((durationSeconds * 2) / 3));
-  return times.filter((t) => t + ROTATE_HINT_VISIBLE_SECONDS <= durationSeconds);
-}
-
-/**
- * Whether a hint belongs on screen at this position. A function of the position
- * alone, so there is no "already shown" bookkeeping to get wrong and rewinding
- * simply shows it again.
- */
-export function rotateHintVisible(position: number, times: readonly number[]): boolean {
-  if (!Number.isFinite(position)) return false;
-  return times.some((t) => position >= t && position < t + ROTATE_HINT_VISIBLE_SECONDS);
 }

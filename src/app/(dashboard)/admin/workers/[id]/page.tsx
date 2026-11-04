@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { LuPhone, LuMail, LuGraduationCap } from "react-icons/lu";
+import { LuPhone, LuMail, LuGraduationCap, LuMonitorPlay } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { getWorkerDetail } from "@/lib/services/workers";
 import { getWorkerProfileOps } from "@/lib/services/operations/workers-ops";
 import { getLinkedAmbassador } from "@/lib/services/linked-profiles";
+import { getTrainingSummaryForUser } from "@/lib/services/training";
 import { LinkedProfileLink } from "@/components/shared/LinkedProfileLink";
 import { RoleChip } from "@/components/layout/RoleChip";
 import { execRoleOfWorker } from "@/lib/services/executives";
@@ -47,6 +48,9 @@ export default async function WorkerDetailPage({ params, searchParams }: { param
 
   const { worker, metrics } = data;
   const linked = await getLinkedAmbassador(worker.userId);
+  // Null while no worker episode is published: the field only appears once the
+  // training series exists, same as the gate.
+  const training = await getTrainingSummaryForUser(worker.userId);
   // No login yet, but this email already belongs to one (the same person holding
   // another role, e.g. an executive): offer to link onto it, not create a second.
   const canLink =
@@ -127,6 +131,19 @@ export default async function WorkerDetailPage({ params, searchParams }: { param
             )}
           </Field>
           <Field icon={LuGraduationCap} label="Academic background">{worker.educationLevel || <span className="text-subtle">—</span>}</Field>
+          {training ? (
+            <Field icon={LuMonitorPlay} label="Training">
+              {training.watched >= training.total ? (
+                <span className="text-success">Watched ({training.watched} of {training.total})</span>
+              ) : training.watched > 0 || training.started > 0 ? (
+                <span>{training.watched} of {training.total} watched</span>
+              ) : worker.userId ? (
+                <span className="text-subtle">Not started</span>
+              ) : (
+                <span className="text-subtle">No login yet</span>
+              )}
+            </Field>
+          ) : null}
           <div>
             <dt className="meta-label">Load</dt>
             <dd className={cn("mt-0.5 font-mono tabular-nums", metrics.atCapacity ? "text-danger" : "text-foreground")}>

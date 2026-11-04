@@ -1,5 +1,6 @@
 import { escapeHtml } from "@/lib/mailer";
 import { firstName } from "@/lib/utils";
+import { TRAINING_TEXT } from "@/lib/training/rules";
 
 /**
  * The applicant hears from us once, when an admin decides: approved or not.
@@ -37,6 +38,8 @@ export function workerApprovedEmail(input: {
   loginUrl: string;
   /** Applied with a login they already had (an ambassador), so no new password. */
   existingLogin: boolean;
+  /** A training series is published: one line says it is waiting for them. */
+  hasTraining?: boolean;
   hq: HqFooter;
 }): { subject: string; html: string; text: string } {
   const first = firstName(input.fullName, input.fullName);
@@ -56,6 +59,7 @@ export function workerApprovedEmail(input: {
     `Sign in: ${input.loginUrl}`,
     "",
     "Your dashboard shows the projects assigned to you, your deadlines and your earnings. We will notify you when your first project is assigned.",
+    ...(input.hasTraining ? ["", TRAINING_TEXT.emailLine] : []),
     "",
     footerText(input.hq),
   ].join("\n");
@@ -70,7 +74,8 @@ export function workerApprovedEmail(input: {
     </div>
     <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#0F172A;word-break:break-word;overflow-wrap:anywhere">${escapeHtml(signIn)}</p>
     <p style="margin:0 0 24px"><a href="${escapeHtml(input.loginUrl)}" style="display:inline-block;padding:12px 22px;background:#0D9488;color:#FFFFFF;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none">Open my dashboard</a></p>
-    <p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:#475569">Your dashboard shows the projects assigned to you, your deadlines and your earnings. We will notify you when your first project is assigned.</p>`,
+    <p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:#475569">Your dashboard shows the projects assigned to you, your deadlines and your earnings. We will notify you when your first project is assigned.</p>
+    ${input.hasTraining ? `<p style="margin:0 0 24px;font-size:14px;line-height:1.7;color:#475569">${escapeHtml(TRAINING_TEXT.emailLine)}</p>` : ""}`,
     input.hq
   );
 
