@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getScreeningSettings, listScreeningItems } from "@/lib/services/screening";
+import { getFinalSettings } from "@/lib/services/final-practical";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ScreeningBankManager } from "@/components/screening/ScreeningBankManager";
+import { FinalBriefsForm } from "@/components/screening/FinalBriefsForm";
 
 export const metadata: Metadata = { title: "Screening questions" };
 export const dynamic = "force-dynamic";
@@ -18,7 +20,7 @@ export default async function ScreeningSettingsPage() {
   if (!session?.user) redirect("/login");
   if (session.user.role !== "SUPER_ADMIN") redirect("/admin");
 
-  const [items, settings] = await Promise.all([listScreeningItems(), getScreeningSettings()]);
+  const [items, settings, finalSettings] = await Promise.all([listScreeningItems(), getScreeningSettings(), getFinalSettings()]);
 
   return (
     <div className="space-y-7">
@@ -31,6 +33,9 @@ export default async function ScreeningSettingsPage() {
         settings={settings}
         items={items.map((i) => ({ id: i.id, kind: i.kind, payload: i.payload, answerKey: i.answerKey, isActive: i.isActive, notes: i.notes }))}
       />
+      <div className="border-t border-border/60 pt-7">
+        <FinalBriefsForm settings={finalSettings} />
+      </div>
     </div>
   );
 }

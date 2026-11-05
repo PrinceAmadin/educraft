@@ -1,6 +1,7 @@
 import { escapeHtml } from "@/lib/mailer";
 import { firstName } from "@/lib/utils";
 import { SCREENING_TEXT } from "@/lib/screening/rules";
+import { FINAL_TEXT } from "@/lib/screening/final-practical";
 import type { HqFooter } from "@/lib/emails/application-decision";
 
 /**
@@ -51,4 +52,19 @@ export function screeningInviteEmail(input: { fullName: string; url: string; hq:
   );
 
   return { subject, html, text };
+}
+
+/** The invitation to the Stage-3 final assessment (sent after a screening pass). */
+export function finalInviteEmail(input: { fullName: string; url: string; hq: HqFooter }): { subject: string; html: string; text: string } {
+  const first = firstName(input.fullName, input.fullName);
+  const text = [`Hi ${first},`, "", FINAL_TEXT.emailLine, "", input.url, "", footerText(input.hq)].join("\n");
+  const html = shell(
+    "EduCraft workers",
+    `<h1 style="margin:0 0 20px;font-size:22px;line-height:1.3;font-weight:700;color:#0F172A">Hi ${escapeHtml(first)},</h1>
+    <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#475569">${escapeHtml(FINAL_TEXT.emailLine)}</p>
+    <p style="margin:0 0 24px"><a href="${escapeHtml(input.url)}" style="display:inline-block;padding:12px 22px;background:#0D9488;color:#FFFFFF;border-radius:10px;font-size:15px;font-weight:600;text-decoration:none">Start the final assessment</a></p>
+    <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#64748B;word-break:break-word;overflow-wrap:anywhere">If the button does not work, open this link:<br/>${escapeHtml(input.url)}</p>`,
+    input.hq
+  );
+  return { subject: FINAL_TEXT.emailSubject, html, text };
 }

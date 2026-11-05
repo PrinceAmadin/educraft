@@ -901,6 +901,42 @@ model WorkerApplication {
   /// founder opts this application into screening.
   screeningStage String?
   screening      ScreeningAssignment?
+  finalAssessment FinalAssessment?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([status])
+}
+
+/// Stage-3 final practical: one per application. Two hand-written chapter
+/// samples (we keep only the extracted text and the voice scan, not the files),
+/// a client-message task and a prompting task, both read by the COO. The
+/// unguessable token IS the link; the COO's decision approves or declines.
+model FinalAssessment {
+  id             String            @id @default(cuid())
+  applicationId  String            @unique
+  application    WorkerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  /// 32-hex; the credential in /final/{token}.
+  token          String            @unique
+  /// SENT | IN_PROGRESS | SUBMITTED
+  status         String            @default("SENT")
+  /// The extracted text of the two uploaded writing samples.
+  chapter1Text   String?
+  chapter2Text   String?
+  /// The two written-judgement answers.
+  memoResponse   String?
+  promptResponse String?
+  /// The voice scan on the two samples (advisory for the COO): { chapter1: [...], chapter2: [...] }.
+  voiceFindings  Json?
+  /// The COO's call: PASS | FAIL.
+  reviewDecision String?
+  reviewNote     String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  sentById       String?
+  startedAt      DateTime?
+  submittedAt    DateTime?
+  deadlineAt     DateTime?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 

@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { WorkerApplicationReview } from "@/components/workers/WorkerApplicationReview";
 import { listWorkerApplications } from "@/lib/services/worker-applications";
 import { countScreeningToReview, screeningStatusMap } from "@/lib/services/screening";
+import { countFinalToReview, finalStatusMap } from "@/lib/services/final-practical";
 import { cn, formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Worker applications" };
@@ -28,9 +29,11 @@ export default async function WorkerApplicationsPage({
       : "PENDING";
 
   const rows = await listWorkerApplications(status);
-  const [screening, toReview] = await Promise.all([
+  const [screening, final, toReview, finalToReview] = await Promise.all([
     status === "PENDING" ? screeningStatusMap(rows.map((r) => r.id)) : Promise.resolve({}),
+    status === "PENDING" ? finalStatusMap(rows.map((r) => r.id)) : Promise.resolve({}),
     countScreeningToReview(),
+    countFinalToReview(),
   ]);
 
   return (
@@ -47,12 +50,20 @@ export default async function WorkerApplicationsPage({
         title="Worker applications"
         description="Review registrations submitted at /apply/worker. Approving creates the worker record and activates their login."
         actions={
-          <Link
-            href="/admin/workers/screening"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-zone px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-zone/70"
-          >
-            Screening results{toReview > 0 ? ` · ${toReview} to review` : ""}
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/workers/screening"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-zone px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-zone/70"
+            >
+              Screening results{toReview > 0 ? ` · ${toReview} to review` : ""}
+            </Link>
+            <Link
+              href="/admin/workers/final"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-zone px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-zone/70"
+            >
+              Final assessments{finalToReview > 0 ? ` · ${finalToReview} to review` : ""}
+            </Link>
+          </div>
         }
       />
 
@@ -84,7 +95,7 @@ export default async function WorkerApplicationsPage({
           }
         />
       ) : status === "PENDING" ? (
-        <WorkerApplicationReview rows={rows} screening={screening} />
+        <WorkerApplicationReview rows={rows} screening={screening} final={final} />
       ) : (
         <ul className="space-y-3">
           {rows.map((row) => (

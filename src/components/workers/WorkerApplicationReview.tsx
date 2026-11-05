@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { LuCheck, LuCircleAlert, LuLoaderCircle, LuListChecks, LuPencil, LuX } from "react-icons/lu";
+import { LuCheck, LuCircleAlert, LuLoaderCircle, LuListChecks, LuPencil, LuPenLine, LuX } from "react-icons/lu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/forms/Field";
@@ -25,6 +25,7 @@ import {
 } from "@/lib/validations/worker-application";
 import type { WorkerApplicationRow } from "@/lib/services/worker-applications";
 import type { ScreeningStatusLite } from "@/lib/services/screening";
+import type { FinalStatusLite } from "@/lib/services/final-practical";
 
 const SCREEN_CHIP: Record<string, { label: string; tone: string }> = {
   SENT: { label: "Screening sent", tone: "bg-zone text-muted-foreground" },
@@ -34,12 +35,22 @@ const SCREEN_CHIP: Record<string, { label: string; tone: string }> = {
   BORDERLINE: { label: "Borderline — review", tone: "bg-gold/15 text-gold" },
 };
 
+const FINAL_CHIP: Record<string, { label: string; tone: string }> = {
+  SENT: { label: "Final sent", tone: "bg-zone text-muted-foreground" },
+  IN_PROGRESS: { label: "Final started", tone: "bg-gold/15 text-gold" },
+  REVIEW: { label: "Final — review", tone: "bg-gold/15 text-gold" },
+  PASS: { label: "Final passed", tone: "bg-success/15 text-success" },
+  FAIL: { label: "Final failed", tone: "bg-danger/15 text-danger" },
+};
+
 export function WorkerApplicationReview({
   rows,
   screening,
+  final,
 }: {
   rows: WorkerApplicationRow[];
   screening: Record<string, ScreeningStatusLite>;
+  final: Record<string, FinalStatusLite>;
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -69,6 +80,29 @@ export function WorkerApplicationReview({
     if (!s) return null;
     const key = s.status === "SUBMITTED" ? s.reviewDecision ?? s.outcome ?? "BORDERLINE" : s.status;
     return { key, chip: SCREEN_CHIP[key] ?? SCREEN_CHIP.SENT };
+  }
+
+  function finalState(f: FinalStatusLite | undefined): { key: string; chip: { label: string; tone: string } } | null {
+    if (!f) return null;
+    const key = f.status === "SUBMITTED" ? f.reviewDecision ?? "REVIEW" : f.status;
+    return { key, chip: FINAL_CHIP[key] ?? FINAL_CHIP.SENT };
+  }
+
+  async function sendFinal(id: string) {
+    setBusy(`final-${id}`);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/workers/applications/${id}/final`, { method: "POST" });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "Could not send the final assessment.");
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the final assessment.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function run(id: string, action: "approve" | "reject", body: unknown = {}) {
@@ -164,6 +198,29 @@ export function WorkerApplicationReview({
                         <LuListChecks className="size-4" aria-hidden />
                       )}
                       Send screening test
+                    </Button>
+                  );
+                })()}
+                {(() => {
+                  // The final practical opens once screening is passed.
+                  if (screenState(screening[row.id])?.key !== "PASS") return null;
+                  const f = finalState(final[row.id]);
+                  if (f) {
+                    return (
+                      <span className="inline-flex items-center gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${f.chip.tone}`}>{f.chip.label}</span>
+                        {final[row.id]?.status === "SUBMITTED" ? (
+                          <Link href={`/admin/workers/final?a=${final[row.id]!.assessmentId}`} className="text-xs font-medium text-primary hover:underline">
+                            Review →
+                          </Link>
+                        ) : null}
+                      </span>
+                    );
+                  }
+                  return (
+                    <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => sendFinal(row.id)}>
+                      {busy === `final-${row.id}` ? <LuLoaderCircle className="size-4 animate-spin" aria-hidden /> : <LuPenLine className="size-4" aria-hidden />}
+                      Send final practical
                     </Button>
                   );
                 })()}
