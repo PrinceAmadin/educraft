@@ -66,6 +66,7 @@
     "check:training": "tsx scripts/check-training.ts",
     "check:screening": "tsx scripts/check-screening.ts",
     "check:final": "tsx scripts/check-final.ts",
+    "check:trust": "tsx scripts/check-trust.ts",
     "tutorials:seed-coo": "dotenv -e .env.local -- tsx scripts/seed-coo-tutorials.ts",
     "tutorials:seed-worker": "dotenv -e .env.local -- tsx scripts/seed-worker-tutorials.ts",
     "cashflow:seed": "dotenv -e .env.local -- tsx scripts/cashflow-seed.ts",

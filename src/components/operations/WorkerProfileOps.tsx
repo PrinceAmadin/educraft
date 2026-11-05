@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LuCircleCheck, LuTriangleAlert } from "react-icons/lu";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { WorkerFlagList } from "@/components/operations/WorkerFlagList";
+import { TrustChip } from "@/components/operations/TrustChip";
 import { WORKER_TARGETS } from "@/lib/operations/worker-performance";
 import { cn, formatDate, formatDateTime, formatNaira } from "@/lib/utils";
 import type { WorkerProfileOps as WorkerProfileOpsData } from "@/lib/services/operations/workers-ops";
@@ -51,9 +52,13 @@ export function WorkerProfileOps({ workerId, data }: { workerId: string; data: W
   return (
     <div className="space-y-10">
       <section>
-        <h2 className="text-[15px] font-semibold text-foreground">
-          Performance summary <span className="ml-1 text-[13px] font-normal text-muted-foreground">last {p.periodDays} days</span>
-        </h2>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h2 className="text-[15px] font-semibold text-foreground">
+            Performance summary <span className="ml-1 text-[13px] font-normal text-muted-foreground">last {p.periodDays} days</span>
+          </h2>
+          <TrustChip tier={data.trustTier} reason={data.trustReason} />
+          <span className="text-[13px] text-muted-foreground">{data.trustReason}</span>
+        </div>
         <dl className="mt-3 grid grid-cols-1 gap-x-10 lg:grid-cols-2">
           <div>
             <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-2">

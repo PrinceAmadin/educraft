@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RoleChip } from "@/components/layout/RoleChip";
+import { TrustChip } from "@/components/operations/TrustChip";
 import { cn } from "@/lib/utils";
 import type { RecommendedWorkers } from "@/lib/services/operations/workers-ops";
 
@@ -134,6 +135,7 @@ export function QuickAssignDialog({
                         >
                           {w.busy ? "Busy" : w.status}
                         </span>
+                        <TrustChip tier={w.trustTier} reason={w.trustReason} />
                         {w.departmentMatch ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
                             <LuCheck className="size-3" aria-hidden />

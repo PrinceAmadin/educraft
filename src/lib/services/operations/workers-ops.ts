@@ -14,6 +14,7 @@ import {
   type WorkerActivityStatus,
 } from "@/lib/operations/worker-performance";
 import { deadlineInfo, type DeadlineUrgency } from "@/lib/utils";
+import { deriveTrustTier, trustTierReason, type TrustSignals, type TrustTier } from "@/lib/operations/trust-tier";
 import { execRoleForRecord } from "@/lib/executive-identity";
 import type { ExecRole } from "@/lib/rbac";
 import { loadExecIndex } from "@/lib/services/executives";
@@ -49,6 +50,40 @@ async function lastActiveByUser(userIds: string[]): Promise<Map<string, Date>> {
   return out;
 }
 
+// ── Trust tier signals ──────────────────────────────────────
+
+/** Open flags per worker, split out by conduct, batched across a set of workers. */
+async function openFlagCounts(workerIds: string[]): Promise<Map<string, { total: number; conduct: number }>> {
+  const out = new Map<string, { total: number; conduct: number }>();
+  if (workerIds.length === 0) return out;
+  const rows = await db.workerFlag.groupBy({ by: ["workerId", "kind"], where: { workerId: { in: workerIds }, resolvedAt: null }, _count: { _all: true } });
+  for (const r of rows) {
+    const cur = out.get(r.workerId) ?? { total: 0, conduct: 0 };
+    cur.total += r._count._all;
+    if (r.kind === "CONDUCT") cur.conduct += r._count._all;
+    out.set(r.workerId, cur);
+  }
+  return out;
+}
+
+/** All trust signals for a set of workers, batched (used where the caller has no project rows to hand). */
+async function trustSignalsFor(workerIds: string[]): Promise<Map<string, TrustSignals>> {
+  const out = new Map<string, TrustSignals>();
+  if (workerIds.length === 0) return out;
+  const [completed, revisions, flags] = await Promise.all([
+    db.project.groupBy({ by: ["workerId"], where: { workerId: { in: workerIds }, status: "COMPLETED" }, _count: { _all: true } }),
+    db.project.groupBy({ by: ["workerId"], where: { workerId: { in: workerIds }, status: "REVISION_NEEDED" }, _count: { _all: true } }),
+    openFlagCounts(workerIds),
+  ]);
+  const completedBy = new Map(completed.map((r) => [r.workerId, r._count._all]));
+  const revisionsBy = new Map(revisions.map((r) => [r.workerId, r._count._all]));
+  for (const id of workerIds) {
+    const f = flags.get(id) ?? { total: 0, conduct: 0 };
+    out.set(id, { completed: completedBy.get(id ?? "") ?? 0, openFlags: f.total, conductFlags: f.conduct, openRevisions: revisionsBy.get(id ?? "") ?? 0 });
+  }
+  return out;
+}
+
 // ── Directory ───────────────────────────────────────────────
 
 export interface WorkerDirectoryFilters {
@@ -77,6 +112,8 @@ export interface WorkerDirectoryRow {
   qaFirstPassRate: number | null;
   tier2Flags: number;
   tier2Warning: boolean;
+  trustTier: TrustTier;
+  trustReason: string;
   lastActiveAt: string | null;
   isQaReviewer: boolean;
   /** Set when the worker record is an executive's (CEO, CFO, HOG, COO): shown as a tag. */
@@ -127,7 +164,12 @@ export async function listWorkerDirectory(filters: WorkerDirectoryFilters, now: 
     },
   });
   const userIds = workers.map((w) => w.userId).filter((x): x is string => Boolean(x));
-  const [lastActive, flags, execIndex] = await Promise.all([lastActiveByUser(userIds), tier2FlagCounts(workers.map((w) => w.id), now), loadExecIndex()]);
+  const [lastActive, flags, openFlags, execIndex] = await Promise.all([
+    lastActiveByUser(userIds),
+    tier2FlagCounts(workers.map((w) => w.id), now),
+    openFlagCounts(workers.map((w) => w.id)),
+    loadExecIndex(),
+  ]);
 
   let rows: WorkerDirectoryRow[] = workers.map((w) => {
     const facts = toPerformanceFacts(w.projects);
@@ -136,6 +178,13 @@ export async function listWorkerDirectory(filters: WorkerDirectoryFilters, now: 
     const projectsDone = w.projects.filter((p) => p.status === "COMPLETED" || p.status === "DELIVERED").length;
     const last = w.userId ? lastActive.get(w.userId) ?? null : null;
     const activity = workerActivityStatus({ status: w.status, activeProjects, maxConcurrentProjects: w.maxConcurrentProjects, lastActiveAt: last, now });
+    const of = openFlags.get(w.id) ?? { total: 0, conduct: 0 };
+    const trust: TrustSignals = {
+      completed: w.projects.filter((p) => p.status === "COMPLETED").length,
+      openFlags: of.total,
+      conductFlags: of.conduct,
+      openRevisions: w.projects.filter((p) => p.status === "REVISION_NEEDED").length,
+    };
     return {
       id: w.id,
       workerId: w.workerId,
@@ -153,6 +202,8 @@ export async function listWorkerDirectory(filters: WorkerDirectoryFilters, now: 
       qaFirstPassRate: perf.qaFirstPassRate,
       tier2Flags: perf.tier2FlagCount,
       tier2Warning: perf.tier2FlagCount >= TIER2_FLAG_WARNING,
+      trustTier: deriveTrustTier(trust),
+      trustReason: trustTierReason(trust),
       lastActiveAt: last?.toISOString() ?? null,
       isQaReviewer: w.isQaReviewer,
       execRole: execRoleForRecord(execIndex, w),
@@ -176,6 +227,8 @@ export async function listWorkerDirectory(filters: WorkerDirectoryFilters, now: 
 export interface WorkerProfileOps {
   performance: WorkerMetrics;
   activity: WorkerActivityStatus;
+  trustTier: TrustTier;
+  trustReason: string;
   lastActiveAt: string | null;
   active: { projectCode: string; title: string | null; department: string; serviceName: string; status: string; deadline: string | null; urgency: DeadlineUrgency; deadlineLabel: string }[];
   completedRecent: { projectCode: string; title: string | null; department: string; deliveredAt: string; onTime: boolean | null; lateDays: number; corrections: number }[];
@@ -286,10 +339,18 @@ export async function getWorkerProfileOps(workerId: string, now: Date = new Date
     db.qaReview.count({ where: { reviewerId: worker.id, reviewerType: "WORKER", completedAt: null, project: { status: { in: ["SUBMITTED", "IN_QA_REVIEW"] } } } }),
   ]);
   const last = worker.userId ? lastActive.get(worker.userId) ?? null : null;
+  const trust: TrustSignals = {
+    completed: worker.projects.filter((p) => p.status === "COMPLETED").length,
+    openFlags: worker.flags.filter((f) => f.resolvedAt == null).length,
+    conductFlags: worker.flags.filter((f) => f.resolvedAt == null && f.kind === "CONDUCT").length,
+    openRevisions: worker.projects.filter((p) => p.status === "REVISION_NEEDED").length,
+  };
 
   return {
     performance,
     activity: workerActivityStatus({ status: worker.status, activeProjects: active.length, maxConcurrentProjects: worker.maxConcurrentProjects, lastActiveAt: last, now }),
+    trustTier: deriveTrustTier(trust),
+    trustReason: trustTierReason(trust),
     lastActiveAt: last?.toISOString() ?? null,
     active,
     completedRecent,
@@ -395,6 +456,8 @@ export interface RecommendedWorker extends WorkerRecommendation {
   /** Over the busy threshold: shown, flagged, never blocked. */
   busy: boolean;
   departmentMatch: boolean;
+  trustTier: TrustTier;
+  trustReason: string;
 }
 
 export interface RecommendedWorkers {
@@ -410,6 +473,8 @@ export interface RecommendedWorkers {
 export async function getRecommendedWorkers(idOrCode: string): Promise<RecommendedWorkers | null> {
   const ctx = await getAssignmentContext(idOrCode);
   if (!ctx) return null;
+  const trust = await trustSignalsFor(ctx.recommendations.map((r) => r.id));
+  const noSignals: TrustSignals = { completed: 0, openFlags: 0, conductFlags: 0, openRevisions: 0 };
   return {
     project: {
       id: ctx.project.id,
@@ -420,6 +485,9 @@ export async function getRecommendedWorkers(idOrCode: string): Promise<Recommend
       serviceName: ctx.project.serviceName,
       currentWorker: ctx.project.currentWorker,
     },
-    workers: ctx.recommendations.map((r) => ({ ...r, busy: r.activeProjects > WORKER_BUSY_THRESHOLD, departmentMatch: r.specialtyMatch })),
+    workers: ctx.recommendations.map((r) => {
+      const s = trust.get(r.id) ?? noSignals;
+      return { ...r, busy: r.activeProjects > WORKER_BUSY_THRESHOLD, departmentMatch: r.specialtyMatch, trustTier: deriveTrustTier(s), trustReason: trustTierReason(s) };
+    }),
   };
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LuArrowRight, LuMessageCircle, LuTriangleAlert } from "react-icons/lu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RoleChip } from "@/components/layout/RoleChip";
+import { TrustChip } from "@/components/operations/TrustChip";
 import { toWaNumber, waLink, greetingName } from "@/lib/whatsapp";
 import { cn, timeAgo } from "@/lib/utils";
 import type { WorkerDirectoryRow } from "@/lib/services/operations/workers-ops";
@@ -76,7 +77,10 @@ export function WorkerDirectoryTable({ rows }: { rows: WorkerDirectoryRow[] }) {
                 </Link>
                 <RoleChip role={row.execRole} />
               </span>
-              <ActivityChip status={row.activity} />
+              <span className="flex shrink-0 items-center gap-1.5">
+                <TrustChip tier={row.trustTier} reason={row.trustReason} />
+                <ActivityChip status={row.activity} />
+              </span>
             </div>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">{row.workerId}</p>
             <p className="mt-1 truncate text-xs text-muted-foreground">{row.departments.join(", ") || "No departments recorded"}</p>
@@ -136,7 +140,10 @@ export function WorkerDirectoryTable({ rows }: { rows: WorkerDirectoryRow[] }) {
                   <span className="line-clamp-2">{row.departments.length ? row.departments.join(", ") : "—"}</span>
                 </TableCell>
                 <TableCell>
-                  <ActivityChip status={row.activity} />
+                  <span className="flex flex-col items-start gap-1">
+                    <ActivityChip status={row.activity} />
+                    <TrustChip tier={row.trustTier} reason={row.trustReason} />
+                  </span>
                 </TableCell>
                 <TableCell className="text-center">
                   <LoadPill row={row} />
