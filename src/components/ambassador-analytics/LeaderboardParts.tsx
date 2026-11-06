@@ -16,13 +16,13 @@ export function parsePeriod(v: string | undefined): LeaderboardPeriod {
   return PERIODS.find((p) => p.key === v)?.key ?? "weekly";
 }
 
-export function PeriodTabs({ active }: { active: LeaderboardPeriod }) {
+export function PeriodTabs({ active, basePath = "/ambassador/leaderboard" }: { active: LeaderboardPeriod; basePath?: string }) {
   return (
     <nav aria-label="Leaderboard period" className="inline-flex gap-1 rounded-xl bg-zone p-1">
       {PERIODS.map((p) => (
         <Link
           key={p.key}
-          href={`/ambassador/leaderboard?period=${p.key}`}
+          href={`${basePath}?period=${p.key}`}
           scroll={false}
           aria-current={p.key === active ? "page" : undefined}
           className={cn(

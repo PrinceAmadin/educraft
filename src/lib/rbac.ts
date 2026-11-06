@@ -72,6 +72,8 @@ export const ROUTE_PERMISSIONS: readonly RoutePermission[] = [
   { prefix: "/admin/finance/payouts", roles: ["SUPER_ADMIN", "CO_CEO_CFO", "COO"] },
   { prefix: "/admin/finance/ai-usage", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/admin/finance", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
+  // The click leaderboard mirrors the ambassadors' own board; the COO reads it too (founder, 6 Nov 2026).
+  { prefix: "/admin/ambassadors/leaderboard", roles: ["SUPER_ADMIN", "HOG", "COO"] },
   { prefix: "/admin/ambassadors", roles: ["SUPER_ADMIN", "HOG"] },
   { prefix: "/admin/growth", roles: ["SUPER_ADMIN", "HOG"] },
   { prefix: "/admin/projects", roles: ["SUPER_ADMIN", "COO"] },

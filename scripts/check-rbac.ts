@@ -44,7 +44,7 @@ expect("HOG sees exactly his tabs", labelsFor("HOG"), ["Ambassadors", "Growth", 
 expect(
   "COO sees exactly his tabs",
   labelsFor("COO"),
-  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Tutorials", "Payouts", "Operations reports", "EduCraft Cashflow", "Bank details", "My earnings"]
+  ["Projects", "QA Review", "Research approvals", "Client inbox", "Clients", "Workers", "Tutorials", "Leaderboard", "Payouts", "Operations reports", "EduCraft Cashflow", "Bank details", "My earnings"]
 );
 expect("everyone opens EduCraft Cashflow, only the founder may publish", [EXEC_ROLES.map((r) => canAccessRoute(r, "/admin/settings/cashflow")), EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cashflow/publish", "POST")), EXEC_ROLES.map((r) => canCallAdminApi(r, "/api/admin/cashflow", "GET"))], [[true, true, true, true], [true, false, false, false], [true, true, true, true]]);
 expect(
@@ -100,6 +100,10 @@ expect("COO cannot open /admin/finance", canAccessRoute("COO", "/admin/finance")
 expect("HOG cannot open /admin/workers", canAccessRoute("HOG", "/admin/workers"), false);
 expect("CFO cannot open /admin/projects", canAccessRoute("CO_CEO_CFO", "/admin/projects"), false);
 expect("COO can open /admin/finance/payouts", canAccessRoute("COO", "/admin/finance/payouts"), true);
+// The click leaderboard is the one ambassador page the COO reads (founder, 6 Nov 2026).
+expect("COO can open the ambassador leaderboard", canAccessRoute("COO", "/admin/ambassadors/leaderboard"), true);
+expect("COO still cannot open /admin/ambassadors", canAccessRoute("COO", "/admin/ambassadors"), false);
+expect("CFO cannot open the ambassador leaderboard", canAccessRoute("CO_CEO_CFO", "/admin/ambassadors/leaderboard"), false);
 expect("HOG cannot open /admin/finance/payouts", canAccessRoute("HOG", "/admin/finance/payouts"), false);
 expect("only SUPER_ADMIN opens the Command Center", EXEC_ROLES.map((r) => canAccessRoute(r, "/admin")), [true, false, false, false]);
 expect("only SUPER_ADMIN opens Team & roles", EXEC_ROLES.map((r) => canAccessRoute(r, "/admin/settings/team")), [true, false, false, false]);

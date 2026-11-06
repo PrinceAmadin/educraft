@@ -25,6 +25,7 @@ import {
   Settings,
   ShieldCheck,
   TrendingUp,
+  Trophy,
   UserCog,
   Users,
   Wallet,
@@ -62,6 +63,9 @@ export const ADMIN_SIDEBAR: NavSection[] = [
     items: [
       { label: "Ambassadors", href: "/admin/ambassadors", icon: Megaphone, matchNested: true, roles: [SA, HOG] },
       { label: "Growth", href: "/admin/growth", icon: TrendingUp, matchNested: true, roles: [SA, HOG] },
+      // The click leaderboard (the ambassadors' own board). The HOG reaches it
+      // through the Ambassadors tab; this entry is the COO's (and founder's) way in.
+      { label: "Leaderboard", href: "/admin/ambassadors/leaderboard", icon: Trophy, roles: [SA, COO] },
     ],
   },
   {
