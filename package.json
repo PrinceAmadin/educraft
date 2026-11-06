@@ -38,6 +38,7 @@
     "report:ai-cost": "dotenv -e .env.local -- tsx scripts/report-ai-cost.ts",
     "ambassadors:backfill": "dotenv -e .env.local -- tsx scripts/ambassador-referrals-backfill.ts",
     "ambassadors:tour-backfill": "dotenv -e .env.local -- tsx scripts/ambassador-tour-backfill.ts",
+    "clicks:attribute": "dotenv -e .env.local -- tsx scripts/click-attribution-backfill.ts",
     "research:tokenize": "dotenv -e .env.local -- tsx scripts/research-tokenize.ts",
     "research:group": "dotenv -e .env.local -- tsx scripts/research-group.ts",
     "roster:seed": "dotenv -e .env.local -- tsx scripts/seed-ambassador-roster.ts",

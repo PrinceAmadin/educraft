@@ -15,6 +15,7 @@ import { applicationRejectedEmail } from "@/lib/emails/application-decision";
 import { alertAmbassadorApplication } from "@/lib/services/team-alerts";
 import { findLoginForApplication, sendApplicationCode, verifyApplicationCode } from "@/lib/services/portal-otp";
 import { ensureGroupInvite } from "@/lib/services/ambassador-group";
+import { claimSlotClicks } from "@/lib/click-tracking/record-click";
 import { getAmbassadorTourVideo } from "@/lib/services/settings";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
 import type { SendFn } from "@/lib/services/client-otp";
@@ -576,6 +577,14 @@ export async function approveApplication(
   // An executive's other email makes the new record Platinum. Outside the approval's
   // transaction (kept short); a failure only delays it to the next recount.
   await recountAmbassador(db, ambassador.id).catch((err) => console.error("[exec-tier] recount after approval failed", err));
+
+  // Clicks recorded on this slot's link before they had an HQ record were
+  // stored with no ambassador (invisible on the leaderboard and in their
+  // analytics) — claim them now that the slot is theirs. Non-fatal; the
+  // `clicks:attribute` backfill catches anything missed.
+  await claimSlotClicks(db, ambassador.id, claimed).catch((err) =>
+    console.error("[click-tracking] claiming slot clicks after approval failed", err)
+  );
 
   // The live site, never localhost: the links are opened on the applicant's phone.
   const base = siteUrl();

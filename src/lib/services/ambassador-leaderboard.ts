@@ -56,22 +56,39 @@ function periodStart(period: LeaderboardPeriod): Date | null {
   return null;
 }
 
+/**
+ * One retry after a short pause. The shared Prisma pool can time out (P2024)
+ * when dashboard pages hold every connection; if the recompute throws,
+ * `unstable_cache` keeps serving whatever it had — the board silently
+ * freezes. A single retry rides out the contention instead.
+ */
+async function withOneRetry<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch {
+    await new Promise((r) => setTimeout(r, 1_500));
+    return read();
+  }
+}
+
 async function computeLeaderboard(period: LeaderboardPeriod): Promise<LeaderboardData> {
   const since = periodStart(period);
   const real = { isTestClick: false, archivedAt: null, quality: "UNIQUE" as const, ambassadorId: { not: null } };
 
-  const [ambassadors, periodClicks, execIndex] = await Promise.all([
-    db.ambassador.findMany({
-      where: { status: "Active" },
-      select: { id: true, fullName: true, legacySlotId: true, university: { select: { abbreviation: true } }, email: true, user: { select: { email: true, role: true } } },
-    }),
-    db.clickEvent.groupBy({
-      by: ["ambassadorId"],
-      where: since ? { ...real, timestamp: { gte: since } } : real,
-      _count: { _all: true },
-    }),
-    loadExecIndex(),
-  ]);
+  const [ambassadors, periodClicks, execIndex] = await withOneRetry(() =>
+    Promise.all([
+      db.ambassador.findMany({
+        where: { status: "Active" },
+        select: { id: true, fullName: true, legacySlotId: true, university: { select: { abbreviation: true } }, email: true, user: { select: { email: true, role: true } } },
+      }),
+      db.clickEvent.groupBy({
+        by: ["ambassadorId"],
+        where: since ? { ...real, timestamp: { gte: since } } : real,
+        _count: { _all: true },
+      }),
+      loadExecIndex(),
+    ])
+  );
 
   const clicksBy = new Map(periodClicks.map((g) => [g.ambassadorId!, g._count._all]));
 

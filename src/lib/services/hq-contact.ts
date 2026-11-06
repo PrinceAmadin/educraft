@@ -42,6 +42,24 @@ export interface HqContact {
   address: string | null;
 }
 
+/**
+ * Served when the Settings read itself fails (a database hiccup): the shipped
+ * defaults, so a referral redirect still opens WhatsApp instead of crashing —
+ * and, upstream of that, still records its click.
+ */
+export const HQ_CONTACT_FALLBACK: HqContact = (() => {
+  const whatsapp = toWaNumber(DEFAULTS.phone)!;
+  return {
+    name: DEFAULTS.name,
+    phone: DEFAULTS.phone,
+    whatsapp,
+    whatsappUrl: `https://wa.me/${whatsapp}`,
+    email: DEFAULTS.email,
+    telegram: null,
+    address: null,
+  };
+})();
+
 const readContact = unstable_cache(
   async (): Promise<HqContact> => {
     const rows = await db.setting.findMany({ where: { key: { in: Object.values(HQ_CONTACT_KEYS) } } });

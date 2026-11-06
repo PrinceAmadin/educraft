@@ -266,6 +266,16 @@ export async function getAmbassadorTourVideo(): Promise<{ videoUrl: string; post
  * ambassador's name (see `fillAmbassadorMessage`). Editing them (Super Admin
  * only, on Settings > General) changes every ambassador link at once.
  */
+/**
+ * The shipped message texts, for the redirect's fallback when the Settings
+ * read itself fails: a referral link must still open WhatsApp with a sensible
+ * message (and record its click) through a database hiccup.
+ */
+export const AMBASSADOR_LINK_MESSAGE_DEFAULTS = {
+  referral: DEFAULTS.ambassadorReferralMessage,
+  core: DEFAULTS.ambassadorCoreMessage,
+} as const;
+
 export async function getAmbassadorLinkMessages(): Promise<{ referral: string; core: string }> {
   const rows = await db.setting.findMany({
     where: { key: { in: [KEYS.ambassadorReferralMessage, KEYS.ambassadorCoreMessage] } },

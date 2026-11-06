@@ -31,3 +31,13 @@ export function sqlTable(name: string): Prisma.Sql {
   if (!IDENT.test(name)) throw new Error(`Not a table name: ${name}`);
   return Prisma.raw(`"${DB_SCHEMA}"."${name}"`);
 }
+
+/**
+ * `"public"."ClickQuality"` — a schema-qualified enum (or other) type name for
+ * `::` casts in raw SQL. An unqualified type resolves through `search_path`
+ * exactly like an unqualified table (see above), so casts must qualify too.
+ */
+export function sqlType(name: string): Prisma.Sql {
+  if (!IDENT.test(name)) throw new Error(`Not a type name: ${name}`);
+  return Prisma.raw(`"${DB_SCHEMA}"."${name}"`);
+}
