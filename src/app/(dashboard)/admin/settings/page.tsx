@@ -2,20 +2,23 @@ import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { SettingsTabs } from "@/components/settings/SettingsTabs";
 import { GeneralSettingsForm } from "@/components/settings/GeneralSettingsForm";
+import { ClaudeApiKeyCard } from "@/components/settings/ClaudeApiKeyCard";
 import { OperationsTimingForm } from "@/components/operations/OperationsTimingForm";
 import { getGeneralSettings } from "@/lib/services/settings";
 import { getExpectedHours } from "@/lib/services/operations/pipeline";
 import { getAlertRoleRecipients } from "@/lib/services/team-alerts";
+import { getAnthropicKeyStatus } from "@/lib/anthropic-key";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [session, settings, expected, alertRoles] = await Promise.all([
+  const [session, settings, expected, alertRoles, anthropicKey] = await Promise.all([
     auth(),
     getGeneralSettings(),
     getExpectedHours(),
     getAlertRoleRecipients(),
+    getAnthropicKeyStatus(),
   ]);
   const canEditPricing = session?.user?.role === "SUPER_ADMIN";
 
@@ -31,6 +34,11 @@ export default async function SettingsPage() {
       <SettingsTabs active="general" role={session?.user?.role} />
 
       <GeneralSettingsForm settings={settings} canEditPricing={canEditPricing} alertRoles={alertRoles} />
+
+      {/* Deliberately a sibling of the form, not a field in it: the key needs its own
+          validating route, and staying out of generalSettingsSchema and the settings
+          KEYS registry means getGeneralSettings() can never return it. */}
+      {canEditPricing ? <ClaudeApiKeyCard status={anthropicKey} canEdit /> : null}
 
       {canEditPricing ? <OperationsTimingForm hours={expected} /> : null}
     </div>

@@ -14,6 +14,7 @@
  * usage log.
  */
 
+import { resolveAnthropicKey } from "@/lib/anthropic-key";
 import { logAiUsage, type AiUsageContext } from "@/lib/ai-usage-log";
 import {
   AnthropicStreamAccumulator,
@@ -41,9 +42,16 @@ const MODEL = "claude-sonnet-5";
  */
 export const SUPERVISOR_FACING_MODEL = "claude-opus-5-5";
 
-function apiKey(): string {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not set");
+/**
+ * The key for one logical operation. Resolved ONCE at each public entry point
+ * and threaded down, never re-read inside a retry loop: a missing or
+ * unresolvable key must not be retried as though it were a dropped
+ * connection, and one database read per call beats one per attempt.
+ * The key saved in the admin settings wins over ANTHROPIC_API_KEY — see
+ * `anthropic-key.ts`.
+ */
+async function apiKey(): Promise<string> {
+  const { key } = await resolveAnthropicKey();
   return key;
 }
 
@@ -120,15 +128,21 @@ class NoToolCallError extends AnthropicError {}
  * "auto", a strict schema and one more try when it answers without the tool.
  */
 export async function callClaudeForJson<T>(input: ClaudeToolCallInput<T>): Promise<T> {
+  const key = await apiKey();
   try {
-    return await callClaudeForJsonOnce(input);
+    return await callClaudeForJsonOnce({ ...input, apiKey: key });
   } catch (error) {
     if (!(error instanceof NoToolCallError)) throw error;
-    return callClaudeForJsonOnce({ ...input, usage: input.usage ? { ...input.usage, step: `${input.usage.step}_notool` } : undefined });
+    return callClaudeForJsonOnce({
+      ...input,
+      apiKey: key,
+      usage: input.usage ? { ...input.usage, step: `${input.usage.step}_notool` } : undefined,
+    });
   }
 }
 
 async function callClaudeForJsonOnce<T>({
+  apiKey: key,
   system,
   user,
   toolName,
@@ -140,7 +154,7 @@ async function callClaudeForJsonOnce<T>({
   timeoutMs = DEFAULT_JSON_TIMEOUT_MS,
   model = MODEL,
   effort,
-}: ClaudeToolCallInput<T>): Promise<T> {
+}: ClaudeToolCallInput<T> & { apiKey: string }): Promise<T> {
   const startedAt = Date.now();
   const unforced = NO_FORCED_TOOL_MODELS.has(model);
   let res: Response;
@@ -149,7 +163,7 @@ async function callClaudeForJsonOnce<T>({
     res = await fetch(ANTHROPIC_BASE_URL, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey(),
+        "x-api-key": key,
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
         ...(unforced ? { "anthropic-beta": REFUSAL_FALLBACK_BETA } : {}),
@@ -305,6 +319,7 @@ export async function callClaudeWithWebSearch<T>({
   webSearch,
   timeoutMs = 100_000,
 }: ClaudeWebSearchInput): Promise<ClaudeWebSearchResult<T>> {
+  const key = await apiKey();
   const deadline = Date.now() + timeoutMs;
   const searchTool: Record<string, unknown> = { type: WEB_SEARCH_TOOL, name: "web_search", max_uses: webSearch.maxUses };
   if (webSearch.allowedDomains?.length) searchTool.allowed_domains = webSearch.allowedDomains;
@@ -328,7 +343,7 @@ export async function callClaudeWithWebSearch<T>({
     try {
       res = await fetch(ANTHROPIC_BASE_URL, {
         method: "POST",
-        headers: { "x-api-key": apiKey(), "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages, tools, tool_choice: { type: "auto" } }),
         signal: AbortSignal.timeout(left),
       });
@@ -513,11 +528,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * `max_tokens` or `refusal` stop means for it.
  */
 export async function streamClaude(input: ClaudeStreamInput): Promise<ClaudeStreamResult> {
+  const key = await apiKey();
   const maxAttempts = Math.max(1, input.attempts ?? 4);
   let total: ClaudeUsage = { ...ZERO_USAGE };
   for (let attempt = 1; ; attempt++) {
     try {
-      const result = await streamOnce(input);
+      const result = await streamOnce(input, key);
       total = addUsage(total, result.usage);
       return { ...result, usage: total, attempts: attempt };
     } catch (error) {
@@ -538,7 +554,7 @@ export async function streamClaude(input: ClaudeStreamInput): Promise<ClaudeStre
   }
 }
 
-async function streamOnce(input: ClaudeStreamInput): Promise<Omit<ClaudeStreamResult, "attempts">> {
+async function streamOnce(input: ClaudeStreamInput, key: string): Promise<Omit<ClaudeStreamResult, "attempts">> {
   const startedAt = Date.now();
   const controller = new AbortController();
   let abortedFor: "deadline" | "idle" | null = null;
@@ -565,7 +581,7 @@ async function streamOnce(input: ClaudeStreamInput): Promise<Omit<ClaudeStreamRe
     const res = await fetch(ANTHROPIC_BASE_URL, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey(),
+        "x-api-key": key,
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
       },

@@ -16,6 +16,22 @@
         "3000"
       ],
       "port": 3000
+    },
+    {
+      "name": "local",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/dotenv-cli/cli.js",
+        "-e",
+        ".env.local",
+        "--",
+        "node",
+        "node_modules/next/dist/bin/next",
+        "dev",
+        "-p",
+        "3000"
+      ],
+      "port": 3000
     }
   ]
 }

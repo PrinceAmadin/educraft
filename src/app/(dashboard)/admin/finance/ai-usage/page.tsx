@@ -18,8 +18,10 @@ import {
   parsePeriod,
 } from "@/lib/services/ai-usage";
 import { getClaudeBurnVsFunding, getClaudePot } from "@/lib/services/finance/pots";
+import { getAnthropicKeyStatus } from "@/lib/anthropic-key";
 import { BurnVsFundingCard } from "@/components/finance/ai-usage/BurnVsFundingCard";
 import { ClaudePotCard } from "@/components/finance/ai-usage/ClaudePotCard";
+import { ClaudeApiKeyCard } from "@/components/settings/ClaudeApiKeyCard";
 import { SendTestEmailButton } from "@/components/finance/ai-usage/SendTestEmailButton";
 import { cn, formatNaira } from "@/lib/utils";
 import { AlertThresholdForm, MonthlySummaryCard, PerProjectCostTable, PerSubsystemBreakdown } from "./token-panels";
@@ -32,7 +34,7 @@ const num = (n: number) => new Intl.NumberFormat("en-NG").format(n);
 
 export default async function AiUsagePage({ searchParams }: { searchParams: { period?: string } }) {
   const period = parsePeriod(searchParams.period);
-  const [session, balance, summary, subsystems, workers, anomalies, monthly, subsystemBreakdown, perProject, claudePot, burnVsFunding] = await Promise.all([
+  const [session, balance, summary, subsystems, workers, anomalies, monthly, subsystemBreakdown, perProject, claudePot, burnVsFunding, anthropicKey] = await Promise.all([
     auth(),
     getCreditBalance(),
     getUsageSummary(period),
@@ -44,8 +46,11 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
     getPerProjectCosts("month"),
     getClaudePot(),
     getClaudeBurnVsFunding(),
+    getAnthropicKeyStatus(),
   ]);
   const canEditThreshold = session?.user?.role === "SUPER_ADMIN";
+  // The key is the founder's alone — the CFO opens this page but never sees the card.
+  const canEditKey = session?.user?.role === "SUPER_ADMIN";
   const canLogTopUp = session?.user?.role === "SUPER_ADMIN" || session?.user?.role === "CO_CEO_CFO";
 
   return (
@@ -61,6 +66,9 @@ export default async function AiUsagePage({ searchParams }: { searchParams: { pe
       />
 
       <AiBalanceCard balance={balance} canEdit={session?.user?.role === "SUPER_ADMIN"} />
+
+      {/* Which Anthropic account HQ is spending on, and changing it without a deploy. */}
+      {canEditKey ? <ClaudeApiKeyCard status={anthropicKey} canEdit /> : null}
 
       {canEditThreshold ? <SendTestEmailButton /> : null}
 

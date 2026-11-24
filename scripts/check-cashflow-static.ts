@@ -116,6 +116,8 @@ const AUDITED: { file: string; fn: string; action: string }[] = [
   { file: "src/lib/services/finance/reprice.ts", fn: "repriceProject", action: "repriced_project" },
   { file: "src/lib/services/project-cleanup.ts", fn: "deleteOne", action: "deleted_test_project" },
   { file: "src/lib/services/finance/cashflow-tick.ts", fn: "runCashflowTick", action: "CRON_FAILURE" },
+  { file: "src/lib/services/anthropic-key.ts", fn: "setAnthropicKey", action: "changed_anthropic_key" },
+  { file: "src/lib/services/anthropic-key.ts", fn: "clearAnthropicKey", action: "cleared_anthropic_key" },
 ];
 for (const a of AUDITED) {
   const full = join(ROOT, a.file);
