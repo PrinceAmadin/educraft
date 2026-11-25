@@ -85,7 +85,8 @@
     "demo:terminate": "dotenv -e .env.demo -- tsx scripts/demo-terminate.ts",
     "demo:dev": "dotenv -e .env.demo -- next dev",
     "demo:migrate": "dotenv -e .env.demo -- prisma migrate deploy",
-    "demo:base": "dotenv -e .env.demo -- tsx prisma/seed.ts"
+    "demo:base": "dotenv -e .env.demo -- tsx prisma/seed.ts",
+    "screening:seed-bank": "dotenv -e .env.local -- tsx scripts/seed-screening-bank.ts"
   },
   "prisma": {
     "seed": "dotenv -e .env.local -- tsx prisma/seed.ts"
