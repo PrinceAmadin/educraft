@@ -54,6 +54,13 @@ export const PAUSE_TEXT: Record<PauseReason, string> = {
   DATA: "Waiting for the client's data files",
 };
 
+/**
+ * Statuses that mean the work is stopped whatever the clock says. A project
+ * held before the clock was wired up has no `deadlinePausedAt`, and it must
+ * still never read as late for standing still.
+ */
+const HELD_STATUSES = new Set(["ON_HOLD", "DISPUTED"]);
+
 function reasonFor(status: string): PauseReason {
   if (status === "AWAITING_CLIENT_INPUT") return "CLIENT_INPUT";
   if (status === "ON_HOLD") return "HOLD";
@@ -77,9 +84,22 @@ export function clockPause(
   project: { status: string; deadlinePausedAt: Date | string | null | undefined },
   now: Date = new Date()
 ): ClockPause | null {
-  if (!project.deadlinePausedAt) return null;
-  const since = project.deadlinePausedAt instanceof Date ? project.deadlinePausedAt : new Date(project.deadlinePausedAt);
-  if (Number.isNaN(since.getTime())) return null;
+  const stamped = project.deadlinePausedAt
+    ? project.deadlinePausedAt instanceof Date
+      ? project.deadlinePausedAt
+      : new Date(project.deadlinePausedAt)
+    : null;
+  const valid = stamped && !Number.isNaN(stamped.getTime()) ? stamped : null;
+
+  // Held, but nothing recorded when: say it is paused and never call it late.
+  // No day count, because we do not know it, and the date does not move.
+  if (!valid) {
+    if (!HELD_STATUSES.has(project.status)) return null;
+    const reason = reasonFor(project.status);
+    return { since: now, days: 0, reason, label: "Paused", detail: PAUSE_TEXT[reason] };
+  }
+
+  const since = valid;
   const days = pausedDaysBetween(since, now);
   const reason = reasonFor(project.status);
   return {

@@ -38,7 +38,26 @@ const days = (n: number) => new Date(now.getTime() + n * DAY);
 
 expect("a running clock is not a pause", clockPause({ status: "IN_PROGRESS", deadlinePausedAt: null }, now), null);
 expect("no field, no pause", clockPause({ status: "AWAITING_CLIENT_INPUT", deadlinePausedAt: null }, now), null);
-expect("rubbish in the field is not a pause", clockPause({ status: "ON_HOLD", deadlinePausedAt: "not a date" }, now), null);
+expect("a working project with rubbish in the field is not paused", clockPause({ status: "IN_PROGRESS", deadlinePausedAt: "not a date" }, now), null);
+
+// ── Held, but nothing says since when ──────────────────────────────────────────
+// Projects held before the clock existed have no date. They are still stopped,
+// and must never read as late — they just cannot claim any days.
+
+for (const status of ["ON_HOLD", "DISPUTED"]) {
+  const held = clockPause({ status, deadlinePausedAt: null }, now)!;
+  expect(`${status} with no date is still a pause`, held !== null, true);
+  expect(`${status} with no date claims no days`, held.days, 0);
+  expect(`${status} with no date just says Paused`, held.label, "Paused");
+  const v = deadlineView({ status, internalDeadline: days(-60), deadlinePausedAt: null }, now);
+  expect(`${status} with no date is never overdue on screen`, Boolean(v.pause), true);
+  expect(`${status} with no date leaves the date where it is`, v.deadline!.toISOString(), days(-60).toISOString());
+}
+expect("a rubbish date on a held project falls back the same way", clockPause({ status: "ON_HOLD", deadlinePausedAt: "not a date" }, now)!.days, 0);
+expect("a working project is not rescued by the fallback", clockPause({ status: "IN_PROGRESS", deadlinePausedAt: null }, now), null);
+expect("a cancelled project is not called paused", clockPause({ status: "CANCELLED", deadlinePausedAt: null }, now), null);
+// A real date always wins over the fallback.
+expect("a stamped hold counts its days", clockPause({ status: "ON_HOLD", deadlinePausedAt: days(-51) }, now)!.days, 51);
 
 const waiting = clockPause({ status: "AWAITING_CLIENT_INPUT", deadlinePausedAt: days(-41) }, now)!;
 expect("waiting on the client is a pause", waiting.reason, "CLIENT_INPUT");
