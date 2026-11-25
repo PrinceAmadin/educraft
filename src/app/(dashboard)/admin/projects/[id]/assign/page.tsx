@@ -7,7 +7,8 @@ import { AssignWorkerScreen } from "@/components/projects/AssignWorkerScreen";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { STATUS_META } from "@/lib/status";
 import { Button } from "@/components/ui/button";
-import { deadlineInfo, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { deadlineView } from "@/lib/project-display";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +33,7 @@ export default async function AssignWorkerPage({ params }: { params: { id: strin
   if (!ctx) notFound();
 
   const { project, recommendations } = ctx;
-  const deadline = project.internalDeadline ?? project.clientDeadline;
-  const info = deadlineInfo(deadline);
+  const { pause, deadline, info } = deadlineView(project);
 
   const isFirstAssignment = project.status === "REQUIREMENTS_CONFIRMED";
   const isReassignable =
@@ -87,7 +87,9 @@ export default async function AssignWorkerPage({ params }: { params: { id: strin
               <Row
                 label="Deadline"
                 value={
-                  deadline ? `${formatDate(deadline)}${info.daysLeft != null ? ` · ${info.label}` : ""}` : "Not set"
+                  deadline
+                    ? `${formatDate(deadline)}${pause ? ` · ${pause.label}` : info.daysLeft != null ? ` · ${info.label}` : ""}`
+                    : "Not set"
                 }
               />
             </dl>

@@ -7,12 +7,14 @@ const DOT: Record<StageAlert["tone"], string> = {
   normal: "bg-primary",
   amber: "bg-gold",
   red: "bg-danger",
+  info: "bg-info",
 };
 
 const ALERT_TEXT: Record<StageAlert["tone"], string> = {
   normal: "text-muted-foreground",
   amber: "text-gold",
   red: "text-danger",
+  info: "text-info",
 };
 
 /** Friendlier wording for the terse data labels; anything not here is shown as-is. */

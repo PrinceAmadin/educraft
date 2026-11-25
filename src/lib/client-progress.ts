@@ -1,4 +1,5 @@
 import type { ProjectStatus } from "@prisma/client";
+import { clockPause, liveDeadline } from "@/lib/pause-clock";
 
 /**
  * What a client sees of their project's progress, in client words.
@@ -255,7 +256,11 @@ export function deliveryCountdown(input: {
   dataPause?: DataPauseState;
   now?: Date;
 }): DeliveryCountdown {
-  const date = input.expectedDeliveryAt;
+  // While the clock is stopped the date shown moves with the pause — the very
+  // days the resume adds back — so a paused project never shows a date that
+  // has already gone by.
+  const pause = clockPause({ status: input.status, deadlinePausedAt: input.deadlinePausedAt }, input.now ?? new Date());
+  const date = liveDeadline(input.expectedDeliveryAt, pause, input.now);
   if (FINISHED.includes(input.status)) return { date, label: "Delivered", tone: "success" };
   if (input.status === "CANCELLED" || input.status === "REFUNDED") return { date: null, label: "", tone: "normal" };
   // Nothing has started before the downpayment: a date here would be a promise we haven't made.

@@ -7,7 +7,9 @@ import { PIPELINE_STAGES, statusAge, type ExpectedHours } from "@/lib/operations
 import { CLOSED_STATUSES } from "@/lib/status";
 import { MAX_CORRECTION_ROUNDS } from "@/lib/operations/corrections";
 import { toWaNumber, waLink, greetingName } from "@/lib/whatsapp";
-import { cn, deadlineInfo, formatDate, formatDateTime, formatNaira } from "@/lib/utils";
+import { cn, formatDate, formatDateTime, formatNaira } from "@/lib/utils";
+import { deadlineView } from "@/lib/project-display";
+import { PausedChip } from "@/components/projects/PausedChip";
 import type { ProjectDetail } from "@/lib/services/projects";
 import type { ProjectOps } from "@/lib/services/operations/project-ops";
 
@@ -54,8 +56,7 @@ export function OpsOverview({
   now?: Date;
 }) {
   const client = project.client;
-  const deadline = project.internalDeadline ?? project.clientDeadline;
-  const dl = deadlineInfo(deadline, now);
+  const { pause, deadline, info: dl } = deadlineView(project, now);
   const since = project.statusLog.length ? project.statusLog[project.statusLog.length - 1].createdAt : project.createdAt;
   const age = statusAge(since, project.status, expected, now);
   const wa = toWaNumber(client.phone);
@@ -146,7 +147,13 @@ export function OpsOverview({
           <Row label="Internal deadline">
             {deadline ? (
               <>
-                {formatDate(deadline)} <span className={cn("text-[13px]", DEADLINE_TEXT[dl.urgency])}>{dl.urgency === "overdue" ? `OVERDUE (${dl.label.toLowerCase()})` : dl.label}</span>
+                {formatDate(deadline)}{" "}
+                {pause ? (
+                  <PausedChip pause={pause} />
+                ) : (
+                  <span className={cn("text-[13px]", DEADLINE_TEXT[dl.urgency])}>{dl.urgency === "overdue" ? `OVERDUE (${dl.label.toLowerCase()})` : dl.label}</span>
+                )}
+                {pause ? <span className="mt-1 block text-[13px] text-muted-foreground">{pause.detail}. It moves on by the days paused.</span> : null}
               </>
             ) : (
               <span className="text-muted-foreground">Not set</span>

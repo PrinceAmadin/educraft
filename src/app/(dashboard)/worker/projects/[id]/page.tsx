@@ -29,7 +29,8 @@ import { ProjectTabs } from "@/components/projects/ProjectTabs";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { LuInbox } from "react-icons/lu";
-import { deadlineInfo, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { deadlineView } from "@/lib/project-display";
 
 export const dynamic = "force-dynamic";
 
@@ -67,8 +68,7 @@ export default async function WorkerAssignmentPage({
   const project = await getWorkerAssignment(worker.id, params.id);
   if (!project) notFound();
 
-  const deadline = project.internalDeadline ?? project.clientDeadline;
-  const info = deadlineInfo(deadline);
+  const { pause: clockStop, deadline, info } = deadlineView(project);
   const clientFiles = project.files.filter((f) => f.category === "from_client" || f.category === "department_outline");
   // Links pasted before uploads existed; new work lives in Documents.
   const earlierLinks = project.files.filter((f) => f.category === "from_worker" && !f.deliverableId);
@@ -178,12 +178,14 @@ export default async function WorkerAssignmentPage({
               : ""}
           </Field>
           <Field label="Deadline">
-            <span className={info.urgency === "overdue" ? "text-danger font-medium" : undefined}>
+            <span className={!clockStop && info.urgency === "overdue" ? "text-danger font-medium" : undefined}>
               {formatDate(deadline)}
-              {info.daysLeft !== null ? ` · ${info.label}` : ""}
+              {!clockStop && info.daysLeft !== null ? ` · ${info.label}` : ""}
             </span>
-            {project.deadlinePausedAt ? (
-              <span className="block text-xs text-gold">Paused — awaiting client input</span>
+            {clockStop ? (
+              <span className="mt-1 block text-xs text-info">
+                {clockStop.label} · {clockStop.detail.toLowerCase()}. The date moves on by the days paused.
+              </span>
             ) : null}
           </Field>
           {project.referencingStyle ? (

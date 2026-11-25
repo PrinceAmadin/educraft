@@ -175,6 +175,8 @@ const listSelect = {
   balanceStatus: true,
   clientDeadline: true,
   internalDeadline: true,
+  // The clock is stopped: the list shows "Paused" instead of counting on.
+  deadlinePausedAt: true,
   createdAt: true,
   atRisk: true,
   // Flagged as a test (Settings > Test data): a quiet marker on the row.
@@ -639,7 +641,15 @@ export async function holdProject(
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
-    select: { id: true, projectId: true, status: true, client: { select: { fullName: true } } },
+    select: {
+      id: true,
+      projectId: true,
+      status: true,
+      deadlinePausedAt: true,
+      internalDeadline: true,
+      expectedDeliveryAt: true,
+      client: { select: { fullName: true } },
+    },
   });
   if (!project) throw new TransitionError("Project not found");
   if (!canHold(project.status, to)) {
@@ -653,9 +663,18 @@ export async function holdProject(
   const moneyIn = to === "CANCELLED" ? await projectNetInflow(db, project.id) : 0;
 
   const feed = statusFeedEntry(project.status, to);
+  // A hold is a pause: the clock stops here and resumeFromHold adds the days
+  // back, the same rule AWAITING_CLIENT_INPUT follows. A clock already stopped
+  // (the project was waiting on its client) keeps the time it stopped at, so
+  // the pause is never counted twice.
+  const now = new Date();
+  const stopsClock = (to === "ON_HOLD" || to === "DISPUTED") && !project.deadlinePausedAt;
   await db.$transaction(
     async (tx) => {
-      await tx.project.update({ where: { id: project.id }, data: { status: to } });
+      await tx.project.update({
+        where: { id: project.id },
+        data: { status: to, ...(stopsClock ? { deadlinePausedAt: now } : {}) },
+      });
       const log = await tx.projectStatusLog.create({
         data: { projectId: project.id, fromStatus: project.status, toStatus: to, changedById, notes: note },
         select: { id: true },
@@ -688,7 +707,16 @@ export async function resumeFromHold(
 ): Promise<ProjectDetail> {
   const project = await db.project.findFirst({
     where: { OR: [{ id: idOrCode }, { projectId: idOrCode }] },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      status: true,
+      deadlinePausedAt: true,
+      internalDeadline: true,
+      expectedDeliveryAt: true,
+      // A data request still open keeps the clock stopped after the hold lifts,
+      // and releases it itself — so the hold must not release it here too.
+      _count: { select: { pauses: { where: { status: { in: ["OPEN", "SUBMITTED"] }, clockPausedAt: { not: null } } } } },
+    },
   });
   if (!project) throw new TransitionError("Project not found");
   if (project.status !== "ON_HOLD" && project.status !== "DISPUTED") {
@@ -702,8 +730,17 @@ export async function resumeFromHold(
   });
   const back = lastHold?.fromStatus ?? "NEW";
 
+  // The hold is over, so the clock starts again and the days it stood still
+  // move both dates on. It stays stopped when something else is still waiting:
+  // an open data request, or a return to AWAITING_CLIENT_INPUT.
+  const stillWaiting = project._count.pauses > 0 || back === "AWAITING_CLIENT_INPUT";
+  const release =
+    project.deadlinePausedAt && !stillWaiting
+      ? { deadlinePausedAt: null, ...shiftedDeadlines(project, pausedDaysBetween(project.deadlinePausedAt, new Date())) }
+      : {};
+
   await db.$transaction([
-    db.project.update({ where: { id: project.id }, data: { status: back } }),
+    db.project.update({ where: { id: project.id }, data: { status: back, ...release } }),
     db.projectStatusLog.create({
       data: {
         projectId: project.id,

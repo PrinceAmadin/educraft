@@ -448,6 +448,7 @@ export async function getAssignmentContext(idOrCode: string): Promise<Assignment
       projectType: true,
       chapterCount: true,
       internalDeadline: true,
+      deadlinePausedAt: true,
       clientDeadline: true,
       service: { select: { serviceName: true } },
       client: { select: { department: true } },

@@ -220,7 +220,10 @@ async function draftForm(pauseId: string): Promise<void> {
         clockPausedAt: pause.clockPausedAt ?? new Date(),
       },
     });
-    if (saved.count === 1) await announceRequest(pause.projectId, pause.id, pause.round, code, pause.project.worker?.userId ?? null);
+    if (saved.count === 1) {
+      await stopProjectClock(pause.projectId, pause.clockPausedAt ?? new Date());
+      await announceRequest(pause.projectId, pause.id, pause.round, code, pause.project.worker?.userId ?? null);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[data pause] could not draft the data request", pauseId, error);
@@ -576,13 +579,23 @@ export async function saveAnswers(projectDbId: string, pauseId: string, answers:
   if (saved.count === 0) throw new DataPauseError("This pause has moved on. Refresh the page.");
 }
 
+/**
+ * Stops the project's clock for a data request. Idempotent, and it never
+ * overwrites a clock already stopped (a hold, say), so a pause is never
+ * counted twice and the earlier stop keeps its date.
+ */
+async function stopProjectClock(projectDbId: string, at: Date): Promise<void> {
+  await db.project.updateMany({ where: { id: projectDbId, deadlinePausedAt: null }, data: { deadlinePausedAt: at } });
+}
+
 /** Ends the pause's clock inside a transaction: the dates move on by the days paused. Returns the days. */
 async function releaseClock(tx: Tx, projectDbId: string, clockPausedAt: Date | null, now: Date): Promise<number> {
   if (!clockPausedAt) return 0;
   const days = pausedDaysBetween(clockPausedAt, now);
   const project = await tx.project.findUniqueOrThrow({ where: { id: projectDbId }, select: { internalDeadline: true, expectedDeliveryAt: true } });
-  const data = shiftedDeadlines(project, days);
-  if (Object.keys(data).length) await tx.project.update({ where: { id: projectDbId }, data });
+  // `Project.deadlinePausedAt` is the one field every screen reads to know the
+  // clock is stopped, whichever pause stopped it — so clear it here too.
+  await tx.project.update({ where: { id: projectDbId }, data: { deadlinePausedAt: null, ...shiftedDeadlines(project, days) } });
   return days;
 }
 
@@ -754,6 +767,7 @@ export async function reopenDataPause(pauseId: string): Promise<void> {
     throw new DataPauseError("The project is already waiting for the client. Resume it first, then ask for the data files.");
   }
   const ready = pause.formStatus === "READY";
+  const reopenedAt = new Date();
   const round = pause.round + 1;
   const moved = await db.pipelinePause.updateMany({
     where: { id: pause.id, status: "CANCELLED" },
@@ -763,13 +777,17 @@ export async function reopenDataPause(pauseId: string): Promise<void> {
       round,
       workerNote: null,
       // The client can see a request that is ready straight away, so the date freezes now; one still to be drafted freezes when it is.
-      clockPausedAt: ready ? new Date() : null,
+      clockPausedAt: ready ? reopenedAt : null,
       ...(ready ? {} : { formStatus: "GENERATING", formError: null }),
     },
   });
   if (moved.count === 0) throw new DataPauseError("This pause has moved on. Refresh the page.");
-  if (ready) await announceRequest(pause.projectId, pause.id, round, pause.project.projectId, pause.project.worker?.userId ?? null);
-  else await draftForm(pause.id);
+  if (ready) {
+    await stopProjectClock(pause.projectId, reopenedAt);
+    await announceRequest(pause.projectId, pause.id, round, pause.project.projectId, pause.project.worker?.userId ?? null);
+  } else {
+    await draftForm(pause.id);
+  }
 }
 
 // ─── Into the chapters ──────────────────────────────────────────────────────

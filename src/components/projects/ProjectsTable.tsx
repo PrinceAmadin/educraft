@@ -12,15 +12,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/projects/StatusBadge";
+import { PausedChip } from "@/components/projects/PausedChip";
 import {
   PAYMENT_BADGE,
   ROW_ACCENT_DOT,
   paymentStanding,
   paymentStandingLabel,
   rowAccent,
+  deadlineView,
   type RowAccent,
 } from "@/lib/project-display";
-import { cn, deadlineInfo, formatDate, formatNaira } from "@/lib/utils";
+import { cn, formatDate, formatNaira } from "@/lib/utils";
 import type { ProjectListRow } from "@/lib/services/projects";
 import type { StatusAge } from "@/lib/operations/pipeline-stages";
 
@@ -41,8 +43,17 @@ function AccentDot({ accent }: { accent: RowAccent }) {
 }
 
 function DeadlineCell({ row }: { row: ProjectListRow }) {
-  const deadline = row.internalDeadline ?? row.clientDeadline;
-  const info = deadlineInfo(deadline);
+  const { pause, deadline, info } = deadlineView(row);
+  if (pause) {
+    // The clock is stopped, so the date here is where it will land if the
+    // pause ended today — never a red "overdue" for standing still.
+    return (
+      <div className="whitespace-nowrap">
+        <div className="text-foreground">{formatDate(deadline)}</div>
+        <PausedChip pause={pause} className="mt-0.5" />
+      </div>
+    );
+  }
   return (
     <div className="whitespace-nowrap">
       <div className={cn(info.urgency === "overdue" ? "text-danger" : "text-foreground")}>{info.urgency === "overdue" ? "Overdue" : formatDate(deadline)}</div>
@@ -82,8 +93,7 @@ export function ProjectsTable({ rows }: { rows: ProjectListRowWithAge[] }) {
       <ul className="space-y-3 md:hidden">
         {rows.map((row) => {
           const accent = rowAccent(row);
-          const deadline = row.internalDeadline ?? row.clientDeadline;
-          const info = deadlineInfo(deadline);
+          const { pause, info } = deadlineView(row);
           const standing = paymentStanding(row);
 
           return (
@@ -115,7 +125,11 @@ export function ProjectsTable({ rows }: { rows: ProjectListRowWithAge[] }) {
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
                   <span className="text-muted-foreground">{row.worker ? row.worker.fullName : "Unassigned"}</span>
-                  <span className={DEADLINE_TEXT[info.urgency]}>{info.daysLeft !== null ? info.label : "No deadline"}</span>
+                  {pause ? (
+                    <PausedChip pause={pause} />
+                  ) : (
+                    <span className={DEADLINE_TEXT[info.urgency]}>{info.daysLeft !== null ? info.label : "No deadline"}</span>
+                  )}
                   <span className="text-muted-foreground">
                     <DaysInStatus age={row.age} className="text-xs" /> in status
                   </span>

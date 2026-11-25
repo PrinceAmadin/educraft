@@ -106,7 +106,9 @@ export function ProjectHoldControl({
           <DialogHeader>
             <DialogTitle>{pendingHold ? HOLD_LABELS[pendingHold] : ""}</DialogTitle>
             <DialogDescription>
-              This is logged on the project timeline. A reason is required.
+              {pendingHold === "ON_HOLD" || pendingHold === "DISPUTED"
+                ? "The delivery date stops while the project is paused, and moves on by the days paused when you resume. The client is told it is paused — your reason stays internal."
+                : "This is logged on the project timeline. A reason is required."}
             </DialogDescription>
           </DialogHeader>
           <form

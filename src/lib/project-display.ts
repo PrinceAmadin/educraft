@@ -1,5 +1,6 @@
 import type { ProjectStatus } from "@prisma/client";
 import { deadlineInfo } from "@/lib/utils";
+import { clockPause, liveDeadline, type ClockPause } from "@/lib/pause-clock";
 
 /**
  * Pure display helpers shared by server and client components — no Prisma,
@@ -49,9 +50,12 @@ export type RowAccent = "none" | "ok" | "soon" | "risk" | "waiting" | "done";
 export function rowAccent(input: {
   status: ProjectStatus;
   internalDeadline: Date | string | null;
+  deadlinePausedAt?: Date | string | null;
 }): RowAccent {
   if (input.status === "AWAITING_CLIENT_INPUT") return "waiting";
   if (["COMPLETED", "CANCELLED", "REFUNDED"].includes(input.status)) return "done";
+  // A stopped clock is a wait, not a risk: never paint a paused row red.
+  if (clockPause({ status: input.status, deadlinePausedAt: input.deadlinePausedAt })) return "waiting";
 
   const { urgency } = deadlineInfo(input.internalDeadline);
   if (urgency === "overdue") return "risk";
@@ -154,3 +158,33 @@ export const FILE_CATEGORY_LABELS: Record<string, string> = {
   department_outline: "Department outline",
   message_attachment: "Sent in messages",
 };
+
+
+// ── The deadline as a screen should show it ─────────────────────────────────
+
+export interface DeadlineView {
+  /** The pause the project is under, or null when its clock is running. */
+  pause: ClockPause | null;
+  /** The date to show: it moves with a pause, so a paused project is never late for waiting. */
+  deadline: Date | null;
+  info: ReturnType<typeof deadlineInfo>;
+}
+
+/**
+ * One answer for every staff screen that shows a deadline. Ask this rather
+ * than reading `internalDeadline` directly, or a paused project drifts into
+ * "overdue" for every day it stands still.
+ */
+export function deadlineView(
+  input: {
+    status: ProjectStatus | string;
+    internalDeadline: Date | string | null;
+    clientDeadline?: Date | string | null;
+    deadlinePausedAt?: Date | string | null;
+  },
+  now: Date = new Date()
+): DeadlineView {
+  const pause = clockPause({ status: input.status, deadlinePausedAt: input.deadlinePausedAt }, now);
+  const deadline = liveDeadline(input.internalDeadline ?? input.clientDeadline ?? null, pause, now);
+  return { pause, deadline, info: deadlineInfo(deadline, now) };
+}

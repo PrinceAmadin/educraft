@@ -15,6 +15,7 @@ import {
   type StageKey,
 } from "@/lib/operations/pipeline-stages";
 import { deadlineInfo } from "@/lib/utils";
+import { clockPause, liveDeadline, type ClockPause } from "@/lib/pause-clock";
 
 /**
  * The COO's pipeline: counts per stage with what needs a look, and the
@@ -56,6 +57,7 @@ const boardSelect = {
   supervisorCorrectionCount: true,
   internalDeadline: true,
   clientDeadline: true,
+  deadlinePausedAt: true,
   downpaymentStatus: true,
   balanceStatus: true,
   workerId: true,
@@ -63,7 +65,7 @@ const boardSelect = {
   client: { select: { fullName: true, department: true } },
   service: { select: { serviceName: true } },
   worker: { select: { fullName: true } },
-  statusLog: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
+  statusLog: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true, notes: true } },
   qaReview: { select: { reviewerId: true, reviewerName: true, startedAt: true } },
   correctionRounds: { orderBy: { roundNumber: "desc" }, take: 1, select: { roundNumber: true, deadline: true, status: true } },
   _count: { select: { correctionRounds: true } },
@@ -74,6 +76,16 @@ type BoardRow = Prisma.ProjectGetPayload<{ select: typeof boardSelect }>;
 export interface BoardProject extends BoardRow {
   /** When the project entered its current status (its creation when there is no log yet). */
   since: Date;
+}
+
+/**
+ * The deadline to judge a row by, and the pause it is under. While the clock
+ * is stopped the date moves with the pause, so a paused project is never late
+ * for waiting — it still has the days it had when it stopped.
+ */
+function deadlineOf(p: BoardProject, now: Date): { deadline: Date | null; pause: ClockPause | null } {
+  const pause = clockPause(p, now);
+  return { deadline: liveDeadline(p.internalDeadline ?? p.clientDeadline, pause, now), pause };
 }
 
 export async function loadBoard(): Promise<BoardProject[]> {
@@ -98,6 +110,9 @@ const DEADLINE_STATUSES: readonly ProjectStatus[] = [
 ];
 
 const AT_RISK_WINDOW_DAYS = 3;
+
+/** A pause this long is worth a second look — it may have been forgotten. */
+const LONG_PAUSE_DAYS = 30;
 const QA_OVERDUE_HOURS = 24;
 const DELIVERED_SETTLE_HOURS = 168;
 
@@ -106,7 +121,8 @@ const DELIVERED_SETTLE_HOURS = 168;
 export interface StageAlert {
   label: string;
   count: number;
-  tone: AgeTone;
+  /** "info" is a standing-still note (paused), not something going wrong. */
+  tone: AgeTone | "info";
 }
 
 export interface PipelineStageSummary {
@@ -146,12 +162,21 @@ export function summarizeBoard(board: readonly BoardProject[], expected: Expecte
         alerts.push({ label: "not started", count: rows.filter(late).length, tone: "amber" });
         break;
       case "in_progress": {
-        const overdue = rows.filter((p) => deadlineInfo(p.internalDeadline ?? p.clientDeadline, now).urgency === "overdue").length;
-        const atRisk = rows.filter((p) => {
-          const info = deadlineInfo(p.internalDeadline ?? p.clientDeadline, now);
-          return p.atRisk || (info.daysLeft != null && info.daysLeft >= 0 && info.daysLeft <= AT_RISK_WINDOW_DAYS);
+        const live = rows.map((p) => ({ p, ...deadlineOf(p, now) }));
+        const running = live.filter((r) => !r.pause);
+        const overdue = running.filter((r) => deadlineInfo(r.deadline, now).urgency === "overdue").length;
+        const atRisk = running.filter((r) => {
+          const info = deadlineInfo(r.deadline, now);
+          return r.p.atRisk || (info.daysLeft != null && info.daysLeft >= 0 && info.daysLeft <= AT_RISK_WINDOW_DAYS);
         }).length;
-        alerts.push({ label: "overdue", count: overdue, tone: "red" }, { label: "at risk", count: atRisk, tone: "amber" });
+        const paused = live.filter((r) => r.pause).length;
+        alerts.push(
+          { label: "overdue", count: overdue, tone: "red" },
+          { label: "at risk", count: atRisk, tone: "amber" },
+          // Not a problem — but the founder must be able to see at a glance
+          // that a project is standing still on purpose.
+          { label: "paused", count: paused, tone: "info" },
+        );
         break;
       }
       case "qa":
@@ -228,7 +253,7 @@ export function actionsForBoard(board: readonly BoardProject[], expected: Expect
 
   for (const p of board) {
     const age = statusAge(p.since, p.status, expected, now);
-    const deadline = p.internalDeadline ?? p.clientDeadline;
+    const { deadline, pause } = deadlineOf(p, now);
     const dl = deadlineInfo(deadline, now);
     const href = `/admin/projects/${p.projectId}`;
     const base = {
@@ -243,7 +268,24 @@ export function actionsForBoard(board: readonly BoardProject[], expected: Expect
 
     if (p.atRisk) push("at-risk", "urgent", "FLAGGED AT RISK", { label: "View", href }, p.atRiskNote);
 
-    if (dl.urgency === "overdue" && DEADLINE_STATUSES.includes(p.status)) {
+    // A paused project is standing still on purpose: it is never late for
+    // waiting, and this one line says so — with the days and why — instead of
+    // the deadline lines below, which assume a running clock.
+    if (pause) {
+      const since = pause.days === 0 ? "today" : pause.days === 1 ? "1 day" : `${pause.days} days`;
+      push(
+        "paused",
+        pause.days >= LONG_PAUSE_DAYS ? "attention" : "routine",
+        `PAUSED ${since.toUpperCase()} — ${pause.detail.toLowerCase()}`,
+        pause.reason === "CLIENT_INPUT"
+          ? { label: "Message", href: `${href}?tab=messages` }
+          : { label: "View", href },
+        p.statusLog[0]?.notes ?? null,
+        pause.days * 24
+      );
+    }
+
+    if (!pause && dl.urgency === "overdue" && DEADLINE_STATUSES.includes(p.status)) {
       const late = Math.abs(dl.daysLeft ?? 0);
       push("overdue", "urgent", `OVERDUE — deadline was ${late === 0 ? "today" : late === 1 ? "yesterday" : `${late} days ago`}`, { label: "View", href }, null, late * 24);
     }
@@ -273,13 +315,8 @@ export function actionsForBoard(board: readonly BoardProject[], expected: Expect
         break;
       case "IN_PROGRESS":
       case "REVISION_NEEDED":
-        if (dl.urgency !== "overdue" && dl.daysLeft != null && dl.daysLeft <= AT_RISK_WINDOW_DAYS) {
+        if (!pause && dl.urgency !== "overdue" && dl.daysLeft != null && dl.daysLeft <= AT_RISK_WINDOW_DAYS) {
           push("deadline", "attention", `APPROACHING DEADLINE — ${dl.label.toLowerCase()}`, { label: "View", href }, null, (AT_RISK_WINDOW_DAYS - dl.daysLeft) * 24);
-        }
-        break;
-      case "AWAITING_CLIENT_INPUT":
-        if (age.hours >= 72) {
-          push("waiting-client", "attention", `WAITING ON CLIENT — since ${daysAgo(age.hours)}`, { label: "Message", href: `${href}?tab=messages` });
         }
         break;
       case "SUBMITTED":

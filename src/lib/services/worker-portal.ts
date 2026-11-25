@@ -1,4 +1,5 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
+import { deadlineView } from "@/lib/project-display";
 import { db } from "@/lib/db";
 import { NOT_OWED, isPaid } from "@/lib/finance/payout-status";
 import { WORKER_FILE_WHERE } from "@/lib/services/file-access";
@@ -50,6 +51,8 @@ export interface WorkerAssignmentRow {
   serviceName: string;
   clientName: string;
   deadline: string | null;
+  /** "Paused · 12 days" while the clock is stopped, else null. */
+  paused: string | null;
 }
 
 export interface WorkerDashboard {
@@ -80,6 +83,7 @@ export async function getWorkerDashboard(workerId: string): Promise<WorkerDashbo
           projectId: true,
           projectTitle: true,
           clientDeadline: true,
+          deadlinePausedAt: true,
           finalCompletionDate: true,
           service: { select: { serviceName: true } },
           client: { select: { fullName: true } },
@@ -109,15 +113,21 @@ export async function getWorkerDashboard(workerId: string): Promise<WorkerDashbo
 
   const assignments: WorkerAssignmentRow[] = worker.projects
     .filter((p) => WORKER_ACTIVE_STATUSES.includes(p.status))
-    .map((p) => ({
-      id: p.id,
-      projectId: p.projectId,
-      projectTitle: p.projectTitle,
-      status: p.status,
-      serviceName: p.service.serviceName,
-      clientName: p.client.fullName,
-      deadline: (p.internalDeadline ?? p.clientDeadline)?.toISOString() ?? null,
-    }))
+    .map((p) => {
+      // A stopped clock: the date shown moves with the pause, so a paused
+      // assignment never reads as late for waiting.
+      const { pause, deadline } = deadlineView(p);
+      return {
+        id: p.id,
+        projectId: p.projectId,
+        projectTitle: p.projectTitle,
+        status: p.status,
+        serviceName: p.service.serviceName,
+        clientName: p.client.fullName,
+        deadline: deadline?.toISOString() ?? null,
+        paused: pause ? pause.label : null,
+      };
+    })
     .sort((a, b) => {
       if (!a.deadline) return 1;
       if (!b.deadline) return -1;
@@ -149,20 +159,25 @@ export async function listWorkerProjects(workerId: string): Promise<WorkerAssign
       status: true,
       internalDeadline: true,
       clientDeadline: true,
+      deadlinePausedAt: true,
       service: { select: { serviceName: true } },
       client: { select: { fullName: true } },
     },
   });
 
-  return projects.map((p) => ({
-    id: p.id,
-    projectId: p.projectId,
-    projectTitle: p.projectTitle,
-    status: p.status,
-    serviceName: p.service.serviceName,
-    clientName: p.client.fullName,
-    deadline: (p.internalDeadline ?? p.clientDeadline)?.toISOString() ?? null,
-  }));
+  return projects.map((p) => {
+    const { pause, deadline } = deadlineView(p);
+    return {
+      id: p.id,
+      projectId: p.projectId,
+      projectTitle: p.projectTitle,
+      status: p.status,
+      serviceName: p.service.serviceName,
+      clientName: p.client.fullName,
+      deadline: deadline?.toISOString() ?? null,
+      paused: pause ? pause.label : null,
+    };
+  });
 }
 
 const assignmentSelect = {

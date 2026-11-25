@@ -2,7 +2,9 @@ import Link from "next/link";
 import { LuArrowLeft, LuGift } from "react-icons/lu";
 import { StatusBadge } from "@/components/projects/StatusBadge";
 import { ProjectHoldControl } from "@/components/projects/ProjectHoldControl";
-import { cn, deadlineInfo, formatDate, formatNaira } from "@/lib/utils";
+import { cn, formatDate, formatNaira } from "@/lib/utils";
+import { deadlineView } from "@/lib/project-display";
+import { PausedChip } from "@/components/projects/PausedChip";
 import type { ProjectDetail } from "@/lib/services/projects";
 
 const DEADLINE_TEXT = {
@@ -20,8 +22,7 @@ const DEADLINE_TEXT = {
  * beneath. No card around any of it.
  */
 export function ProjectDetailHeader({ project, testControls }: { project: ProjectDetail; testControls?: React.ReactNode }) {
-  const deadline = project.internalDeadline ?? project.clientDeadline;
-  const info = deadlineInfo(deadline);
+  const { pause, deadline, info } = deadlineView(project);
   const client = project.client;
 
   return (
@@ -93,7 +94,12 @@ export function ProjectDetailHeader({ project, testControls }: { project: Projec
 
         <Field label="Deadline">
           {formatDate(deadline)}
-          {info.daysLeft !== null ? (
+          {pause ? (
+            <>
+              <PausedChip pause={pause} className="mt-1" />
+              <span className="mt-1 block text-[13px] text-muted-foreground">{pause.detail}. The date moves on by the days paused.</span>
+            </>
+          ) : info.daysLeft !== null ? (
             <span className={cn("block text-[13px]", DEADLINE_TEXT[info.urgency])}>{info.label}</span>
           ) : (
             <span className="block text-[13px] text-muted-foreground">Not set</span>

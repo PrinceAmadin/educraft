@@ -28,6 +28,7 @@ export function WorkerAssignmentList({ rows }: { rows: WorkerAssignmentRow[] }) 
     <ul className="grid gap-3 lg:grid-cols-2">
       {rows.map((row) => {
         const info = deadlineInfo(row.deadline);
+        // A paused assignment reads blue, not red: the clock is stopped on purpose.
         return (
           <li key={row.id}>
             <Link
@@ -36,7 +37,7 @@ export function WorkerAssignmentList({ rows }: { rows: WorkerAssignmentRow[] }) 
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2 font-mono text-sm font-medium text-foreground">
-                  <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", DEADLINE_DOT[info.urgency])} />
+                  <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", row.paused ? "bg-info" : DEADLINE_DOT[info.urgency])} />
                   {row.projectId}
                 </span>
                 <StatusBadge status={row.status} short />
@@ -46,10 +47,10 @@ export function WorkerAssignmentList({ rows }: { rows: WorkerAssignmentRow[] }) 
                 {row.serviceName} · {row.clientName}
               </p>
               <div className="mt-4 flex items-center justify-between">
-                <span className={cn("text-xs", DEADLINE_TEXT[info.urgency])}>
+                <span className={cn("text-xs", row.paused ? "text-info" : DEADLINE_TEXT[info.urgency])}>
                   {row.deadline
-                    ? `${formatDate(row.deadline)}${info.daysLeft !== null ? ` · ${info.label}` : ""}`
-                    : "No deadline set"}
+                    ? `${formatDate(row.deadline)} · ${row.paused ?? (info.daysLeft !== null ? info.label : "")}`.replace(/ · $/, "")
+                    : row.paused ?? "No deadline set"}
                 </span>
                 <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
                   View

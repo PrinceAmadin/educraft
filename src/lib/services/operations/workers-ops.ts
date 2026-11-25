@@ -13,7 +13,8 @@ import {
   workerActivityStatus,
   type WorkerActivityStatus,
 } from "@/lib/operations/worker-performance";
-import { deadlineInfo, type DeadlineUrgency } from "@/lib/utils";
+import { type DeadlineUrgency } from "@/lib/utils";
+import { deadlineView } from "@/lib/project-display";
 import { deriveTrustTier, trustTierReason, type TrustSignals, type TrustTier } from "@/lib/operations/trust-tier";
 import { execRoleForRecord } from "@/lib/executive-identity";
 import type { ExecRole } from "@/lib/rbac";
@@ -252,6 +253,7 @@ export async function getWorkerProfileOps(workerId: string, now: Date = new Date
           projectTitle: true,
           status: true,
           internalDeadline: true,
+          deadlinePausedAt: true,
           clientDeadline: true,
           deliveryDate: true,
           finalCompletionDate: true,
@@ -272,8 +274,7 @@ export async function getWorkerProfileOps(workerId: string, now: Date = new Date
   const active = worker.projects
     .filter((p) => WORKER_ACTIVE_STATUSES.includes(p.status))
     .map((p) => {
-      const deadline = p.internalDeadline ?? p.clientDeadline;
-      const info = deadlineInfo(deadline, now);
+      const { pause, deadline, info } = deadlineView(p, now);
       return {
         projectCode: p.projectId,
         title: p.projectTitle,
@@ -282,7 +283,7 @@ export async function getWorkerProfileOps(workerId: string, now: Date = new Date
         status: p.status,
         deadline: deadline?.toISOString() ?? null,
         urgency: info.urgency,
-        deadlineLabel: info.label,
+        deadlineLabel: pause ? pause.label : info.label,
       };
     })
     .sort((a, b) => (a.deadline ?? "9") .localeCompare(b.deadline ?? "9"));
