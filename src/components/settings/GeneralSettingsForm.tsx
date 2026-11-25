@@ -288,7 +288,7 @@ export function GeneralSettingsForm({
             error={errors.ambassadorReferralMessage?.message}
             hint="Opens when someone uses a normal ambassador's link. Use {AMBASSADOR} for the ambassador's name. Leave empty to reset to the default."
           >
-            <Textarea id="ambassadorReferralMessage" disabled={!canEditPricing} {...register("ambassadorReferralMessage")} />
+            <Textarea id="ambassadorReferralMessage" rows={8} disabled={!canEditPricing} {...register("ambassadorReferralMessage")} />
           </Field>
           <Field
             label="Core recruiting message (/ECCA links)"

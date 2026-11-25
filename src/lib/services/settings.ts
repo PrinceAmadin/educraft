@@ -51,8 +51,16 @@ const DEFAULTS = {
   alertEmails: "amadinprince26@gmail.com",
   /** The ambassador WhatsApp group every approved ambassador's device-locked link opens. */
   ambassadorGroupUrl: "https://chat.whatsapp.com/D7Cp4C9jA2uLddpUyy0WPr",
-  /** The WhatsApp message a general or sub ambassador's link pre-fills; {AMBASSADOR} becomes the ambassador's name. */
-  ambassadorReferralMessage: "Hi EduCraft! I was referred by {AMBASSADOR}. I'd like to place an order on the following Services:",
+  /**
+   * The WhatsApp message a general or sub ambassador's link pre-fills;
+   * {AMBASSADOR} becomes the ambassador's name. It names what EduCraft
+   * actually does and ends on the student's own answer, so the chat opens
+   * past "which services do you offer?" instead of starting there. The blank
+   * lines survive the link: `waLink` encodes the message, so WhatsApp shows
+   * the list as a list.
+   */
+  ambassadorReferralMessage:
+    "Hi EduCraft! I was referred by {AMBASSADOR}. I'd like to order:\n\n1. Full final year project\n2. Chapters only (any of 1-5)\n3. Project defence slides\n4. Proofreading & formatting\n\nI need number:",
   /** The WhatsApp message a Core ambassador's recruitment link pre-fills; {AMBASSADOR} becomes the ambassador's name. */
   ambassadorCoreMessage: "Hi EduCraft! I was brought in by {AMBASSADOR}. I'd love to know more about the EduCraft Ambassadorship Program and how I can be a part of the brand.",
   /**
