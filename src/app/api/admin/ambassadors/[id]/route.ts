@@ -34,7 +34,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!parsed.success) return badRequest("Invalid request", parsed.error.flatten());
 
   try {
-    const result = await updateAmbassador(params.id, parsed.data);
+    const result = await updateAmbassador(params.id, parsed.data, guard.session.userId);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof AmbassadorEditError) {

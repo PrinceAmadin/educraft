@@ -67,12 +67,18 @@ export default async function DashboardLayout({
       where: { id: session.user.id },
       select: {
         canFlagTestProjects: true,
-        workerProfile: { select: { status: true } },
-        ambassadorProfile: { select: { status: true } },
+        displayName: true,
+        workerProfile: { select: { status: true, fullName: true } },
+        ambassadorProfile: { select: { status: true, fullName: true } },
         _count: { select: { clientProfiles: true } },
       },
     });
     appointedFlagger = profiles?.canFlagTestProjects ?? false;
+    // Greeted by the name on their own record, read fresh, in the same
+    // precedence `auth.ts` uses when it mints the session: an ambassador who has
+    // just corrected their own name must not still be greeted by the old one.
+    const ownName = profiles?.displayName ?? profiles?.workerProfile?.fullName ?? profiles?.ambassadorProfile?.fullName;
+    if (ownName) name = ownName;
     const found = portalsForUser(session.user.role, {
       worker: profiles?.workerProfile ? isWorkerOpen(profiles.workerProfile.status) : false,
       ambassador: profiles?.ambassadorProfile ? profiles.ambassadorProfile.status === "Active" : false,

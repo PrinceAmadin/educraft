@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+/**
+ * An ambassador correcting their own name. Only the length is checked here, so a
+ * bad name reaches `checkName` and comes back with the one sentence that says
+ * why — the schema must never be the thing that explains a refusal.
+ */
+export const ambassadorNameSchema = z.object({
+  fullName: z.string().min(1).max(200),
+});
+
 export const ambassadorBankSchema = z.object({
   bankName: z.string().trim().max(80).optional().or(z.literal("")),
   accountNumber: z.string().trim().max(20).optional().or(z.literal("")),

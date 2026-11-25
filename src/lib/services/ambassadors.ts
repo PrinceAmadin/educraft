@@ -8,6 +8,8 @@ import {
   provisionalDeadline,
 } from "@/lib/ambassador";
 import { tierProgress } from "@/lib/ambassadors/tier-utils";
+import { sameName } from "@/lib/ambassadors/name-change";
+import { logAdminNameChange } from "@/lib/services/ambassador-name";
 import { ratePercentForTier } from "@/lib/finance/commission-config";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import {
@@ -513,12 +515,13 @@ const blank = (v: string | undefined) => (v === undefined ? undefined : v.trim()
  * only goes to a login whose own email matches the record, so leaving them
  * apart would lock the ambassador out of resetting their password.
  */
-export async function updateAmbassador(id: string, input: UpdateAmbassadorInput) {
+export async function updateAmbassador(id: string, input: UpdateAmbassadorInput, actorUserId: string | null = null) {
   const ambassador = await db.ambassador.findUnique({
     where: { id },
     select: {
       id: true,
       email: true,
+      fullName: true,
       legacySlotId: true,
       user: { select: { id: true, email: true, workerProfile: { select: { id: true, email: true } } } },
     },
@@ -588,6 +591,13 @@ export async function updateAmbassador(id: string, input: UpdateAmbassadorInput)
         data: { name: input.fullName },
       })
     );
+  }
+
+  // An admin's correction joins the same history the ambassador's own changes go
+  // into, so the Head of Growth sees every rename and who made it. Logged as
+  // ADMIN, so it never spends the ambassador's own 30-day allowance.
+  if (input.fullName !== undefined && !sameName(input.fullName, ambassador.fullName)) {
+    writes.push(logAdminNameChange(id, ambassador.fullName, input.fullName, actorUserId));
   }
 
   const [updated] = await db.$transaction([

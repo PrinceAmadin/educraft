@@ -1135,6 +1135,7 @@ model Ambassador {
   referrals           AmbassadorReferral[]
   quarterlyChallenges AmbassadorQuarterlyChallenge[]
   tierLogs            AmbassadorTierLog[]
+  nameChanges         AmbassadorNameChange[]
 
   @@index([universityId])
   @@index([status])
@@ -2760,6 +2761,35 @@ model AmbassadorTierLog {
 
   @@index([ambassadorId, createdAt])
   @@index([createdAt])
+}
+
+/// Every change to an ambassador's name, their own or an admin's (Nov 2026).
+///
+/// The 30-day self-service cooldown is DERIVED from the latest `source: "SELF"`
+/// row rather than cached on the ambassador — a dated record, like the activity
+/// label and the worker trust tiers, so the throttle can never drift out of step
+/// with the history the Head of Growth reads. An admin correction is logged here
+/// too (so the HOG sees who renamed whom) but is not `SELF`, so it never spends
+/// the ambassador's own allowance.
+///
+/// Nothing here is attribution: the referral code, `ambassadorId` and every
+/// foreign key are untouched by a rename. See `src/lib/ambassadors/name-change.ts`.
+model AmbassadorNameChange {
+  id           String     @id @default(cuid())
+  ambassadorId String
+  /// Cascade on purpose: a name change must never be the reason
+  /// `deleteAmbassador` fails on a duplicate record with no jobs.
+  ambassador   Ambassador @relation(fields: [ambassadorId], references: [id], onDelete: Cascade)
+  oldName      String
+  newName      String
+  /// "SELF" — the ambassador, which spends their cooldown | "ADMIN"
+  source       String
+  /// The login that made the change: the ambassador's own, or the admin's.
+  changedById  String?
+  createdAt    DateTime   @default(now())
+
+  @@index([ambassadorId, createdAt])
+  @@index([source, createdAt])
 }
 
 /// A student-union or faculty partnership the HOG manages.

@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { LuPhone, LuMail, LuBuilding2, LuBellRing, LuCalendarClock, LuMonitorPlay } from "react-icons/lu";
+import { LuPhone, LuMail, LuBuilding2, LuBellRing, LuCalendarClock, LuMonitorPlay, LuPencilLine } from "react-icons/lu";
 import { getAmbassadorDetail, listParentCandidates } from "@/lib/services/ambassadors";
+import { getNameHistory } from "@/lib/services/ambassador-name";
+import { NAME_CHANGE_TEXT } from "@/lib/ambassadors/name-change";
 import { getDirectoryDetail, listSubCandidates } from "@/lib/services/ambassador-platform/directory";
 import { DirectoryProfile } from "@/components/ambassadors/platform/DirectoryProfile";
 import { SuspendControl } from "@/components/ambassadors/platform/SuspendControl";
@@ -61,7 +63,7 @@ export default async function AmbassadorDetailPage({
 
   const { ambassador, metrics, payouts, parentCommission } = data;
   const view = searchParams.view === "analytics" ? "analytics" : "profile";
-  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole, groupInviteView, slotLink] = await Promise.all([
+  const [parentCandidates, active, linkedWorker, session, universities, platform, subCandidates, execRole, groupInviteView, slotLink, nameHistory] = await Promise.all([
     listParentCandidates(ambassador.id),
     getActiveCashflow(),
     getLinkedWorker(ambassador.userId),
@@ -75,6 +77,7 @@ export default async function AmbassadorDetailPage({
     execRoleOfAmbassador(ambassador.id),
     getGroupInvite(ambassador.id),
     getAmbassadorLink(ambassador.id),
+    getNameHistory(ambassador.id),
   ]);
   if (!platform) notFound();
   const groupInvite = groupInviteView
@@ -225,6 +228,22 @@ export default async function AmbassadorDetailPage({
               provisionalUntil={ambassador.provisionalUntil}
               activatedAt={ambassador.activatedAt}
             />
+          </Field>
+          {/* A rename never touches the referral code or any attribution, so this
+              is here to be seen, not acted on: who they used to be, and when. */}
+          <Field icon={LuPencilLine} label="Name history">
+            {nameHistory.length === 0 ? (
+              <span className="text-subtle">Never changed</span>
+            ) : (
+              <>
+                {NAME_CHANGE_TEXT.formerly(nameHistory[0].oldName)}
+                <span className="block text-xs text-muted-foreground">
+                  {formatDate(nameHistory[0].createdAt)} ·{" "}
+                  {nameHistory[0].source === "SELF" ? "their own change" : "changed by an admin"}
+                  {nameHistory.length > 1 ? ` · ${nameHistory.length} changes in all` : ""}
+                </span>
+              </>
+            )}
           </Field>
           <Field icon={LuLink} label="Referral code">
             <span className="font-mono">{ambassador.referralCode}</span>

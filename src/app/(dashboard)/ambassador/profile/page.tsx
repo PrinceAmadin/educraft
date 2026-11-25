@@ -5,10 +5,13 @@ import { LuArrowRight, LuInbox } from "react-icons/lu";
 import { auth } from "@/lib/auth";
 import { getAmbassadorByUserId, getAmbassadorProfile } from "@/lib/services/ambassador-portal";
 import { AmbassadorBankForm } from "@/components/ambassadors/AmbassadorBankForm";
+import { AmbassadorNameForm } from "@/components/ambassadors/AmbassadorNameForm";
 import { WeeklyEmailToggle } from "@/components/ambassadors/WeeklyEmailToggle";
 import { TierBadge } from "@/components/ambassadors/TierBadge";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { referralLink } from "@/lib/ambassador";
+import { NAME_CHANGE_TEXT } from "@/lib/ambassadors/name-change";
+import { getNameChangeView } from "@/lib/services/ambassador-name";
 import { PAYING_CLIENTS_HINT, tierProgressLine } from "@/lib/ambassador-copy";
 import { TOUR_TEXT } from "@/lib/ambassador-tour";
 import { getAmbassadorTourVideo } from "@/lib/services/settings";
@@ -31,9 +34,10 @@ export default async function AmbassadorProfilePage() {
     return <EmptyState icon={LuInbox} title="No ambassador profile" description="Contact an admin." />;
   }
 
-  const [{ profile, progress, rate, nextRate, rates, ladder }, tourVideo] = await Promise.all([
+  const [{ profile, progress, rate, nextRate, rates, ladder }, tourVideo, name] = await Promise.all([
     getAmbassadorProfile(ambassador.id),
     getAmbassadorTourVideo(),
+    getNameChangeView(ambassador.id),
   ]);
   const link = referralLink(origin(), profile.referralCode);
 
@@ -42,7 +46,7 @@ export default async function AmbassadorProfilePage() {
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">My profile</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Contact an admin to change your name, university, or department.
+          Contact an admin to change your university or department.
         </p>
       </div>
 
@@ -95,6 +99,23 @@ export default async function AmbassadorProfilePage() {
           ))}
         </ol>
         <p className="mt-2 text-xs text-muted-foreground">{PAYING_CLIENTS_HINT}.</p>
+      </section>
+
+      <section className="surface p-4 sm:p-5">
+        <h2 className="mb-3 text-sm font-semibold text-foreground">{NAME_CHANGE_TEXT.heading}</h2>
+        <AmbassadorNameForm
+          initial={{
+            fullName: name.fullName,
+            canChange: name.cooldown.canChange,
+            cooldownMessage: name.cooldownMessage,
+            bankNudge: name.bankNudge,
+            history: name.history.map((h) => ({
+              oldName: h.oldName,
+              newName: h.newName,
+              createdAt: h.createdAt.toISOString(),
+            })),
+          }}
+        />
       </section>
 
       <section className="surface p-4 sm:p-5">
