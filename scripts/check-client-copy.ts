@@ -25,6 +25,13 @@ const TARGETS = [
   "src/lib/client-document-text.ts",
   "src/lib/client-research-message.ts",
   "src/lib/services/client-research.ts",
+  // The public ambassador recruitment page. Not a client page, but public —
+  // anyone who scans a printed card lands on it, clients and competitors
+  // included — so the same external rule applies, and this is the only
+  // mechanical guard on it.
+  "src/app/(public)/join",
+  "src/components/join",
+  "src/lib/ambassadors/ambassador-copy.ts",
 ];
 
 // Whole words. "AI" is matched case-sensitively so "said" or "again" never trip it.

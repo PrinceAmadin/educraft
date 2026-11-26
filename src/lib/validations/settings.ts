@@ -103,6 +103,21 @@ export const generalSettingsSchema = z.object({
   ambassadorTourVideoUrl: httpsUrl(600, "Enter an https link to the video file, or leave it blank").optional(),
   /** Its poster frame. Blank = the browser's own first frame. Super Admin only. */
   ambassadorTourPosterUrl: httpsUrl(600, "Enter an https link to the poster image, or leave it blank").optional(),
+  /**
+   * Projects delivered, as the homepage states it. Blank leaves the stat off
+   * the page entirely — deliberately possible, so the band is never padded.
+   * Stated rather than computed: HQ cannot see the work that predates it.
+   */
+  marketingProjectsDelivered: z
+    .string()
+    .trim()
+    .max(7)
+    .refine((raw) => raw === "" || (/^\d+$/.test(raw) && Number(raw) > 0), "Enter a whole number, or leave it blank")
+    .optional(),
+  /** The recruitment clip the public /join page plays. Blank = no video section. Super Admin only. */
+  ambassadorRecruitmentVideoUrl: httpsUrl(600, "Enter an https link to the video file, or leave it blank").optional(),
+  /** Its poster frame. Blank = the browser's own first frame. Super Admin only. */
+  ambassadorRecruitmentPosterUrl: httpsUrl(600, "Enter an https link to the poster image, or leave it blank").optional(),
   /** Margin on top of the auto-fetched ₦/$ rate, in percent (0–20). Super Admin only. */
   fxRateMarginPercent: z.coerce.number().min(0, "0–20").max(20, "0–20").optional(),
   /** Optional manual override of the base ₦/$ rate. Empty string clears it. Super Admin only. */

@@ -29,7 +29,7 @@ function groups(hq: HqContact) {
       heading: "Company",
       links: [
         { label: "How it works", href: "/#how-it-works" },
-        { label: "Become an ambassador", href: "/apply" },
+        { label: "Become an ambassador", href: "/join" },
         { label: "Work with us", href: "/apply/worker" },
         { label: "Client sign in", href: "/client/login" },
         { label: "Sign in", href: "/login" },

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { sqlTable, sqlType } from "@/lib/db-schema";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
 import { readGeo } from "@/lib/click-tracking/geo-headers";
+import { isRecruitSlotCode } from "@/lib/click-tracking/namespaces";
 import {
   classifyReferrer,
   hashVisitor,
@@ -303,6 +304,11 @@ export async function claimSlotClicks(
   ambassadorId: string,
   slotCode: string
 ): Promise<number> {
+  // A recruitment card's scans share this column but are not an ambassador's
+  // client-link clicks, and must never be claimed as them: they would land on
+  // the public leaderboard. See click-tracking/namespaces.ts.
+  if (isRecruitSlotCode(slotCode)) return 0;
+
   const { count } = await client.clickEvent.updateMany({
     where: { slotCode, ambassadorId: null },
     data: { ambassadorId },

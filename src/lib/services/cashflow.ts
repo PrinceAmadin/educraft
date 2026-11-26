@@ -1,9 +1,10 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type AmbassadorTier } from "@prisma/client";
 import { revalidateTag, unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import type { CashflowStructure } from "@/lib/finance/cashflow-types";
 import { canonicalHash, diffStructures, hasErrors, tiersChanged, validateStructure, type DiffLine, type Violation } from "@/lib/finance/cashflow-rules";
 import { cashflowStructureSchema, toStructure } from "@/lib/validations/cashflow";
+import { tierLadderRows } from "@/lib/ambassadors/tier-utils";
 
 /**
  * The published cashflow structure: one immutable JSON snapshot per version.
@@ -197,6 +198,61 @@ export async function publicDownpaymentPercent(): Promise<number> {
   if (active) return active.structure.triggers.downpaymentPercent;
   const service = await minServiceDownpayment();
   return service ?? 0;
+}
+
+export interface PublicCommissionTier {
+  tier: AmbassadorTier;
+  label: string;
+  /** Paying students needed to reach this tier. */
+  minPayingClients: number;
+  /** Percent of the project price the ambassador earns. */
+  rate: number;
+  /** That percent of `referencePriceNgn`, in whole naira. */
+  earnsNgn: number;
+}
+
+export interface PublicCommissionLadder {
+  tiers: PublicCommissionTier[];
+  /** The service price the naira figures are worked out on. */
+  referencePriceNgn: number;
+  /** The highest rate on the ladder, for the headline promise. */
+  topRate: number;
+  /** True when the ambassador's share is owed at the student's downpayment rather than at delivery. */
+  paidAtDownpayment: boolean;
+  downpaymentPercent: number;
+}
+
+/**
+ * The tier ladder as public copy needs it: rate per tier and what that rate is
+ * worth in naira on one real service price. Read from the published structure
+ * and the live catalogue, never typed in — the founder can publish a new
+ * structure or reprice a service, and the page must not then contradict the
+ * books (`check:cashflow-static` enforces it).
+ *
+ * Returns null instead of throwing when there is no published structure yet.
+ * `getActiveCashflow` throws `NoCashflowVersion`, and the page this feeds is
+ * what a QR code on a printed business card opens: a 500 there is unrecoverable,
+ * so the section must be able to degrade instead.
+ */
+export async function publicCommissionLadder(referenceServiceCode = "FYP-FULL"): Promise<PublicCommissionLadder | null> {
+  const [active, service] = await Promise.all([
+    readActive(),
+    db.service.findFirst({ where: { serviceCode: referenceServiceCode, isActive: true }, select: { basePrice: true } }),
+  ]);
+  if (!active || !service) return null;
+
+  const { structure } = active;
+  const rows = tierLadderRows(structure.tiers);
+  if (rows.length === 0) return null;
+
+  const ambassador = structure.level1.find((row) => row.key === "ambassador");
+  return {
+    tiers: rows.map((row) => ({ ...row, earnsNgn: Math.round((service.basePrice * row.rate) / 100) })),
+    referencePriceNgn: service.basePrice,
+    topRate: Math.max(...rows.map((row) => row.rate)),
+    paidAtDownpayment: ambassador?.trigger === "downpayment",
+    downpaymentPercent: structure.triggers.downpaymentPercent,
+  };
 }
 
 export interface PublishResult {

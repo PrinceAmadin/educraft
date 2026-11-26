@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { sendMail } from "@/lib/mailer";
 import { ApplicationError, submitApplication } from "@/lib/services/applications";
 import { ambassadorApplicationSchema } from "@/lib/validations/application";
+import { readRecruitCardCode } from "@/lib/recruit-attribution";
 
 /** Public — no auth. */
 export async function POST(req: NextRequest) {
@@ -23,7 +24,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
-    const result = await submitApplication(parsed.data, { ip, send: sendMail, defer: (work) => waitUntil(work.catch(() => {})) });
+    // The card they scanned comes off the cookies, server-side, exactly as the
+    // IP does — never from the body, so it cannot be forged in the payload.
+    const recruitCardCode = readRecruitCardCode(req.headers);
+    const result = await submitApplication(parsed.data, {
+      ip,
+      recruitCardCode,
+      send: sendMail,
+      defer: (work) => waitUntil(work.catch(() => {})),
+    });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof ApplicationError) {

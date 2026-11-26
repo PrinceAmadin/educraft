@@ -5,8 +5,8 @@ import { Ledger } from "@/components/marketing/Ledger";
 import { ProcessTimeline } from "@/components/marketing/ProcessTimeline";
 import { QualityControl } from "@/components/marketing/QualityControl";
 import { ServiceBento } from "@/components/marketing/ServiceBento";
-import { TestimonialStage } from "@/components/marketing/TestimonialStage";
 import { publicDownpaymentPercent } from "@/lib/services/cashflow";
+import { getMarketingStats } from "@/lib/services/marketing-stats";
 
 /**
  * Homepage composition.
@@ -21,24 +21,32 @@ import { publicDownpaymentPercent } from "@/lib/services/cashflow";
  *   Process     B      open        spatial timeline, sticky stage
  *   Expertise   A      dense       typographic index
  *   Quality     B      open        annotated document
- *   Voice       A      quiet       one dominant quote
+ *   Closing     ink    immersive   full-bleed statement
  *
  * Grounds alternate strictly A/B (B is teal-tinted), so every section edge is
- * visible without a border.
- *   Closing     ink    immersive   full-bleed statement
+ * visible without a border; B meeting ink at the end is its own change of
+ * ground and needs no section between them.
+ *
+ * The Voice band (one dominant client quote) sat between Quality and Closing
+ * until 26 Nov 2026. Its three quotes were marked in the source as placeholder
+ * copy to replace before launch, and the page had been public for weeks, so it
+ * came out rather than shipping invented client voices. It can return when
+ * there are real, permissioned ones.
  */
 export default async function LandingPage() {
   // Only the figure crosses to the client component; the steps (with their icons) are built there.
-  const downpaymentPercent = await publicDownpaymentPercent();
+  // Both read-only and independently cached, so one slow read cannot hold the
+  // other up. The figures are computed or founder-stated, never written into
+  // the source — see services/marketing-stats.ts.
+  const [downpaymentPercent, stats] = await Promise.all([publicDownpaymentPercent(), getMarketingStats()]);
   return (
     <>
       <Hero />
-      <Ledger />
+      <Ledger stats={stats} />
       <ServiceBento />
       <ProcessTimeline downpaymentPercent={downpaymentPercent} />
       <Expertise />
       <QualityControl />
-      <TestimonialStage />
       <ClosingCta />
     </>
   );

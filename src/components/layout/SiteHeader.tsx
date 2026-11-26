@@ -13,7 +13,9 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { label: "Services", href: "/services" },
   { label: "How it works", href: "/#how-it-works" },
-  { label: "Ambassadors", href: "/apply" },
+  // The pitch, not the form: an organic visitor should read what the role is
+  // before being asked for their bank details.
+  { label: "Ambassadors", href: "/join" },
   { label: "Work with us", href: "/apply/worker" },
 ];
 

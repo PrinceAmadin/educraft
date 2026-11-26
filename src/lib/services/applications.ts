@@ -18,6 +18,7 @@ import { ensureGroupInvite } from "@/lib/services/ambassador-group";
 import { claimSlotClicks } from "@/lib/click-tracking/record-click";
 import { getAmbassadorTourVideo } from "@/lib/services/settings";
 import { recountAmbassador } from "@/lib/services/ambassador-platform/conversions";
+import { creditForApproval, creditFromCard } from "@/lib/services/growth/recruit-credit";
 import type { SendFn } from "@/lib/services/client-otp";
 import type { AmbassadorApplicationInput, EditApplicationInput } from "@/lib/validations/application";
 
@@ -35,6 +36,13 @@ export interface ApplyContext {
   ip: string;
   send: SendFn;
   defer: (work: Promise<unknown>) => void;
+  /**
+   * The printed card whose QR brought them, read from the `ecr` cookie by the
+   * route handler — like `ip`, and deliberately never part of the submitted
+   * form. Nobody can credit a rival, or themselves, by editing what the
+   * browser sends.
+   */
+  recruitCardCode?: string | null;
 }
 
 // ── Public submit ────────────────────────────────────────────
@@ -112,6 +120,10 @@ export async function submitApplication(
   // The slot is picked here, not trusted from the browser: the first vacant
   // slot (or the next number), held for this application until it is decided.
   const { code: slotCode } = await nextGeneralCode();
+  // Who gets credit, as it stands today: the card can be retired or handed on
+  // before this is approved, and the credit belongs to whoever held it when
+  // the scan happened.
+  const credit = await creditFromCard(ctx.recruitCardCode ?? null);
   const email = input.email.trim().toLowerCase();
   const passwordHash = ownLogin ? "" : await bcrypt.hash(input.password, 12);
 
@@ -147,6 +159,9 @@ export async function submitApplication(
         accountName: input.accountName.trim(),
         slotCode,
         userId: user.id,
+        recruitCardCode: credit.recruitCardCode,
+        recruitedByType: credit.recruitedByType,
+        recruitedBy: credit.recruitedBy,
         status: "PENDING",
       },
       select: { id: true },
@@ -477,6 +492,9 @@ export async function approveApplication(
       accountName: true,
       slotCode: true,
       userId: true,
+      recruitCardCode: true,
+      recruitedByType: true,
+      recruitedBy: true,
     },
   });
   if (!application) throw new ApplicationError("Application not found");
@@ -507,6 +525,11 @@ export async function approveApplication(
   if (!slotCode) slotCode = (await nextGeneralCode()).code;
   const claimed = slotCode;
 
+  // Checked before the transaction so a lookup can never hold it open: a
+  // holder who has gone, a retired card or a self-credit all fall back to
+  // "APPLICATION", which is the existing value for applying off your own bat.
+  const recruited = await creditForApproval(application);
+
   const ambassadorId = await nextId("AMBASSADOR");
 
   const ambassador = await (async () => {
@@ -530,6 +553,8 @@ export async function approveApplication(
               userId: application.userId,
               tier: "BRONZE",
               status: "Active",
+              recruitedByType: recruited.recruitedByType,
+              recruitedBy: recruited.recruitedBy,
               // The slot is theirs for 30 days; a confirmed order makes it permanent.
               provisionalUntil: provisionalDeadline(),
             },

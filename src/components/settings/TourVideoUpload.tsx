@@ -12,8 +12,11 @@ const ACCEPT = ".mp4,.webm,.png,.jpg,.jpeg,.webp";
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(0)} MB`;
 
 /**
- * Uploads the tutorial video (or its poster) straight from the browser to the
- * public Blob store and hands back the URL for the settings field beside it.
+ * Uploads a film (or its poster) straight from the browser to the public Blob
+ * store and hands back the URL for the settings field beside it. `folder`
+ * picks which film: the tutorial every new ambassador watches, or the
+ * recruitment clip the public /join page plays. The route's own allowlist has
+ * to agree, so the two move together.
  *
  * A 5–7 minute film is far past the 4.5 MB a function may receive, so it never
  * passes through HQ: the route only mints a token. `multipart` splits the file
@@ -26,11 +29,14 @@ const mb = (n: number) => `${(n / 1024 / 1024).toFixed(0)} MB`;
 export function TourVideoUpload({
   label,
   kind,
+  folder = "ambassador-tour",
   disabled,
   onUploaded,
 }: {
   label: string;
   kind: "video" | "poster";
+  /** Blob folder, without the slash. Must be on `FOLDERS` in the upload route. */
+  folder?: "ambassador-tour" | "ambassador-recruitment";
   disabled?: boolean;
   onUploaded: (url: string) => void;
 }) {
@@ -50,7 +56,7 @@ export function TourVideoUpload({
     }
     setProgress(0);
     try {
-      const blob = await upload(`ambassador-tour/${file.name}`, file, {
+      const blob = await upload(`${folder}/${file.name}`, file, {
         access: "public",
         handleUploadUrl: "/api/admin/settings/tour-video",
         contentType: file.type || undefined,

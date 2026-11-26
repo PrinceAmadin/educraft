@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { splitEmailList, type GeneralSettingsInput } from "@/lib/validations/settings";
 import { DEFAULT_FX_MARGIN_PERCENT, FX_RATE_SETTING_KEYS, clampMargin, resolveFxRate, type FxRateSnapshot } from "@/lib/fx-rate";
 import { HQ_CONTACT_KEYS, revalidateHqContact } from "@/lib/services/hq-contact";
+import { MARKETING_KEYS, revalidateMarketingStats } from "@/lib/services/marketing-stats";
 import { hqContactChanges, type HqContactChange, type HqContactField } from "@/lib/hq-contact-rules";
 
 export { hqContactChanges, type HqContactChange } from "@/lib/hq-contact-rules";
@@ -28,6 +29,9 @@ const KEYS = {
   ambassadorCoreMessage: "ambassador_core_message",
   ambassadorTourVideoUrl: "ambassador_tour_video_url",
   ambassadorTourPosterUrl: "ambassador_tour_poster_url",
+  ambassadorRecruitmentVideoUrl: "ambassador_recruitment_video_url",
+  ambassadorRecruitmentPosterUrl: "ambassador_recruitment_poster_url",
+  marketingProjectsDelivered: MARKETING_KEYS.projectsDelivered,
   fxMargin: FX_RATE_SETTING_KEYS.marginPercent,
   fxManualOverride: FX_RATE_SETTING_KEYS.manualOverride,
   fxManualOverrideSetAt: FX_RATE_SETTING_KEYS.manualOverrideSetAt,
@@ -73,6 +77,29 @@ const DEFAULTS = {
   ambassadorTourVideoUrl: "",
   /** Poster frame shown before play. Empty = the browser's own first frame. */
   ambassadorTourPosterUrl: "",
+  /**
+   * The short recruitment clip on the public /join page, which the QR code on
+   * a printed EduCraft card opens. A DIFFERENT film from the tutorial above:
+   * that one is the long walkthrough an approved ambassador watches once,
+   * this one is the 30-second hook a student sees before applying. Empty by
+   * default and empty is meaningful: with no video the page's video section
+   * renders nothing and everything else still works. Never serve it from
+   * /public/images — the service worker caches that folder and its cacheFirst
+   * is range-unaware, which breaks seeking.
+   */
+  ambassadorRecruitmentVideoUrl: "",
+  /** Its poster frame. Supply one: without it a 9:16 frame on a slow connection is a tall black rectangle under the page's main button. */
+  ambassadorRecruitmentPosterUrl: "",
+  /**
+   * Projects delivered, as the homepage states it. Blank by default and blank
+   * is meaningful: the stat is dropped rather than guessed.
+   *
+   * This is a STATED figure, not a computed one, because EduCraft delivered
+   * roughly a hundred projects a year before HQ existed and a database that
+   * only knows what was typed into it cannot see them. It belongs to the
+   * founder: Settings shows HQ's own count beside it so the gap stays visible.
+   */
+  marketingProjectsDelivered: "",
 };
 
 export interface GeneralSettings {
@@ -99,6 +126,12 @@ export interface GeneralSettings {
   ambassadorTourVideoUrl: string;
   /** Its poster frame; empty = the browser's own. Super Admin only. */
   ambassadorTourPosterUrl: string;
+  /** The recruitment clip on the public /join page; empty = no video section. Super Admin only. */
+  ambassadorRecruitmentVideoUrl: string;
+  /** Its poster frame; empty = the browser's own. Super Admin only. */
+  ambassadorRecruitmentPosterUrl: string;
+  /** Projects delivered as the homepage states it; blank = the stat is left off. Super Admin only. */
+  marketingProjectsDelivered: string;
   /** Margin % applied on top of the base ₦/$ rate (0–20). */
   fxRateMarginPercent: number;
   /** Manual override for the base ₦/$ rate; empty string when unset. */
@@ -147,6 +180,9 @@ export async function getGeneralSettings(): Promise<GeneralSettings> {
     ambassadorCoreMessage: s[KEYS.ambassadorCoreMessage]?.trim() || DEFAULTS.ambassadorCoreMessage,
     ambassadorTourVideoUrl: s[KEYS.ambassadorTourVideoUrl]?.trim() || DEFAULTS.ambassadorTourVideoUrl,
     ambassadorTourPosterUrl: s[KEYS.ambassadorTourPosterUrl]?.trim() || DEFAULTS.ambassadorTourPosterUrl,
+    ambassadorRecruitmentVideoUrl: s[KEYS.ambassadorRecruitmentVideoUrl]?.trim() || DEFAULTS.ambassadorRecruitmentVideoUrl,
+    ambassadorRecruitmentPosterUrl: s[KEYS.ambassadorRecruitmentPosterUrl]?.trim() || DEFAULTS.ambassadorRecruitmentPosterUrl,
+    marketingProjectsDelivered: s[KEYS.marketingProjectsDelivered]?.trim() || DEFAULTS.marketingProjectsDelivered,
     fxRateMarginPercent: clampMargin(num(s[KEYS.fxMargin], DEFAULT_FX_MARGIN_PERCENT)),
     fxRateManualOverride: s[KEYS.fxManualOverride] ?? "",
     fxRateSnapshot,
@@ -188,6 +224,12 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
     writes.push({ key: KEYS.ambassadorTourVideoUrl, value: input.ambassadorTourVideoUrl.trim() });
   if (input.ambassadorTourPosterUrl !== undefined)
     writes.push({ key: KEYS.ambassadorTourPosterUrl, value: input.ambassadorTourPosterUrl.trim() });
+  if (input.ambassadorRecruitmentVideoUrl !== undefined)
+    writes.push({ key: KEYS.ambassadorRecruitmentVideoUrl, value: input.ambassadorRecruitmentVideoUrl.trim() });
+  if (input.ambassadorRecruitmentPosterUrl !== undefined)
+    writes.push({ key: KEYS.ambassadorRecruitmentPosterUrl, value: input.ambassadorRecruitmentPosterUrl.trim() });
+  if (input.marketingProjectsDelivered !== undefined)
+    writes.push({ key: KEYS.marketingProjectsDelivered, value: input.marketingProjectsDelivered.trim() });
 
   if (input.fxRateMarginPercent !== undefined)
     writes.push({ key: KEYS.fxMargin, value: String(clampMargin(input.fxRateMarginPercent)) });
@@ -234,6 +276,7 @@ export async function updateGeneralSettings(input: GeneralSettingsInput, actor?:
   });
 
   if (contactChanges.length > 0) revalidateHqContact();
+  if (input.marketingProjectsDelivered !== undefined) revalidateMarketingStats();
   return { contactChanges };
 }
 
@@ -265,6 +308,26 @@ export async function getAmbassadorTourVideo(): Promise<{ videoUrl: string; post
   return {
     videoUrl: byKey[KEYS.ambassadorTourVideoUrl]?.trim() || DEFAULTS.ambassadorTourVideoUrl,
     posterUrl: byKey[KEYS.ambassadorTourPosterUrl]?.trim() || DEFAULTS.ambassadorTourPosterUrl,
+  };
+}
+
+/**
+ * The recruitment clip and poster the public /join page plays — the page a
+ * printed card's QR code opens. Read at request time, so swapping the film
+ * changes what every already-printed card shows.
+ *
+ * No URL = no video section: the page drops it and still renders, which is how
+ * /join ships before the film is uploaded. Same storage rule as the tour: the
+ * public Blob store or any https host, never /public/images.
+ */
+export async function getAmbassadorRecruitmentVideo(): Promise<{ videoUrl: string; posterUrl: string }> {
+  const rows = await db.setting.findMany({
+    where: { key: { in: [KEYS.ambassadorRecruitmentVideoUrl, KEYS.ambassadorRecruitmentPosterUrl] } },
+  });
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return {
+    videoUrl: byKey[KEYS.ambassadorRecruitmentVideoUrl]?.trim() || DEFAULTS.ambassadorRecruitmentVideoUrl,
+    posterUrl: byKey[KEYS.ambassadorRecruitmentPosterUrl]?.trim() || DEFAULTS.ambassadorRecruitmentPosterUrl,
   };
 }
 

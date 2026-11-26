@@ -3,10 +3,15 @@ import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { requireSuperAdmin } from "@/lib/api";
 
 /**
- * Mints a short upload token so the founder's browser can send the ambassador
- * tutorial video straight to the PUBLIC Blob store. A 5–7 minute film is far
- * past the 4.5 MB a function may receive, so it never passes through here —
- * only the token does.
+ * Mints a short upload token so the founder's browser can send an ambassador
+ * film straight to the PUBLIC Blob store: the tutorial every new ambassador
+ * watches, or the short recruitment clip the public /join page plays. A 5–7
+ * minute film is far past the 4.5 MB a function may receive, so it never
+ * passes through here — only the token does.
+ *
+ * One route, two folders. Each film keeps its own prefix so the store stays
+ * readable, and `FOLDERS` is the allowlist: an upload to any other path is
+ * refused, so this token can never be used to write elsewhere in the store.
  *
  * Founder only. `/api/admin/settings` is already SUPER_ADMIN in
  * `API_PERMISSIONS` and longest-prefix-wins covers this child, so the edge
@@ -21,6 +26,9 @@ import { requireSuperAdmin } from "@/lib/api";
  * ambassador.
  */
 const ALLOWED_TYPES = ["video/mp4", "video/webm", "image/png", "image/jpeg", "image/webp"];
+
+/** The only paths this token may write. Keep in step with `TourVideoUpload`'s `folder` prop. */
+const FOLDERS = ["ambassador-tour/", "ambassador-recruitment/"] as const;
 
 /** A 7-minute 1080p export lands around 100–200 MB; this leaves generous room. */
 const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
@@ -49,7 +57,7 @@ export async function POST(req: NextRequest) {
       body,
       request: req,
       onBeforeGenerateToken: async (pathname) => {
-        if (!pathname.startsWith("ambassador-tour/")) throw new Error("Invalid upload path");
+        if (!FOLDERS.some((folder) => pathname.startsWith(folder))) throw new Error("Invalid upload path");
         return {
           allowedContentTypes: ALLOWED_TYPES,
           maximumSizeInBytes: MAX_UPLOAD_BYTES,

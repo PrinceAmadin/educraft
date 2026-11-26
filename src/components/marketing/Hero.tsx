@@ -32,7 +32,13 @@ export function Hero() {
           <Reveal>
             <p className="eyebrow flex items-center gap-2.5">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-primary" />
-              Trusted by students across 10+ Nigerian universities
+              {/* Scopes who this is for and claims nothing that cannot be
+                  shown. It read "Trusted by students across 10+ Nigerian
+                  universities" until 26 Nov 2026: HQ had four universities
+                  with a client on record and no measure of trust at all. The
+                  page's figures are in the Ledger band below, computed per
+                  request — see services/marketing-stats.ts. */}
+              For final year students in Nigerian universities
             </p>
           </Reveal>
 

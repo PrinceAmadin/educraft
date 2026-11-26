@@ -8,17 +8,21 @@ import { getGeneralSettings } from "@/lib/services/settings";
 import { getExpectedHours } from "@/lib/services/operations/pipeline";
 import { getAlertRoleRecipients } from "@/lib/services/team-alerts";
 import { getAnthropicKeyStatus } from "@/lib/anthropic-key";
+import { deliveredProjectCount } from "@/lib/services/marketing-stats";
 
 export const metadata: Metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [session, settings, expected, alertRoles, anthropicKey] = await Promise.all([
+  const [session, settings, expected, alertRoles, anthropicKey, deliveredInHq] = await Promise.all([
     auth(),
     getGeneralSettings(),
     getExpectedHours(),
     getAlertRoleRecipients(),
     getAnthropicKeyStatus(),
+    // Shown beside the stated homepage figure, so the gap between what the
+    // page claims and what HQ can prove is visible where it is edited.
+    deliveredProjectCount().catch(() => null),
   ]);
   const canEditPricing = session?.user?.role === "SUPER_ADMIN";
 
@@ -33,7 +37,12 @@ export default async function SettingsPage() {
 
       <SettingsTabs active="general" role={session?.user?.role} />
 
-      <GeneralSettingsForm settings={settings} canEditPricing={canEditPricing} alertRoles={alertRoles} />
+      <GeneralSettingsForm
+        settings={settings}
+        canEditPricing={canEditPricing}
+        alertRoles={alertRoles}
+        deliveredInHq={deliveredInHq}
+      />
 
       {/* Deliberately a sibling of the form, not a field in it: the key needs its own
           validating route, and staying out of generalSettingsSchema and the settings

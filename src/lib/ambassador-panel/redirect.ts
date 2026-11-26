@@ -1,14 +1,8 @@
-import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { redisConfigured, withRedis } from "@/lib/ambassador-panel/redis";
-import {
-  drainClickRetryQueue,
-  readVisitorId,
-  recordClick,
-  VISITOR_COOKIE,
-  VISITOR_COOKIE_MAX_AGE_SECONDS,
-} from "@/lib/click-tracking/record-click";
+import { drainClickRetryQueue, recordClick } from "@/lib/click-tracking/record-click";
+import { redirectWithVisitor, resolveVisitorId } from "@/lib/click-tracking/visitor-cookie";
 import { db } from "@/lib/db";
 import { waLink } from "@/lib/whatsapp";
 import { getHqContact, HQ_CONTACT_FALLBACK, type HqContact } from "@/lib/services/hq-contact";
@@ -47,7 +41,7 @@ export type ReferralKind = "ambassador" | "ecca" | "ecsa";
 const wa = waLink;
 
 function trackClick(id: string, req: Request): { visitorId: string } {
-  const visitorId = readVisitorId(req.headers) ?? crypto.randomUUID();
+  const visitorId = resolveVisitorId(req);
 
   const redisWrite = redisConfigured()
     ? withRedis((client) => client.multi().incr(`clicks:${id}`).sAdd("ambassador_ids", id).exec()).catch(() => {})
@@ -110,18 +104,6 @@ a{display:inline-block;margin-top:22px;color:#0D9488;font-weight:600;text-decora
 }
 
 /** 302 to WhatsApp, carrying the visitor cookie the click was keyed on. */
-function redirectWithVisitor(url: string, visitorId: string) {
-  const res = NextResponse.redirect(url, 302);
-  res.cookies.set(VISITOR_COOKIE, visitorId, {
-    maxAge: VISITOR_COOKIE_MAX_AGE_SECONDS,
-    path: "/",
-    sameSite: "lax",
-    httpOnly: true,
-    secure: true,
-  });
-  return res;
-}
-
 export async function referralResponse(kind: ReferralKind, rawId: string, req: Request) {
   const id = decodeURIComponent(rawId ?? "").trim();
   const errorPage = async (title: string, body: string, status: number) =>

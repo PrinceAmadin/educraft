@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LuArrowRight, LuCalendarDays, LuHandshake, LuLayoutDashboard, LuNetwork, LuTrophy, LuWallet } from "react-icons/lu";
+import { LuArrowRight, LuCalendarDays, LuHandshake, LuLayoutDashboard, LuNetwork, LuQrCode, LuTrophy, LuWallet } from "react-icons/lu";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { InProgressNotice } from "@/components/shared/InProgressNotice";
 import type { AppIcon } from "@/lib/icons";
@@ -14,6 +14,7 @@ const TOOLS: { href: string; title: string; body: string; icon: AppIcon }[] = [
   { href: "/admin/ambassadors/network", title: "Network map", body: "Core ambassadors and their Sub-teams, and who is ready to lead one.", icon: LuNetwork },
   { href: "/admin/ambassadors/partnerships", title: "Partnerships", body: "Student unions and faculty associations, what they cost the Growth Fund and the projects they brought.", icon: LuHandshake },
   { href: "/admin/ambassadors/content", title: "Content hub", body: "The weekly content rhythm, how consistently it went out, and the pre-season campaign.", icon: LuCalendarDays },
+  { href: "/admin/growth/recruitment", title: "Printed cards", body: "A QR design per person handing cards out, and what each run produced: scans, applications, approvals and cost per application.", icon: LuQrCode },
 ];
 
 /** The Head of Growth's front door: the Ambassador Platform's tools, and what is still to come. */

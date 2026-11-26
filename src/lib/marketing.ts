@@ -19,30 +19,20 @@ import { MAX_REVISIONS } from "@/lib/constants";
  * The homepage renders composition; the words live here. Prices and business
  * rules are the ones already committed in `constants.ts` and the previous
  * landing page — nothing here invents a claim the business hasn't made.
+ *
+ * NO FIGURE ABOUT THE BUSINESS BELONGS IN THIS FILE. The homepage's numbers
+ * used to live here as four constants, and three of them were claims HQ had no
+ * record of: a 95% delivery record measured from nothing, and a 4.5 average
+ * rating from a rating system that has never existed. They now come from
+ * `services/marketing-stats.ts`, computed per request or stated by the founder
+ * in Settings, so a figure cannot be published that nobody can correct.
+ *
+ * The testimonials that sat here were marked "PLACEHOLDER COPY — REPLACE
+ * BEFORE LAUNCH" and the page was live. They were removed (26 Nov 2026, the
+ * founder's call): an invented client voice is riskier than an invented
+ * number, because it is a person who can be asked about. Real, permissioned
+ * quotes can go back when there are some.
  */
-
-/* ── Ledger ─────────────────────────────────────────────────
-   Read as an index, not four equal tiles: the entries carry
-   different weights because they are not equally interesting. */
-
-export interface LedgerEntry {
-  /** The number the counter animates to. */
-  to: number;
-  /** Decimal places to hold while counting — 4.5 must not render as 5. */
-  decimals?: number;
-  prefix?: string;
-  suffix?: string;
-  label: string;
-  /** Sets the type scale. One lead entry per row, the rest support it. */
-  weight: "lead" | "support";
-}
-
-export const LEDGER: LedgerEntry[] = [
-  { to: 90, suffix: "+", label: "Projects delivered", weight: "lead" },
-  { to: 10, suffix: "+", label: "Universities covered", weight: "support" },
-  { to: 95, suffix: "%", label: "On-time delivery", weight: "support" },
-  { to: 4.5, decimals: 1, label: "Average rating out of 5", weight: "support" },
-];
 
 /* ── Service catalogue ──────────────────────────────────────
    Rows, not cards. `scope` is the broken-grid right column: a
@@ -228,47 +218,3 @@ export const ANNOTATIONS: Annotation[] = [
   },
 ];
 
-/* ── Testimonials ───────────────────────────────────────────
-   PLACEHOLDER COPY — REPLACE BEFORE LAUNCH.
-   These are deliberately non-attributed (initials and a region,
-   never an invented full name) so nothing here can be mistaken
-   for a real review. Swap in genuine, permissioned quotes with
-   real attribution before this page goes public. */
-
-export interface Testimonial {
-  quote: string;
-  initials: string;
-  programme: string;
-  institution: string;
-}
-
-export const TESTIMONIALS: Testimonial[] = [
-  {
-    quote:
-      "I sent the brief once and stopped chasing anyone. The chapters came back in my department's format, with references I could actually open.",
-    initials: "A. O.",
-    programme: "Final year, Mechanical Engineering",
-    institution: "Federal university, South-West",
-  },
-  {
-    quote:
-      "My supervisor asked for corrections twice. Both times they came back handled properly, without an argument about scope.",
-    initials: "C. E.",
-    programme: "Final year, Accounting",
-    institution: "State university, South-East",
-  },
-  {
-    quote:
-      "The defence deck matched the report instead of repeating it. That was the difference in the room.",
-    initials: "M. I.",
-    programme: "Final year, Public Health",
-    institution: "Federal university, North-Central",
-  },
-  {
-    quote:
-      "Paying part of it up front made the whole thing feel like a transaction with an actual company, not a favour from a stranger.",
-    initials: "T. A.",
-    programme: "Final year, Computer Science",
-    institution: "Private university, South-West",
-  },
-];

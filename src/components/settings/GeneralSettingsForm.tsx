@@ -39,11 +39,18 @@ export function GeneralSettingsForm({
   settings,
   canEditPricing,
   alertRoles,
+  deliveredInHq = null,
 }: {
   settings: GeneralSettings;
   canEditPricing: boolean;
   /** The executives who also get alerts, at their sign-in email. */
   alertRoles: AlertRoleRecipient[];
+  /**
+   * How many projects HQ itself has delivered, shown beside the stated figure
+   * so the gap between what the homepage claims and what HQ can prove is
+   * always visible to whoever is editing it.
+   */
+  deliveredInHq?: number | null;
 }) {
   const router = useRouter();
   const [submitError, setSubmitError] = React.useState<string | null>(null);
@@ -78,6 +85,9 @@ export function GeneralSettingsForm({
       ambassadorCoreMessage: settings.ambassadorCoreMessage,
       ambassadorTourVideoUrl: settings.ambassadorTourVideoUrl,
       ambassadorTourPosterUrl: settings.ambassadorTourPosterUrl,
+      ambassadorRecruitmentVideoUrl: settings.ambassadorRecruitmentVideoUrl,
+      ambassadorRecruitmentPosterUrl: settings.ambassadorRecruitmentPosterUrl,
+      marketingProjectsDelivered: settings.marketingProjectsDelivered,
       fxRateMarginPercent: settings.fxRateMarginPercent,
       fxRateManualOverride: settings.fxRateManualOverride,
     },
@@ -354,6 +364,99 @@ export function GeneralSettingsForm({
             />
           ) : null}
         </div>
+      </FormSection>
+
+      <FormSection
+        title="Ambassador recruitment clip"
+        description={
+          canEditPricing
+            ? "The short film on the public join page — the page the QR code on a printed EduCraft card opens. A different film from the tutorial above: this one is the hook a student sees before applying. Leave it blank and the page simply has no video."
+            : "Only the founder (Super Admin) can change the recruitment clip."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="grid grid-cols-1 gap-5">
+          <Field
+            label="Video file"
+            htmlFor="ambassadorRecruitmentVideoUrl"
+            error={errors.ambassadorRecruitmentVideoUrl?.message}
+            hint="Upload the clip, or paste an https link to one hosted elsewhere. A phone-shaped (vertical) film of about 30 seconds suits the page best. Swapping it changes what every already-printed card shows."
+          >
+            <Input
+              id="ambassadorRecruitmentVideoUrl"
+              inputMode="url"
+              placeholder="No clip yet"
+              disabled={!canEditPricing}
+              {...register("ambassadorRecruitmentVideoUrl")}
+            />
+          </Field>
+          {canEditPricing ? (
+            <TourVideoUpload
+              label="Upload the clip"
+              kind="video"
+              folder="ambassador-recruitment"
+              onUploaded={(url) => setValue("ambassadorRecruitmentVideoUrl", url, { shouldDirty: true })}
+            />
+          ) : null}
+          <Field
+            label="Poster frame"
+            htmlFor="ambassadorRecruitmentPosterUrl"
+            error={errors.ambassadorRecruitmentPosterUrl?.message}
+            hint="The still shown before it plays. Worth setting here: without one, a slow connection shows a tall dark rectangle right under the page's main button."
+          >
+            <Input
+              id="ambassadorRecruitmentPosterUrl"
+              inputMode="url"
+              placeholder="Optional"
+              disabled={!canEditPricing}
+              {...register("ambassadorRecruitmentPosterUrl")}
+            />
+          </Field>
+          {canEditPricing ? (
+            <TourVideoUpload
+              label="Upload a poster image"
+              kind="poster"
+              folder="ambassador-recruitment"
+              onUploaded={(url) => setValue("ambassadorRecruitmentPosterUrl", url, { shouldDirty: true })}
+            />
+          ) : null}
+        </div>
+      </FormSection>
+
+      <FormSection
+        title="Homepage figures"
+        description={
+          canEditPricing
+            ? "The numbers on the public homepage. Projects delivered is stated by you, because HQ can only count what has been entered into it and EduCraft was delivering work long before this system existed. Leave it blank and the homepage simply leaves it out."
+            : "Only the founder (Super Admin) can change the homepage figures."
+        }
+        action={!canEditPricing ? <LuLock className="size-4 text-muted-foreground" aria-label="Locked" /> : null}
+      >
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <Field
+            label="Projects delivered"
+            htmlFor="marketingProjectsDelivered"
+            error={errors.marketingProjectsDelivered?.message}
+            hint={
+              deliveredInHq === null
+                ? "Shown on the homepage as a total, with a plus. Blank leaves the figure off the page."
+                : `Shown on the homepage as a total, with a plus. HQ itself has ${deliveredInHq === 1 ? "1 delivered project" : `${deliveredInHq} delivered projects`} on record, so keep this current as the real count grows. Blank leaves the figure off the page.`
+            }
+          >
+            <Input
+              id="marketingProjectsDelivered"
+              inputMode="numeric"
+              placeholder="Leave blank to hide it"
+              disabled={!canEditPricing}
+              {...register("marketingProjectsDelivered")}
+            />
+          </Field>
+        </div>
+        <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">
+          The other two figures on that band — campus representatives and universities reached — are counted from HQ
+          at the moment the page loads, so they are always true and need nothing here. Each one hides itself while it
+          is still too small to be worth stating.
+        </p>
       </FormSection>
 
       <FormSection

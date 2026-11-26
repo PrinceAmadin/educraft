@@ -12,7 +12,7 @@ import { animate, useInView, useReducedMotion } from "framer-motion";
  *
  * The final value is present in the DOM from the first render and the counting
  * digits are `aria-hidden`, so assistive tech and search engines always read
- * "90+", never a partial number mid-animation.
+ * the whole figure, never a partial number mid-animation.
  */
 export function CountUp({
   to,

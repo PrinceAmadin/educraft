@@ -72,7 +72,7 @@ export function ClosingCta() {
               <ActionLink href="/intake" variant="primary" magnetic>
                 Start your project
               </ActionLink>
-              <ActionLink href="/apply">Become an ambassador</ActionLink>
+              <ActionLink href="/join">Become an ambassador</ActionLink>
             </div>
           </Reveal>
         </div>

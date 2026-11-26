@@ -153,7 +153,7 @@ const pad = (n: number) => String(n).padStart(3, "0");
  * pending application is already holding, otherwise the next number after the
  * highest. Vacant slots are filled first, as in the original panel.
  */
-export async function nextGeneralCode(): Promise<{ code: string; reused: boolean }> {
+async function readGeneralSlots() {
   const [slots, held] = await Promise.all([
     db.ambassadorSlot.findMany({ where: { kind: "GENERAL" }, select: { code: true, vacant: true } }),
     db.ambassadorApplication.findMany({
@@ -162,9 +162,29 @@ export async function nextGeneralCode(): Promise<{ code: string; reused: boolean
     }),
   ]);
   const heldCodes = new Set(held.map((h) => h.slotCode!));
-  const free = slots
-    .filter((s) => s.vacant && !heldCodes.has(s.code))
-    .sort(byCode)[0];
+  return { slots, heldCodes, free: slots.filter((s) => s.vacant && !heldCodes.has(s.code)) };
+}
+
+/**
+ * How many general positions are genuinely open, and how many there are in
+ * all — the "N of 66 positions open" line the public recruitment page shows.
+ *
+ * Deliberately the same read `nextGeneralCode` allocates from, so the number a
+ * student is shown and the slot they would actually be given can never
+ * disagree. A slot a pending application is already holding is not open.
+ *
+ * Note the roster is not a hard ceiling: with nothing vacant, `nextGeneralCode`
+ * mints the next number. So this is the number of positions waiting to be
+ * filled, not a cap on how many ambassadors EduCraft can have.
+ */
+export async function openGeneralSlots(): Promise<{ open: number; total: number }> {
+  const { slots, free } = await readGeneralSlots();
+  return { open: free.length, total: slots.length };
+}
+
+export async function nextGeneralCode(): Promise<{ code: string; reused: boolean }> {
+  const { slots, heldCodes, free: freeSlots } = await readGeneralSlots();
+  const free = freeSlots.sort(byCode)[0];
   if (free) return { code: free.code, reused: true };
 
   let max = 0;
