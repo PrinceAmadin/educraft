@@ -170,15 +170,38 @@ export function hasOwnLengthTarget(level: DegreeLevel, minimumPages?: string | n
  * The fewest works the chapters must actually cite (ST12's floor). A full undergraduate report is
  * 35; postgraduate work carries its argument in its sources, so it is far higher.
  *
- * Known ceiling: the research step keeps at most `MAX_REFERENCES` (70) references, so the PhD floor
- * below is NOT satisfiable until that cap and the OpenAlex query budget rise. PhD is quote-only and
- * never self-serve, so this is a deliberate marker rather than a live refusal.
+ * This floor and `researchTargetFor` below are one decision in two halves: the gate may only ask
+ * for a number of citations the research step was told to go and find. `check:degree-level` holds
+ * them together, so raising one without the other fails the build rather than the report.
  */
 export function referenceFloorFor(level: DegreeLevel, chapterBased = false): number {
   if (chapterBased) return 15;
   if (level === "MASTERS") return 60;
   if (level === "PHD") return 90;
   return 35;
+}
+
+/**
+ * How many relevant references the research step keeps searching for. The undergraduate figure is
+ * the one the step has always used, so an undergraduate run is unchanged; postgraduate work needs
+ * more because its gate asks for more (see `referenceFloorFor`), with headroom for the works that
+ * are kept but never end up cited.
+ */
+export function researchTargetFor(level: DegreeLevel): number {
+  if (level === "MASTERS") return 80;
+  if (level === "PHD") return 120;
+  return 50;
+}
+
+/**
+ * The hard ceiling on a job's kept set: extras above it are trimmed, CORE and most-cited first.
+ * Derived from the target rather than stored, so one figure per level decides both and a job that
+ * was started under an older figure keeps the ceiling that matches it.
+ *
+ * 50 → 70 is exactly what the research step capped at before postgraduate work existed.
+ */
+export function referenceCeiling(targetCount: number): number {
+  return Math.round(Math.max(1, targetCount) * 1.4);
 }
 
 // ─── Abstract ────────────────────────────────────────────────────────────────

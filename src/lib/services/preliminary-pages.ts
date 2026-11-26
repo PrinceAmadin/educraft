@@ -400,7 +400,7 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
     extracted_conclusion: extracted.conclusion,
   };
   // A law report's abstract has NALT's band (26 Nov 2026), so the writer aims at the band it is judged against.
-  const band = abstractBand({ section: sectionOfApprovedMode(project.researchMode), referencingStyle: project.researchMode?.referencingStyle ?? null });
+  const band = abstractBand({ section: sectionOfApprovedMode(project.researchMode), referencingStyle: project.researchMode?.referencingStyle ?? null, degreeLevel: project.degreeLevel });
   return { projectDbId: project.id, values, chapters, band };
 }
 
@@ -662,6 +662,7 @@ export async function getPreliminaryPagesView(projectDbId: string): Promise<Prel
       hodName: true,
       dedicationType: true,
       dedicationDetails: true,
+      degreeLevel: true,
       additionalData: true,
       chapterCount: true,
       service: { select: { serviceCode: true } },
@@ -670,7 +671,7 @@ export async function getPreliminaryPagesView(projectDbId: string): Promise<Prel
   });
   if (!project) throw new PreliminaryPagesError("Project not found", 404, "NOT_FOUND");
   // A law report is written and judged against NALT’s band (26 Nov 2026).
-  const band = abstractBand({ section: sectionOfApprovedMode(project.researchMode), referencingStyle: project.researchMode?.referencingStyle ?? null });
+  const band = abstractBand({ section: sectionOfApprovedMode(project.researchMode), referencingStyle: project.researchMode?.referencingStyle ?? null, degreeLevel: project.degreeLevel });
   if (isChapterBasedOrder(project.service.serviceCode, project.additionalData)) {
     return { applies: false, chaptersReady: false, band, pages: null, intakeGaps: [], blanks: [], qaCopyOlder: null };
   }

@@ -5,6 +5,7 @@
  * this module builds its tool and checks what comes back. Pure.
  */
 
+import { referenceFloorFor, type DegreeLevel } from "@/lib/degree-level";
 import { parseChapter, type Block } from "@/lib/assembly/parse-chapter";
 import { analyseChapterNotes, distinctNoteCount, entryFor } from "@/lib/assembly/endnotes";
 import { citesInEndnotes } from "./citation-check";
@@ -30,6 +31,8 @@ export interface StructuralChapter {
 export interface StructuralInput {
   chapters: StructuralChapter[];
   chapterBased: boolean;
+  /** Undergraduate unless the order says otherwise: raises ST12's reference floor and ST1's abstract band. */
+  degreeLevel?: DegreeLevel;
   section: SectionKey | null;
   /** The approved referencing style key: a NALT report is held to NALT's citation signals (ST17). */
   referencingStyle?: string | null;
@@ -99,7 +102,12 @@ export const STRUCTURAL_CHECKS: readonly { id: string; title: string; severity: 
   { id: "ST19", title: "NALT chapter section order", severity: "MAJOR" },
 ];
 
-export const REFERENCE_MINIMUM = { full: 35, chapterBased: 15 } as const;
+/**
+ * The undergraduate floor, kept exported for the checks that name it. The live floor is
+ * `referenceFloorFor(level, chapterBased)`: postgraduate work carries its argument in its sources,
+ * and the research step is told to go and find that many (`researchTargetFor`).
+ */
+export const REFERENCE_MINIMUM = { full: referenceFloorFor("UNDERGRADUATE"), chapterBased: referenceFloorFor("UNDERGRADUATE", true) } as const;
 export const BALANCE_TOLERANCE = 0.2;
 export const THEMATIC_BALANCE = 1.75;
 const WORDS = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
@@ -200,7 +208,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     const fillIn = p.placeholders.filter((x) => !later.includes(x));
     const w = p.written ?? null;
     if (later.length) issues.push({ level: "WARN", message: `Not written: ${later.join(", ")}.`, fix: "Write them again, or type them in, on the Preliminary pages card (Report tab)." });
-    const band = abstractBand({ section: input.section, referencingStyle: input.referencingStyle });
+    const band = abstractBand({ section: input.section, referencingStyle: input.referencingStyle, degreeLevel: input.degreeLevel });
     if (w?.needsReview) issues.push({ level: "WARN", message: `The abstract is ${w.abstractWords} words; it should be ${band.min}–${band.max}.`, fix: "Shorten or lengthen it on the Preliminary pages card, or write it again." });
     if (w?.blanks.length) issues.push({ level: "WARN", message: `The acknowledgement or abstract still has blanks: ${w.blanks.join(", ")}.`, fix: "Add the missing details on Edit intake and write the pages again, or fill the blanks in by hand on the Preliminary pages card." });
     if (fillIn.length) issues.push({ level: "WARN", message: `Not collected at intake: ${fillIn.join(", ")}.`, fix: "Add them on the project's Edit intake page before delivery." });
@@ -400,7 +408,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
   // placement) have no author-date markers, so their count is the total number of endnote entries
   // across the chapters. Both are held to REFERENCE_MINIMUM.
   {
-    const min = input.chapterBased ? REFERENCE_MINIMUM.chapterBased : REFERENCE_MINIMUM.full;
+    const min = referenceFloorFor(input.degreeLevel ?? "UNDERGRADUATE", input.chapterBased);
     let n: number;
     let howCounted: string;
     const placement = input.citations.placement;

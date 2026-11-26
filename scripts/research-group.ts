@@ -67,6 +67,8 @@ async function main() {
       topic: j.project.projectTitle ?? j.project.projectId,
       department: j.project.client.department ?? "",
       universityName: j.project.client.university?.name ?? null,
+      // Grouping does not search, so the level plays no part in it.
+      degreeLevel: "UNDERGRADUATE" as const,
     };
     try {
       const grouping = await mintSupervisorGrouping(ctx, j.id, analysis);

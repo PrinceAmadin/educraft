@@ -107,6 +107,7 @@ export function finishReport(
   const structural = runStructuralChecks({
     chapters: input.chapters.map((c) => ({ ...c, plan: context.plans.get(c.number) ?? null })),
     chapterBased: !input.includePrelims,
+    degreeLevel: input.degreeLevel ?? "UNDERGRADUATE",
     section: input.section,
     referencingStyle: input.referencingStyle,
     mode: input.mode,
@@ -119,7 +120,8 @@ export function finishReport(
     prelims: {
       included: input.includePrelims,
       hasCover: input.includePrelims && firstText === input.title.toUpperCase(),
-      hasTitlePage: doc.outside.some((p) => p.text.trim() === "BY") && doc.outside.some((p) => /^A PROJECT SUBMITTED/.test(p.text.trim())),
+      // A dissertation and a thesis say so; only an undergraduate report says "A PROJECT SUBMITTED".
+      hasTitlePage: doc.outside.some((p) => p.text.trim() === "BY") && doc.outside.some((p) => /^A (?:PROJECT|DISSERTATION|THESIS) SUBMITTED/.test(p.text.trim())),
       heading1: doc.heading1,
       placeholders: report.prelimPlaceholders,
       written:

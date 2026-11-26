@@ -1,5 +1,6 @@
 import type { Prisma, ReferenceClassification } from "@prisma/client";
 import { db } from "@/lib/db";
+import { referenceCeiling, researchTargetFor, type DegreeLevel } from "@/lib/degree-level";
 import { callClaudeForJson, AnthropicError } from "@/lib/anthropic";
 import { resolveOpenAccessPdf } from "@/lib/unpaywall";
 import { searchWorks } from "@/lib/openalex";
@@ -49,12 +50,17 @@ export class ResearchError extends Error {}
 const CANDIDATES_PER_ROUND = 150;
 const MAX_REPLACEMENT_ROUNDS = 3;
 const MIN_REPLACEMENT_CANDIDATES = 20;
-/** The minimum: searching continues (replacement rounds) until this many relevant references are kept. */
-export const TARGET_REFERENCES = 50;
-/** Never keep more than this; extras are trimmed, CORE and most-cited papers first. */
-export const MAX_REFERENCES = 70;
-/** Below this many relevant references, once the rounds run out, the job goes to an admin instead of passing. */
-const MIN_USABLE_REFERENCES = TARGET_REFERENCES;
+/**
+ * The undergraduate target: searching continues (replacement rounds) until this many relevant
+ * references are kept. A job stores its own `targetCount`, which is this for an undergraduate
+ * report and higher for postgraduate work (`researchTargetFor`), because the gate's own reference
+ * floor rises with the level and may only ask for what the search was told to find.
+ */
+export const TARGET_REFERENCES = researchTargetFor("UNDERGRADUATE");
+/** Never keep more than this; extras are trimmed, CORE and most-cited papers first. Per job: `referenceCeiling(job.targetCount)`. */
+export const MAX_REFERENCES = referenceCeiling(TARGET_REFERENCES);
+/** Below its own target, once the rounds run out, the job goes to an admin instead of passing. */
+const minUsable = (job: { targetCount: number }) => job.targetCount;
 /** Fewer CORE papers than this passes, but with a warning to the worker and admins. */
 const MIN_CORE_REFERENCES = 10;
 
@@ -77,6 +83,8 @@ interface ProjectContext {
   topic: string;
   department: string;
   universityName: string | null;
+  /** Decides how many references the search goes looking for (`researchTargetFor`). */
+  degreeLevel: DegreeLevel;
 }
 
 /** `workerId` null = the founder or the COO, who may act on any project (D9). */
@@ -87,6 +95,7 @@ async function loadProjectContext(workerId: string | null, idOrCode: string): Pr
       id: true,
       projectId: true,
       projectTitle: true,
+      degreeLevel: true,
       client: { select: { department: true, university: { select: { name: true } } } },
     },
   });
@@ -99,7 +108,16 @@ async function loadProjectContext(workerId: string | null, idOrCode: string): Pr
     topic: project.projectTitle,
     department: project.client.department,
     universityName: project.client.university?.name ?? null,
+    degreeLevel: project.degreeLevel,
   };
+}
+
+/**
+ * The target this job searches to: what the caller asked for, else the project's own degree level.
+ * A postgraduate report's gate asks for more citations, so its search has to go and find more.
+ */
+function targetFor(project: Pick<ProjectContext, "degreeLevel">, asked?: number): number {
+  return asked && asked > 0 ? asked : researchTargetFor(project.degreeLevel);
 }
 
 /**
@@ -111,7 +129,8 @@ export async function startResearchJob(
   workerId: string,
   idOrCode: string,
   userId: string,
-  targetCount = TARGET_REFERENCES
+  /** Left out: the project's own degree level decides it (postgraduate work needs more). */
+  targetCount?: number,
 ) {
   const project = await loadProjectContext(workerId, idOrCode);
 
@@ -121,7 +140,7 @@ export async function startResearchJob(
   const claim = await claimRun(project.id, userId);
   try {
     return await db.researchJob.create({
-      data: { projectId: project.id, requestedById: userId, targetCount },
+      data: { projectId: project.id, requestedById: userId, targetCount: targetFor(project, targetCount) },
     });
   } catch (error) {
     await releaseClaim(claim);
@@ -135,14 +154,14 @@ export async function startResearchJob(
  * research-runs.ts). The allowance is claimed before anything is deleted, so
  * a refused re-run leaves the existing results untouched.
  */
-export async function rerunResearchJob(workerId: string, idOrCode: string, userId: string, targetCount = TARGET_REFERENCES) {
+export async function rerunResearchJob(workerId: string, idOrCode: string, userId: string, targetCount?: number) {
   const project = await loadProjectContext(workerId, idOrCode);
 
   const claim = await claimRun(project.id, userId);
   try {
     await resetResearchJob(workerId, idOrCode);
     return await db.researchJob.create({
-      data: { projectId: project.id, requestedById: userId, targetCount },
+      data: { projectId: project.id, requestedById: userId, targetCount: targetFor(project, targetCount) },
     });
   } catch (error) {
     await releaseClaim(claim);
@@ -156,14 +175,14 @@ export async function rerunResearchJob(workerId: string, idOrCode: string, userI
  * a chapter exists, and the run is logged and shown in the research ledger like
  * any other.
  */
-export async function rerunResearchAsAdmin(idOrCode: string, userId: string, targetCount = TARGET_REFERENCES) {
+export async function rerunResearchAsAdmin(idOrCode: string, userId: string, targetCount?: number) {
   const project = await loadProjectContext(null, idOrCode);
 
   const claim = await claimRun(project.id, userId, { approver: true });
   try {
     await resetResearchJob(null, project.id);
     return await db.researchJob.create({
-      data: { projectId: project.id, requestedById: userId, targetCount },
+      data: { projectId: project.id, requestedById: userId, targetCount: targetFor(project, targetCount) },
     });
   } catch (error) {
     await releaseClaim(claim);
@@ -500,6 +519,7 @@ export async function advanceResearchJob(jobId: string): Promise<AdvanceResult> 
     select: {
       projectId: true,
       projectTitle: true,
+      degreeLevel: true,
       client: { select: { department: true, university: { select: { name: true } } } },
     },
   });
@@ -508,6 +528,7 @@ export async function advanceResearchJob(jobId: string): Promise<AdvanceResult> 
     id: job.projectId,
     projectId: project.projectId,
     topic: project.projectTitle,
+    degreeLevel: project.degreeLevel,
     department: project.client.department,
     universityName: project.client.university?.name ?? null,
   };
@@ -809,14 +830,15 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
       Number(b.classification === "CORE") - Number(a.classification === "CORE") ||
       (b.citedByCount ?? 0) - (a.citedByCount ?? 0)
   );
-  const keeperIds = ranked.slice(0, MAX_REFERENCES).map((r) => r.id);
-  const trimmedIds = ranked.slice(MAX_REFERENCES).map((r) => r.id);
+  const cap = referenceCeiling(job.targetCount);
+  const keeperIds = ranked.slice(0, cap).map((r) => r.id);
+  const trimmedIds = ranked.slice(cap).map((r) => r.id);
   // TANGENTIAL and IRRELEVANT are never kept — so the final set is always
   // 100% CORE + CLOSELY_RELATED with zero IRRELEVANT, comfortably inside the
   // Tier 2 rule (≥75% CORE + CLOSELY_RELATED, zero IRRELEVANT).
   const offenderIds = [...active.filter((r) => !isKeeper(r.classification)).map((r) => r.id), ...trimmedIds];
 
-  const keeperRows = ranked.slice(0, MAX_REFERENCES);
+  const keeperRows = ranked.slice(0, cap);
   const core = keeperRows.filter((r) => r.classification === "CORE").length;
   const closelyRelated = keeperRows.length - core;
   const pct = (n: number) => (keeperRows.length > 0 ? Math.round((n / keeperRows.length) * 1000) / 10 : 0);
@@ -846,7 +868,7 @@ async function advanceClassifying(job: Job, ctx: ProjectContext): Promise<Advanc
     return { job: updated, done: false };
   }
 
-  if (keeperIds.length < MIN_USABLE_REFERENCES) {
+  if (keeperIds.length < minUsable(job)) {
     await db.$transaction([
       ...settle,
       db.researchJob.update({
@@ -1027,9 +1049,10 @@ async function advanceCurating(job: Job, ctx: ProjectContext): Promise<AdvanceRe
   const validIds = new Set(kept.map((r) => r.id));
   const flagged = result.demote.filter((d) => validIds.has(d.referenceId));
 
-  // Safety cap: never drop below MIN_USABLE_REFERENCES. Demote greedily by
+  // Safety cap: never drop below the job's own target. Demote greedily by
   // category priority (guard > broad > generic > cluster) until the floor.
-  const room = Math.max(kept.length - MIN_USABLE_REFERENCES, 0);
+  const floor = minUsable(job);
+  const room = Math.max(kept.length - floor, 0);
   const ordered = [...flagged].sort((a, b) => (CATEGORY_PRIORITY[a.category] - CATEGORY_PRIORITY[b.category]));
   const toDemote = ordered.slice(0, room);
   const skipped = ordered.slice(room);
@@ -1056,7 +1079,7 @@ async function advanceCurating(job: Job, ctx: ProjectContext): Promise<AdvanceRe
 
   const notes: string[] = [];
   if (toDemote.length > 0) notes.push(`Curation demoted ${toDemote.length} reference(s) as redundant or weakly related.`);
-  if (skipped.length > 0) notes.push(`${skipped.length} further flag(s) held back to keep the set at the ${MIN_USABLE_REFERENCES}-reference floor.`);
+  if (skipped.length > 0) notes.push(`${skipped.length} further flag(s) held back to keep the set at the ${floor}-reference floor.`);
   if (result.gaps.length > 0) notes.push(`Coverage gaps: ${result.gaps.slice(0, 4).join("; ")}.`);
   const existing = job.errorMessage ? job.errorMessage.trim() : "";
   const combined = [existing, notes.join(" ")].filter(Boolean).join(" ") || null;

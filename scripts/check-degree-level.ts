@@ -28,7 +28,9 @@ import {
   hasOwnLengthTarget,
   pageTargetFor,
   parsePageRequirement,
+  referenceCeiling,
   referenceFloorFor,
+  researchTargetFor,
   wholeReportChapters,
   wordTargetFor,
   requiresGreenReviewer,
@@ -41,6 +43,9 @@ import { PRELIM_TEXT } from "../src/lib/assembly/assemble";
 import { SERVICE_CATALOGUE, RETIRED_SERVICE_CODES } from "../prisma/catalogue";
 import { MAX_REPORT_CHAPTERS, isPartialChapterOrder } from "../src/lib/deliverables";
 import { GENERATION_TEXT } from "../src/lib/generation/chapter-plan";
+import { MAX_REFERENCES, TARGET_REFERENCES } from "../src/lib/services/research";
+import { REFERENCE_MINIMUM } from "../src/lib/quality/structural-checks";
+import { abstractBand } from "../src/lib/generation/preliminary-pages-rules";
 
 let passed = 0;
 const failures: string[] = [];
@@ -185,6 +190,53 @@ check("the undergraduate ceiling is still the one the rest of HQ enforces", MAX_
 const sentence = GENERATION_TEXT.chapterLength(9750);
 check("the planner is told the target in words and in pages", /9,750 words/.test(sentence) && /39 double-spaced pages/.test(sentence), sentence);
 check("...and told to plan to it rather than to the prompt files' page count", /plan to it rather than/i.test(sentence), sentence);
+
+// ─── The gate's floor and the search's target are ONE decision ───────────────
+//
+// The gate may only ask for a number of citations the research step was told to go and find. These
+// are the assertions that make raising one without the other fail the build rather than the report.
+
+for (const level of DEGREE_LEVELS) {
+  const floor = referenceFloorFor(level);
+  const target = researchTargetFor(level);
+  const ceiling = referenceCeiling(target);
+  check(`${level}: the search looks for more than the gate demands`, target > floor, { floor, target });
+  check(`${level}: with real headroom for the works that are kept but never cited`, target - floor >= 15, { floor, target });
+  check(`${level}: the ceiling leaves room above the target`, ceiling > target, { target, ceiling });
+  // 40 queries x 12 works a query, of which about 45% pass the relevance check.
+  check(`${level}: the OpenAlex query budget can actually supply the target`, target <= Math.round(40 * 12 * 0.45), { target });
+}
+check("postgraduate work searches for more than undergraduate work", researchTargetFor("MASTERS") > researchTargetFor("UNDERGRADUATE") && researchTargetFor("PHD") > researchTargetFor("MASTERS"));
+check("a chapter-based order keeps its own low floor", referenceFloorFor("UNDERGRADUATE", true) < referenceFloorFor("UNDERGRADUATE") && referenceFloorFor("MASTERS", true) === referenceFloorFor("UNDERGRADUATE", true));
+
+check("the research step's own constants are still the undergraduate figures", TARGET_REFERENCES === researchTargetFor("UNDERGRADUATE") && MAX_REFERENCES === referenceCeiling(researchTargetFor("UNDERGRADUATE")));
+check("...which are the 50 and 70 it capped at before postgraduate work existed", TARGET_REFERENCES === 50 && MAX_REFERENCES === 70, { TARGET_REFERENCES, MAX_REFERENCES });
+check("the gate's exported minimum is still the undergraduate floor", REFERENCE_MINIMUM.full === referenceFloorFor("UNDERGRADUATE") && REFERENCE_MINIMUM.chapterBased === referenceFloorFor("UNDERGRADUATE", true));
+check("a ceiling is never below 1, whatever is asked for", referenceCeiling(0) >= 1 && referenceCeiling(-5) >= 1);
+
+// ─── The abstract band ───────────────────────────────────────────────────────
+
+const plain = abstractBand({});
+const nalt = abstractBand({ referencingStyle: "NALT" });
+check("an undergraduate abstract band is unchanged", plain.min === 240 && plain.max === 320, plain);
+check("...and a NALT law report keeps its own", nalt.min === 250 && nalt.max === 350, nalt);
+check("a master's abstract is longer than either", (() => {
+  const m = abstractBand({ degreeLevel: "MASTERS" });
+  return m.min > plain.min && m.min >= nalt.max - 50 && m.max > nalt.max;
+})(), abstractBand({ degreeLevel: "MASTERS" }));
+check("the level beats NALT, because a dissertation is a bigger document than a long essay", (() => {
+  const a = abstractBand({ referencingStyle: "NALT", degreeLevel: "MASTERS" });
+  return a.min === abstractBandFor("MASTERS")!.min && a.max === abstractBandFor("MASTERS")!.max;
+})());
+check("an explicit UNDERGRADUATE level changes nothing", (() => {
+  const u = abstractBand({ degreeLevel: "UNDERGRADUATE" });
+  const n = abstractBand({ referencingStyle: "NALT", degreeLevel: "UNDERGRADUATE" });
+  return u.min === plain.min && u.max === plain.max && n.min === nalt.min && n.max === nalt.max;
+})());
+for (const level of DEGREE_LEVELS) {
+  const b = abstractBand({ degreeLevel: level });
+  check(`${level}: the band the page writer is given is the band the gate judges`, b.targetLo >= b.min && b.targetHi <= b.max && b.targetLo < b.targetHi, b);
+}
 
 // ─── The undergraduate path is unchanged ─────────────────────────────────────
 

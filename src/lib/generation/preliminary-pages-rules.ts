@@ -5,6 +5,7 @@
  */
 
 import { followsNalt } from "@/lib/law/nalt";
+import { abstractBandFor, type DegreeLevel } from "@/lib/degree-level";
 import type { SectionKey } from "./department-map";
 export const ABSTRACT_MIN_WORDS = 240;
 export const ABSTRACT_MAX_WORDS = 320;
@@ -28,8 +29,20 @@ export interface AbstractBand {
   targetHi: number;
 }
 
-/** The band this report's abstract is written and judged against. */
-export function abstractBand(input: { section?: SectionKey | null; referencingStyle?: string | null }): AbstractBand {
+/**
+ * The band this report's abstract is written and judged against.
+ *
+ * The level is read first and beats NALT: a master's dissertation and a PhD thesis are far longer
+ * documents than the undergraduate long essay NALT's own figure was written for, so a postgraduate
+ * law dissertation takes the postgraduate band (`abstractBandFor`), not the 250-350 one.
+ */
+export function abstractBand(input: {
+  section?: SectionKey | null;
+  referencingStyle?: string | null;
+  degreeLevel?: DegreeLevel | null;
+}): AbstractBand {
+  const postgraduate = input.degreeLevel ? abstractBandFor(input.degreeLevel) : null;
+  if (postgraduate) return postgraduate;
   if (followsNalt(input)) return { min: NALT_ABSTRACT_MIN_WORDS, max: NALT_ABSTRACT_MAX_WORDS, targetLo: 270, targetHi: 320 };
   return { min: ABSTRACT_MIN_WORDS, max: ABSTRACT_MAX_WORDS, targetLo: ABSTRACT_TARGET_LO, targetHi: ABSTRACT_TARGET_HI };
 }
