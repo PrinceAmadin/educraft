@@ -15,6 +15,14 @@ import {
   averageProjectMinutes,
   DEFAULT_PROJECT_MINUTES,
   estimateStart,
+  isLane,
+  LANES,
+  LANE_DEFAULT_MINUTES,
+  LANE_MINUTES_SETTING,
+  LANE_SLOTS,
+  LANE_SLOTS_SETTING,
+  laneFor,
+  laneOf,
   MAX_CONCURRENT_GENERATIONS,
   ordinal,
   orderQueue,
@@ -111,13 +119,54 @@ const members: QueueMember[] = [
 check("queue order: express first, then approval time, never-approved last", orderQueue(members).map((m) => m.projectId).join() === "p-c,p-a,p-e,p-b,p-d", orderQueue(members).map((m) => m.projectId));
 check("queue order is stable on equal times", orderQueue([{ projectId: "z", isExpress: false, approvedAt: at(1) }, { projectId: "y", isExpress: false, approvedAt: at(1) }])[0].projectId === "y");
 const now = new Date("2026-09-27T12:00:00Z");
-check("a free slot means start now", estimateStart(1, 0, 40, now).getTime() === now.getTime() && estimateStart(3, 0, 40, now).getTime() === now.getTime());
-check("all slots busy: one round of the average", estimateStart(1, 3, 40, now).getTime() === now.getTime() + 40 * 60_000);
-check("7th with 1 generating: 2 free, then ceil(5/3) = 2 rounds", estimateStart(7, 1, 40, now).getTime() === now.getTime() + 80 * 60_000);
+check("a free slot means start now", estimateStart(1, 0, 40, now)!.getTime() === now.getTime() && estimateStart(3, 0, 40, now)!.getTime() === now.getTime());
+check("all slots busy: one round of the average", estimateStart(1, 3, 40, now)!.getTime() === now.getTime() + 40 * 60_000);
+check("7th with 1 generating: 2 free, then ceil(5/3) = 2 rounds", estimateStart(7, 1, 40, now)!.getTime() === now.getTime() + 80 * 60_000);
 check("the estimate assumes 3 at a time", MAX_CONCURRENT_GENERATIONS === 3);
 check("fewer than 3 finished reports: the 40-minute starting figure", JSON.stringify(averageProjectMinutes([30, 50])) === JSON.stringify({ minutes: DEFAULT_PROJECT_MINUTES, fromHistory: false }) && DEFAULT_PROJECT_MINUTES === 40);
 check("three or more: their mean", JSON.stringify(averageProjectMinutes([30, 50, 70])) === JSON.stringify({ minutes: 50, fromHistory: true }));
 check("bad durations are ignored", averageProjectMinutes([30, 50, NaN, -5]).fromHistory === false);
+
+// ─── Two lanes: a long job never holds a standard slot ───────────────────────
+
+check("the standard lane is the three slots it always had, and 40 minutes", LANE_SLOTS.STANDARD === 3 && LANE_DEFAULT_MINUTES.STANDARD === 40 && MAX_CONCURRENT_GENERATIONS === LANE_SLOTS.STANDARD && DEFAULT_PROJECT_MINUTES === LANE_DEFAULT_MINUTES.STANDARD);
+check("the long lane is extra capacity beside it, not a share of it", LANE_SLOTS.LONG >= 1 && LANE_SLOTS.STANDARD + LANE_SLOTS.LONG > LANE_SLOTS.STANDARD);
+check("a long report is expected to take longer", LANE_DEFAULT_MINUTES.LONG > LANE_DEFAULT_MINUTES.STANDARD);
+check("both lanes have their own settings keys", LANE_SLOTS_SETTING("LONG") === "generation_lane_slots:LONG" && LANE_MINUTES_SETTING("STANDARD") === "generation_default_minutes:STANDARD" && LANES.every((l) => LANE_SLOTS_SETTING(l) !== LANE_MINUTES_SETTING(l)));
+check("a lane name is checked, never trusted", isLane("LONG") && isLane("STANDARD") && !isLane("long") && !isLane("") && !isLane(null));
+
+check("postgraduate work is always long", laneFor({ degreeLevel: "MASTERS" }) === "LONG" && laneFor({ degreeLevel: "PHD" }) === "LONG");
+check("an ordinary undergraduate report is standard", laneFor({}) === "STANDARD" && laneFor({ degreeLevel: "UNDERGRADUATE" }) === "STANDARD" && laneFor({ degreeLevel: "UNDERGRADUATE", minimumPages: "90" }) === "STANDARD");
+check("...but one that asked for more pages than an undergraduate report runs to is long", laneFor({ degreeLevel: "UNDERGRADUATE", minimumPages: "200" }) === "LONG");
+check("a page count nobody can read does not move a report into the long lane", laneFor({ degreeLevel: "UNDERGRADUATE", minimumPages: "Above 90" }) === "STANDARD" && laneFor({ minimumPages: "Not Specified" }) === "STANDARD");
+check("a member with no lane is standard, exactly as every report was before lanes", laneOf({ projectId: "p", isExpress: false, approvedAt: null }) === "STANDARD");
+
+const laneMembers = [
+  { projectId: "s1", isExpress: false, approvedAt: new Date("2026-11-01T09:00:00Z"), lane: "STANDARD" as const },
+  { projectId: "s2", isExpress: false, approvedAt: new Date("2026-11-01T10:00:00Z"), lane: "STANDARD" as const },
+  { projectId: "L1", isExpress: false, approvedAt: new Date("2026-11-01T11:00:00Z"), lane: "LONG" as const },
+  { projectId: "L2", isExpress: false, approvedAt: new Date("2026-11-01T12:00:00Z"), lane: "LONG" as const },
+];
+const sLast = queueStateFrom({ projectId: "s2", phase: "not_ready", members: laneMembers, generatingNow: { STANDARD: 0, LONG: 1 }, average: { minutes: 40, fromHistory: false }, now });
+check("a standard report queues behind standard reports only", sLast.position === 2 && sLast.queueLength === 2, { position: sLast.position, length: sLast.queueLength });
+check("...and a busy long lane does not delay it", sLast.estimatedStartTime === now.toISOString() && sLast.basis.generatingNow === 0 && sLast.basis.concurrent === LANE_SLOTS.STANDARD);
+const lFirst = queueStateFrom({ projectId: "L1", phase: "not_ready", members: laneMembers, generatingNow: { STANDARD: 3, LONG: 0 }, average: { minutes: 120, fromHistory: false }, now });
+check("a long report is first in its own lane even though it joined last", lFirst.position === 1 && lFirst.queueLength === 2, { position: lFirst.position });
+check("...and a full standard lane does not delay it either", lFirst.estimatedStartTime === now.toISOString() && lFirst.basis.concurrent === LANE_SLOTS.LONG);
+const lSecond = queueStateFrom({ projectId: "L2", phase: "not_ready", members: laneMembers, generatingNow: { LONG: 1 }, average: { minutes: 120, fromHistory: false }, now });
+check("the second long report waits a whole long report", lSecond.position === 2 && lSecond.estimatedStartTime === new Date(now.getTime() + 2 * 120 * 60_000).toISOString(), lSecond.estimatedStartTime);
+check("a plain number of busy slots is still read as the standard lane's", (() => {
+  const a = queueStateFrom({ projectId: "s1", phase: "not_ready", members: laneMembers, generatingNow: 3, average: { minutes: 40, fromHistory: false }, now });
+  const b = queueStateFrom({ projectId: "s1", phase: "not_ready", members: laneMembers, generatingNow: { STANDARD: 3 }, average: { minutes: 40, fromHistory: false }, now });
+  return a.estimatedStartTime === b.estimatedStartTime && a.basis.generatingNow === 3;
+})());
+check("a lane closed by its setting holds its reports and promises no start time", (() => {
+  const shut = queueStateFrom({ projectId: "L1", phase: "not_ready", members: laneMembers, generatingNow: { LONG: 0 }, average: { minutes: 120, fromHistory: false }, now, slots: { LONG: 0 } });
+  return shut.status === "queued" && shut.basis.concurrent === 0 && shut.estimatedStartTime === null;
+})());
+check("...and no closed lane can ever produce an invalid date", estimateStart(1, 0, 40, now, 0) === null && estimateStart(9, 2, 40, now, -1) === null);
+check("the average falls back to the lane's own figure, not always 40", averageProjectMinutes([30, 50], LANE_DEFAULT_MINUTES.LONG).minutes === LANE_DEFAULT_MINUTES.LONG && averageProjectMinutes([30, 50]).minutes === LANE_DEFAULT_MINUTES.STANDARD);
+
 const q = queueStateFrom({ projectId: "p-b", phase: "not_ready", members, generatingNow: 3, average: { minutes: 40, fromHistory: false }, now });
 check("a queued project gets its place and the queue length", q.status === "queued" && q.position === 4 && q.queueLength === 5, q);
 check("…and an estimated start", q.estimatedStartTime === new Date(now.getTime() + 80 * 60_000).toISOString(), q.estimatedStartTime);

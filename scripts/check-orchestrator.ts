@@ -36,6 +36,7 @@ import {
   kicksSinceProgress,
   nextCheckDelayMs,
   noticeKey,
+  laneHolders,
   pickStarts,
   runLine,
   runViewForWorker,
@@ -55,7 +56,7 @@ import {
   type RunView,
   type StartFacts,
 } from "../src/lib/generation/orchestrator-rules";
-import { MAX_CONCURRENT_GENERATIONS } from "../src/lib/generation/generation-queue";
+import { LANE_SLOTS, MAX_CONCURRENT_GENERATIONS } from "../src/lib/generation/generation-queue";
 import { gateReason, gateReasonChapter } from "../src/lib/generation/orchestrator-rules";
 import type { ChapterGateFact } from "../src/lib/quality/chapter-gate";
 import { expectedChapters, runsFromChapterOne } from "../src/lib/deliverables";
@@ -327,6 +328,31 @@ check("walk: a one-chapter order goes straight to the gate", story(1, [1]) === "
   const queue = [member("d", false, 40), member("a", false, 10), member("x", true, 90), member("b", false, 20)];
   const ids = (list: { projectId: string }[]) => list.map((m) => m.projectId).join("");
   check("slots: the limit is three", MAX_CONCURRENT_GENERATIONS === 3);
+check("slots: a long job is picked from its own lane, so a full standard lane never blocks it", (() => {
+  const q = [
+    { projectId: "s1", isExpress: false, approvedAt: new Date("2026-11-01T09:00:00Z"), lane: "STANDARD" as const },
+    { projectId: "L1", isExpress: false, approvedAt: new Date("2026-11-01T10:00:00Z"), lane: "LONG" as const },
+  ];
+  // Standard full, long free: only the long one starts -- and the other way round.
+  const longOnly = pickStarts(q, { STANDARD: LANE_SLOTS.STANDARD, LONG: 0 }).map((p) => p.projectId);
+  const standardOnly = pickStarts(q, { STANDARD: 0, LONG: LANE_SLOTS.LONG }).map((p) => p.projectId);
+  const bothFree = pickStarts(q, { STANDARD: 0, LONG: 0 }).map((p) => p.projectId).sort();
+  const bothFull = pickStarts(q, { STANDARD: LANE_SLOTS.STANDARD, LONG: LANE_SLOTS.LONG });
+  return longOnly.join() === "L1" && standardOnly.join() === "s1" && bothFree.join() === "L1,s1" && bothFull.length === 0;
+})());
+check("slots: a plain holder count is still the standard lane's, as before lanes", (() => {
+  const q = [{ projectId: "s1", isExpress: false, approvedAt: new Date(), lane: "STANDARD" as const }];
+  return pickStarts(q, 3).length === 0 && pickStarts(q, 2).length === 1;
+})());
+check("slots: a lane closed to 0 starts nothing in it", pickStarts([{ projectId: "L1", isExpress: false, approvedAt: new Date(), lane: "LONG" as const }], { LONG: 0 }, { LONG: 0 }).length === 0);
+check("slots: one project counts once in its own lane, however many things hold it", (() => {
+  const counts = laneHolders([
+    { projectId: "p1", lane: "LONG" },
+    { projectId: "p1", lane: "LONG" },
+    { projectId: "p2", lane: "STANDARD" },
+  ]);
+  return counts.LONG === 1 && counts.STANDARD === 1;
+})());
   check("slots: three holders and four queued -> none starts", pickStarts(queue, 3).length === 0);
   check("slots: four holders (a manual re-generation) -> still none", pickStarts(queue, 4).length === 0);
   check("slots: one free -> the express order first", ids(pickStarts(queue, 2)) === "x");

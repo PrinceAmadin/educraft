@@ -73,6 +73,7 @@ import {
   holdsSlot,
   isNewNotice,
   kicksSinceProgress,
+  laneHolders,
   latestChange,
   nextCheckDelayMs,
   noticeKey,
@@ -85,6 +86,8 @@ import {
   type AttentionReason,
   type OrchestratorFacts,
 } from "./orchestrator-rules";
+
+import { LANES, LANE_SLOTS, LANE_SLOTS_SETTING, laneFor, type GenerationLane } from "./generation-queue";
 
 export { GENERATION_PAUSED_SETTING, currentRunner, generationPaused, getRunView, runViewKey, schedulerQuiet, type RunView } from "./orchestrator-view";
 
@@ -795,22 +798,31 @@ async function inBatches<T>(items: T[], size: number, work: (item: T) => Promise
  * two ticks can never both take the last slot. Returns the runs to start.
  */
 async function claimSlots(runner: string): Promise<{ id: string; projectId: string; chapter: number }[]> {
+  const slots = await laneSlotSettings();
   return db.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SLOT_LOCK_KEY}::bigint)`;
       const [runs, active] = await Promise.all([
         tx.orchestratorRun.findMany({
           where: { status: { in: ["QUEUED", "GENERATING", "FETCHING_DATA"] } },
-          select: { id: true, projectId: true, status: true, runner: true, currentChapter: true, project: { select: { isExpressDelivery: true, researchMode: { select: { cooApprovedAt: true } } } } },
+          select: { id: true, projectId: true, status: true, runner: true, currentChapter: true, project: { select: { isExpressDelivery: true, degreeLevel: true, minimumPages: true, researchMode: { select: { cooApprovedAt: true } } } } },
         }),
         tx.generationCheckpoint.findMany({ where: { status: { in: ACTIVE_STATUSES } }, distinct: ["projectId"], select: { projectId: true } }),
       ]);
       const holders = slotHolders(runs, active.map((a) => a.projectId));
+      // Each holder's lane, so a long job is counted against the long lane's slots and nothing else.
+      const laneByProject = new Map(runs.map((r) => [r.projectId, laneFor(r.project)]));
+      const unknown = [...holders].filter((id) => !laneByProject.has(id));
+      if (unknown.length) {
+        const rows = await tx.project.findMany({ where: { id: { in: unknown } }, select: { id: true, degreeLevel: true, minimumPages: true } });
+        for (const row of rows) laneByProject.set(row.id, laneFor(row));
+      }
+      const busy = laneHolders([...holders].map((id) => ({ projectId: id, lane: laneByProject.get(id) ?? "STANDARD" })));
       const queued = runs
         .filter((r) => r.status === "QUEUED" && r.runner === runner && r.currentChapter !== null && !holders.has(r.projectId))
-        .map((r) => ({ id: r.id, projectId: r.projectId, chapter: r.currentChapter as number, isExpress: r.project.isExpressDelivery, approvedAt: r.project.researchMode?.cooApprovedAt ?? null }));
+        .map((r) => ({ id: r.id, projectId: r.projectId, chapter: r.currentChapter as number, isExpress: r.project.isExpressDelivery, approvedAt: r.project.researchMode?.cooApprovedAt ?? null, lane: laneFor(r.project) }));
       const claimed: { id: string; projectId: string; chapter: number }[] = [];
-      for (const pick of pickStarts(queued, holders.size)) {
+      for (const pick of pickStarts(queued, busy, slots)) {
         const got = await tx.orchestratorRun.updateMany({ where: { id: pick.id, status: "QUEUED" }, data: { status: "GENERATING" } });
         if (got.count === 1) claimed.push({ id: pick.id, projectId: pick.projectId, chapter: pick.chapter });
       }
@@ -818,6 +830,25 @@ async function claimSlots(runner: string): Promise<{ id: string; projectId: stri
     },
     { timeout: 20_000, maxWait: 10_000 },
   );
+}
+
+/**
+ * The slots each lane has, from its Setting (`generation_lane_slots:STANDARD` / `:LONG`), so the
+ * founder can widen or close a lane without a deploy. A missing, unreadable or out-of-range value
+ * falls back to the shipped size; 0 closes a lane, which is how generation is throttled for one
+ * kind of work without stopping all of it (`generation_paused` still stops everything).
+ */
+async function laneSlotSettings(): Promise<Record<GenerationLane, number>> {
+  const rows = await db.setting
+    .findMany({ where: { key: { in: LANES.map((l) => LANE_SLOTS_SETTING(l)) } }, select: { key: true, value: true } })
+    .catch(() => [] as { key: string; value: string }[]);
+  const out = { ...LANE_SLOTS };
+  for (const lane of LANES) {
+    const raw = rows.find((r) => r.key === LANE_SLOTS_SETTING(lane))?.value?.trim();
+    const n = raw === undefined ? NaN : Number(raw);
+    if (Number.isInteger(n) && n >= 0 && n <= 20) out[lane] = n;
+  }
+  return out;
 }
 
 async function startClaimed(claim: { id: string; chapter: number }, depth: number): Promise<void> {

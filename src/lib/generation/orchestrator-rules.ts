@@ -15,7 +15,7 @@
 
 import type { DataFormStatus, DataPauseStatus, GenerationStatus, OrchestratorStatus, ProjectStatus } from "@prisma/client";
 import { pausePointsFor, pausesBeforeChapter } from "./pause-points";
-import { MAX_CONCURRENT_GENERATIONS, orderQueue, type QueueMember } from "./generation-queue";
+import { LANES, LANE_SLOTS, laneOf, orderQueue, type GenerationLane, type QueueMember } from "./generation-queue";
 import { MAX_GATE_REPAIRS, MAX_GATE_REWRITES, nextGateStep, type ChapterGateFact, type RewritePolicy } from "@/lib/quality/chapter-gate";
 
 // ─── The numbers ─────────────────────────────────────────────────────────────
@@ -465,10 +465,41 @@ export function slotHolders(runs: { projectId: string; status: RunStatus }[], pr
   return new Set([...runs.filter((r) => holdsSlot(r.status)).map((r) => r.projectId), ...projectsWithActiveChapter]);
 }
 
-/** The queued projects to start now: express first, then the earliest approval, as many as there are free slots. */
-export function pickStarts<T extends QueueMember>(queued: T[], holders: number, max = MAX_CONCURRENT_GENERATIONS): T[] {
-  const free = Math.max(0, max - holders);
-  return orderQueue(queued).slice(0, free);
+/**
+ * The queued projects to start now: express first, then the earliest approval, as many as there are
+ * free slots -- counted per lane, so a long postgraduate job and a standard undergraduate report
+ * never compete for the same slot.
+ *
+ * `holders` may be a plain number, which is read as the STANDARD lane's, exactly as it behaved
+ * before there were lanes.
+ */
+export function pickStarts<T extends QueueMember>(
+  queued: T[],
+  holders: number | Partial<Record<GenerationLane, number>>,
+  max: number | Partial<Record<GenerationLane, number>> = LANE_SLOTS,
+): T[] {
+  const busyIn = (lane: GenerationLane) =>
+    typeof holders === "number" ? (lane === "STANDARD" ? holders : 0) : (holders[lane] ?? 0);
+  const slotsIn = (lane: GenerationLane) =>
+    typeof max === "number" ? (lane === "STANDARD" ? max : LANE_SLOTS[lane]) : (max[lane] ?? LANE_SLOTS[lane]);
+  const out: T[] = [];
+  for (const lane of LANES) {
+    const free = Math.max(0, slotsIn(lane) - busyIn(lane));
+    if (free > 0) out.push(...orderQueue(queued.filter((q) => laneOf(q) === lane)).slice(0, free));
+  }
+  return out;
+}
+
+/** The slots in use in each lane, from the runs and chapters holding them. */
+export function laneHolders(holders: { projectId: string; lane: GenerationLane }[]): Record<GenerationLane, number> {
+  const counts = { STANDARD: 0, LONG: 0 };
+  const seen = new Set<string>();
+  for (const h of holders) {
+    if (seen.has(h.projectId)) continue;
+    seen.add(h.projectId);
+    counts[h.lane] += 1;
+  }
+  return counts;
 }
 
 // ─── The sequence, for display and for the check script ──────────────────────

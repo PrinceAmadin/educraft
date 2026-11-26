@@ -33,7 +33,12 @@ export function formatWait(iso: string, now: Date): string | null {
 
 /** The project's place in the generation queue, or what it is doing instead. Updates live from queue_position. */
 export function QueueCard({ queue, now }: { queue: QueueState; now: Date }) {
-  const basis = `Express orders go first. Estimate: ${queue.basis.concurrent} at a time, about ${queue.basis.avgMinutes} min each${queue.basis.fromHistory ? " (from finished reports)" : " (a starting figure until 3 reports have finished)"}.`;
+  // A lane set to 0 slots is not going to start anything, so the card says that rather than
+  // quoting an estimate worked out from no capacity at all.
+  const basis =
+    queue.basis.concurrent <= 0
+      ? "Reports of this length are not being started at the moment. This one keeps its place in the queue."
+      : `Express orders go first. Estimate: ${queue.basis.concurrent} at a time, about ${queue.basis.avgMinutes} min each${queue.basis.fromHistory ? " (from finished reports)" : " (a starting figure until 3 reports have finished)"}.`;
 
   if (queue.status === "queued" && queue.position !== null) {
     const wait = queue.estimatedStartTime ? formatWait(queue.estimatedStartTime, now) : null;
