@@ -1277,7 +1277,7 @@ function ReviewStep({
         {!variablePrice ? (
           <>
             <div className="mt-1 flex items-center justify-between text-muted-foreground">
-              <span>Pay now (45% downpayment)</span>
+              <span>Pay now ({service.downpaymentPercentage}% downpayment)</span>
               <span className="font-mono tabular-nums">{formatNaira(price.downpaymentAmount)}</span>
             </div>
             <div className="flex items-center justify-between text-muted-foreground">

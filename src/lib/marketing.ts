@@ -44,7 +44,6 @@ export interface Service {
   id: string;
   index: string;
   title: string;
-  price: string;
   body: string;
   scope: string;
   icon: AppIcon;
@@ -56,7 +55,6 @@ export const SERVICES: Service[] = [
     id: "final-year",
     index: "01",
     title: "Final Year Projects",
-    price: "from ₦70,000",
     body: "Full five-chapter reports, proposals and data analysis, matched to your department's format.",
     scope: "Proposal · 5 chapters · Analysis",
     icon: IconProject,
@@ -66,7 +64,6 @@ export const SERVICES: Service[] = [
     id: "reports",
     index: "02",
     title: "Reports & Papers",
-    price: "from ₦10,000",
     body: "Seminar reports, IT reports, term papers, case studies and assignment-based reports.",
     scope: "Seminar · IT · Term paper",
     icon: IconReport,
@@ -76,7 +73,6 @@ export const SERVICES: Service[] = [
     id: "presentations",
     index: "03",
     title: "Presentations",
-    price: "from ₦8,000",
     body: "Defence decks and class presentations — design only, or design with the written content.",
     scope: "Defence · Class · Design-only",
     icon: IconSlides,
@@ -86,7 +82,6 @@ export const SERVICES: Service[] = [
     id: "editing",
     index: "04",
     title: "Editing & Formatting",
-    price: "from ₦5,000",
     body: "Proofreading, full editing and department-standard formatting for work you've already written.",
     scope: "Proofread · Edit · Format",
     icon: IconEditing,
@@ -96,7 +91,6 @@ export const SERVICES: Service[] = [
     id: "combined",
     index: "05",
     title: "Combined Packages",
-    price: "from ₦85,000",
     body: "Proposal, report and defence deck bundled together for less than the parts.",
     scope: "Proposal + Report + Deck",
     icon: IconBundle,

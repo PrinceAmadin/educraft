@@ -87,7 +87,7 @@ export function TheMoney({ ladder }: { ladder: PublicCommissionLadder | null }) 
                       <span className="meta-label text-right">{t.tableHeads.rate}</span>
                       <span className="meta-label text-right">{t.tableHeads.earns}</span>
                     </div>
-                    {ladder.tiers.map((tier) => (
+                    {ladder.tiers.map((tier, i) => (
                       <div
                         key={tier.tier}
                         className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 border-t border-hairline/15 py-3.5 md:grid-cols-[1fr_auto_auto_auto] md:gap-x-7"
@@ -96,7 +96,14 @@ export function TheMoney({ ladder }: { ladder: PublicCommissionLadder | null }) 
                         <dd className="hidden text-sm text-muted-foreground md:block">
                           {t.tierClients(tier.minPayingClients)}
                         </dd>
-                        <dd className="tabular text-right text-muted-foreground">{tier.rate}%</dd>
+                        {/* The last row is the top tier, which also pays a per-student
+                            bonus; the rate alone would understate what it earns. */}
+                        <dd className="tabular text-right text-muted-foreground">
+                          {tier.rate}%
+                          {i === ladder.tiers.length - 1 && ladder.topTierBonusNgn ? (
+                            <span className="block text-xs text-primary">{t.topTierBonusCell(ladder.topTierBonusNgn)}</span>
+                          ) : null}
+                        </dd>
                         <dd className="tabular text-right font-medium text-foreground">{naira(tier.earnsNgn)}</dd>
                       </div>
                     ))}
@@ -108,6 +115,9 @@ export function TheMoney({ ladder }: { ladder: PublicCommissionLadder | null }) 
                     <p>{t.basis(ladder.referencePriceNgn)}</p>
                     {ladder.paidAtDownpayment ? (
                       <p className="text-foreground">{t.trigger(ladder.downpaymentPercent)}</p>
+                    ) : null}
+                    {ladder.topTierBonusNgn ? (
+                      <p>{t.topTierBonusNote(ladder.tiers[ladder.tiers.length - 1]!.label, ladder.topTierBonusNgn)}</p>
                     ) : null}
                     <p className="text-foreground">{t.cadence}</p>
                   </div>

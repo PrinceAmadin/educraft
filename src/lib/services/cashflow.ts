@@ -234,6 +234,10 @@ export interface PublicCommissionLadder {
   referencePriceNgn: number;
   /** The highest rate on the ladder, for the headline promise. */
   topRate: number;
+  /** The lowest rate on the ladder — what someone starts on. */
+  startRate: number;
+  /** The top tier's quarterly bonus per student referred, in naira; null when the structure has none. */
+  topTierBonusNgn: number | null;
   /** True when the ambassador's share is owed at the student's downpayment rather than at delivery. */
   paidAtDownpayment: boolean;
   downpaymentPercent: number;
@@ -263,10 +267,16 @@ export async function publicCommissionLadder(referenceServiceCode = "FYP-FULL"):
   if (rows.length === 0) return null;
 
   const ambassador = structure.level1.find((row) => row.key === "ambassador");
+  // The top tier's per-student quarterly bonus is part of what it pays, so copy
+  // quoting the percentage alone understates it. Read from the published
+  // structure like every other figure here (`commissions.ts` reads the same key).
+  const topTierBonus = structure.bonuses.find((b) => b.key === "platinum_per_client");
   return {
     tiers: rows.map((row) => ({ ...row, earnsNgn: Math.round((service.basePrice * row.rate) / 100) })),
     referencePriceNgn: service.basePrice,
     topRate: Math.max(...rows.map((row) => row.rate)),
+    startRate: Math.min(...rows.map((row) => row.rate)),
+    topTierBonusNgn: topTierBonus?.amountNgn ?? null,
     paidAtDownpayment: ambassador?.trigger === "downpayment",
     downpaymentPercent: structure.triggers.downpaymentPercent,
   };

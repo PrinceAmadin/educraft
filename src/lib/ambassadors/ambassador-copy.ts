@@ -84,6 +84,9 @@ export const JOIN_TEXT = {
     basis: (price: number) =>
       `Worked out on a full final year project at ${naira(price)}, which is the service most students order. Every other service pays the same percentage of its own price, so bigger orders pay you more.`,
     cadence: "Paid every Saturday, straight into the account you give us when you apply.",
+    topTierBonusCell: (amount: number) => `+ ${naira(amount)} a student`,
+    topTierBonusNote: (tier: string, amount: number) =>
+      `${tier} also pays ${naira(amount)} for every student you bring, on top of the percentage, worked out at the end of each quarter.`,
     trigger: (downpaymentPercent: number) =>
       `Owed to you as soon as your student pays their ${downpaymentPercent}% deposit — not when the project is delivered.`,
     unavailable: "Our rates are being updated. Apply and we will send you the current ones.",
