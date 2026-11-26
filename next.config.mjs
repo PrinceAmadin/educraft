@@ -49,23 +49,6 @@ const nextConfig = {
     ],
   },
 
-  async redirects() {
-    return [
-      {
-        /**
-         * The QR on a printed card encodes `/J/{CODE}` in capitals, because a
-         * QR code can only use its compact alphanumeric mode for digits and
-         * capitals — one lowercase character forces the denser byte mode and a
-         * symbol that is harder to scan in poor light. Anyone who TYPES the
-         * address off the card will use lower case, so it has to work too.
-         */
-        source: "/j/:token",
-        destination: "/J/:token",
-        permanent: true,
-      },
-    ];
-  },
-
   async headers() {
     return [
       {

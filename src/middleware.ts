@@ -24,6 +24,21 @@ export default auth((req) => {
   const { nextUrl } = req;
   const user = req.auth?.user;
   const path = nextUrl.pathname;
+  // The QR on a printed card encodes `/J/{CODE}` in CAPITALS: a QR symbol can
+  // only use its compact alphanumeric mode for digits and capitals, and one
+  // lowercase character forces the denser byte mode, which scans worse in poor
+  // light. Someone typing the address off a card will use lower case, so `/j/`
+  // has to work too.
+  //
+  // This CANNOT be a `redirects()` rule in next.config.mjs. Vercel matches those
+  // case-INSENSITIVELY, so `/j/:token` -> `/J/:token` also matched `/J/CODE` and
+  // sent it to itself: every scan died in a redirect loop (curl exit 47, five
+  // hops, same URL), which would have killed all 300 printed cards. Middleware
+  // compares the pathname exactly, so this only fires on a real lowercase path
+  // and `/J/` is left alone.
+  if (path.startsWith("/j/")) {
+    return NextResponse.redirect(new URL(`/J/${path.slice(3)}${nextUrl.search}`, nextUrl), 308);
+  }
 
   // Whole path segments only — `/ambassador-panel/*` is a public page and must
   // not be caught by the `/ambassador` portal prefix.
