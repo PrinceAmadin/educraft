@@ -54,10 +54,13 @@ import type { Project, Reference } from "@prisma/client";
 import { referenceListEntries } from "@/lib/research-references-doc";
 import { formatWorkerData, type WorkerData } from "./dynamic-data-form";
 import { pausePointsFor } from "./pause-points";
+import { MODE_NUMBERS } from "@/lib/mode-classifier";
 import {
   MODE_NAMES,
+  hostModeFor,
   matchDepartment,
   resolveSection,
+  templateForMode,
   type DepartmentEntry,
   type ResearchModeNumber,
   type SectionKey,
@@ -307,6 +310,17 @@ export const LOADER_TEXT = {
   /** NALT's Chapter Five: five numbered sections, the conclusion LAST. */
   naltChapterFive: (sections: readonly string[]) =>
     `This Chapter Five is titled CONCLUSION and has exactly these five numbered sections, in this order and under these titles: ${sections.map((s, i) => `5.${String(i + 1)} ${s}`).join("; ")}. The conclusion is the LAST section, not the second, and there is no introduction section. 5.1 SUMMARY OF FINDINGS states what each preceding chapter established. 5.2 RECOMMENDATIONS are specific legal reforms, each flowing from a finding and addressed to whoever can make it (the National Assembly, a State House of Assembly, a Ministry, or the courts), each as its own [H3] sub-section. 5.3 CONTRIBUTIONS TO KNOWLEDGE states what this study adds that was not available before. 5.4 AREAS FOR FURTHER STUDIES names the questions left open. 5.5 CONCLUSION is the closing assessment, in two or three paragraphs. This replaces both the unnumbered Template B conclusion structure and the department section's own numbered list.`,
+  /**
+   * Mode 6 (qualitative) hosts on Mode 2's prompt block, which is a survey: these notes replace the
+   * two chapters where a qualitative study is not a survey at all. Everything else about Mode 2 --
+   * one pause after Chapter 3, the client's own material, the chapter shape -- is right already.
+   */
+  qualitativeMode:
+    "This is a QUALITATIVE study (Mode 6), not a survey. The mode instructions above are written for a questionnaire survey; where they ask for anything statistical, the rules below replace them. There is no questionnaire, no sample-size formula, no Cronbach's Alpha, no hypothesis test, no significance value and no demographic frequency table anywhere in this report. The evidence is what participants said, in their own words.",
+  qualitativeChapterThree:
+    "This Chapter Three describes a qualitative design and has exactly these numbered sections, in this order: 3.1 Research Design (name the qualitative approach -- phenomenological, case study, ethnographic, narrative or grounded theory -- and say why it suits this topic); 3.2 Study Area and Participants; 3.3 Sampling Technique (purposive or snowball, with the inclusion criteria, and the reason that number of participants is enough, which is data saturation and never a sample-size formula); 3.4 Data Collection Instrument (the interview guide or focus-group schedule, its sections and the kinds of question it asks, not a questionnaire with scored items); 3.5 Data Collection Procedure (how participants were approached, how long each interview ran, how it was recorded and transcribed); 3.6 Method of Data Analysis (the named analytical method and its steps -- for thematic analysis, familiarisation, coding, searching for themes, reviewing, defining and naming -- and the software if any, NVivo or Atlas.ti, never SPSS); 3.7 Trustworthiness of the Study (credibility, transferability, dependability and confirmability, each as its own [H3] sub-section, and the technique used for each: member checking, thick description, an audit trail, reflexivity); 3.8 Ethical Considerations (informed consent, voluntary participation, confidentiality, pseudonyms and the right to withdraw). This replaces the department section's own numbered list, its population and sample-size sections, and its validity and reliability sections: validity and reliability are quantitative ideas, and trustworthiness is what replaces them.",
+  qualitativeChapterFour:
+    "This Chapter Four presents themes, not numbers. Open with 4.1 Introduction, then 4.2 Participants' Profile as a short prose description of who took part (how many, their roles, their range of experience) with pseudonyms and no frequency table. Then give one numbered section per theme you identified, each with its sub-themes as [H3] sub-sections, and in each one: state the theme, explain what it means, and support it with at least two VERBATIM quotations from different participants, each attributed to a pseudonym (for example: \"I had no idea it existed\" (Participant 4, nurse, 8 years). A quotation is reproduced exactly as the participant said it and is the one place in this report where direct quotation is required rather than forbidden. End with a Discussion of Findings section that reads the themes against the literature reviewed in Chapter Two, naming the published work each theme agrees or disagrees with. There are no tables of frequencies, no percentages, no correlation or regression output and no hypothesis tests. This replaces the department section's own numbered list for this chapter.",
   /** NALT's bibliography: the assembly builds it, so the chapters write none. */
   naltBibliography:
     "The report ends with a BIBLIOGRAPHY (not a References list), split into PRIMARY SOURCES and SECONDARY SOURCES. The assembly builds it from the footnotes and the verified reference list, so write no bibliography, reference list or table of cases of your own in this chapter.",
@@ -837,7 +851,7 @@ const PROJECT_TYPE_LABEL: Record<Project["projectType"], string> = {
   NOT_APPLICABLE: "Not specified",
 };
 
-const DATA_REQUIREMENTS: Record<ResearchModeNumber, string> = { 1: "None", 2: "Primary", 3: "Primary", 4: "Primary", 5: "Secondary" };
+const DATA_REQUIREMENTS: Record<ResearchModeNumber, string> = { 1: "None", 2: "Primary", 3: "Primary", 4: "Primary", 5: "Secondary", 6: "Primary" };
 
 const TOKEN = /\{([A-Z][A-Z0-9_]*)\}/g;
 
@@ -916,7 +930,7 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   const chapter = input.chapter;
   // The types stop bad values at compile time; a JSON body from the COO card is checked here too.
   if (![1, 2, 3, 4, 5].includes(chapter)) throw new PromptAssemblyError(`Chapter ${String(chapter)} does not exist; reports have five chapters at most.`);
-  if (![1, 2, 3, 4, 5].includes(input.mode)) throw new PromptAssemblyError(`Mode ${String(input.mode)} does not exist; research modes run from 1 to 5.`);
+  if (!MODE_NUMBERS.includes(input.mode)) throw new PromptAssemblyError(`Mode ${String(input.mode)} does not exist; research modes run from 1 to ${MODE_NUMBERS.length}.`);
   const knownStyle = ["CUSTOM", "CHICAGO", ...Object.keys(STYLE_LABEL)].includes(input.project.referencingStyle);
   if (!knownStyle) throw new PromptAssemblyError(`Unknown referencing style "${String(input.project.referencingStyle)}".`);
   if (!(input.project.projectType in PROJECT_TYPE_LABEL)) throw new PromptAssemblyError(`Unknown project type "${String(input.project.projectType)}".`);
@@ -928,7 +942,7 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   }
   const entry: DepartmentEntry = match.entry;
   const section = resolveSection(entry, input.mode, input.sectionOverride);
-  const template: "A" | "B" = input.mode === 1 ? "B" : "A";
+  const template: "A" | "B" = templateForMode(input.mode);
 
   // B5: a thematic report is blocked until both thematic titles are on the card, whichever chapter is asked for.
   if (template === "B") {
@@ -966,7 +980,7 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   if (extras.length) used.push(`ch${fileChapter}:header extras`);
   parts.push({
     title: modeTitle,
-    text: render(modeTitle, [...allModes, ...file.routingIntro, ...file.modeBlocks.get(input.mode)!, ...extras, LOADER_TEXT.modePrecedence]),
+    text: render(modeTitle, [...allModes, ...file.routingIntro, ...file.modeBlocks.get(hostModeFor(input.mode))!, ...extras, LOADER_TEXT.modePrecedence]),
   });
 
   // 2. Shared section of this chapter's file.
@@ -1024,6 +1038,15 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
     if (chapter === 1) notes.push(LOADER_TEXT.naltChapterOne(lawSections[1]));
     if (chapter === 2) notes.push(LOADER_TEXT.naltChapterTwo(NALT_CHAPTER_TITLES[2][section], lawSections[2]));
     if (chapter === 5) notes.push(LOADER_TEXT.naltChapterFive(lawSections[5]));
+  }
+  // Mode 6 reads its host Mode 2's block, which is written for a questionnaire survey. These notes
+  // replace the two chapters where a qualitative study is not one: Chapter Three's population,
+  // sample-size formula, validity and reliability, and Chapter Four's demographic tables and
+  // hypothesis tests. The rule note goes on every chapter, so no chapter drifts into statistics.
+  if (input.mode === 6) {
+    notes.push(LOADER_TEXT.qualitativeMode);
+    if (chapter === 3) notes.push(LOADER_TEXT.qualitativeChapterThree);
+    if (chapter === 4) notes.push(LOADER_TEXT.qualitativeChapterFour);
   }
   // Q1/Q2: five chapters at most. Wherever the loaded text plans a sixth chapter, the note overrides it.
   if (parts.some((p) => SIX_CHAPTERS.test(p.text))) notes.push(LOADER_TEXT.fiveChapters);
@@ -1313,7 +1336,7 @@ function placeholderValues(
 /** This chapter's routing block for a mode, as written in the prompt file header. */
 export async function getModeInstructions(chapter: FileChapter, mode: ResearchModeNumber): Promise<string> {
   const lib = await loadPromptLibrary();
-  return lib.chapters.get(chapter)!.modeBlocks.get(mode)!.join("\n\n");
+  return lib.chapters.get(chapter)!.modeBlocks.get(hostModeFor(mode))!.join("\n\n");
 }
 
 /** The body of one [DEPARTMENT: X] block, or null when the file has no such block. */

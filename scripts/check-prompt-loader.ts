@@ -186,7 +186,10 @@ async function main() {
     () => parseRoutingHeaderForCheck(routingFixture(true)),
     /MODE 6 appears after the mode blocks end/,
   );
-  await refuses("a mode the system does not support is refused", () => loadChapterPrompt(input({ mode: 6 as ResearchModeNumber })), /Mode 6 does not exist/);
+  // Mode 6 exists since 26 Nov 2026 (qualitative, hosted on Mode 2), so the guard is tested with a
+  // number that does not. The MODE 6 trap above is the other half of that change.
+  await refuses("a mode the system does not support is refused", () => loadChapterPrompt(input({ mode: 9 as ResearchModeNumber })), /Mode 9 does not exist/);
+  expect("Mode 6 loads, through its host's block", (await loadChapterPrompt(input({ department: "Nursing", mode: 6 }))).blocksUsed.some((b) => b.includes("MODE 6")), true);
   expect("extractDepartmentSection finds ENGINEERING in chapter 1", (await extractDepartmentSection(1, "ENGINEERING"))?.startsWith("ENGINEERING"), true);
 
   // ── The founder's D1 test: Chapter 1, "Electrical Engineering", Mode 3 ──────────────────
@@ -511,7 +514,7 @@ async function main() {
   await refuses("Law cannot be Mode 3", () => loadChapterPrompt(input({ department: "Law", mode: 3 })), /Mode 1 \(doctrinal\) or Mode 2/);
   await refuses("Law's section follows its mode", () => loadChapterPrompt(input({ department: "Law", mode: 2, sectionOverride: "BUSINESS" })), /section follows the mode/);
   await refuses("Physics needs the COO's section (A9)", () => loadChapterPrompt(input({ department: "Physics", mode: 3 })), /COO must pick the mode and the section/);
-  await refuses("an override must be written for the mode", () => loadChapterPrompt(input({ department: "Physics", mode: 2, sectionOverride: "HUMANITIES" })), /written for Mode 1, not Mode 2/);
+  await refuses("an override must be written for the mode", () => loadChapterPrompt(input({ department: "Physics", mode: 2, sectionOverride: "HUMANITIES" })), /written for Mode 1 and 6, not Mode 2/);
   await refuses("a non-Law department cannot take a Law section", () => loadChapterPrompt(input({ department: "Sociology", mode: 2, sectionOverride: "LAW_NON_DOCTRINAL" })), /Only Law departments/);
   await refuses("Mode 3 outside Engineering and Computing needs the COO's pick", () => loadChapterPrompt(input({ department: "Health Information Management", mode: 3 })), /hardware build.*software build/);
   await refuses("a missing title is refused", () => loadChapterPrompt(input({ project: { projectTitle: " " } })), /PROJECT_TITLE: The project title is required/);

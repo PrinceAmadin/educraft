@@ -3,6 +3,7 @@ import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
 import { PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
+import { INTAKE_MODE_ANSWERS } from "@/lib/constants";
 
 const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
 const referencingValues = Object.values(ReferencingStyle) as [ReferencingStyle, ...ReferencingStyle[]];
@@ -68,7 +69,7 @@ export const intakeEditSchema = z.object({
       chapterCount: optionalInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
       referencingStyle: blankOr(z.enum(referencingValues)),
       dataRequirements: blankOr(z.enum(dataValues)),
-      intakeModeAnswer: blankOr(z.enum(["A", "B", "C", "D", "E"])),
+      intakeModeAnswer: blankOr(z.enum(INTAKE_MODE_ANSWERS)),
       minimumPages: pageRequirement,
       clientDeadline: blankOr(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date")),
       departmentOutline: text(6000),

@@ -111,6 +111,19 @@ const DISCUSSION = R("Discussion of Findings", /discussion/i);
 const DEMOGRAPHIC = R("Socio-Demographic Profile of Respondents", /demographic|characteristics of (?:the )?(?:study )?(?:respondents|participants|subjects)/i);
 const DESCRIPTIVE = R("Descriptive Statistics", /descriptive/i);
 const RELIABILITY_TEST = R("Reliability Test Results", /reliability/i);
+// Mode 6, qualitative (26 Nov 2026). Code-owned, like the NALT sections: Mode 6 reads Mode 2's
+// prompt block and these replace the two chapters a survey block gets wrong, so they are held to
+// `LOADER_TEXT.qualitativeChapterThree` / `qualitativeChapterFour` rather than to a prompt file.
+const QUAL_DESIGN = R("Research Design", /research design|qualitative design|design of the study/i);
+const QUAL_PARTICIPANTS = R("Study Area and Participants", /participants?|study area|setting/i);
+const QUAL_SAMPLING = R("Sampling Technique", /sampling|purposive|snowball|saturation/i);
+const QUAL_INSTRUMENT = R("Data Collection Instrument", /instrument|interview guide|interview schedule|focus.group (?:guide|schedule)|topic guide/i);
+const QUAL_PROCEDURE = R("Data Collection Procedure", /data collection|procedure|fieldwork/i);
+const QUAL_ANALYSIS = R("Method of Data Analysis", /data analysis|thematic analysis|method of analysis|analytical (?:approach|method)/i);
+const TRUSTWORTHINESS = R("Trustworthiness of the Study", /trustworthiness|credibility|dependability|confirmability|rigou?r of the study/i);
+const QUAL_THEMES = R("The themes, each with verbatim participant quotes", /theme/i);
+const QUAL_DISCUSSION = R("Discussion of Findings", /discussion/i);
+
 const RQ_ANALYSIS = R("Analysis of Research Questions", /research questions?/i);
 const HYPOTHESES_TESTING = R("Hypotheses Testing", /hypothes[ie]s/i);
 const KEY_FINDINGS = R("Summary of Major Findings", /summary/i);
@@ -208,6 +221,13 @@ export function requiredSectionsAsListed(section: SectionKey, chapter: number, c
       }
       break;
     case 3:
+      // A qualitative study's Chapter Three is the same shape in Nursing, Education, Business or
+      // Humanities, so it is decided by the mode and not by the section. Crucially it does NOT
+      // require validity, reliability or a sample-size formula: those are quantitative ideas, and
+      // demanding them of a qualitative report would fail every one of them.
+      if (ctx.mode === 6) {
+        return [QUAL_DESIGN, QUAL_PARTICIPANTS, QUAL_SAMPLING, QUAL_INSTRUMENT, QUAL_PROCEDURE, QUAL_ANALYSIS, TRUSTWORTHINESS, ETHICS_CRITICAL];
+      }
       switch (section) {
         case "ENGINEERING":
           return ctx.mode === 4 ? [DESIGN_OR_FLOW, CALCULATIONS, WORKING_PRINCIPLE, BEME, TESTING] : [BLOCK_DIAGRAM, CALCULATIONS, IMPLEMENTATION_ENG, WORKING_PRINCIPLE, BEME, TESTING];
@@ -236,6 +256,9 @@ export function requiredSectionsAsListed(section: SectionKey, chapter: number, c
       }
       break;
     case 4:
+      // Themes with verbatim quotes, and a discussion against the literature. No demographic table,
+      // no reliability test, no hypothesis testing: a qualitative Chapter Four reports no numbers.
+      if (ctx.mode === 6) return [QUAL_THEMES, QUAL_DISCUSSION];
       switch (section) {
         case "ENGINEERING":
           return ctx.mode === 4 ? [RESULTS, DISCUSSION] : [RESULTS, PERFORMANCE, DISCUSSION];

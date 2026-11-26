@@ -30,8 +30,8 @@ export const SECTION_KEYS = [
 ] as const;
 export type SectionKey = (typeof SECTION_KEYS)[number];
 
-/** 1 Thematic · 2 Survey · 3 Build · 4 Lab · 5 Secondary data. */
-export type ResearchModeNumber = 1 | 2 | 3 | 4 | 5;
+/** 1 Thematic · 2 Survey · 3 Build · 4 Lab · 5 Secondary data · 6 Qualitative. */
+export type ResearchModeNumber = 1 | 2 | 3 | 4 | 5 | 6;
 
 export const MODE_NAMES: Record<ResearchModeNumber, string> = {
   1: "Thematic / Argumentative",
@@ -39,22 +39,50 @@ export const MODE_NAMES: Record<ResearchModeNumber, string> = {
   3: "Implementation / Build",
   4: "Laboratory / Experimental",
   5: "Secondary Data / Quantitative Modelling",
+  6: "Qualitative / Interpretive",
 };
+
+/**
+ * A mode added after the prompt library was written borrows another mode's chapter instructions
+ * (founder's call, 26 Nov 2026), so the five .docx files are never edited: the host gives it a
+ * complete set of instructions for all five chapters, and `LOADER_TEXT` notes replace the sections
+ * that differ -- the same mechanism the NALT rebuild used to correct a whole chapter's section list.
+ *
+ * Mode 6 (qualitative) hosts on Mode 2 because it shares its pipeline SHAPE: one pause after
+ * Chapter 3, waiting on the client's own material. What it does not share is Chapter 3's
+ * population / Yamane / validity / reliability list or Chapter 4's demographic tables and
+ * hypothesis tests, and those are what the notes replace.
+ */
+export const MODE_HOST: Partial<Record<ResearchModeNumber, ResearchModeNumber>> = { 6: 2 };
+
+/** The mode whose prompt block this mode is written from (itself, unless it is a hosted mode). */
+export function hostModeFor(mode: ResearchModeNumber): ResearchModeNumber {
+  return MODE_HOST[mode] ?? mode;
+}
+
+/**
+ * Which template a mode's chapters follow. Derived from the mode, NOT from `mode === 1`: Mode 7
+ * (systematic review) will host on Mode 1 and still be Template A, so the two must not be the same
+ * question. Template B is the thematic chain (named chapters 3 and 4).
+ */
+export function templateForMode(mode: ResearchModeNumber): "A" | "B" {
+  return mode === 1 ? "B" : "A";
+}
 
 /** The modes each section's chapter instructions are written for. A section is
  *  kept when the approved mode is one of these; otherwise the section follows the mode. */
 export const SECTION_MODES: Record<SectionKey, readonly ResearchModeNumber[]> = {
   ENGINEERING: [3, 4],
   COMPUTER_SCIENCE: [3],
-  MEDICAL_SCIENCE: [2, 4],
-  NURSING: [2],
-  BUSINESS: [2],
-  EDUCATION: [2], // a theoretical (Mode 1) Education project takes the Humanities thematic chain
+  MEDICAL_SCIENCE: [2, 4, 6],
+  NURSING: [2, 6],
+  BUSINESS: [2, 6],
+  EDUCATION: [2, 6], // a theoretical (Mode 1) Education project takes the Humanities thematic chain
   ECONOMICS: [5],
   AGRICULTURE: [4],
-  HUMANITIES: [1],
+  HUMANITIES: [1, 6],
   LAW_DOCTRINAL: [1],
-  LAW_NON_DOCTRINAL: [2],
+  LAW_NON_DOCTRINAL: [2, 6],
 };
 
 /** Where a department lands when the COO approves a mode its own section wasn't written for.
@@ -65,6 +93,7 @@ const MODE_FALLBACK_SECTION: Record<ResearchModeNumber, SectionKey | null> = {
   3: null,
   4: "MEDICAL_SCIENCE",
   5: "ECONOMICS",
+  6: "BUSINESS", // Mode 6 hosts on Mode 2, so it falls back where Mode 2 does
 };
 
 export type DepartmentEntry = {

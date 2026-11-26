@@ -21,6 +21,7 @@ import {
   SECTION_MODES,
   DepartmentRoutingError,
   MODE_NAMES,
+  templateForMode,
   defaultReferencingStyle,
   matchDepartment,
   resolveSection,
@@ -36,7 +37,7 @@ import {
   type ReferencingStyleKey,
 } from "./generation/referencing";
 
-export type ModeCode = "THEMATIC" | "SURVEY" | "BUILD" | "LAB" | "API_DATA";
+export type ModeCode = "THEMATIC" | "SURVEY" | "BUILD" | "LAB" | "API_DATA" | "QUALITATIVE";
 
 export const MODE_CODES: Record<ResearchModeNumber, ModeCode> = {
   1: "THEMATIC",
@@ -44,12 +45,16 @@ export const MODE_CODES: Record<ResearchModeNumber, ModeCode> = {
   3: "BUILD",
   4: "LAB",
   5: "API_DATA",
+  6: "QUALITATIVE",
 };
 
-export const MODE_NUMBERS: ResearchModeNumber[] = [1, 2, 3, 4, 5];
+export const MODE_NUMBERS: ResearchModeNumber[] = [1, 2, 3, 4, 5, 6];
+
+/** "Pick a mode from 1 to 6." Derived, so a new mode cannot leave this sentence behind. */
+export const PICK_A_MODE = `Pick a mode from ${MODE_NUMBERS[0]} to ${MODE_NUMBERS[MODE_NUMBERS.length - 1]}.`;
 
 export function isModeNumber(n: unknown): n is ResearchModeNumber {
-  return n === 1 || n === 2 || n === 3 || n === 4 || n === 5;
+  return MODE_NUMBERS.includes(n as ResearchModeNumber);
 }
 
 export function modeName(n: ResearchModeNumber): ModeCode {
@@ -57,7 +62,7 @@ export function modeName(n: ResearchModeNumber): ModeCode {
 }
 
 /** Short everyday names, for sentences. */
-export const MODE_SHORT: Record<ResearchModeNumber, string> = { 1: "thematic", 2: "survey", 3: "build", 4: "lab", 5: "secondary data" };
+export const MODE_SHORT: Record<ResearchModeNumber, string> = { 1: "thematic", 2: "survey", 3: "build", 4: "lab", 5: "secondary data", 6: "qualitative" };
 
 /** "Mode 2 (survey)": the wording the conflict messages use. */
 export function modeTitle(n: ResearchModeNumber): string {
@@ -165,6 +170,35 @@ export const MODE_KEYWORDS: Record<ResearchModeNumber, readonly Keyword[]> = {
     "regression analysis",
     /\(\s*\d{4}\s*[-–—]\s*\d{4}\s*\)/, // a year range such as (2000–2023)
   ],
+  // Mode 6, qualitative. "thematic analysis" and "discourse analysis" were Mode 1 keywords until
+  // 26 Nov 2026 and were taken out with nowhere to go, because Mode 1 cannot receive a file at all;
+  // this is where they belong. Every phrase here names evidence that comes from PEOPLE in their own
+  // words -- which is what separates Mode 6 from its host Mode 2, where the evidence is a number
+  // from a questionnaire.
+  6: [
+    "thematic analysis",
+    "discourse analysis",
+    "content analysis",
+    "narrative analysis",
+    "phenomenological",
+    "phenomenology",
+    "lived experience",
+    "lived experiences",
+    "grounded theory",
+    "ethnographic",
+    "ethnography",
+    "case study of",
+    "in-depth interview",
+    "in-depth interviews",
+    "focus group",
+    "focus groups",
+    "semi-structured interview",
+    "semi-structured interviews",
+    "exploratory study",
+    "perspectives of",
+    "experiences of",
+    "views of",
+  ],
 };
 
 /**
@@ -266,7 +300,7 @@ export function keywordSignal(triggers: KeywordTrigger[]): { mode: ResearchModeN
 // ─── The client's answer ────────────────────────────────────────────────────
 
 /** The intake question's options (the spec's plain-language wording lives with the form in constants.ts). */
-export const ANSWER_MODE: Record<IntakeModeAnswer, ResearchModeNumber> = { A: 1, B: 2, C: 3, D: 4, E: 5 };
+export const ANSWER_MODE: Record<IntakeModeAnswer, ResearchModeNumber> = { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 };
 
 export function intakeAnswerToMode(answer: IntakeModeAnswer | null | undefined): ResearchModeNumber | null {
   return answer ? ANSWER_MODE[answer] : null;
@@ -493,7 +527,7 @@ export function validateModeDecision(d: ModeDecision): ValidDecision | { ok: fal
   if (!match) problems.push(`"${d.department}" is not in the department list. Pick the department from the list.`);
   else if (match.entry.group) problems.push(`"${match.entry.name}" is not a department. Pick the exact department.`);
 
-  if (!isModeNumber(d.modeNumber)) problems.push("Pick a mode from 1 to 5.");
+  if (!isModeNumber(d.modeNumber)) problems.push(PICK_A_MODE);
 
   let section: SectionKey | null = null;
   if (match && !match.entry.group && isModeNumber(d.modeNumber)) {
@@ -525,7 +559,7 @@ export function validateModeDecision(d: ModeDecision): ValidDecision | { ok: fal
   else if (style === "CHICAGO") problems.push("Pick Chicago author-date or Chicago notes-bibliography.");
   else if (style === "CUSTOM" && !d.customStyleText?.trim()) problems.push("Enter the supervisor's referencing format for a Custom style.");
 
-  const template: "A" | "B" = d.modeNumber === 1 ? "B" : "A";
+  const template: "A" | "B" = isModeNumber(d.modeNumber) ? templateForMode(d.modeNumber) : "A";
   if (d.citationPlacement != null) {
     if (!CITATION_PLACEMENTS.includes(d.citationPlacement)) problems.push("Pick a citation placement from the list.");
     else if (section && isReferencingStyleKey(style) && style !== "CHICAGO") {
@@ -562,7 +596,7 @@ export function validateModeDraft(d: ModeDecision): string[] {
   const match = matchDepartment(d.department);
   if (!match) problems.push(`"${d.department}" is not in the department list. Pick the department from the list.`);
   else if (match.entry.group) problems.push(`"${match.entry.name}" is not a department. Pick the exact department.`);
-  if (!isModeNumber(d.modeNumber)) problems.push("Pick a mode from 1 to 5.");
+  if (!isModeNumber(d.modeNumber)) problems.push(PICK_A_MODE);
   if (match && !match.entry.group && isModeNumber(d.modeNumber)) {
     const allowed = allowedModes(match.entry);
     if (!allowed.includes(d.modeNumber)) {

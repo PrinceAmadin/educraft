@@ -56,7 +56,8 @@ export const OBJECTIVES_TEXT = {
     "- Mode 2 (Survey): The student collects primary data by distributing questionnaires to human respondents. Chapter 4 analyses the responses (frequencies, correlations, hypothesis testing using SPSS or similar).\n" +
     "- Mode 3 (Implementation/Build): The student designs and builds a working system, prototype, or application. Chapter 3 covers the design/specification. Chapter 4 covers the implementation and testing results.\n" +
     "- Mode 4 (Laboratory): The student conducts physical lab experiments or tests. Chapter 3 covers the experimental setup. Chapter 4 analyses the lab results.\n" +
-    "- Mode 5 (Secondary Data): The student uses existing published datasets, institutional records, or statistical databases — no primary data collection. Chapter 4 models or analyses this external data quantitatively.\n\n" +
+    "- Mode 5 (Secondary Data): The student uses existing published datasets, institutional records, or statistical databases — no primary data collection. Chapter 4 models or analyses this external data quantitatively.\n" +
+    "- Mode 6 (Qualitative): The student collects primary data from people in their own words — in-depth interviews, focus groups, or documents. Chapter 3 covers the qualitative design, purposive sampling and trustworthiness. Chapter 4 presents themes supported by verbatim participant quotes; there is no hypothesis testing and no statistics.\n\n" +
     "---\n\n" +
     "STEP 1 — UNDERSTAND THE TITLE:\n" +
     "Read the project title carefully. Ask yourself:\n" +
@@ -113,6 +114,7 @@ const MODE_NAME: Record<ResearchModeNumber, string> = {
   3: "Mode 3 (Implementation/Build)",
   4: "Mode 4 (Laboratory)",
   5: "Mode 5 (Secondary Data)",
+  6: "Mode 6 (Qualitative)",
 };
 
 /**

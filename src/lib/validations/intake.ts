@@ -3,6 +3,7 @@ import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
 import { PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
+import { INTAKE_MODE_ANSWERS } from "@/lib/constants";
 
 const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
 const referencingValues = Object.values(ReferencingStyle) as [ReferencingStyle, ...ReferencingStyle[]];
@@ -150,7 +151,7 @@ export const intakeSubmitSchema = z
     referencingStyle: z.enum(referencingValues).optional().or(z.literal("")),
     dataRequirements: z.enum(dataValues).optional().or(z.literal("")),
     // D3: how the project collects its data (A–E, or NOT_SURE); the COO's mode card reads it.
-    intakeModeAnswer: z.enum(["A", "B", "C", "D", "E", "NOT_SURE"]).optional().or(z.literal("")),
+    intakeModeAnswer: z.enum([...INTAKE_MODE_ANSWERS, "NOT_SURE"]).optional().or(z.literal("")),
     minimumPages: pageRequirement,
 
     // Term paper

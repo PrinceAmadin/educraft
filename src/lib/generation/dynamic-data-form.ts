@@ -37,6 +37,11 @@ export const MODE_FORMATS: Record<number, readonly string[]> = {
   2: ["pdf", "xlsx", "csv", "docx"],
   3: ["pdf", "png", "jpg", "docx"],
   4: ["pdf", "xlsx", "csv", "docx", "png", "jpg"],
+  // Mode 6: a qualitative study's evidence is transcripts (docx, pdf) and, often in Nigeria,
+  // photographs or scans of handwritten field notes (png, jpg). xlsx and csv are here because a
+  // coding frame or a theme matrix genuinely arrives that way -- not to invite a questionnaire
+  // sheet, which the project-specific request Claude writes will not ask for.
+  6: ["docx", "pdf", "xlsx", "csv", "png", "jpg"],
 };
 
 export interface DataFormFile {
@@ -117,6 +122,13 @@ export const DATA_FORM_TEXT = {
     SPECIFICATION:
       "The pause comes after Chapter 2, before Chapter 3 describes the system. Ask the student for what they have of the system that was built: screenshots of it working, the tools and languages it uses, what each part does, its database design and any test records. EduCraft's specialist adds whatever the student does not have.",
   } satisfies Record<PauseKind, string>,
+  /**
+   * Mode 6 (qualitative). The rules above are written for a survey or a laboratory run -- they name
+   * questionnaires, respondents, SPSS and reliability tests -- and a qualitative student has none of
+   * those. This replaces them, and goes last so it carries.
+   */
+  qualitative:
+    "This is a QUALITATIVE project (Mode 6): the student interviewed people or ran focus groups, and the evidence is what participants said in their own words. Do NOT ask for questionnaires, a data sheet with one row per respondent, SPSS output, reliability tests or any statistics -- none of that exists here. Ask for the interview or focus-group TRANSCRIPTS (as Word or PDF, one file per participant or all of them in one document), the interview guide they actually used, and their own coding or theme notes if they have any. The short questions should ask how many people took part, their roles, how long the interviews ran, how the participants were chosen, and whether anything changed from the plan. The checklist lines should be about what the transcripts must show -- every participant, the full exchange rather than a summary, and enough material on each objective -- never about tables or test results.",
   dataFrom: {
     RAW: "This order includes EduCraft's data analysis: ask the student for the data they collected (for example the completed questionnaires, as scans or clear photos, or a data sheet with one row per respondent; or their laboratory readings or test records), never for analysis output. The checklist says what the raw data must include (every item, every respondent or reading, the demographic questions) so the analysis can be run.",
     ANALYSED:
@@ -155,6 +167,8 @@ export function dataFormUserPrompt(ctx: DataFormContext): string {
     DATA_FORM_TEXT.purpose[ctx.kind],
   ];
   if (ctx.kind === "RESULTS") lines.push(DATA_FORM_TEXT.dataFrom[ctx.dataFrom]);
+  // Last, so it overrides the survey wording above it.
+  if (ctx.mode === 6) lines.push(DATA_FORM_TEXT.qualitative);
   if (ctx.kind === "RESULTS" && ctx.checklist.length) lines.push("", DATA_FORM_TEXT.checklistIntro, ...ctx.checklist.map((c) => `- ${c}`));
   const perChapter = Math.floor(CHAPTER_CHARS / Math.max(1, ctx.chapters.length));
   for (const ch of ctx.chapters) {

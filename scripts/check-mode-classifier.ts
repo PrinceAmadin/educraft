@@ -19,7 +19,13 @@ import {
   sectionOptionsFor,
   validateModeDecision,
   type ModeDecision,
+  MODE_NUMBERS,
+  PICK_A_MODE,
+  ANSWER_MODE,
 } from "../src/lib/mode-classifier";
+import { MODE_FORMATS } from "../src/lib/generation/dynamic-data-form";
+import { pauseKind, pausePointsFor } from "../src/lib/generation/pause-points";
+import { SECTION_MODES, hostModeFor, templateForMode } from "../src/lib/generation/department-map";
 
 let passed = 0;
 const failures: string[] = [];
@@ -137,7 +143,60 @@ check("placement: NALT cannot be moved off footnotes", problemsOf({ department: 
 check("placement: a standard report may choose", validateModeDecision({ ...base, citationPlacement: "MODE_B" }).ok);
 check("decision: an unknown department is refused", problemsOf({ ...base, department: "Underwater Basket Weaving" }).some((p) => p.includes("not in the department list")));
 check("decision: a group label is refused", problemsOf({ ...base, department: "Engineering" }).some((p) => p.includes("not a department")));
-check("decision: the mode must be 1–5", problemsOf({ ...base, modeNumber: 7 }).some((p) => p.includes("1 to 5")));
+// ─── Mode 6: qualitative (26 Nov 2026) ───────────────────────────────
+//
+// The bug this mode closes: "thematic analysis" and "discourse analysis" were MODE 1 keywords, and
+// Mode 1 is pure desk research that cannot receive a file at all (no MODE_FORMATS entry, no pause).
+// A topic reading "A thematic analysis of nurses' lived experiences" was therefore recommended the
+// one mode that forbids having the transcripts it names.
+
+const qualTopics = [
+  "A thematic analysis of nurses lived experiences of caring for COVID-19 patients",
+  "A discourse analysis of political campaign speeches in Nigeria",
+  "Lived experiences of female entrepreneurs in Lagos informal markets",
+  "In-depth interviews on why secondary school teachers leave the profession",
+  "A phenomenological study of widowhood rites in Benin",
+  "Focus groups on patient satisfaction with antenatal care",
+];
+for (const topic of qualTopics) {
+  const r = classifyMode({ topic, department: "Nursing", answer: null });
+  check(`a qualitative topic is Mode 6, not Mode 1: "${topic.slice(0, 40)}"`, r.recommendedMode === 6 && r.recommendedBy === "KEYWORDS", { mode: r.recommendedMode, by: r.recommendedBy });
+}
+check("the two misrouted phrases are no longer Mode 1 keywords", !MODE_KEYWORDS[1].some((k) => typeof k === "string" && /thematic analysis|discourse analysis/.test(k)));
+check("...and are Mode 6's", MODE_KEYWORDS[6].includes("thematic analysis") && MODE_KEYWORDS[6].includes("discourse analysis"));
+
+check("a quantitative topic is untouched by Mode 6 existing", (() => {
+  const survey = classifyMode({ topic: "Attitude of nurses towards hand hygiene at LUTH", department: "Nursing", answer: null });
+  const secondary = classifyMode({ topic: "Effect of exchange rate on GDP in Nigeria (2000-2023)", department: "Economics", answer: null });
+  const build = classifyMode({ topic: "Design and implementation of a hospital management system", department: "Computer Science", answer: null });
+  return survey.recommendedMode === 2 && survey.confidence === "HIGH" && secondary.recommendedMode === 5 && build.recommendedMode === 3;
+})());
+
+check("the client's own answer F beats a disagreeing keyword, as the precedence says", (() => {
+  const r = classifyMode({ topic: "Attitude of nurses towards hand hygiene", department: "Nursing", answer: "F" });
+  return r.recommendedMode === 6 && r.recommendedBy === "CLIENT_ANSWER" && r.conflicts.some((c) => /keywords point to Mode 2/.test(c));
+})());
+check("answering F maps to Mode 6", ANSWER_MODE.F === 6);
+check("a locked department still refuses Mode 6 and says why in plain English", (() => {
+  const r = classifyMode({ topic: "Impact of cashless policy on SMEs in Lagos", department: "Accounting", answer: "F" });
+  return r.recommendedMode === 5 && r.recommendedBy === "LOCKED_DEPARTMENT" && r.conflicts.some((c) => /answered F \(qualitative, Mode 6\), but Accounting is always Mode 5/.test(c));
+})());
+
+check("Mode 6 pauses once, after Chapter 3, exactly where its host Mode 2 does", JSON.stringify(pausePointsFor(6)) === JSON.stringify(pausePointsFor(2)) && JSON.stringify(pausePointsFor(6)) === "[3]");
+check("...and that pause asks for results, not a build specification", pauseKind(6, 3) === "RESULTS");
+check("Mode 6 can actually receive a file, which Mode 1 cannot", (MODE_FORMATS[6] ?? []).includes("docx") && (MODE_FORMATS[6] ?? []).includes("pdf") && (MODE_FORMATS[1] ?? []).length === 0);
+check("Mode 6 reads its host's prompt block", hostModeFor(6) === 2 && hostModeFor(2) === 2 && hostModeFor(1) === 1);
+check("the template is decided by the mode, not by a comparison with 1", templateForMode(1) === "B" && templateForMode(6) === "A" && templateForMode(2) === "A");
+check("every section that admits Mode 6 is one a qualitative study is really done in", (() => {
+  const admits = (Object.keys(SECTION_MODES) as (keyof typeof SECTION_MODES)[]).filter((k) => SECTION_MODES[k].includes(6));
+  const expected = ["MEDICAL_SCIENCE", "NURSING", "BUSINESS", "EDUCATION", "HUMANITIES", "LAW_NON_DOCTRINAL"];
+  return admits.length === expected.length && expected.every((e) => admits.includes(e as never));
+})());
+check("no engineering, computing, economics or agriculture section takes it", (["ENGINEERING", "COMPUTER_SCIENCE", "ECONOMICS", "AGRICULTURE", "LAW_DOCTRINAL"] as const).every((k) => !SECTION_MODES[k].includes(6)));
+
+check("decision: an unknown mode number is refused, naming the real range", problemsOf({ ...base, modeNumber: 9 }).some((p) => p === PICK_A_MODE));
+check("...and that sentence names the modes that actually exist", PICK_A_MODE === `Pick a mode from 1 to ${MODE_NUMBERS.length}.` && MODE_NUMBERS.includes(6));
+check("decision: Mode 6 is accepted where a section is written for it", problemsOf({ ...base, department: "Nursing", modeNumber: 6 }).length === 0, problemsOf({ ...base, department: "Nursing", modeNumber: 6 }));
 const law = validateModeDecision({ department: "Law", modeNumber: 2, referencingStyle: "NALT" });
 check("Law Mode 2 = non-doctrinal", law.ok && law.section === "LAW_NON_DOCTRINAL", law);
 

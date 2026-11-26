@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DEGREE_LEVELS, PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
+import { INTAKE_MODE_ANSWERS } from "@/lib/constants";
 import { ProjectStatus, ProjectType, ReferencingStyle } from "@prisma/client";
 import { commissionRateSchema } from "@/lib/validations/commission";
 
@@ -153,7 +154,7 @@ export const createProjectSchema = z
     projectType: z.enum(projectTypeValues).optional().or(z.literal("")),
     /** Blank means the service decides (degreeLevelForService); the admin may override it. */
     degreeLevel: z.enum(DEGREE_LEVELS).optional().or(z.literal("")),
-    intakeModeAnswer: z.enum(["A", "B", "C", "D", "E"]).optional().or(z.literal("")),
+    intakeModeAnswer: z.enum(INTAKE_MODE_ANSWERS).optional().or(z.literal("")),
     chapterCount: optionalPositiveInt(MAX_REPORT_CHAPTERS, CHAPTER_LIMIT_MESSAGE),
 
     // Term paper

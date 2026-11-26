@@ -145,6 +145,12 @@ export const INTAKE_MODE_OPTIONS = [
     examples: "Effect of exchange rate on GDP, inflation and interest rates, stock market analysis",
   },
   {
+    value: "F",
+    title: "I will interview people, or run focus groups, and study what they say",
+    detail: "I will record and transcribe what people tell me and look for the themes in their own words, not score it as numbers.",
+    examples: "Lived experiences of nurses, why teachers leave a profession, how traders decided to adopt a service",
+  },
+  {
     value: "NOT_SURE",
     title: "I'm not sure yet",
     detail: "Choose this if your supervisor hasn't said. We will work it out from your topic and department.",
@@ -152,13 +158,24 @@ export const INTAKE_MODE_OPTIONS = [
   },
 ] as const;
 
+/**
+ * The answers a client may give, as the `IntakeModeAnswer` enum holds them. ONE list: the Zod
+ * schemas, the admin forms and the staff labels all read it, because these values were written out
+ * as literals in five places and adding a sixth answer missed four of them.
+ *
+ * "NOT_SURE" is a form value only -- it is stored as null, never as an enum member.
+ */
+export const INTAKE_MODE_ANSWERS = ["A", "B", "C", "D", "E", "F"] as const;
+export type IntakeModeAnswerValue = (typeof INTAKE_MODE_ANSWERS)[number];
+
 /** Short labels for staff screens (Requirements tab, edit forms). */
-export const INTAKE_MODE_LABEL: Record<"A" | "B" | "C" | "D" | "E", string> = {
+export const INTAKE_MODE_LABEL: Record<IntakeModeAnswerValue, string> = {
   A: "A: reads and argues (thematic)",
   B: "B: survey or questionnaire",
   C: "C: builds something",
   D: "D: lab or field experiments",
   E: "E: published (secondary) data",
+  F: "F: interviews or focus groups (qualitative)",
 };
 
 /** Quick-add suggestions for a worker's specialties (department areas). */

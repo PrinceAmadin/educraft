@@ -54,6 +54,7 @@ export const OBJECTIVES_CHECK_TEXT = {
     3: "Mode 3, build: designs, implements and tests a working system, prototype or application.",
     4: "Mode 4, laboratory: runs physical experiments or tests and analyses the measurements.",
     5: "Mode 5, secondary data: analyses existing published datasets or records quantitatively, with no primary data collection.",
+    6: "Mode 6, qualitative: collects primary data from people in their own words (interviews, focus groups, documents) and analyses it thematically, not statistically.",
   } satisfies Record<ResearchModeNumber, string>,
 } as const;
 

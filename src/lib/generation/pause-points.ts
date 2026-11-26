@@ -9,7 +9,9 @@
 
 export type PauseKind = "SPECIFICATION" | "RESULTS";
 
-const PAUSE_POINTS: Record<number, number[]> = { 1: [], 2: [3], 3: [2, 3], 4: [3], 5: [] };
+// Mode 6 (qualitative) pauses where its host Mode 2 does: once, after Chapter 3, waiting on the
+// client's own transcripts or coded output. That identical shape is why it hosts there.
+const PAUSE_POINTS: Record<number, number[]> = { 1: [], 2: [3], 3: [2, 3], 4: [3], 5: [], 6: [3] };
 
 /** The chapters after which a mode's pipeline waits for the client's data. */
 export function pausePointsFor(mode: number): number[] {

@@ -460,6 +460,7 @@ enum IntakeModeAnswer {
   C
   D
   E
+  F // interviews, focus groups or documents analysed in the participants' own words (Mode 6, 26 Nov 2026)
 }
 
 enum DataRequirement {
