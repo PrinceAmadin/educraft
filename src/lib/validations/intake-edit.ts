@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
+import { PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
 
 const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
 const referencingValues = Object.values(ReferencingStyle) as [ReferencingStyle, ...ReferencingStyle[]];
@@ -9,6 +10,13 @@ const dataValues = Object.values(DataRequirement) as [DataRequirement, ...DataRe
 
 /** A string that may be blank (blank clears the field). */
 const text = (max: number) => z.string().trim().max(max);
+
+/**
+ * A page requirement the planner can actually read. Blank is fine (the level's own band decides);
+ * free text is not, because `parsePageRequirement` ignores what it cannot read and nobody would
+ * know the number did nothing.
+ */
+const pageRequirement = text(1000).refine((v) => !v || parsePageRequirement(v) !== null, PAGE_REQUIREMENT_MESSAGE);
 const blankOr = <T extends z.ZodTypeAny>(schema: T) => z.union([z.literal(""), schema]);
 
 const optionalInt = (max: number, tooMany?: string) =>
@@ -61,7 +69,7 @@ export const intakeEditSchema = z.object({
       referencingStyle: blankOr(z.enum(referencingValues)),
       dataRequirements: blankOr(z.enum(dataValues)),
       intakeModeAnswer: blankOr(z.enum(["A", "B", "C", "D", "E"])),
-      minimumPages: text(1000),
+      minimumPages: pageRequirement,
       clientDeadline: blankOr(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a valid date")),
       departmentOutline: text(6000),
       specialInstructions: text(6000),

@@ -110,10 +110,15 @@ const CHAPTER_WEIGHT: Record<number, number> = { 1: 12, 2: 26, 3: 24, 4: 28, 5: 
  * text ("70", "Above 90", "Not Specified"), so anything that is not a number is ignored rather than
  * guessed at.
  */
+export const PAGE_REQUIREMENT_RANGE = { min: 20, max: 1000 } as const;
+
+/** What a form says when the number it was given cannot be read. */
+export const PAGE_REQUIREMENT_MESSAGE = `Give the page count as a plain number between ${PAGE_REQUIREMENT_RANGE.min} and ${PAGE_REQUIREMENT_RANGE.max} (for example 180). It sets how long the report is written, so "above 90" cannot be used.`;
+
 export function parsePageRequirement(minimumPages: string | null | undefined): number | null {
   const m = /^\s*(\d{2,4})\s*(?:pages?)?\s*$/i.exec(minimumPages ?? "");
   const n = m ? Number(m[1]) : NaN;
-  return Number.isFinite(n) && n >= 20 && n <= 1000 ? n : null;
+  return Number.isFinite(n) && n >= PAGE_REQUIREMENT_RANGE.min && n <= PAGE_REQUIREMENT_RANGE.max ? n : null;
 }
 
 /** The whole report's word target: the client's own page requirement if they gave one, else the middle of the level's band. */

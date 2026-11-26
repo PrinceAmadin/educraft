@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
-import { DEGREE_LEVELS } from "@/lib/degree-level";
+import { DEGREE_LEVELS, PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
 import { ProjectStatus, ProjectType, ReferencingStyle } from "@prisma/client";
 import { commissionRateSchema } from "@/lib/validations/commission";
 
@@ -77,6 +77,13 @@ export const internalNotesBodySchema = z.object({
 
 const optionalText = z.string().trim().max(500).optional().or(z.literal(""));
 
+/**
+ * A page requirement the planner can actually read. Blank is fine (the level's own band decides);
+ * free text is not, because `parsePageRequirement` ignores what it cannot read and nobody would
+ * know the number did nothing.
+ */
+const pageRequirement = optionalText.refine((v) => !v || parsePageRequirement(v) !== null, PAGE_REQUIREMENT_MESSAGE);
+
 /** Empty string / null → undefined, otherwise coerce to a positive int. */
 const optionalPositiveInt = (max: number, tooMany?: string) =>
   z.preprocess(
@@ -142,7 +149,7 @@ export const createProjectSchema = z
     supervisorName: optionalText,
     hodName: optionalText,
     referencingStyle: z.enum(referencingValues).optional().or(z.literal("")),
-    minimumPages: optionalText,
+    minimumPages: pageRequirement,
     projectType: z.enum(projectTypeValues).optional().or(z.literal("")),
     /** Blank means the service decides (degreeLevelForService); the admin may override it. */
     degreeLevel: z.enum(DEGREE_LEVELS).optional().or(z.literal("")),

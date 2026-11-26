@@ -19,6 +19,7 @@ import { TagInput } from "@/components/forms/TagInput";
 import { UniversityCombobox } from "@/components/forms/UniversityCombobox";
 import { FormProgress } from "@/components/intake/FormProgress";
 import { DEPARTMENT_TEMPLATES, intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/intake";
+import { PAGE_REQUIREMENT_RANGE } from "@/lib/degree-level";
 import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
@@ -719,8 +720,21 @@ function FypProjectStep() {
             ))}
           </Select>
         </Field>
-        <Field label="Minimum pages" htmlFor="minimumPages" hint="If your school sets a minimum">
-          <Input id="minimumPages" {...register("minimumPages")} />
+        <Field
+          label="Minimum pages"
+          htmlFor="minimumPages"
+          hint="If your school sets one. We write to this length, so give it as a plain number."
+          error={errors.minimumPages?.message as string | undefined}
+        >
+          <Input
+            id="minimumPages"
+            type="number"
+            inputMode="numeric"
+            min={PAGE_REQUIREMENT_RANGE.min}
+            max={PAGE_REQUIREMENT_RANGE.max}
+            placeholder="e.g. 180"
+            {...register("minimumPages")}
+          />
         </Field>
       </div>
     </div>

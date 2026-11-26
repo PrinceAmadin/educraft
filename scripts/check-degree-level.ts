@@ -27,6 +27,8 @@ import {
   chapterWordTarget,
   hasOwnLengthTarget,
   pageTargetFor,
+  PAGE_REQUIREMENT_MESSAGE,
+  PAGE_REQUIREMENT_RANGE,
   parsePageRequirement,
   referenceCeiling,
   referenceFloorFor,
@@ -150,6 +152,8 @@ check("catalogue: the PhD has no data-analysis option to self-serve", !phd?.vari
 
 const FIVE = [1, 2, 3, 4, 5];
 
+check("the message says what the number does and refuses the free text that used to be allowed", /plain number/.test(PAGE_REQUIREMENT_MESSAGE) && /how long the report is written/.test(PAGE_REQUIREMENT_MESSAGE) && /above 90/.test(PAGE_REQUIREMENT_MESSAGE));
+check("the parser and the forms share one range", parsePageRequirement(String(PAGE_REQUIREMENT_RANGE.min)) === PAGE_REQUIREMENT_RANGE.min && parsePageRequirement(String(PAGE_REQUIREMENT_RANGE.max)) === PAGE_REQUIREMENT_RANGE.max && parsePageRequirement(String(PAGE_REQUIREMENT_RANGE.min - 1)) === null && parsePageRequirement(String(PAGE_REQUIREMENT_RANGE.max + 1)) === null);
 check("a page requirement is read only when it is a plain number", parsePageRequirement("180") === 180 && parsePageRequirement("180 pages") === 180 && parsePageRequirement("  90  ") === 90);
 check("...and anything a client might type instead is ignored, never guessed at", ["Above 90", "Not Specified", "", "as my supervisor says", "1", "99999", null, undefined].every((v) => parsePageRequirement(v) === null));
 

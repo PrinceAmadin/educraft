@@ -2,12 +2,26 @@ import { z } from "zod";
 import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
+import { PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
 
 const projectTypeValues = Object.values(ProjectType) as [ProjectType, ...ProjectType[]];
 const referencingValues = Object.values(ReferencingStyle) as [ReferencingStyle, ...ReferencingStyle[]];
 const dataValues = Object.values(DataRequirement) as [DataRequirement, ...DataRequirement[]];
 
 const text = z.string().trim().max(1000).optional().or(z.literal(""));
+
+/**
+ * A page requirement the planner can actually read. Blank is fine (the level's own band decides);
+ * free text is not, because `parsePageRequirement` ignores what it cannot read and the client would
+ * never know their number did nothing.
+ */
+const pageRequirement = z
+  .string()
+  .trim()
+  .optional()
+  .or(z.literal(""))
+  .refine((v) => !v || parsePageRequirement(v) !== null, PAGE_REQUIREMENT_MESSAGE);
+
 const longText = z.string().trim().max(6000).optional().or(z.literal(""));
 
 const optionalPositiveInt = (max: number, tooMany?: string) =>
@@ -137,7 +151,7 @@ export const intakeSubmitSchema = z
     dataRequirements: z.enum(dataValues).optional().or(z.literal("")),
     // D3: how the project collects its data (A–E, or NOT_SURE); the COO's mode card reads it.
     intakeModeAnswer: z.enum(["A", "B", "C", "D", "E", "NOT_SURE"]).optional().or(z.literal("")),
-    minimumPages: text,
+    minimumPages: pageRequirement,
 
     // Term paper
     courseTitle: text,

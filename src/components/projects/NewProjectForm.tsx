@@ -26,7 +26,7 @@ import {
 import { EmailToggle } from "@/components/projects/AmbassadorAllocation";
 import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/projects";
 import { ACADEMIC_LEVELS, INTAKE_MODE_LABEL, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
-import { DEGREE_LEVELS, degreeLevelLabel } from "@/lib/degree-level";
+import { DEGREE_LEVELS, PAGE_REQUIREMENT_RANGE, degreeLevelLabel } from "@/lib/degree-level";
 import { COMMISSION_RATE_PRESETS, commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
@@ -834,8 +834,21 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
               ))}
             </Select>
           </Field>
-          <Field label="Minimum pages" htmlFor="minimumPages">
-            <Input id="minimumPages" {...register("minimumPages")} />
+          <Field
+            label="Minimum pages"
+            htmlFor="minimumPages"
+            hint="A plain number: the report is written to this length."
+            error={errors.minimumPages?.message}
+          >
+            <Input
+              id="minimumPages"
+              type="number"
+              inputMode="numeric"
+              min={PAGE_REQUIREMENT_RANGE.min}
+              max={PAGE_REQUIREMENT_RANGE.max}
+              placeholder="e.g. 180"
+              {...register("minimumPages")}
+            />
           </Field>
           <Field label="Level" htmlFor="degreeLevel" hint="Leave blank and the service decides. A PhD is always set here.">
             <Select id="degreeLevel" {...register("degreeLevel")}>
