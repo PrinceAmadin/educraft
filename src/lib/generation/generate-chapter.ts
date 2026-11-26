@@ -243,6 +243,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
     supervisorToc: input.prompt.project.supervisorToc,
     qualityFailures: input.qualityFailures,
     wordTarget,
+    degreeLevel: level,
   });
   const promptMeta = {
     department: assembled.department,

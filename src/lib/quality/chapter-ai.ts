@@ -12,6 +12,7 @@ import path from "node:path";
 import { callClaudeForJson } from "@/lib/anthropic";
 import { ABSTRACT_CHARS, noAbstract, readSupportVerdicts, supportPairs, SUPPORT_TOOL, type CitationMatch, type GateReference, type SupportPair, type SupportResult } from "./citation-check";
 import type { ProseParagraph } from "./prose";
+import type { DegreeLevel } from "@/lib/degree-level";
 import { QUALITY_TEXT } from "./text";
 import { validateAiVoiceFindings, VOICE_TOOL, type VoiceFinding } from "./voice-scan";
 
@@ -108,6 +109,8 @@ export function chapterAiTasks(a: {
   title: string;
   department: string;
   chapter: { number: number; text: string };
+  /** Undergraduate unless the order says otherwise: the voice review is told what it is reading. */
+  degreeLevel?: DegreeLevel;
   paragraphs: ProseParagraph[];
   scan: VoiceFinding[];
   match: CitationMatch;
@@ -130,7 +133,7 @@ export function chapterAiTasks(a: {
       if (!chapterParas.length) return;
       try {
         const raw = await callClaudeForJson<unknown>({
-          system: `${QUALITY_TEXT.voiceSystem}\n\n${await voiceRules()}`,
+          system: `${QUALITY_TEXT.voiceSystemFor(a.degreeLevel)}\n\n${await voiceRules()}`,
           cacheSystem: true,
           user: QUALITY_TEXT.voiceUser({
             title: a.title,

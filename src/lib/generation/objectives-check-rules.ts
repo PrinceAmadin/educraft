@@ -14,6 +14,16 @@
  */
 
 import type { ResearchModeNumber } from "@/lib/generation/department-map";
+import { postgraduateNote, type DegreeLevel } from "@/lib/degree-level";
+
+/**
+ * The examiner prompt, with the postgraduate correction appended when the work is postgraduate. The
+ * undergraduate string is returned unchanged, so an undergraduate check is byte-identical.
+ */
+export function checkSystemPrompt(level: DegreeLevel = "UNDERGRADUATE"): string {
+  const note = postgraduateNote(level, "objectives");
+  return note ? `${OBJECTIVES_CHECK_TEXT.system}\n\n---\n\n${note}` : OBJECTIVES_CHECK_TEXT.system;
+}
 
 export const OBJECTIVES_CHECK_TEXT = {
   system:
@@ -54,6 +64,8 @@ export interface ObjectivesCheckInput {
   modeNumber: ResearchModeNumber;
   aim: string | null;
   objectives: string[];
+  /** Undergraduate unless the order says otherwise: appends the postgraduate correction. */
+  degreeLevel?: DegreeLevel;
 }
 
 const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
@@ -81,6 +93,7 @@ export function checkUserPrompt(input: ObjectivesCheckInput): string {
  */
 export function objectivesCheckKey(input: ObjectivesCheckInput): string {
   const text = JSON.stringify([
+    input.degreeLevel ?? "UNDERGRADUATE",
     clean(input.title).toLowerCase(),
     clean(input.department).toLowerCase(),
     clean(input.degree).toLowerCase(),

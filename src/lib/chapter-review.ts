@@ -16,6 +16,9 @@
  * `npm run check:chapter-review` all use these rules.
  */
 
+import { requiresGreenReviewer, type DegreeLevel } from "@/lib/degree-level";
+import { TRUST_TIER, type TrustTier } from "@/lib/operations/trust-tier";
+
 export type ReviewVersionStatus = "SUBMITTED" | "RELEASED" | "RETURNED" | "SUPERSEDED";
 
 export interface ReviewVersion {
@@ -203,6 +206,13 @@ export interface ApprovalFacts {
   check?: { status: "RUNNING" | "PASSED" | "FAILED" | "ERROR"; lines: string[] } | null;
   /** The founder approves a failed check anyway, with a written reason. */
   override?: boolean;
+  /**
+   * Postgraduate work (founder: "same pipeline, stricter review"): the specialist who uploaded this
+   * chapter must be at the Green trust tier. Left out where the rule does not apply.
+   */
+  level?: DegreeLevel;
+  /** The uploading specialist's trust tier, when one is known. */
+  uploaderTier?: TrustTier | null;
 }
 
 /** Why the COO cannot approve this version (empty = they can). */
@@ -226,6 +236,12 @@ export function approvalRefusals(f: ApprovalFacts): string[] {
       else if (f.check.status === "ERROR") out.push(c.error);
       else if (f.check.status === "FAILED" && !f.override) out.push(c.failed(f.check.lines));
     }
+  }
+  // Postgraduate work is reviewed by a Green-tier specialist only. The founder may still approve it
+  // with a written reason, the same override that carries a failed check.
+  if (f.level && requiresGreenReviewer(f.level) && !f.override) {
+    if (f.uploaderTier === undefined || f.uploaderTier === null) out.push(t.tierUnknown);
+    else if (f.uploaderTier !== "GREEN") out.push(t.notGreen(f.uploaderTier));
   }
   return out;
 }
@@ -276,6 +292,9 @@ export const CHAPTER_REVIEW_TEXT = {
     notRead: "The file has not been read yet. Refresh in a moment.",
     placeholders: (items: readonly string[]) => `Blanks are still to be filled in: ${LIST(items.slice(0, 8))}${items.length > 8 ? ` and ${items.length - 8} more` : ""}.`,
     changed: "The file was read again since you looked at it. Refresh and check the summary before approving.",
+    tierUnknown: "Postgraduate chapters are approved from a Green-tier specialist only, and this upload's specialist is not known. Check who uploaded it.",
+    notGreen: (tier: TrustTier) =>
+      `Postgraduate chapters are approved from a Green-tier specialist only; this one is ${TRUST_TIER[tier].label}. Reassign it to a Green-tier specialist, or ask the founder to approve it with a reason.`,
   },
   approveConfirm: (chapter: number, clientSees: boolean) =>
     `Approve Chapter ${chapter}? ${clientSees ? "The client can download it straight away." : "It is not shown to the client on its own; it goes into the complete report."} The complete report is built from this file.`,

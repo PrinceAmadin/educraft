@@ -131,7 +131,8 @@ const BRIEF_SELECT = {
       projectType: true,
       dataRequirements: true,
       intakeModeAnswer: true,
-      client: { select: { department: true, university: { select: { name: true } } } },
+      degreeLevel: true,
+      client: { select: { department: true, faculty: true, university: { select: { name: true } } } },
       researchMode: { select: { department: true, modeNumber: true } },
     },
   },
@@ -222,7 +223,20 @@ async function stepDraft(brief: StageBrief): Promise<void> {
     return;
   }
   const mode = savedMode;
-  const objectivesContext = { title: ctx.topic, department: ctx.department, degree: getDegreeFromDepartment(ctx.department), modeNumber: mode };
+  const level = brief.project.degreeLevel;
+  // The award the DEPARTMENT confers at THIS level: Computer Science + MASTERS is an M.Sc, and the
+  // judge is told so, because "achievable" means something different at each level.
+  const objectivesContext = {
+    title: ctx.topic,
+    department: ctx.department,
+    degree: getDegreeFromDepartment(ctx.department, {
+      faculty: brief.project.client.faculty,
+      institution: brief.project.client.university?.name,
+      level,
+    }),
+    modeNumber: mode,
+    degreeLevel: level,
+  };
   // Pre-check: if the client's own brief or the supervisor's outline already
   // lists the objectives (a run of 4–5 "To …" lines), use them word for word
   // and skip the full draft. Preserves the fromClient flag used by the card.

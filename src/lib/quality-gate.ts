@@ -222,6 +222,7 @@ async function runLocked(
         title,
         department,
         chapter: ch,
+        degreeLevel: input.degreeLevel,
         paragraphs,
         scan,
         match,

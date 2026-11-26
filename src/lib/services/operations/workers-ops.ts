@@ -68,7 +68,7 @@ async function openFlagCounts(workerIds: string[]): Promise<Map<string, { total:
 }
 
 /** All trust signals for a set of workers, batched (used where the caller has no project rows to hand). */
-async function trustSignalsFor(workerIds: string[]): Promise<Map<string, TrustSignals>> {
+export async function trustSignalsFor(workerIds: string[]): Promise<Map<string, TrustSignals>> {
   const out = new Map<string, TrustSignals>();
   if (workerIds.length === 0) return out;
   const [completed, revisions, flags] = await Promise.all([

@@ -13,7 +13,7 @@
 
 import { SUPERVISOR_FACING_MODEL, callClaudeForJson } from "@/lib/anthropic";
 import type { AiUsageContext } from "@/lib/ai-usage-log";
-import { OBJECTIVES_CHECK_TEXT, checkUserPrompt, validateCheckReply, type CheckRow, type CheckScores, type ObjectivesCheckInput } from "@/lib/generation/objectives-check-rules";
+import { OBJECTIVES_CHECK_TEXT, checkSystemPrompt, checkUserPrompt, validateCheckReply, type CheckRow, type CheckScores, type ObjectivesCheckInput } from "@/lib/generation/objectives-check-rules";
 
 export const JUDGE_MODEL = SUPERVISOR_FACING_MODEL;
 export const JUDGE_STEP = "check_objectives";
@@ -74,7 +74,7 @@ export async function judgeObjectives(input: ObjectivesCheckInput, usage: AiUsag
       effort: "medium",
       // The retry re-sends within seconds; the cached system then costs 0.05x.
       cacheSystem: true,
-      system: OBJECTIVES_CHECK_TEXT.system,
+      system: checkSystemPrompt(input.degreeLevel),
       user,
       toolName: "record_objectives_check",
       toolDescription: OBJECTIVES_CHECK_TEXT.tool,

@@ -32,6 +32,7 @@ import {
   parsePageRequirement,
   referenceCeiling,
   referenceFloorFor,
+  postgraduateNote,
   researchTargetFor,
   wholeReportChapters,
   wordTargetFor,
@@ -48,6 +49,10 @@ import { GENERATION_TEXT } from "../src/lib/generation/chapter-plan";
 import { MAX_REFERENCES, TARGET_REFERENCES } from "../src/lib/services/research";
 import { REFERENCE_MINIMUM } from "../src/lib/quality/structural-checks";
 import { abstractBand } from "../src/lib/generation/preliminary-pages-rules";
+import { buildChapterBrief } from "../src/lib/generation/chapter-plan";
+import { OBJECTIVES_CHECK_TEXT, checkSystemPrompt } from "../src/lib/generation/objectives-check-rules";
+import { QUALITY_TEXT } from "../src/lib/quality/text";
+import { approvalRefusals, CHAPTER_REVIEW_TEXT } from "../src/lib/chapter-review";
 
 let passed = 0;
 const failures: string[] = [];
@@ -241,6 +246,60 @@ for (const level of DEGREE_LEVELS) {
   const b = abstractBand({ degreeLevel: level });
   check(`${level}: the band the page writer is given is the band the gate judges`, b.targetLo >= b.min && b.targetHi <= b.max && b.targetLo < b.targetHi, b);
 }
+
+// ─── Every Claude call is told what level it is working on ────────────────
+//
+// Each of these prompts was written for an undergraduate project and says so. The correction is
+// appended, never substituted, so the undergraduate prompt is byte-identical.
+
+for (const purpose of ["objectives", "voice", "chapter"] as const) {
+  check(`${purpose}: an undergraduate project gets no correction at all`, postgraduateNote("UNDERGRADUATE", purpose) === null);
+  for (const level of ["MASTERS", "PHD"] as const) {
+    const note = postgraduateNote(level, purpose)!;
+    check(`${purpose} / ${level}: the correction names the work for what it is`, note.includes(DEGREE_LEVEL_TEXT.workDescription[level]), note.slice(0, 80));
+    check(`${purpose} / ${level}: and says it is not an undergraduate project`, /not an undergraduate/i.test(note), note.slice(0, 120));
+  }
+}
+check("the objectives correction fixes the ACHIEVABLE band, which named an undergraduate in one semester", (() => {
+  const note = postgraduateNote("MASTERS", "objectives")!;
+  return note.includes(DEGREE_LEVEL_TEXT.achievableBy.MASTERS) && /ACHIEVABLE means/.test(note) && !note.includes(DEGREE_LEVEL_TEXT.achievableBy.UNDERGRADUATE.slice(0, 20));
+})());
+check("...and asks for a contribution to knowledge, which undergraduate work is not held to", /contribution to knowledge/i.test(postgraduateNote("PHD", "objectives")!));
+check("the chapter correction carries the founder's benchmarking rule word for word", postgraduateNote("MASTERS", "chapter")!.includes(DEGREE_LEVEL_TEXT.benchmarking));
+check("the voice correction says depth is not a fault", /depth/i.test(postgraduateNote("MASTERS", "voice")!) && /not faults/i.test(postgraduateNote("MASTERS", "voice")!));
+
+check("the examiner prompt is unchanged for an undergraduate project", checkSystemPrompt() === OBJECTIVES_CHECK_TEXT.system && checkSystemPrompt("UNDERGRADUATE") === OBJECTIVES_CHECK_TEXT.system);
+check("...and carries the correction for a master's, after the original", (() => {
+  const pg = checkSystemPrompt("MASTERS");
+  return pg.startsWith(OBJECTIVES_CHECK_TEXT.system) && pg.endsWith(postgraduateNote("MASTERS", "objectives")!);
+})());
+check("the voice review prompt is unchanged for an undergraduate report", QUALITY_TEXT.voiceSystemFor() === QUALITY_TEXT.voiceSystem && QUALITY_TEXT.voiceSystemFor("UNDERGRADUATE") === QUALITY_TEXT.voiceSystem);
+check("...and corrected for a dissertation", QUALITY_TEXT.voiceSystemFor("PHD").startsWith(QUALITY_TEXT.voiceSystem) && QUALITY_TEXT.voiceSystemFor("PHD").length > QUALITY_TEXT.voiceSystem.length);
+
+const briefArgs = { chapter: 4 as const, projectTitle: "T", university: "U", department: "Computer Science", template: "A" as const, objectives: ["o"] };
+check("a chapter brief carries no level note for an undergraduate report", !buildChapterBrief(briefArgs).includes("benchmark") && buildChapterBrief(briefArgs) === buildChapterBrief({ ...briefArgs, degreeLevel: "UNDERGRADUATE" }));
+check("...and a master's brief carries the benchmarking rule", buildChapterBrief({ ...briefArgs, degreeLevel: "MASTERS" }).includes(DEGREE_LEVEL_TEXT.benchmarking));
+
+// ─── Postgraduate chapters are approved from a Green specialist only ───────
+
+check("the Green rule applies to postgraduate work and not to undergraduate", requiresGreenReviewer("MASTERS") && requiresGreenReviewer("PHD") && !requiresGreenReviewer("UNDERGRADUATE"));
+const clean = {
+  version: { status: "SUBMITTED" as const, submittedByRole: "WORKER", fileName: "ch4.docx" },
+  projectStatus: "IN_PROGRESS",
+  readback: { blocking: [], placeholders: [], hash: "h" },
+  seenHash: "h",
+  check: { status: "PASSED" as const, lines: [] },
+};
+check("a clean undergraduate upload is approvable, with or without a tier", approvalRefusals(clean).length === 0 && approvalRefusals({ ...clean, level: "UNDERGRADUATE", uploaderTier: "RED" }).length === 0);
+check("a clean master's upload from a Green specialist is approvable", approvalRefusals({ ...clean, level: "MASTERS", uploaderTier: "GREEN" }).length === 0);
+check("...from an Amber or Red one it is refused by name", (() => {
+  const amber = approvalRefusals({ ...clean, level: "MASTERS", uploaderTier: "AMBER" });
+  const red = approvalRefusals({ ...clean, level: "PHD", uploaderTier: "RED" });
+  return amber.length === 1 && amber[0] === CHAPTER_REVIEW_TEXT.refuse.notGreen("AMBER") && red.length === 1 && /Green-tier/.test(red[0]);
+})());
+check("...and refused when nobody knows whose upload it is", approvalRefusals({ ...clean, level: "MASTERS", uploaderTier: null })[0] === CHAPTER_REVIEW_TEXT.refuse.tierUnknown);
+check("the founder's override carries this refusal too, as it carries a failed check", approvalRefusals({ ...clean, level: "MASTERS", uploaderTier: "RED", override: true }).length === 0);
+check("a failed check is still refused on postgraduate work from a Green specialist", approvalRefusals({ ...clean, level: "MASTERS", uploaderTier: "GREEN", check: { status: "FAILED", lines: ["ST15"] } }).length === 1);
 
 // ─── The undergraduate path is unchanged ─────────────────────────────────────
 

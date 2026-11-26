@@ -244,6 +244,7 @@ async function evaluateChapter(s: Subject, force: boolean, opts: { ai?: boolean 
       title: input.title,
       department: settings?.department ?? input.department,
       chapter: { number: s.chapter, text: s.text },
+      degreeLevel: prepared.input.degreeLevel,
       paragraphs: prepared.paragraphs,
       scan: prepared.scan,
       match: prepared.match,

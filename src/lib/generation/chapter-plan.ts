@@ -14,10 +14,14 @@
 import { z } from "zod";
 import type { ChapterNumber } from "./prompt-loader";
 import { ENDNOTES_START, endnoteEntry } from "@/lib/assembly/parse-chapter";
+import { WORDS_PER_PAGE, postgraduateNote, type DegreeLevel } from "@/lib/degree-level";
 
 export const REPORT_CHAPTERS = 5;
-/** Double-spaced Times New Roman 12pt, 1-inch margins. */
-export const WORDS_PER_PAGE = 250;
+/**
+ * Double-spaced Times New Roman 12pt, 1-inch margins. Re-exported from degree-level.ts, which
+ * works the length targets out from it, so the planner and the targets can never disagree.
+ */
+export { WORDS_PER_PAGE };
 /** Words written per Claude call: about 60–120 seconds of output. A section longer than this is split across parts by its sub-sections. */
 export const PART_WORD_LIMIT = 2000;
 /** A section with no sub-sections to split it by may run this long in one call; a longer one sends the plan back. */
@@ -208,6 +212,12 @@ export interface BriefInput {
    * in the department's own prompt block exactly as it always has.
    */
   wordTarget?: number | null;
+  /**
+   * Undergraduate unless the order says otherwise. Postgraduate work gets the founder's
+   * benchmarking rule: every finding measured against a published standard value or percentage,
+   * with the comparison cited.
+   */
+  degreeLevel?: DegreeLevel;
 }
 
 const numbered = (items: string[]) => items.map((item, i) => `${i + 1}. ${item.trim()}`).join("\n");
@@ -222,6 +232,8 @@ export function buildChapterBrief(b: BriefInput): string {
     GENERATION_TEXT.chapterOf(b.chapter),
   ];
   if (b.wordTarget && b.wordTarget > 0) lines.push(GENERATION_TEXT.chapterLength(b.wordTarget));
+  const levelNote = postgraduateNote(b.degreeLevel ?? "UNDERGRADUATE", "chapter");
+  if (levelNote) lines.push("", levelNote);
   if (b.template === "B") {
     const t3 = b.thematicTitles?.chapter3?.trim();
     const t4 = b.thematicTitles?.chapter4?.trim();

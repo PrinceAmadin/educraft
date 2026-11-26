@@ -280,4 +280,50 @@ export const DEGREE_LEVEL_TEXT = {
     "This is postgraduate work. Measure each finding against published standard values or percentages and cite the work you compare it with; a postgraduate result stated without a benchmark is not finished work.",
   /** The reviewer rule, for the chapter-approval screens. */
   greenReviewerOnly: "Postgraduate chapters are approved by a Green-tier specialist only.",
+
+  /**
+   * What each level's work is called when a prompt has to name it. Every Claude call HQ makes about
+   * a report was written for an undergraduate project and says so, in sentences the founder has
+   * reviewed; these are the corrections appended to them, the same mechanism `LOADER_TEXT` uses on
+   * the prompt .docx files, so the undergraduate wording stays byte-identical.
+   */
+  workDescription: {
+    UNDERGRADUATE: "Nigerian undergraduate research report",
+    MASTERS: "Nigerian master's dissertation",
+    PHD: "Nigerian doctoral thesis",
+  } satisfies Record<DegreeLevel, string>,
+  /** Who the work has to be achievable by, for the objectives judge's ACHIEVABLE band. */
+  achievableBy: {
+    UNDERGRADUATE: "one Nigerian final-year undergraduate in a single semester",
+    MASTERS: "one Nigerian master's candidate over a full research year, with supervision",
+    PHD: "one Nigerian doctoral candidate over several years of supervised research",
+  } satisfies Record<DegreeLevel, string>,
 } as const;
+
+/**
+ * The correction appended to an undergraduate-written prompt when the work is postgraduate. Null for
+ * an undergraduate report, so nothing about an existing call changes.
+ *
+ * `purpose` picks what the note has to put right:
+ *  - "objectives": the aim and objectives being drafted or judged (depth, scope, who it is for)
+ *  - "voice": the chapter being reviewed for voice
+ *  - "chapter": the chapter being written (the founder's benchmarking rule)
+ */
+export function postgraduateNote(level: DegreeLevel, purpose: "objectives" | "voice" | "chapter"): string | null {
+  if (!isPostgraduate(level)) return null;
+  const work = DEGREE_LEVEL_TEXT.workDescription[level];
+  const label = degreeLevelLabel(level);
+  const noun = workNoun(level);
+  if (purpose === "voice") {
+    return `This chapter is from a ${work}, not an undergraduate project. Judge its voice to the standard expected of a ${label} ${noun}: the banned constructions below are banned just the same, but depth, technical vocabulary and sustained argument are expected here and are not faults.`;
+  }
+  if (purpose === "chapter") {
+    return `${DEGREE_LEVEL_TEXT.benchmarking} You are writing a chapter of a ${work}, not an undergraduate project: argue at ${label} depth, and support every claim with a cited source.`;
+  }
+  return [
+    `This is a ${work}, not an undergraduate final year project. Judge and write to ${label} standard:`,
+    `- the aim and objectives must be worth a ${noun}, not a project that could pass at first-degree level;`,
+    `- ACHIEVABLE means achievable by ${DEGREE_LEVEL_TEXT.achievableBy[level]}, not by an undergraduate in a semester;`,
+    "- a contribution to knowledge is expected, so an objective that only describes or summarises is weak here even where it would pass undergraduate.",
+  ].join("\n");
+}

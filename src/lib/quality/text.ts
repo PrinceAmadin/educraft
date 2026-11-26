@@ -4,8 +4,18 @@
  * GENERATION_TEXT are for generation). Pure.
  */
 
+import { postgraduateNote, type DegreeLevel } from "@/lib/degree-level";
+
 export const QUALITY_TEXT = {
   // ── Layer 2a: voice review (one call per chapter; the rule files follow this in the system prompt) ──
+  /**
+   * Appended to voiceSystem for postgraduate work: the review was written for an undergraduate
+   * report and says so, and depth is not a fault in a dissertation.
+   */
+  voiceSystemFor: (level: DegreeLevel = "UNDERGRADUATE"): string => {
+    const note = postgraduateNote(level, "voice");
+    return note ? `${QUALITY_TEXT.voiceSystem}\n${note}` : QUALITY_TEXT.voiceSystem;
+  },
   voiceSystem: [
     "You review the voice of one chapter of a Nigerian undergraduate research report for EduCraft, before a human QA reviewer reads it.",
     "The writer was given the two rule files below. Find the passages in this chapter that break them.",

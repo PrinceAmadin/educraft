@@ -8,6 +8,9 @@ import { checkUploadedFile, type UploadedFileInput } from "@/lib/files/register"
 import { buildPrivatePath } from "@/lib/files/paths";
 import { deleteStoredFile, putPrivateFile } from "@/lib/files/storage";
 import { releaseAnnouncement } from "@/lib/client-document-text";
+import { requiresGreenReviewer } from "@/lib/degree-level";
+import { deriveTrustTier, type TrustTier } from "@/lib/operations/trust-tier";
+import { trustSignalsFor } from "@/lib/services/operations/workers-ops";
 import {
   approvalRefusals,
   builtFromIsStale,
@@ -635,6 +638,16 @@ async function releaseMessage(projectDbId: string, title: string, isFinal: boole
  * Release a submitted version to the client, or return it to the worker with
  * a note. Returns 409 when someone else already reviewed it.
  */
+/**
+ * The assigned specialist's trust tier, for the postgraduate Green-only rule. Null when there is no
+ * specialist to judge, which `approvalRefusals` treats as "not known" rather than as a pass.
+ */
+async function uploaderTrustTier(workerId: string | null): Promise<TrustTier | null> {
+  if (!workerId) return null;
+  const signals = (await trustSignalsFor([workerId]).catch(() => null))?.get(workerId);
+  return signals ? deriveTrustTier(signals) : null;
+}
+
 export async function reviewVersion(input: {
   projectIdOrCode: string;
   versionId: string;
@@ -676,7 +689,8 @@ export async function reviewVersion(input: {
               status: true,
               downpaymentStatus: true,
               balanceStatus: true,
-              worker: { select: { userId: true } },
+              degreeLevel: true,
+              worker: { select: { id: true, userId: true } },
             },
           },
         },
@@ -727,6 +741,10 @@ export async function reviewVersion(input: {
     const override = input.overrideReason?.trim() || null;
     if (override && !input.isSuperAdmin) throw new DeliverableError(CHAPTER_REVIEW_TEXT.check.refuse.overrideFounderOnly, 403, "OVERRIDE_FOUNDER_ONLY");
     const check = isAiDraft(version) ? null : await uploadCheck(project.id, deliverable.chapter, version.id);
+    // Postgraduate work is approved from a Green-tier specialist only (founder: "same pipeline,
+    // stricter review"). The tier is derived from the specialist's own record, as everywhere else.
+    const needsGreen = requiresGreenReviewer(project.degreeLevel);
+    const uploaderTier = needsGreen ? await uploaderTrustTier(project.worker?.id ?? null) : undefined;
     const refusals = approvalRefusals({
       version: { status: version.status, submittedByRole: version.submittedByRole, fileName: version.file.fileName },
       projectStatus: project.status,
@@ -734,6 +752,7 @@ export async function reviewVersion(input: {
       seenHash: input.readbackHash ?? null,
       check,
       override: Boolean(override),
+      ...(needsGreen ? { level: project.degreeLevel, uploaderTier } : {}),
     });
     if (refusals.length) throw new DeliverableError(refusals[0], 409, "APPROVAL_REFUSED", { refusals });
     if (override && check?.status === "FAILED") {

@@ -28,6 +28,7 @@ import { listFrom } from "@/lib/research/source-policy";
 import type { AiUsageContext } from "@/lib/ai-usage-log";
 import { MAX_AIM_CHARS, MAX_OBJECTIVE_CHARS, MAX_OBJECTIVES, MIN_OBJECTIVES, validateAim, validateObjectives } from "@/lib/generation/objectives-rules";
 import type { ResearchModeNumber } from "@/lib/generation/department-map";
+import { postgraduateNote, type DegreeLevel } from "@/lib/degree-level";
 
 export { MAX_OBJECTIVE_CHARS, MAX_OBJECTIVES, MIN_OBJECTIVES, validateAim, validateObjectives };
 export type { ObjectivesCheck } from "@/lib/generation/objectives-rules";
@@ -37,6 +38,8 @@ export interface ObjectivesContext {
   department: string;
   degree: string;
   modeNumber: ResearchModeNumber;
+  /** Undergraduate unless the order says otherwise: appends the postgraduate correction. */
+  degreeLevel?: DegreeLevel;
 }
 
 export const OBJECTIVES_TEXT = {
@@ -112,6 +115,15 @@ const MODE_NAME: Record<ResearchModeNumber, string> = {
   5: "Mode 5 (Secondary Data)",
 };
 
+/**
+ * The drafter's prompt, with the postgraduate correction appended when the work is postgraduate. An
+ * undergraduate project gets the string the founder reviewed, unchanged.
+ */
+function systemFor(ctx: ObjectivesContext, base: string): string {
+  const note = postgraduateNote(ctx.degreeLevel ?? "UNDERGRADUATE", "objectives");
+  return note ? `${base}\n\n---\n\n${note}` : base;
+}
+
 export function objectivesUserPrompt(ctx: ObjectivesContext): string {
   return [
     `PROJECT TITLE: ${ctx.title.replace(/\s+/g, " ").trim()}`,
@@ -163,7 +175,7 @@ export async function draftObjectives(ctx: ObjectivesContext, usage: AiUsageCont
   let last: string[] = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     const reply = await callClaudeForJson<{ aim?: unknown; objectives?: unknown }>({
-      system: OBJECTIVES_TEXT.system,
+      system: systemFor(ctx, OBJECTIVES_TEXT.system),
       user,
       toolName: "record_objectives",
       toolDescription: OBJECTIVES_TEXT.tool,
@@ -190,7 +202,7 @@ export async function draftAim(ctx: ObjectivesContext, objectives: string[], usa
   let last: string[] = [];
   for (let attempt = 1; attempt <= 2; attempt++) {
     const reply = await callClaudeForJson<{ aim?: unknown }>({
-      system: OBJECTIVES_TEXT.aimSystem,
+      system: systemFor(ctx, OBJECTIVES_TEXT.aimSystem),
       user,
       toolName: "record_aim",
       toolDescription: OBJECTIVES_TEXT.aimTool,
