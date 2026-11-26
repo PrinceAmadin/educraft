@@ -18,7 +18,7 @@ import { Field } from "@/components/forms/Field";
 import { TagInput } from "@/components/forms/TagInput";
 import { UniversityCombobox } from "@/components/forms/UniversityCombobox";
 import { FormProgress } from "@/components/intake/FormProgress";
-import { intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/intake";
+import { DEPARTMENT_TEMPLATES, intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/intake";
 import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
@@ -456,6 +456,7 @@ function StepContent({
               ? "light"
               : "full"
           }
+          departmentRequired={DEPARTMENT_TEMPLATES.includes(template)}
         />
       );
     case "contact":
@@ -610,9 +611,16 @@ function UniversitySelect({ universities }: { universities: UniversityOption[] }
 function PersonalStep({
   universities,
   variant,
+  departmentRequired,
 }: {
   universities: UniversityOption[];
   variant: "full" | "light";
+  /**
+   * Whether the schema will insist on a department for this template. NOT the
+   * same as `variant`: the term-paper form is "light" (no faculty or matric
+   * number) but still has to name a department.
+   */
+  departmentRequired: boolean;
 }) {
   const {
     register,
@@ -641,7 +649,7 @@ function PersonalStep({
         ) : null}
         <Field
           label="Department"
-          required={full}
+          required={departmentRequired}
           htmlFor="department"
           error={errors.department?.message as string | undefined}
         >

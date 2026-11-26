@@ -84,6 +84,19 @@ export const INTAKE_TEMPLATES = [
 ] as const;
 
 /**
+ * The templates that must name a department. The schema's rule below and the
+ * form's asterisk read this ONE list, so a field cannot be required by the
+ * server while the form leaves it looking optional (which is what happened to
+ * the term-paper form: required here, unmarked there, until 26 Nov 2026).
+ */
+export const DEPARTMENT_TEMPLATES: readonly (typeof INTAKE_TEMPLATES)[number][] = [
+  "academic_fyp",
+  "academic_termpaper",
+  "academic_seminar",
+  "academic_it",
+];
+
+/**
  * Public intake submission. One flat shape; `template` drives a superRefine
  * that enforces the fields each form actually requires.
  */
@@ -186,13 +199,7 @@ export const intakeSubmitSchema = z
     // Every EduCraft client is tied to a university.
     require("universityId", Boolean(v.universityId), "Select your university");
 
-    const academic = [
-      "academic_fyp",
-      "academic_termpaper",
-      "academic_seminar",
-      "academic_it",
-    ].includes(v.template);
-    if (academic) {
+    if (DEPARTMENT_TEMPLATES.includes(v.template)) {
       require("department", Boolean(v.department && v.department.length >= 2), "Enter your department");
     }
 
