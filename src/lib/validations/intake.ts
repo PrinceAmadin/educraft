@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHAPTER_LIMIT_MESSAGE, MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
+import { MAX_PAPERS } from "@/lib/publication-pricing";
 import { DataRequirement, ProjectType, ReferencingStyle } from "@prisma/client";
 import { phoneSchema } from "@/lib/validations/clients";
 import { PAGE_REQUIREMENT_MESSAGE, parsePageRequirement } from "@/lib/degree-level";
@@ -123,6 +124,8 @@ export const intakeSubmitSchema = z
     serviceVariantId: z.string().trim().max(60).optional().or(z.literal("")),
     /** Chapter-based report only: which chapters (1-5) the client wants. */
     chapters: z.array(z.number().int().min(1).max(5)).max(5).optional(),
+    /** Publication order only: how many papers (1-MAX_PAPERS) from the one source report. */
+    papers: optionalPositiveInt(MAX_PAPERS),
     /** Documents the client attached (proposal, outline, existing work). */
     attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS).optional(),
 

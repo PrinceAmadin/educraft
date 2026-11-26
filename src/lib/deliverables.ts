@@ -1,4 +1,5 @@
 import { CHAPTER_SERVICE_CODE, normalizeChapters } from "@/lib/chapter-pricing";
+import { PUBLICATION_SERVICE_CODE, normalizePaperCount } from "@/lib/publication-pricing";
 
 /**
  * What each service hands the client, and when the client may download each
@@ -39,6 +40,10 @@ export function chapterTitle(n: number): string {
   return `Chapter ${n}`;
 }
 
+export function paperTitle(n: number): string {
+  return `Paper ${n}`;
+}
+
 /** Every report has five chapters at most, in every department (founder, 26 Sept 2026). */
 export const MAX_REPORT_CHAPTERS = 5;
 export const CHAPTER_LIMIT_MESSAGE = `A report has ${MAX_REPORT_CHAPTERS} chapters at most.`;
@@ -54,10 +59,24 @@ export function deliverableTemplate(input: {
   chapterCount: number | null;
   /** Chapter-based orders: the chapters the client paid for. */
   chapters?: readonly number[] | null;
+  /** Publication orders: how many papers the client paid for. */
+  papers?: number | null;
 }): DeliverableSpec[] {
   const code = input.serviceCode.toUpperCase();
   const out: DeliverableSpec[] = [];
   const push = (spec: Omit<DeliverableSpec, "sortOrder">) => out.push({ ...spec, sortOrder: out.length });
+
+  if (code === PUBLICATION_SERVICE_CODE) {
+    // Each paper is an independent deliverable — no "complete document" — released
+    // and approved on its own through the chapter-review loop, exactly as the
+    // proposal and slides (also kind OTHER) are. Access is BALANCE: a manuscript
+    // is the finished product, so it unlocks only on full payment.
+    const papers = normalizePaperCount(input.papers);
+    for (let n = 1; n <= papers; n++) {
+      push({ key: `paper${n}`, kind: "OTHER", chapter: null, title: paperTitle(n), access: "BALANCE" });
+    }
+    return out;
+  }
 
   if (code === CHAPTER_SERVICE_CODE) {
     const chapters = normalizeChapters(input.chapters);
@@ -121,6 +140,13 @@ export function orderedChapters(additionalData: unknown): number[] {
   const raw = (additionalData as Record<string, unknown>).chapters;
   if (!Array.isArray(raw)) return [];
   return normalizeChapters(raw.map((n) => Number(n)).filter((n) => Number.isFinite(n)));
+}
+
+/** How many papers a publication order was placed for, read from the intake data. */
+export function orderedPapers(additionalData: unknown): number {
+  if (!additionalData || typeof additionalData !== "object") return 1;
+  const raw = (additionalData as Record<string, unknown>).papers;
+  return normalizePaperCount(typeof raw === "number" ? raw : Number(raw));
 }
 
 /**
