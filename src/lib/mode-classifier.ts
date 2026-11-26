@@ -92,8 +92,14 @@ export const MODE_KEYWORDS: Record<ResearchModeNumber, readonly Keyword[]> = {
     "feminist literary",
     "post-colonial",
     "postcolonial",
-    "discourse analysis",
-    "thematic analysis",
+    // "thematic analysis" and "discourse analysis" were here, and they are the wrong signal: Mode 1
+    // is pure desk research ("No data collection", objectives-drafter.ts) with no pause and no
+    // upload format, while both name a method applied to interview transcripts at least as often as
+    // to published text. A topic reading "A thematic analysis of nurses' lived experiences" was
+    // therefore recommended the one mode that cannot receive the transcripts it implies. With no
+    // keyword either way the client's own answer, the older intake fields or the department default
+    // decides, and the COO still sees it on the card. They belong to the qualitative mode once it
+    // exists (26 Nov 2026).
   ],
   2: [
     "attitude of",

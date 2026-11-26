@@ -430,7 +430,12 @@ type ChapterFile = {
   /** Rule groups above the routing header marked "(ALL MODES)" (Chapter 4 and 5 cardinal rules). */
   allModesRules: string[][];
   routingIntro: string[];
-  modeBlocks: Map<ResearchModeNumber, string[]>;
+  /**
+   * Keyed by the number in the heading, not by ResearchModeNumber: a prompt file can physically
+   * carry a block for a mode the system does not yet support, and the type should say so. The
+   * guard in parseChapterFile still requires 1-5 to be present.
+   */
+  modeBlocks: Map<number, string[]>;
   /** Rule groups after the mode blocks; a group split by "Mode n:" lines keeps only the approved mode's part. */
   headerExtras: HeaderExtra[];
   blocks: Map<string, string[]>; // "SHARED: ALL DEPARTMENTS", "DEPARTMENT: X", "TEMPLATE B — X" → paragraphs
@@ -496,12 +501,23 @@ async function docxParagraphs(folder: string, fileName: string): Promise<string[
 }
 
 const ROUTING_HEADING = /^CHAPTER \d+ — MODE-(?:SPECIFIC|BY-MODE)\b/;
-const MODE_HEADING = /^MODE ([1-5]) — /;
+/**
+ * A mode block's heading. The range deliberately runs PAST the five modes the library holds blocks
+ * for. While it was `/^MODE ([1-5]) — /`, a "MODE 6 — …" paragraph did not match, fell through to
+ * the "append to the open block" branch, and was silently added to the **MODE 5** block — so every
+ * Mode 5 project (Accounting is locked to it, Economics defaults to it) would have received a sixth
+ * mode's instructions, and `check:prompts` could not notice because its mode assertions iterate the
+ * literal [1,2,3,4,5]. Widening it means a stray block parses as its own entry and is simply never
+ * read: the guard below still requires 1-5, and `loadChapterPrompt` still refuses any mode the
+ * system does not support. Widen this BEFORE writing a new MODE block into a prompt file.
+ */
+const MODE_HEADING = /^MODE ([1-8]) — /;
 const RULE_LINE = /^─{10,}/;
 const DEPARTMENT_BANNER = /^═+\s*DEPARTMENT-SPECIFIC PROMPTS/;
 const OPEN_TAG = /^\[(SHARED: ALL DEPARTMENTS|DEPARTMENT: [A-Z0-9_]+|TEMPLATE B — [^\]]+)\]$/;
 const CLOSE_TAG = /^\[END (.+)\]$/;
-const CHECKLIST_MODE = /^\s*Mode ([1-5]):\s*$/;
+/** A per-mode checklist line ("Mode 2:"), widened alongside MODE_HEADING and for the same reason. */
+const CHECKLIST_MODE = /^\s*Mode ([1-8]):\s*$/;
 
 function splitByRules(paragraphs: string[]): string[][] {
   const groups: string[][] = [[]];
@@ -525,17 +541,20 @@ function parseChapterFile(chapter: FileChapter, fileName: string, paragraphs: st
   // The routing header: an optional intro, the five MODE blocks, then groups separated by rule
   // lines that apply to every mode (e.g. Chapter 4's data input checklist).
   const routingIntro: string[] = [];
-  const modeBlocks = new Map<ResearchModeNumber, string[]>();
+  const modeBlocks = new Map<number, string[]>();
   const after: string[] = [];
-  let mode: ResearchModeNumber | null = null;
+  let mode: number | null = null;
   let afterModes = false;
   for (const p of paragraphs.slice(start + 1, banner)) {
     const heading = MODE_HEADING.exec(p);
     if (!afterModes && heading) {
-      mode = Number(heading[1]) as ResearchModeNumber;
+      mode = Number(heading[1]);
       if (modeBlocks.has(mode)) throw fail(`MODE ${mode} appears twice in the routing header`);
       modeBlocks.set(mode, [p]);
     } else if (afterModes) {
+      // The other half of the same trap: a MODE block written below the rule line that ends the mode
+      // section becomes a headerExtra, which EVERY mode receives. Refuse it loudly rather than ship it.
+      if (heading) throw fail(`MODE ${heading[1]} appears after the mode blocks end; move it in among the others`);
       after.push(p);
     } else if (RULE_LINE.test(p)) {
       if (mode !== null) {
@@ -574,6 +593,23 @@ function parseChapterFile(chapter: FileChapter, fileName: string, paragraphs: st
   if (open) throw fail(`[${open}] is never closed`);
   if (!blocks.has("SHARED: ALL DEPARTMENTS")) throw fail("no [SHARED: ALL DEPARTMENTS] block");
   return { chapter, fileName, allModesRules, routingIntro: trimBlank(routingIntro), modeBlocks, headerExtras, blocks };
+}
+
+/**
+ * For `check:prompts` only: parse a synthetic chapter file the way a real one is parsed, so the
+ * MODE-block trap above stays covered by a test instead of by a comment. Returns each mode's block
+ * as one string and the groups that every mode receives (the headerExtras), which is exactly what a
+ * stray block must not end up in.
+ */
+export function parseRoutingHeaderForCheck(paragraphs: string[]): {
+  modeBlocks: Map<number, string>;
+  everyMode: string[];
+} {
+  const file = parseChapterFile(1, "check-fixture.docx", paragraphs);
+  return {
+    modeBlocks: new Map([...file.modeBlocks].map(([m, ps]) => [m, ps.join("\n\n")])),
+    everyMode: file.headerExtras.map((g) => g.paragraphs.join("\n\n")),
+  };
 }
 
 /**

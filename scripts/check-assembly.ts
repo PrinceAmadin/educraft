@@ -8,6 +8,7 @@
  *   npm run check:assembly -- --out <dir>  also write the two .docx files there (for Word)
  */
 
+import { createHash } from "node:crypto";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import JSZip from "jszip";
@@ -38,6 +39,43 @@ const failures: string[] = [];
 function check(label: string, ok: boolean, detail = "") {
   if (ok) passed++;
   else failures.push(`${label}${detail ? ` — ${detail}` : ""}`);
+}
+
+/**
+ * Byte-identity control (Appendix A step 0 of the publication format-profile work).
+ *
+ * The exact bytes of each report's document.xml and styles.xml. Introducing a new
+ * format profile - PUBLICATION, or postgraduate preliminary-page wording - must leave
+ * the undergraduate and engineering output untouched, and "untouched" is proved here
+ * rather than by reading a diff. Any change to the assembled output, intended or not,
+ * fails these two checks until someone deliberately re-records them:
+ *
+ *   npm run check:assembly -- --update-golden
+ *
+ * Re-record ONLY when changing the shipped formats is the point of the commit.
+ */
+const GOLDEN: Record<string, { doc: string; styles: string }> = {
+  STD: { doc: "5c16f530801cf9f452e270356ba4b1e3744256a621362871f9ce33618a3b6080", styles: "00c561de1db92575bb7ecaa2df088843ed56555322703ed5caf39594215534e1" },
+  ENG: { doc: "9b8daa69db52f07de70c914ccf0f004c62594abbc649569709e183dfef4db24d", styles: "00c561de1db92575bb7ecaa2df088843ed56555322703ed5caf39594215534e1" },
+};
+
+const UPDATE_GOLDEN = process.argv.includes("--update-golden");
+const recordedGolden: string[] = [];
+
+function checkGolden(label: string, doc: string, styles: string) {
+  const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+  const got = { doc: sha(doc), styles: sha(styles) };
+  if (UPDATE_GOLDEN) {
+    recordedGolden.push(`  ${label}: { doc: "${got.doc}", styles: "${got.styles}" },`);
+    return;
+  }
+  const want = GOLDEN[label];
+  if (!want || want.doc.startsWith("__")) {
+    failures.push(`${label} golden hashes are not recorded - run: npm run check:assembly -- --update-golden`);
+    return;
+  }
+  check(`${label} golden document.xml unchanged`, got.doc === want.doc, `${got.doc.slice(0, 16)} expected ${want.doc.slice(0, 16)}`);
+  check(`${label} golden styles.xml unchanged`, got.styles === want.styles, `${got.styles.slice(0, 16)} expected ${want.styles.slice(0, 16)}`);
 }
 const eq = (label: string, got: unknown, want: unknown) => check(label, JSON.stringify(got) === JSON.stringify(want), `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 
@@ -256,6 +294,8 @@ async function checkReport(engineering: boolean, outDir: string | null) {
   const footerNames = Object.keys(zip.files).filter((f) => /^word\/footer\d+\.xml$/.test(f));
   const footers = await Promise.all(footerNames.map((f) => zip.file(f)!.async("string")));
   const all = [doc, styles, ...footers].join("\n");
+
+  checkGolden(label, doc, styles);
 
   // F1-F6
   check(`${label} F1 fonts are Times New Roman`, attr(all, "w:rFonts", "w:ascii").every((f) => f === "Times New Roman") && attr(all, "w:rFonts", "w:ascii").length > 0, [...new Set(attr(all, "w:rFonts", "w:ascii"))].join(","));
@@ -524,6 +564,12 @@ async function documentXml(input: AssemblyInput): Promise<string> {
   if (outDir) mkdirSync(outDir, { recursive: true });
   await checkReport(false, outDir);
   await checkReport(true, outDir);
+  if (UPDATE_GOLDEN) {
+    console.log("Recorded golden hashes - paste into GOLDEN in scripts/check-assembly.ts:");
+    console.log("");
+    for (const line of recordedGolden) console.log(line);
+    return;
+  }
   await checkEndnotes(outDir);
   checkDefaultStyle();
   if (failures.length) {

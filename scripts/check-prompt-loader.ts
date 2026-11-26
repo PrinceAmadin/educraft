@@ -30,6 +30,7 @@ import {
   getModeInstructions,
   loadChapterPrompt,
   loadPromptLibrary,
+  parseRoutingHeaderForCheck,
   splitPromptBlocks,
   type ChapterNumber,
   type ChapterPromptInput,
@@ -149,6 +150,43 @@ async function main() {
     files[0].blocks.includes("TEMPLATE B — QUALITY GATE RULES"),
   ], [true, true, true, true, true, true]);
   expect("every chapter has all five mode blocks", await Promise.all(([1, 2, 3, 4, 5] as const).map(async (c) => (await Promise.all(([1, 2, 3, 4, 5] as const).map((m) => getModeInstructions(c, m)))).every((t) => /^MODE [1-5] — /.test(t)))), [true, true, true, true, true]);
+
+  // ── The MODE-block trap ────────────────────────────────────────────────────
+  // A sixth mode's block must never be absorbed into MODE 5 (Accounting is locked to Mode 5), and
+  // must never land in the groups every mode receives. Nothing covered this before: the assertions
+  // above iterate the literal [1,2,3,4,5], so a stray block was invisible to them.
+  const RULE = "─".repeat(20);
+  const routingFixture = (strayAfterTheRule: boolean) => {
+    const stray = ["MODE 6 — QUALITATIVE / INTERPRETIVE", "Code the transcripts into themes."];
+    return [
+      "CHAPTER 1 — MODE-SPECIFIC ROUTING INSTRUCTIONS",
+      "Chapter 1 is written in every mode; the emphasis differs.",
+      "MODE 1 — THEMATIC", "Thematic body.",
+      "MODE 2 — SURVEY", "Survey body.",
+      "MODE 3 — IMPLEMENTATION", "Build body.",
+      "MODE 4 — LABORATORY", "Lab body.",
+      "MODE 5 — SECONDARY DATA", "Secondary body.",
+      ...(strayAfterTheRule ? [] : stray),
+      RULE,
+      "THE RULES THAT APPLY IN ALL MODES",
+      ...(strayAfterTheRule ? stray : []),
+      "═══ DEPARTMENT-SPECIFIC PROMPTS ═══",
+      "[SHARED: ALL DEPARTMENTS]", "Shared body.", "[END SHARED: ALL DEPARTMENTS]",
+    ];
+  };
+
+  const strayInside = parseRoutingHeaderForCheck(routingFixture(false));
+  const modeFive = strayInside.modeBlocks.get(5) ?? "";
+  has("trap: MODE 5's block is still its own", modeFive, "Secondary body.");
+  lacks("trap: a stray MODE 6 is NOT absorbed into MODE 5", modeFive, /MODE 6|transcripts/);
+  has("trap: the stray block parses as mode 6, where nothing reads it", strayInside.modeBlocks.get(6) ?? "", "Code the transcripts into themes.");
+  lacks("trap: the stray block is not handed to every mode", strayInside.everyMode.join("\n"), /MODE 6|transcripts/);
+  await refuses(
+    "trap: a MODE block below the rule line is refused, not given to every mode",
+    () => parseRoutingHeaderForCheck(routingFixture(true)),
+    /MODE 6 appears after the mode blocks end/,
+  );
+  await refuses("a mode the system does not support is refused", () => loadChapterPrompt(input({ mode: 6 as ResearchModeNumber })), /Mode 6 does not exist/);
   expect("extractDepartmentSection finds ENGINEERING in chapter 1", (await extractDepartmentSection(1, "ENGINEERING"))?.startsWith("ENGINEERING"), true);
 
   // ── The founder's D1 test: Chapter 1, "Electrical Engineering", Mode 3 ──────────────────
