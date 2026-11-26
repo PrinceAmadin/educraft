@@ -392,8 +392,23 @@ export const LOADER_TEXT = {
     const request =
       mode === 2 ? "questionnaire results"
       : mode === 4 ? "laboratory results"
+      // Mode 6 is qualitative: there are no test results, only what participants said.
+      // Without this it fell through to Mode 3's wording and a qualitative Chapter Three
+      // was told the client owed it "test results" (found by the Mode 6 pilot, 26 Nov 2026).
+      : mode === 6 ? "interview or focus-group transcripts"
       : mode === 3 && chapter === 2 ? "build specification"
       : "test results";
+    // Mode 6: most of the list is survey apparatus a qualitative study does not have.
+    const which =
+      mode === 6
+        ? "\nOf these, a qualitative study uses only [SAMPLE_SIZE] — here the number of participants interviewed — and [FIELDWORK_PERIOD]. Nothing was distributed, nothing was returned and there is no response rate, so use [SPECIFIC VALUE TO BE SUPPLIED] for every other value the participants' own accounts will give."
+        : "";
+    // The example is the last thing read, so it must not be a survey sentence in a
+    // chapter that has just been told it has no questionnaire.
+    const example =
+      mode === 6
+        ? '"A total of [SAMPLE_SIZE] nurses were interviewed, each for between [SPECIFIC VALUE TO BE SUPPLIED] and [SPECIFIC VALUE TO BE SUPPLIED] minutes, between [FIELDWORK_PERIOD]."'
+        : '"A total of [N_DISTRIBUTED] questionnaires were distributed, of which [N_RETURNED] were retrieved and [N_USABLE] were found usable, giving a response rate of [RESPONSE_RATE]."';
     return `The client has not yet supplied the ${request} for this study. The pipeline pauses at the end of this chapter and asks the client for them; the specialist verifies the files and Chapter ${chapter === 2 ? "Three" : "Four"} onwards uses the real values. Do not invent any figure the client has not yet supplied. Where this chapter would state a count, a date, a sampling frame size, a response rate, a measurement or any other specific value that only the client's data supplies, write a placeholder in square brackets in this exact format:
 - [N_DISTRIBUTED] for the number of questionnaires, forms or samples distributed
 - [N_RETURNED] for the number returned or recovered
@@ -402,8 +417,8 @@ export const LOADER_TEXT = {
 - [POPULATION_SIZE] for the population frame this study samples from
 - [SAMPLE_SIZE] for the sample size actually achieved
 - [FIELDWORK_PERIOD] for the dates the fieldwork ran
-- [SPECIFIC VALUE TO BE SUPPLIED] for any other single value the client's data will give
-Write the surrounding sentence so that the placeholder reads naturally where the value would go ("A total of [N_DISTRIBUTED] questionnaires were distributed, of which [N_RETURNED] were retrieved and [N_USABLE] were found usable, giving a response rate of [RESPONSE_RATE]."). The method the chapter describes, the instrument, the sampling design, the analytical technique and any figure the client has already supplied elsewhere are all still stated in full.`;
+- [SPECIFIC VALUE TO BE SUPPLIED] for any other single value the client's data will give${which}
+Write the surrounding sentence so that the placeholder reads naturally where the value would go (${example}). The method the chapter describes, the instrument, the sampling design, the analytical technique and any figure the client has already supplied elsewhere are all still stated in full.`;
   },
   countsBeforePauseNoData:
     "The client's data has not been received. Do not invent counts, response rates or measurements: use the placeholders listed above wherever the value the client will supply would go.",

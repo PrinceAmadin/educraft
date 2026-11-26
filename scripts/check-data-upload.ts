@@ -215,6 +215,37 @@ check("the notification says what the spec says", DATA_PAUSE_CLIENT_TEXT.request
   const loaderList = LOADER_TEXT.countsBeforePause(2, 3);
   check("every placeholder the loader asks for is one the step can fill", ["N_DISTRIBUTED", "N_RETURNED", "N_USABLE", "RESPONSE_RATE", "POPULATION_SIZE", "SAMPLE_SIZE", "FIELDWORK_PERIOD", "SPECIFIC VALUE TO BE SUPPLIED"].every((t) => loaderList.includes(`[${t}]`) && findValueSlots([{ number: 3, text: `[${t}]` }]).length === 1));
   check("the specialist's wording names the chapter", COUNT_VALUE_TEXT.heading([3]) === "Values Chapter 3 left for the client's data" && COUNT_VALUE_TEXT.explain([2, 3]).startsWith("Chapters 2 and 3 were written"));
+
+  // ── Mode 6: a qualitative pause asks for transcripts, not test results ──
+  //
+  // Both of these were found by the Mode 6 pilot (26 Nov 2026) on a real chapter.
+  // The loader's request noun fell through to Mode 3's wording, so a qualitative
+  // Chapter Three was told the client owed it "test results"; and the pre-fill
+  // rules only knew survey vocabulary, so the specialist re-typed a participant
+  // count the client had already given — on a figure the chapter states as fact.
+  const m6 = LOADER_TEXT.countsBeforePause(6, 3);
+  check("a Mode 6 chapter is told the client owes transcripts, not test results", /interview or focus-group transcripts/.test(m6) && !/test results/.test(m6), m6.slice(0, 140));
+  check("...and is told which placeholders a qualitative study actually uses", /a qualitative study uses only \[SAMPLE_SIZE\]/.test(m6) && /no response rate/.test(m6));
+  // The example sentence is the last thing the model reads, so it must not be a
+  // survey sentence in a chapter that has just been told it has no questionnaire.
+  check("the worked example is a qualitative one", /\[SAMPLE_SIZE\] nurses were interviewed/.test(m6) && !/questionnaires were distributed/.test(m6));
+  check("...and the survey modes keep theirs", [2, 3, 4].every((m) => /questionnaires were distributed/.test(LOADER_TEXT.countsBeforePause(m, 3))));
+  check("the survey modes' wording is unmoved", LOADER_TEXT.countsBeforePause(2, 3).includes("questionnaire results") && LOADER_TEXT.countsBeforePause(4, 3).includes("laboratory results") && LOADER_TEXT.countsBeforePause(3, 2).includes("build specification") && LOADER_TEXT.countsBeforePause(3, 3).includes("test results"));
+  check("only Mode 6 gets the qualitative note", [2, 3, 4].every((m) => !LOADER_TEXT.countsBeforePause(m, 3).includes("a qualitative study uses only")));
+
+  const qualSlots = findValueSlots([{ number: 3, text: "A total of [SAMPLE_SIZE] nurses were interviewed before saturation was reached. Interviews ran between [SPECIFIC VALUE TO BE SUPPLIED] and [SPECIFIC VALUE TO BE SUPPLIED] minutes." }]);
+  const qualFields = [
+    { key: "participants", label: "How many nurses did you interview in all?", type: "number" },
+    { key: "duration", label: "About how long did each interview run?", type: "text" },
+    { key: "roles", label: "What roles and wards did they work in?", type: "textarea" },
+  ];
+  const qual = prefillValues(qualSlots, qualFields, { participants: "9", duration: "35 to 60 minutes", roles: "Isolation ward and intensive care" });
+  check("a participant count pre-fills the achieved-size blank", qual.find((s) => s.key === "SAMPLE_SIZE")?.prefill === "9", qual.map((s) => [s.key, s.prefill]));
+  // The guard that makes the pattern safe: a duration question must never fill a count.
+  const minutes = prefillValues(qualSlots, [{ key: "duration", label: "About how long did each interview run, in minutes?", type: "number" }], { duration: "45" });
+  check("a duration in minutes never fills the participant count", minutes.find((s) => s.key === "SAMPLE_SIZE")?.prefill === "", minutes.find((s) => s.key === "SAMPLE_SIZE")?.prefill);
+  const howLong = prefillValues(qualSlots, [{ key: "sessions", label: "How many interview sessions did each nurse attend?", type: "number" }], { sessions: "1" });
+  check("a count question about interviews still pre-fills, as a count", howLong.find((s) => s.key === "SAMPLE_SIZE")?.prefill === "1");
 }
 
 if (failures.length) {

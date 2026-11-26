@@ -198,7 +198,13 @@ const FIELD_RULES: { slot: NamedCountPlaceholder; test: RegExp; numeric: boolean
   { slot: "N_USABLE", test: /usable|valid|analysable|analyzable|after cleaning/, numeric: true },
   { slot: "RESPONSE_RATE", test: /response rate/, numeric: true },
   { slot: "POPULATION_SIZE", test: /population/, numeric: true },
-  { slot: "SAMPLE_SIZE", test: /sample size|number of respondents|respondents/, numeric: true },
+  // The participant wording is Mode 6's: a qualitative data request asks "how many
+  // people took part", never "how many respondents", so without it the specialist
+  // re-typed a number the client had already given — and a figure the chapter states
+  // as fact is the worst place for a typing slip (Mode 6 pilot, 26 Nov 2026).
+  // The count framing is required, so "about how long did each interview run?" can
+  // never fill a participant count with a number of minutes.
+  { slot: "SAMPLE_SIZE", test: /sample size|number of respondents|respondents|(?:how many|number of|total)[^.?]{0,40}(?:participants?|interview|people|took part)|participants? (?:interviewed|recruited)/, numeric: true },
   { slot: "FIELDWORK_PERIOD", test: /fieldwork|data collection period|collection period|period of data|when .*collected|dates? of/, numeric: false },
 ];
 
