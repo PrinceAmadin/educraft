@@ -132,6 +132,24 @@ expect(
   computePrice({ basePrice: intakeBasePrice({ serviceCode: "FYP-CHAPTERS", basePrice: 70_000, variantAddon: 0, chapters: [4] }), expressSurcharge: 0, isExpressDelivery: false, downpaymentPercentage: 45, override: null }).total,
   24_500
 );
+// A publication order is priced by how many papers it holds, and the reprice path
+// reads that count off `additionalData.papers` — so repricing a three-paper order
+// must never quote one paper. The ladder itself is asserted in check:publication.
+expect(
+  "publication: three papers from our own report = ₦52,000",
+  computePrice({ basePrice: intakeBasePrice({ serviceCode: "PUB", basePrice: 20_000, variantAddon: 0, papers: 3 }), expressSurcharge: 0, isExpressDelivery: false, downpaymentPercentage: 45, override: null }).total,
+  52_000
+);
+expect(
+  "publication: the same three from a report we did not write = ₦67,000",
+  computePrice({ basePrice: intakeBasePrice({ serviceCode: "PUB", basePrice: 20_000, variantAddon: 5_000, papers: 3 }), expressSurcharge: 0, isExpressDelivery: false, downpaymentPercentage: 45, override: null }).total,
+  67_000
+);
+expect(
+  "publication: no stored count is one paper, not none",
+  computePrice({ basePrice: intakeBasePrice({ serviceCode: "PUB", basePrice: 20_000, variantAddon: 0 }), expressSurcharge: 0, isExpressDelivery: false, downpaymentPercentage: 45, override: null }).total,
+  20_000
+);
 
 if (failures) {
   console.log(`\n${failures} reprice check(s) failed.`);

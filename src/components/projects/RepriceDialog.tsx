@@ -10,6 +10,7 @@ import { Field } from "@/components/forms/Field";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { computePrice } from "@/lib/pricing";
 import { CHAPTER_SHARES, intakeBasePrice, normalizeChapters } from "@/lib/chapter-pricing";
+import { isPublicationService, normalizePaperCount } from "@/lib/publication-pricing";
 import { reconcileClientLegs, reconcileSnapshots } from "@/lib/finance/reprice-rules";
 import { formatNaira } from "@/lib/utils";
 import type { RepriceServiceOption } from "@/lib/services/finance/reprice";
@@ -18,6 +19,8 @@ export interface RepriceCurrent {
   serviceId: string;
   serviceVariantId: string | null;
   chapters: number[];
+  /** Publication orders only: the papers the order holds. */
+  papers: number | null;
   price: number;
   isExpressDelivery: boolean;
   downpaymentVerified: boolean;
@@ -80,7 +83,8 @@ export function RepriceDialog({
   const overrideNum = overrideStr.trim() === "" ? null : Number(overrideStr);
   const override = overrideNum != null && Number.isFinite(overrideNum) && overrideNum >= 0 ? Math.round(overrideNum) : null;
 
-  const base = intakeBasePrice({ serviceCode: svc.serviceCode, basePrice: svc.basePrice, variantAddon, chapters: chapterList });
+  const papers = isPublicationService(svc.serviceCode) ? normalizePaperCount(current.papers) : undefined;
+  const base = intakeBasePrice({ serviceCode: svc.serviceCode, basePrice: svc.basePrice, variantAddon, chapters: chapterList, papers });
   const breakdown = computePrice({
     basePrice: base,
     expressSurcharge: svc.expressDeliverySurcharge ?? 0,

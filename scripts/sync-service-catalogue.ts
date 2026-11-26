@@ -68,6 +68,23 @@ function fieldChanges(row: ServiceRow, target: CatalogueService): Change[] {
   return out;
 }
 
+/**
+ * A retired code keeps its catalogue entry — its prices and wording are history
+ * worth keeping, and existing projects point at it — so it sits in BOTH
+ * `SERVICE_CATALOGUE` and `RETIRED_SERVICE_CODES`, and the retired list is the
+ * one that decides whether it is for sale.
+ *
+ * This guard exists because it was not there. The sync's catalogue loop sets
+ * `isActive: true` on everything it writes, while the retire step only touched
+ * rows that were still active — so the twelve services the founder retired on
+ * 26 Nov 2026 would have been brought back to life by the very next `--apply`,
+ * reported as an innocuous "active no → yes". Found by the dry run the standing
+ * rule requires before applying, which is exactly what that rule is for.
+ */
+function isRetired(serviceCode: string): boolean {
+  return (RETIRED_SERVICE_CODES as readonly string[]).includes(serviceCode);
+}
+
 function variantChanges(row: ServiceRow, target: CatalogueService): Change[] {
   if (target.variants === undefined) return [];
   const want = target.variants;
@@ -95,22 +112,28 @@ async function main() {
   });
   const byCode = new Map(rows.map((r) => [r.serviceCode, r]));
 
-  const plans: Plan[] = SERVICE_CATALOGUE.map((target, sortOrder) => {
-    const row = byCode.get(target.serviceCode) ?? null;
-    if (!row) return { target, sortOrder, row, changes: [], reorderOnly: false };
-    const changes = [...fieldChanges(row, target), ...variantChanges(row, target)];
-    return { target, sortOrder, row, changes, reorderOnly: changes.length === 0 && row.sortOrder !== sortOrder };
-  });
+  // A retired code is never planned at all: not created, not updated, not
+  // reordered. Its entry stays in the catalogue as the record of what it was,
+  // and `retires` below switches off whatever row it still has.
+  const plans: Plan[] = SERVICE_CATALOGUE
+    // The position is the entry's place in the catalogue as written, retired
+    // entries included, so retiring one never reshuffles every service after it.
+    .map((target, sortOrder) => ({ target, sortOrder }))
+    .filter(({ target }) => !isRetired(target.serviceCode))
+    .map(({ target, sortOrder }) => {
+      const row = byCode.get(target.serviceCode) ?? null;
+      if (!row) return { target, sortOrder, row, changes: [], reorderOnly: false };
+      const changes = [...fieldChanges(row, target), ...variantChanges(row, target)];
+      return { target, sortOrder, row, changes, reorderOnly: changes.length === 0 && row.sortOrder !== sortOrder };
+    });
 
   const creates = plans.filter((p) => !p.row);
   const updates = plans.filter((p) => p.row && p.changes.length > 0);
   const reorders = plans.filter((p) => p.reorderOnly);
   const unchanged = plans.filter((p) => p.row && p.changes.length === 0 && !p.reorderOnly);
-  const retires = rows.filter((r) => r.isActive && (RETIRED_SERVICE_CODES as readonly string[]).includes(r.serviceCode));
+  const retires = rows.filter((r) => r.isActive && isRetired(r.serviceCode));
   const catalogueCodes = new Set(SERVICE_CATALOGUE.map((s) => s.serviceCode));
-  const untouched = rows.filter(
-    (r) => !catalogueCodes.has(r.serviceCode) && !(RETIRED_SERVICE_CODES as readonly string[]).includes(r.serviceCode)
-  );
+  const untouched = rows.filter((r) => !catalogueCodes.has(r.serviceCode) && !isRetired(r.serviceCode));
 
   const pad = (s: string, n: number) => s.padEnd(n);
   console.log(`\nEduCraft service catalogue — ${APPLY ? "APPLYING" : "dry run (nothing written)"}\n`);

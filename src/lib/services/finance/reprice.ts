@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { computePrice } from "@/lib/pricing";
 import { intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { isPublicationService, normalizePaperCount } from "@/lib/publication-pricing";
 import { reconcileClientLegs, reconcileSnapshots, type Recovery } from "@/lib/finance/reprice-rules";
 import { upsertCommissionExpense, upsertParentCommissionExpense } from "@/lib/services/ambassador-commission";
 import { monthKeyOf, projectNetInflow, syncProjectBuckets } from "@/lib/services/finance/buckets";
@@ -170,11 +171,14 @@ export async function repriceProject(idOrCode: string, input: RepriceInput, acto
   }
 
   const chapterService = isChapterService(service.serviceCode);
-  const existing = (project.additionalData as { chapters?: number[] } | null)?.chapters ?? [];
-  const chapters = chapterService ? normalizeChapters(input.chapters ?? existing) : [];
+  const stored = project.additionalData as { chapters?: number[]; papers?: number } | null;
+  const chapters = chapterService ? normalizeChapters(input.chapters ?? stored?.chapters ?? []) : [];
   if (chapterService && chapters.length === 0) throw new RepriceError("Choose at least one chapter for a chapter-based order.");
+  // A publication order is priced by how many papers it holds, so the count has
+  // to come with it or repricing a three-paper order would quote one paper.
+  const papers = isPublicationService(service.serviceCode) ? normalizePaperCount(stored?.papers) : undefined;
 
-  const base = intakeBasePrice({ serviceCode: service.serviceCode, basePrice: service.basePrice, variantAddon, chapters });
+  const base = intakeBasePrice({ serviceCode: service.serviceCode, basePrice: service.basePrice, variantAddon, chapters, papers });
   const breakdown = computePrice({
     basePrice: base,
     expressSurcharge: service.expressDeliverySurcharge ?? 0,

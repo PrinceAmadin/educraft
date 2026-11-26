@@ -90,13 +90,18 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
   },
   {
     serviceCode: "PUB",
-    serviceName: "Publication Report",
+    serviceName: "Publication Paper",
     category: ServiceCategory.ACADEMIC,
-    basePrice: 15000,
+    // The first paper. Each further paper from the same report costs less
+    // (₦17,000 · ₦15,000 · ₦13,000) — the ladder is in
+    // `src/lib/publication-pricing.ts`, and the variant's addon below is the
+    // PER-PAPER premium when EduCraft did not write the source report.
+    basePrice: 20000,
     intakeFormTemplate: "academic_publication",
-    estimatedDays: 10,
-    description: "Report prepared for journal or conference publication.",
+    estimatedDays: 14,
+    description: "A journal or conference paper written from a finished research report, delivered as a submission-ready manuscript. Several papers can come from one report, and each paper after the first costs less.",
     expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+    variants: [{ name: "From a report EduCraft did not write", priceAddon: 5000 }],
   },
 
   // ── Section A.2: Final year combo ──

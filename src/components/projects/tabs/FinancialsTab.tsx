@@ -132,6 +132,9 @@ export function FinancialsTab({
     serviceId: project.serviceId,
     serviceVariantId: project.serviceVariantId,
     chapters: (project.additionalData as { chapters?: number[] } | null)?.chapters ?? [],
+    // A publication order is priced by how many papers it holds; the preview has
+    // to know the count or it would quote one paper where three are charged.
+    papers: (project.additionalData as { papers?: number } | null)?.papers ?? null,
     price: project.price,
     isExpressDelivery: project.isExpressDelivery,
     downpaymentVerified: project.downpaymentStatus === "Verified",

@@ -5,7 +5,14 @@
  * is a fixed share of the full report's price (the price of the same report,
  * with or without data analysis), and the total is the shares added up. The
  * shares below are the founder's, and they add to 100%.
+ *
+ * `intakeBasePrice` at the foot of this file is the one price function the
+ * intake form, the Paystack checkout, the submit path, the coupon quote and
+ * the reprice dialog all call, so it also routes publication orders to
+ * `publication-pricing.ts`. The shown price is the charged price.
  */
+
+import { isPublicationService, publicationBreakdown } from "./publication-pricing";
 
 export const CHAPTER_SERVICE_CODE = "FYP-CHAPTERS";
 
@@ -45,15 +52,20 @@ export function chapterBreakdown(fullPrice: number, chapters: readonly number[])
 /**
  * The amount an intake is priced on. Ordinary services use the base price plus
  * the chosen option; the chapter-based service uses the share of that price the
- * chosen chapters make up. The one function both the form and the server use,
- * so what the student sees is what is charged.
+ * chosen chapters make up; a publication order uses its own descending ladder,
+ * where the chosen option is the PER-PAPER premium for a report EduCraft did
+ * not write rather than a one-off addon. The one function both the form and the
+ * server use, so what the student sees is what is charged.
  */
 export function intakeBasePrice(input: {
   serviceCode: string;
   basePrice: number;
   variantAddon: number;
   chapters?: readonly number[] | null;
+  /** Publication orders only: how many papers from the one source report. */
+  papers?: number | null;
 }): number {
+  if (isPublicationService(input.serviceCode)) return publicationBreakdown(input.papers, input.basePrice, input.variantAddon).total;
   const full = input.basePrice + input.variantAddon;
   if (!isChapterService(input.serviceCode)) return full;
   return chapterBreakdown(full, input.chapters ?? []).total;

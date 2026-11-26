@@ -25,6 +25,10 @@ const TARGETS = [
   "src/lib/client-document-text.ts",
   "src/lib/client-research-message.ts",
   "src/lib/services/client-research.ts",
+  // The publication order's own wording: what a paper is, what it costs and
+  // what EduCraft does not promise. The client reads every sentence of it on
+  // the intake form, so the external rule applies.
+  "src/lib/publication-pricing.ts",
   // The public ambassador recruitment page. Not a client page, but public —
   // anyone who scans a printed card lands on it, clients and competitors
   // included — so the same external rule applies, and this is the only
