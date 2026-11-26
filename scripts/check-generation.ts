@@ -216,6 +216,22 @@ const briefB = buildChapterBrief({
 });
 check("brief: Template B lists the thematic titles given", briefB.includes("Chapter 3 title: Colonial trade routes") && !briefB.includes("Chapter 4 title:"));
 
+// A length target reaches the planner through the brief (postgraduate work, and any order that
+// asked for a page count). Without one the brief is unchanged, so every undergraduate report
+// still takes its length from the department's own `Page count:` line.
+check("brief: no length line when the order has no target", !brief.includes("Target length for this chapter"));
+const briefLong = buildChapterBrief({
+  chapter: 2,
+  projectTitle: "T",
+  university: "U",
+  department: "Computer Science",
+  template: "A",
+  objectives: ["o"],
+  wordTarget: 11400,
+});
+check("brief: the target is stated in words and pages", briefLong.includes(GENERATION_TEXT.chapterLength(11400)) && briefLong.includes("11,400 words"), briefLong.slice(0, 0));
+check("brief: a zero or missing target writes nothing", !buildChapterBrief({ chapter: 2, projectTitle: "T", university: "U", department: "CS", template: "A", objectives: ["o"], wordTarget: 0 }).includes("Target length"));
+
 // ─── The plan ───────────────────────────────────────────────────────────────
 const rawPlan = {
   sections: [

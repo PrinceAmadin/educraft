@@ -67,6 +67,8 @@ import { FOOTNOTE_DENSITY, followsNalt, isLawSection, NALT_CHAPTER_TITLES, NALT_
 
 export type { CitationPlacement, ReferencingStyleKey } from "./referencing";
 
+import type { DegreeLevel } from "@/lib/degree-level";
+
 const PROMPTS_ROOT = path.join(process.cwd(), "prompts");
 
 /** Five chapters at most, in every department. */
@@ -88,6 +90,11 @@ export interface ChapterPromptInput {
   mode: ResearchModeNumber;
   /** The COO's section choice on the card; required for departments with no default section. */
   sectionOverride?: SectionKey | null;
+  /**
+   * Undergraduate project, master's dissertation or PhD thesis. Absent means undergraduate, so a
+   * report assembled before postgraduate work existed is unaffected.
+   */
+  degreeLevel?: DegreeLevel;
   project: ProjectPromptFields & {
     /** University.name of the client's university. */
     university: string;

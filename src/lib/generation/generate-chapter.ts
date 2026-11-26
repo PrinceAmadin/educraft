@@ -40,6 +40,8 @@ import { attachmentRefs, loadDataAttachments, pauseDataForChapter, type Attachme
 import { secondaryDataForChapter } from "@/lib/services/secondary-data";
 import { CHAPTER_REVIEW_TEXT } from "@/lib/chapter-review";
 import { chapterTextHash } from "@/lib/quality/chapter-hash";
+import { chapterWordTarget, hasOwnLengthTarget, parsePageRequirement } from "@/lib/degree-level";
+import { expectedChapters, isPartialChapterOrder } from "@/lib/deliverables";
 import {
   PART_SEPARATOR,
   PLAN_TOOL,
@@ -121,6 +123,12 @@ export class GenerationError extends Error {
 export interface GenerationOptions {
   /** Claude's effort for every call of the run; omitted = the API default (high). */
   effort?: ClaudeEffort;
+  /**
+   * How long this chapter should be, in words, frozen at start like the effort so every call of the
+   * run sees the same figure and the prompt cache holds. Absent for an undergraduate report with no
+   * page requirement, where the department's own `Page count:` line still decides.
+   */
+  wordTarget?: number;
   /** Tests only, ignored in production: throw before writing this part (0-based). "fatal" fails at once; "transient" goes through the retries. */
   simulateFailure?: { atPart: number; kind: "fatal" | "transient" };
 }
@@ -185,7 +193,15 @@ export interface StartChapterInput {
 export async function startChapterGeneration(input: StartChapterInput) {
   const project = await db.project.findFirst({
     where: { OR: [{ id: input.project }, { projectId: input.project }] },
-    select: { id: true, projectId: true },
+    // chapterCount / additionalData / serviceCode: the chapters this order actually has, which the
+    // per-chapter word target is a share of.
+    select: {
+      id: true,
+      projectId: true,
+      chapterCount: true,
+      additionalData: true,
+      service: { select: { serviceCode: true } },
+    },
   });
   if (!project) throw new GenerationError("Project not found", true, "PROJECT_NOT_FOUND");
 
@@ -198,6 +214,20 @@ export async function startChapterGeneration(input: StartChapterInput) {
   if (!title) throw new GenerationError("The project needs a title before chapters are generated.", true, "NO_TITLE");
 
   const [assembled, effortSetting] = await Promise.all([loadChapterPrompt(input.prompt), generationEffortSetting()]);
+  // The length the student is owed. Postgraduate work and any order with a page requirement get a
+  // real target here; an undergraduate report without one keeps taking its length from the
+  // department's `Page count:` line in the prompt files, exactly as before.
+  const level = input.prompt.degreeLevel ?? "UNDERGRADUATE";
+  const chapters = expectedChapters({
+    serviceCode: project.service?.serviceCode,
+    additionalData: project.additionalData,
+    chapterCount: project.chapterCount,
+  });
+  const wordTarget = hasOwnLengthTarget(level, input.prompt.project.minimumPages)
+    ? chapterWordTarget(level, chapter, chapters, parsePageRequirement(input.prompt.project.minimumPages), {
+        partial: isPartialChapterOrder(project.service?.serviceCode),
+      })
+    : null;
   const briefText = buildChapterBrief({
     chapter,
     projectTitle: title,
@@ -212,6 +242,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
     specialInstructions: input.prompt.project.specialInstructions,
     supervisorToc: input.prompt.project.supervisorToc,
     qualityFailures: input.qualityFailures,
+    wordTarget,
   });
   const promptMeta = {
     department: assembled.department,
@@ -319,7 +350,7 @@ export async function startChapterGeneration(input: StartChapterInput) {
           promptMeta: promptMeta as Prisma.InputJsonValue,
           // The effort Setting is frozen in at start (a caller's explicit effort wins),
           // so every call of the run sends the same effort and the cache holds.
-          options: { ...(input.options ?? {}), ...(effortSetting && !input.options?.effort ? { effort: effortSetting } : {}) } as Prisma.InputJsonValue,
+          options: { ...(input.options ?? {}), ...(effortSetting && !input.options?.effort ? { effort: effortSetting } : {}), ...(wordTarget ? { wordTarget } : {}) } as Prisma.InputJsonValue,
           requestedById: input.requestedById ?? null,
           lastProgressAt: new Date(),
           // Chapter gate: an automatic rewrite counts on from the text it replaces; anything a person asks for starts again at 0.
@@ -457,7 +488,7 @@ async function planChapter(cp: GenerationCheckpoint, ctx: StepContext): Promise<
   const chapter = cp.chapterNumber;
   yieldIfNoTime(ctx, stepEstimateMs({ kind: "plan" }));
   const result = await callClaude(cp, {
-    user: outlineUserBlocks(cp.briefText, chapter, await dataAttachments(cp)),
+    user: outlineUserBlocks(cp.briefText, chapter, await dataAttachments(cp), options(cp).wordTarget),
     toolChoice: { type: "auto" },
     maxTokens: OUTLINE_MAX_TOKENS,
     deadline: ctx.deadline,

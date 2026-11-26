@@ -141,6 +141,16 @@ export function expectedChapters(p: { serviceCode: string | null | undefined; ad
   return Array.from({ length: count }, (_, i) => i + 1);
 }
 
+/**
+ * True when the order bought only SOME of a report's chapters rather than the whole thing. Its
+ * chapters are written at the length they would be in a complete report, so the document is
+ * shorter rather than denser (see `chapterWordTarget`'s `partial`).
+ */
+export function isPartialChapterOrder(serviceCode: string | null | undefined): boolean {
+  const code = (serviceCode ?? "").toUpperCase();
+  return code === CHAPTER_SERVICE_CODE || code === "FYP-CH4";
+}
+
 /** True when the chapters are 1, 2, … N with no gap: the only orders the orchestrator writes on its own. */
 export function runsFromChapterOne(chapters: readonly number[]): boolean {
   return chapters.length > 0 && chapters.every((n, i) => n === i + 1);

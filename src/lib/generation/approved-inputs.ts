@@ -55,6 +55,7 @@ export async function approvedChapterInput(projectIdOrCode: string, chapter: Cha
       projectType: true,
       specialInstructions: true,
       minimumPages: true,
+      degreeLevel: true,
       departmentOutline: true,
       client: { select: { university: { select: { name: true } } } },
     },
@@ -70,12 +71,13 @@ export async function approvedChapterInput(projectIdOrCode: string, chapter: Cha
       select: { title: true, proposedTitle: true, authors: true, year: true, journal: true, doi: true, abstract: true },
     }),
   ]);
-  const { id: _id, departmentOutline, client, ...fields } = project;
+  const { id: _id, departmentOutline, client, degreeLevel: _level, ...fields } = project;
   return {
     chapter,
     department: settings.department,
     mode: settings.mode,
     sectionOverride: settings.sectionOverride,
+    degreeLevel: project.degreeLevel,
     project: {
       ...fields,
       university: client.university?.name ?? "",

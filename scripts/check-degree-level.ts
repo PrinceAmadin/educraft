@@ -22,8 +22,15 @@ import {
   isDegreeLevel,
   isPostgraduate,
   maxChaptersFor,
+  MAX_CHAPTER_WORDS,
+  WORDS_PER_PAGE,
+  chapterWordTarget,
+  hasOwnLengthTarget,
   pageTargetFor,
+  parsePageRequirement,
   referenceFloorFor,
+  wholeReportChapters,
+  wordTargetFor,
   requiresGreenReviewer,
   workNoun,
   workNounUpper,
@@ -32,6 +39,8 @@ import {
 import { DEGREE_NAMES, degreeName, getDegreeFromDepartment, postgraduateAward } from "../src/lib/generation/department-map";
 import { PRELIM_TEXT } from "../src/lib/assembly/assemble";
 import { SERVICE_CATALOGUE, RETIRED_SERVICE_CODES } from "../prisma/catalogue";
+import { MAX_REPORT_CHAPTERS, isPartialChapterOrder } from "../src/lib/deliverables";
+import { GENERATION_TEXT } from "../src/lib/generation/chapter-plan";
 
 let passed = 0;
 const failures: string[] = [];
@@ -131,6 +140,51 @@ check("catalogue: its option is priced", (masters?.variants?.[0]?.priceAddon ?? 
 const phd = SERVICE_CATALOGUE.find((s) => s.serviceCode === "PHD-THESIS");
 check("catalogue: the PhD is quote-only, so it carries no list price", phd?.basePrice === 0 && phd?.pricingModel === "VARIABLE", { price: phd?.basePrice, model: phd?.pricingModel });
 check("catalogue: the PhD has no data-analysis option to self-serve", !phd?.variants?.length);
+
+// ─── The length target the planner writes to ─────────────────────────────────
+
+const FIVE = [1, 2, 3, 4, 5];
+
+check("a page requirement is read only when it is a plain number", parsePageRequirement("180") === 180 && parsePageRequirement("180 pages") === 180 && parsePageRequirement("  90  ") === 90);
+check("...and anything a client might type instead is ignored, never guessed at", ["Above 90", "Not Specified", "", "as my supervisor says", "1", "99999", null, undefined].every((v) => parsePageRequirement(v) === null));
+
+check("an undergraduate report with no page requirement keeps taking its length from the prompt files", hasOwnLengthTarget("UNDERGRADUATE", null) === false && hasOwnLengthTarget("UNDERGRADUATE", "Not Specified") === false);
+check("...but one that asked for a page count gets a real target", hasOwnLengthTarget("UNDERGRADUATE", "180") === true);
+check("postgraduate work always has a target, whatever the order says", hasOwnLengthTarget("MASTERS", null) && hasOwnLengthTarget("PHD", "Not Specified"));
+
+for (const level of DEGREE_LEVELS) {
+  const band = pageTargetFor(level);
+  const mid = Math.round((band.min + band.max) / 2);
+  check(`${level}: the whole-report target is the middle of its own page band`, wordTargetFor(level) === mid * WORDS_PER_PAGE, { target: wordTargetFor(level), mid });
+  const per = FIVE.map((c) => chapterWordTarget(level, c, FIVE));
+  check(`${level}: every chapter gets a workable target`, per.every((w) => w >= 1500 && w <= MAX_CHAPTER_WORDS), per);
+  check(`${level}: chapters 2, 3 and 4 are the deep ones (founder, 26 Nov 2026)`, per[1] > per[0] && per[1] > per[4] && per[2] > per[0] && per[3] > per[0], per);
+  check(`${level}: no chapter is asked for more than the plan validator allows`, per.every((w) => w <= MAX_CHAPTER_WORDS));
+}
+check("the client's own page requirement beats the level's band", chapterWordTarget("UNDERGRADUATE", 2, FIVE, 180) > chapterWordTarget("UNDERGRADUATE", 2, FIVE), [chapterWordTarget("UNDERGRADUATE", 2, FIVE, 180), chapterWordTarget("UNDERGRADUATE", 2, FIVE)]);
+check("a master's chapter is longer than the same undergraduate chapter", chapterWordTarget("MASTERS", 2, FIVE) > chapterWordTarget("UNDERGRADUATE", 2, FIVE));
+check("...and a PhD's longer again", chapterWordTarget("PHD", 2, FIVE) >= chapterWordTarget("MASTERS", 2, FIVE));
+
+check(
+  "a whole report written in four chapters still comes out at its full length",
+  [1, 2, 3, 4].reduce((n, c) => n + chapterWordTarget("MASTERS", c, [1, 2, 3, 4]), 0) >= wordTargetFor("MASTERS") - 500,
+  [1, 2, 3, 4].map((c) => chapterWordTarget("MASTERS", c, [1, 2, 3, 4])),
+);
+check(
+  "a PARTIAL order's chapters are the length they would be in a complete report, so it is shorter, not denser",
+  chapterWordTarget("MASTERS", 1, [1, 2], null, { partial: true }) === chapterWordTarget("MASTERS", 1, FIVE) &&
+    chapterWordTarget("MASTERS", 2, [1, 2], null, { partial: true }) === chapterWordTarget("MASTERS", 2, FIVE),
+  [chapterWordTarget("MASTERS", 2, [1, 2], null, { partial: true }), chapterWordTarget("MASTERS", 2, FIVE)],
+);
+check("a chapter-based order is what counts as partial", isPartialChapterOrder("FYP-CHAPTERS") && isPartialChapterOrder("FYP-CH4") && isPartialChapterOrder("fyp-ch4"));
+check("...and a whole report is not", !isPartialChapterOrder("FYP-FULL") && !isPartialChapterOrder("THESIS") && !isPartialChapterOrder("PHD-THESIS") && !isPartialChapterOrder(null));
+check("the partial denominator is the whole report at that level", wholeReportChapters("UNDERGRADUATE").length === 5 && wholeReportChapters("MASTERS").length === 5 && wholeReportChapters("PHD").length === 6);
+check("...which is the level's own chapter ceiling", DEGREE_LEVELS.every((l) => wholeReportChapters(l).length === maxChaptersFor(l)));
+check("the undergraduate ceiling is still the one the rest of HQ enforces", MAX_REPORT_CHAPTERS === maxChaptersFor("UNDERGRADUATE"));
+
+const sentence = GENERATION_TEXT.chapterLength(9750);
+check("the planner is told the target in words and in pages", /9,750 words/.test(sentence) && /39 double-spaced pages/.test(sentence), sentence);
+check("...and told to plan to it rather than to the prompt files' page count", /plan to it rather than/i.test(sentence), sentence);
 
 // ─── The undergraduate path is unchanged ─────────────────────────────────────
 

@@ -138,13 +138,18 @@ export const GENERATION_TEXT = {
   qualityFailuresIntro: (chapter: number) => `The previous version of Chapter ${chapter} failed these checks. Write the chapter so that none of them happens again:`,
   planIntro: "CHAPTER PLAN (from the planning step; write to it)",
   writtenSoFar: (chapter: number) => `CHAPTER ${chapter} TEXT WRITTEN SO FAR`,
-  outlineInstruction: (chapter: number) =>
+  /** Postgraduate work and any order with a page requirement: the length is set here, not in the prompt files. */
+  chapterLength: (words: number) =>
+    `Target length for this chapter: about ${words.toLocaleString("en-US")} words (roughly ${Math.round(words / WORDS_PER_PAGE)} double-spaced pages). This is what the student is owed, so plan to it rather than to any page count in the instructions above.`,
+  outlineInstruction: (chapter: number, wordTarget?: number | null) =>
     [
       `PLAN CHAPTER ${chapter}`,
       `Before any writing, plan Chapter ${chapter} of this project by calling ${PLAN_TOOL_NAME} once.`,
       `- List every numbered section the instructions above require in Chapter ${chapter}, in order, with its number and heading, and the numbered sub-sections you will write inside each.`,
       "- Where the brief gives the supervisor's table of contents, follow it.",
-      `- Give each section a word target. The targets together should match the page length the instructions set for this chapter, at about ${WORDS_PER_PAGE} words per double-spaced page (aim for the middle of the range).`,
+      wordTarget && wordTarget > 0
+        ? `- Give each section a word target. The targets together must add up to the target length in the brief (about ${wordTarget.toLocaleString("en-US")} words), at about ${WORDS_PER_PAGE} words per double-spaced page.`
+        : `- Give each section a word target. The targets together should match the page length the instructions set for this chapter, at about ${WORDS_PER_PAGE} words per double-spaced page (aim for the middle of the range).`,
       `- Give every section longer than ${PART_WORD_LIMIT.toLocaleString("en-US")} words numbered sub-sections.`,
       "- Plan the chapter body only: the chapter title lines are added at assembly.",
       "Call the tool and write nothing else.",
@@ -197,6 +202,12 @@ export interface BriefInput {
   supervisorToc?: string | null;
   /** D8: the previous version's quality failures, one line each (a re-generation only). */
   qualityFailures?: string[];
+  /**
+   * How long this chapter should be, in words. Set for postgraduate work and whenever the client
+   * gave a page requirement; absent otherwise, so the planner falls back to the `Page count:` line
+   * in the department's own prompt block exactly as it always has.
+   */
+  wordTarget?: number | null;
 }
 
 const numbered = (items: string[]) => items.map((item, i) => `${i + 1}. ${item.trim()}`).join("\n");
@@ -210,6 +221,7 @@ export function buildChapterBrief(b: BriefInput): string {
     `Department: ${b.department.trim()}`,
     GENERATION_TEXT.chapterOf(b.chapter),
   ];
+  if (b.wordTarget && b.wordTarget > 0) lines.push(GENERATION_TEXT.chapterLength(b.wordTarget));
   if (b.template === "B") {
     const t3 = b.thematicTitles?.chapter3?.trim();
     const t4 = b.thematicTitles?.chapter4?.trim();
@@ -471,11 +483,16 @@ export const SYSTEM_CACHE_POINTS = 2;
  * The planning call: the brief and the data attachments (one cache point, on
  * the last of them), then the instruction.
  */
-export function outlineUserBlocks(briefText: string, chapter: number, attachments: AttachmentBlock[] = []): UserBlock[] {
+export function outlineUserBlocks(
+  briefText: string,
+  chapter: number,
+  attachments: AttachmentBlock[] = [],
+  wordTarget?: number | null,
+): UserBlock[] {
   return [
     { type: "text", text: briefText, ...(attachments.length ? {} : { cache_control: CACHED }) },
     ...withCachePoint(attachments),
-    { type: "text", text: GENERATION_TEXT.outlineInstruction(chapter) },
+    { type: "text", text: GENERATION_TEXT.outlineInstruction(chapter, wordTarget) },
   ];
 }
 

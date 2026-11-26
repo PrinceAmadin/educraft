@@ -83,6 +83,87 @@ export function pageTargetFor(level: DegreeLevel): { min: number; max: number } 
   return { min: 60, max: 120 };
 }
 
+// ─── The length target the planner writes to ─────────────────────────────────
+
+/** Words per double-spaced page, Times New Roman 12pt, 1 inch margins. The planner's own figure. */
+export const WORDS_PER_PAGE = 250;
+
+/**
+ * The most words one chapter's plan may target. `parsePlanInput` in chapter-plan.ts refuses a plan
+ * totalling over 20,000 words, so this leaves headroom under that. It binds on a PhD at the top of
+ * its page range: a 400-page thesis would want ~22,750 words in its longest chapter. A PhD is
+ * quote-only, so for now it simply comes out shorter than 400 pages; raising it means raising the
+ * plan cap first.
+ */
+export const MAX_CHAPTER_WORDS = 18_000;
+
+/**
+ * How a report's words are shared between its chapters, as percentages. Postgraduate work is deeper
+ * "especially from chapter 2, 3 and 4" (founder, 26 Nov 2026), so those three carry most of it. A
+ * sixth chapter (PhD) is weighted like the fifth and the shares are normalised over whichever
+ * chapters the order actually has, so a chapter-based order splits correctly too.
+ */
+const CHAPTER_WEIGHT: Record<number, number> = { 1: 12, 2: 26, 3: 24, 4: 28, 5: 10, 6: 10 };
+
+/**
+ * A page requirement the client typed, when it is a plain number. `Project.minimumPages` is free
+ * text ("70", "Above 90", "Not Specified"), so anything that is not a number is ignored rather than
+ * guessed at.
+ */
+export function parsePageRequirement(minimumPages: string | null | undefined): number | null {
+  const m = /^\s*(\d{2,4})\s*(?:pages?)?\s*$/i.exec(minimumPages ?? "");
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n >= 20 && n <= 1000 ? n : null;
+}
+
+/** The whole report's word target: the client's own page requirement if they gave one, else the middle of the level's band. */
+export function wordTargetFor(level: DegreeLevel, pages?: number | null): number {
+  const band = pageTargetFor(level);
+  const p = pages && pages > 0 ? pages : Math.round((band.min + band.max) / 2);
+  return p * WORDS_PER_PAGE;
+}
+
+/**
+ * One chapter's share of that target, to the nearest 50 words.
+ *
+ * `chapters` is the chapters this order actually has (`expectedChapters`), and by default the shares
+ * are normalised over them, so a whole report written in four chapters instead of five still comes
+ * out at its full length.
+ *
+ * `partial` is for an order that bought only SOME of a report's chapters (a chapter-based order).
+ * There the denominator is the whole report, so Chapter 2 is the length Chapter 2 of that report
+ * would be and the order simply comes out shorter — never the whole report's words squeezed into
+ * the two chapters that were paid for.
+ */
+export function chapterWordTarget(
+  level: DegreeLevel,
+  chapter: number,
+  chapters: readonly number[],
+  pages?: number | null,
+  opts?: { partial?: boolean },
+): number {
+  const weightOf = (c: number) => CHAPTER_WEIGHT[c] ?? 15;
+  const denominator = opts?.partial ? wholeReportChapters(level) : chapters;
+  const total = wordTargetFor(level, pages);
+  const sum = denominator.reduce((n, c) => n + weightOf(c), 0) || weightOf(chapter);
+  const share = (total * weightOf(chapter)) / sum;
+  return Math.min(MAX_CHAPTER_WORDS, Math.round(share / 50) * 50);
+}
+
+/** 1..N for a complete report at this level: the denominator a partial order is measured against. */
+export function wholeReportChapters(level: DegreeLevel): number[] {
+  return Array.from({ length: maxChaptersFor(level) }, (_, i) => i + 1);
+}
+
+/**
+ * Whether this level's length is set here at all. An undergraduate report takes its length from the
+ * `Page count:` line in each department's prompt block, as it always has, unless the client gave a
+ * page requirement of their own — so nothing about an existing report changes.
+ */
+export function hasOwnLengthTarget(level: DegreeLevel, minimumPages?: string | null): boolean {
+  return isPostgraduate(level) || parsePageRequirement(minimumPages) !== null;
+}
+
 // ─── References ──────────────────────────────────────────────────────────────
 
 /**
