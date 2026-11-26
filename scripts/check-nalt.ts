@@ -37,7 +37,7 @@ import { isShortForm, primaryGroupOf, primarySourcesFrom, withoutPinpoint, PRIMA
 import { abstractBand, ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS } from "../src/lib/generation/preliminary-pages-rules";
 import { LOADER_TEXT } from "../src/lib/generation/prompt-loader";
 import { requiredSections } from "../src/lib/quality/required-sections";
-import { citationPlacementFor } from "../src/lib/generation/referencing";
+import { citationPlacementFor, effectivePlacement } from "../src/lib/generation/referencing";
 import { BENCHMARK_FOOTNOTE_LINES } from "./fixtures/nalt-benchmark-footnotes";
 
 let passed = 0;
@@ -304,5 +304,18 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`);
   process.exit(1);
 }
+// ── The placement survives a NULL column ───────────────────────────────────
+// ResearchMode.citationPlacement is nullable and nothing on the approval path
+// fills it, so every production row is null. A reader that trusts the column
+// built a NALT chapter as endnotes while the prompt told the model to write
+// page footnotes — H2/AL3 then failed on an "ENDNOTES" heading the report
+// should never have had, and the gate marked it unrewritable. 26 Nov 2026.
+check("NALT with no stored placement still derives MODE_C", effectivePlacement("NALT", 1, "LAW_DOCTRINAL", null) === "MODE_C", String(effectivePlacement("NALT", 1, "LAW_DOCTRINAL", null)));
+check("NALT non-doctrinal with no stored placement is MODE_C", effectivePlacement("NALT", 2, "LAW_NON_DOCTRINAL", null) === "MODE_C", String(effectivePlacement("NALT", 2, "LAW_NON_DOCTRINAL", null)));
+check("a stored placement still wins", effectivePlacement("NALT", 1, "LAW_DOCTRINAL", "MODE_C") === "MODE_C");
+check("an author-date style derives no note placement", effectivePlacement("APA_7TH", 2, "BUSINESS", null) !== "MODE_C");
+check("an unknown style derives nothing", effectivePlacement("NOT_A_STYLE", 1, "LAW_DOCTRINAL", null) === null);
+check("no section derives nothing", effectivePlacement("NALT", 1, null, null) === null);
+
 console.log(`check:nalt — all ${passed} checks passed`);
 console.log("The law rules match the NALT guide and the professor-corrected benchmark.");

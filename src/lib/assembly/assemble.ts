@@ -52,7 +52,7 @@ import { expectedChapters, orderedChapters } from "@/lib/deliverables";
 import { isReportTemplate } from "@/lib/generation/generation-state";
 import { chapterTitle } from "@/lib/generation/progress-events";
 import { CERTIFICATE_AWARDS, degreeName, getDegreeFromDepartment, lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
-import { STYLE_LABEL } from "@/lib/generation/referencing";
+import { STYLE_LABEL, effectivePlacement } from "@/lib/generation/referencing";
 import { getApprovedModeSettings } from "@/lib/services/research-mode";
 import { formattedReferences, type DocReference, type ReferencingStyle as ListStyle } from "@/lib/research-references-doc";
 import { loadChapterTexts, type ChapterTextSource } from "@/lib/services/chapter-texts";
@@ -334,7 +334,7 @@ export async function loadAssemblyInput(
     mode: settings?.mode ?? null,
     section,
     referencingStyle: settings?.referencingStyle ?? "APA_7TH",
-    citationPlacement: settings?.citationPlacement ?? null,
+    citationPlacement: effectivePlacement(settings?.referencingStyle, settings?.mode, section, settings?.citationPlacement),
     thematicTitles: settings?.thematicTitles ?? { chapter3: null, chapter4: null },
     chapters: texts.chapters.map((c) => ({ number: c.number, text: c.text })),
     media: texts.media,

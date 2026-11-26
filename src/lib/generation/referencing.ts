@@ -76,3 +76,28 @@ export function citationPlacementFor(
   if (override) return { placement: override };
   return { placement: style === "CHICAGO_NOTES_BIBLIOGRAPHY" ? "MODE_C" : "NOT_APPLICABLE" };
 }
+
+/**
+ * The placement a project's chapters are actually written and built with.
+ *
+ * `ResearchMode.citationPlacement` is nullable and nothing on the approval path
+ * fills it — `validateModeDecision` only checks a placement the COO chose by
+ * hand. So it is null on every row in production, and a reader that trusts the
+ * column alone disagrees with the prompt loader, which derives the placement
+ * from the style. That split is invisible for an author-date style and fatal
+ * for NALT: the model is told to write `[FOOTNOTES]`, and the assembly then
+ * builds an endnotes document from them. Found by the 26 Nov 2026 law pilot.
+ *
+ * A stored placement still wins, so a deliberate COO override is untouched.
+ */
+export function effectivePlacement(
+  style: string | null | undefined,
+  mode: number | null | undefined,
+  section: SectionKey | null | undefined,
+  stored?: string | null,
+): string | null {
+  if (stored) return stored;
+  if (!section || !isReferencingStyleKey(style)) return null;
+  const r = citationPlacementFor(style, mode === 1 ? "B" : "A", section);
+  return "placement" in r ? r.placement : null;
+}

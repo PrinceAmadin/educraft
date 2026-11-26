@@ -137,6 +137,21 @@ function footnoteLines(chapters: StructuralChapter[]): { number: number; text: s
 }
 
 /** Text of a chapter's prose, lists and captions (what a reader reads as the chapter's words). */
+/**
+ * Entries across EVERY `[FOOTNOTES]` / `[ENDNOTES]` block a chapter carries.
+ *
+ * A chapter written in several parts emits one notes block per part, because
+ * that is what the generation prompt asks for. Reading only the first block
+ * under-counts such a chapter and fails it for markers it has perfectly good
+ * notes for. Found by the 26 Nov 2026 NALT law pilot: a two-part Chapter One
+ * wrote 19 + 1 notes for 20 markers, and both ST12 and ST13 read 19.
+ */
+function endnoteEntryCount(c: Parsed): number {
+  return c.blocks
+    .filter((b): b is Extract<Block, { kind: "endnotes" }> => b.kind === "endnotes")
+    .reduce((n, b) => n + b.lines.filter((line) => /^\s*\**\s*\d{1,3}[.)]\s+\S/.test(line)).length, 0);
+}
+
 function readable(blocks: Block[]): string {
   return blocks
     .map((b) => (b.kind === "paragraph" ? b.text : b.kind === "list" ? b.items.map((i) => i.text).join(" ") : b.kind === "heading" ? b.text : ""))
@@ -394,10 +409,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
       n = distinctNoteCount(chapters, placement);
       howCounted = "distinct endnotes";
     } else if (input.citations.noteStyle) {
-      n = chapters.reduce((total, c) => {
-        const block = c.blocks.find((b): b is Extract<Block, { kind: "endnotes" }> => b.kind === "endnotes");
-        return total + (block?.lines.filter((line) => /^\s*\**\s*\d{1,3}[.)]\s+\S/.test(line)).length ?? 0);
-      }, 0);
+      n = chapters.reduce((total, c) => total + endnoteEntryCount(c), 0);
       howCounted = "endnote entries";
     } else {
       n = input.citations.cited.length;
@@ -450,11 +462,7 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
         const matches = bare.match(/\^\{?\[?\d{1,3}\]?\}?|(?<=[\p{L}.,;:!?)"'’”])\[\d{1,3}\](?![\p{L}\d])/gu) ?? [];
         return matches.length;
       };
-      const endnoteCount = (c: Parsed): number => {
-        const block = c.blocks.find((b): b is Extract<Block, { kind: "endnotes" }> => b.kind === "endnotes");
-        if (!block) return 0;
-        return block.lines.filter((line) => /^\s*\**\s*\d{1,3}[.)]\s+\S/.test(line)).length;
-      };
+      const endnoteCount = endnoteEntryCount;
       for (const n of [1, 2]) {
         const c = byNumber.get(n);
         if (!c) continue;
