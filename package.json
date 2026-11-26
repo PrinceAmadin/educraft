@@ -89,6 +89,7 @@
     "demo:migrate": "dotenv -e .env.demo -- prisma migrate deploy",
     "demo:base": "dotenv -e .env.demo -- tsx prisma/seed.ts",
     "screening:seed-bank": "dotenv -e .env.local -- tsx scripts/seed-screening-bank.ts",
+    "check:publication": "tsx scripts/check-publication.ts",
     "check:nalt": "tsx scripts/check-nalt.ts",
     "check:coupons": "tsx scripts/check-coupons.ts"
   },
