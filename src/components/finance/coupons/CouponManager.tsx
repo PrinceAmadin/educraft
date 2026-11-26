@@ -353,11 +353,16 @@ function NewCouponForm({
         description="Tie it to one client and only their own order gets the discount. Anyone else who types it is recorded as having been brought in by them — which is how a client who does not want to be an ambassador still gets the credit."
       >
         <Field
-          label="Client's internal id"
+          label="Client ID"
           htmlFor="coupon-owner"
-          hint="Leave blank to let anyone with the code use it."
+          hint="Like ECC-0042. Leave blank to let anyone with the code use it."
         >
-          <Input id="coupon-owner" value={ownerClientId} onChange={(e) => setOwnerClientId(e.target.value)} />
+          <Input
+            id="coupon-owner"
+            value={ownerClientId}
+            onChange={(e) => setOwnerClientId(e.target.value.toUpperCase())}
+            placeholder="ECC-0042"
+          />
         </Field>
         <Field
           label="Percentage for whoever they bring"

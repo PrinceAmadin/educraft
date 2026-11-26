@@ -125,12 +125,20 @@ export interface CreateCouponInput {
 export async function createCoupon(input: CreateCouponInput, actor: CouponActor) {
   const code = normalizeCouponCode(input.code);
   const now = new Date();
-  const problems = validateCouponDraft({ ...input, code }, now);
+  const problems = validateCouponDraft({ ...input, code, ownerClientId: input.ownerClientId ?? null }, now);
   if (problems.length) throw new CouponError(problems[0], 400, problems);
 
+  // The founder knows a client as ECC-0042, not as an internal id, so either
+  // is accepted and the code is tied to the row it finds.
+  let ownerClientId: string | null = null;
   if (input.ownerClientId) {
-    const owner = await db.client.findUnique({ where: { id: input.ownerClientId }, select: { id: true } });
-    if (!owner) throw new CouponError("That client no longer exists", 400);
+    const typed = input.ownerClientId.trim();
+    const owner = await db.client.findFirst({
+      where: { OR: [{ id: typed }, { clientId: { equals: typed, mode: "insensitive" } }] },
+      select: { id: true },
+    });
+    if (!owner) throw new CouponError("We don't have a client with that ID", 400);
+    ownerClientId = owner.id;
   }
 
   const taken = await db.coupon.findUnique({ where: { code }, select: { id: true } });
@@ -163,7 +171,7 @@ export async function createCoupon(input: CreateCouponInput, actor: CouponActor)
         percentOff: input.percentOff ?? null,
         amountOffNgn: input.amountOffNgn ?? null,
         friendPercentOff: input.friendPercentOff ?? null,
-        ownerClientId: input.ownerClientId ?? null,
+        ownerClientId,
         serviceCodes: input.serviceCodes ?? [],
         minOrderNgn: input.minOrderNgn ?? null,
         expiresAt: input.expiresAt ?? null,
