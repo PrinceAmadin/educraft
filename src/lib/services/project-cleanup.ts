@@ -630,6 +630,26 @@ async function deleteOne(code: string, reason: string, actor: Actor): Promise<De
       await tx.bucketAllocationLog.deleteMany({ where: { projectId: projectDbId } });
 
       // Payout records go outright (a cancelled one left behind would read as a bonus), then the commission lines.
+      // A coupon's redemption row cascades with the project, but the count it
+      // was measured by does not: bring it back down or the code reads as spent.
+      const redemption = await tx.couponRedemption.findUnique({
+        where: { projectId: projectDbId },
+        select: { couponId: true },
+      });
+      if (redemption) {
+        const used = await tx.coupon.findUnique({
+          where: { id: redemption.couponId },
+          select: { redemptionCount: true },
+        });
+        if (used && used.redemptionCount > 0) {
+          await tx.coupon.update({
+            where: { id: redemption.couponId },
+            data: { redemptionCount: used.redemptionCount - 1 },
+          });
+        }
+      }
+      await tx.couponRedemption.deleteMany({ where: { projectId: projectDbId } });
+
       await tx.payoutRecord.deleteMany({ where: { projectId: projectDbId } });
       await tx.refundRecord.deleteMany({ where: { projectId: projectDbId } });
       await tx.expense.deleteMany({ where: { projectId: projectDbId } });

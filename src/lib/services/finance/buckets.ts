@@ -81,6 +81,7 @@ const LEGS_SELECT = {
   id: true,
   projectId: true,
   price: true,
+  discountAmount: true,
   workerPayout: true,
   workerPayoutRate: true,
   ambassadorCommission: true,

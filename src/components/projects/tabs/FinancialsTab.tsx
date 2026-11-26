@@ -256,6 +256,13 @@ export function FinancialsTab({
               {project.workerPayoutPaid ? "Paid" : f.payoutsDue ? "Unpaid" : "Not yet due"}
             </span>
           </Line>
+          {project.discountAmount > 0 ? (
+            <Line label="Coupon discount" amount={project.discountAmount}>
+              <span className="text-xs text-muted-foreground">
+                Off the client&apos;s bill. Nobody&apos;s share above changes — EduCraft carries it.
+              </span>
+            </Line>
+          ) : null}
           <Line label="EduCraft revenue" amount={f.educraftRevenue} strong />
         </div>
         <p className="mt-3 text-[13px] text-muted-foreground">

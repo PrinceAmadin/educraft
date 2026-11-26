@@ -82,6 +82,9 @@ export const ROUTE_PERMISSIONS: readonly RoutePermission[] = [
   { prefix: "/admin/workers", roles: ["SUPER_ADMIN", "COO"] },
   // The COO's tutorial library ("How operations works"). Never a gate.
   { prefix: "/admin/tutorials", roles: ["SUPER_ADMIN", "COO"] },
+  // Coupons: the CEO creates them; the COO can too, and his wait for the CEO
+  // while the approval switch is on. Only the CEO approves or overrides a cap.
+  { prefix: "/admin/coupons", roles: ["SUPER_ADMIN", "COO"] },
   // Client messages and documents waiting for review are the delivery pipeline
   // (the COO's domain); the matrix predates this page.
   { prefix: "/admin/client-inbox", roles: ["SUPER_ADMIN", "COO"] },
@@ -136,6 +139,9 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   { prefix: "/api/admin/token-usage", roles: ["SUPER_ADMIN", "CO_CEO_CFO"] },
   { prefix: "/api/admin/ambassadors", roles: ["SUPER_ADMIN", "HOG"] },
   { prefix: "/api/admin/roster", roles: ["SUPER_ADMIN", "HOG"] },
+  // Printed recruitment cards and the funnel they feed: the same audience as
+  // the /admin/growth pages they are read on.
+  { prefix: "/api/admin/growth", roles: ["SUPER_ADMIN", "HOG"] },
   { prefix: "/api/admin/projects", roles: ["SUPER_ADMIN", "COO"] },
   { prefix: "/api/admin/qa", roles: ["SUPER_ADMIN", "COO"] },
   { prefix: "/api/admin/research-rerun-requests", roles: ["SUPER_ADMIN", "COO"] },
@@ -144,6 +150,7 @@ export const API_PERMISSIONS: readonly ApiPermission[] = [
   // The COO posts his own tutorial progress here; every management handler
   // (create/edit/delete/reset) re-checks requireSuperAdmin on top of this row.
   { prefix: "/api/admin/tutorials", roles: ["SUPER_ADMIN", "COO"] },
+  { prefix: "/api/admin/coupons", roles: ["SUPER_ADMIN", "COO"] },
   // The COO's monthly operations report (and its Word export).
   { prefix: "/api/admin/reports/operations", roles: ["SUPER_ADMIN", "COO"] },
   // Every executive reads their own notifications.

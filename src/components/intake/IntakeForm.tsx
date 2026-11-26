@@ -22,6 +22,7 @@ import { intakeSubmitSchema, type IntakeSubmitInput } from "@/lib/validations/in
 import { TEMPLATE_STEPS, type IntakeTemplate } from "@/lib/intake-templates";
 import { ACADEMIC_LEVELS, PROJECT_TYPES, REFERENCING_STYLES, COMMON_SKILLS } from "@/lib/constants";
 import { computePrice } from "@/lib/pricing";
+import { CouponField, type AppliedCoupon } from "@/components/intake/CouponField";
 import { baseOptionLabel } from "@/lib/service-groups";
 import { ChapterCalculator } from "@/components/services/ChapterCalculator";
 import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
@@ -201,6 +202,9 @@ export function IntakeForm({
   const chapterService = isChapterService(service.serviceCode);
   const variantAddon = service.variants?.find((v) => v.id === variantId)?.priceAddon ?? 0;
   const [uploading, setUploading] = React.useState(false);
+  // A coupon the client applied on the review step. The server priced it; this
+  // only feeds the figures on screen, and the order is priced again on submit.
+  const [coupon, setCoupon] = React.useState<AppliedCoupon | null>(null);
 
   const price = computePrice({
     basePrice: intakeBasePrice({
@@ -212,6 +216,7 @@ export function IntakeForm({
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: Boolean(isExpress),
     downpaymentPercentage: service.downpaymentPercentage,
+    discountAmount: coupon?.discountAmount ?? 0,
   });
 
   // Variable-priced services (amount confirmed on WhatsApp, not upfront) have
@@ -379,6 +384,8 @@ export function IntakeForm({
           universities={universities}
           service={service}
           price={price}
+          coupon={coupon}
+          onCoupon={setCoupon}
         />
 
         {submitError ? (
@@ -428,12 +435,16 @@ function StepContent({
   universities,
   service,
   price,
+  coupon,
+  onCoupon,
 }: {
   template: IntakeTemplate;
   stepId: string;
   universities: UniversityOption[];
   service: ServiceProp;
   price: ReturnType<typeof computePrice>;
+  coupon: AppliedCoupon | null;
+  onCoupon: (coupon: AppliedCoupon | null) => void;
 }) {
   switch (stepId) {
     case "personal":
@@ -482,7 +493,7 @@ function StepContent({
     case "files":
       return <FilesStep template={template} service={service} />;
     case "review":
-      return <ReviewStep template={template} service={service} price={price} />;
+      return <ReviewStep template={template} service={service} price={price} coupon={coupon} onCoupon={onCoupon} />;
     default:
       return null;
   }
@@ -1182,10 +1193,14 @@ function ReviewStep({
   template,
   service,
   price,
+  coupon,
+  onCoupon,
 }: {
   template: IntakeTemplate;
   service: ServiceProp;
   price: ReturnType<typeof computePrice>;
+  coupon: AppliedCoupon | null;
+  onCoupon: (coupon: AppliedCoupon | null) => void;
 }) {
   const {
     register,
@@ -1233,6 +1248,10 @@ function ReviewStep({
         {v.referralCode ? <Row label="Referral code" value={v.referralCode} /> : null}
       </dl>
 
+      {proBono || variablePrice ? null : (
+        <CouponField serviceCode={service.serviceCode} coupon={coupon} onCoupon={onCoupon} />
+      )}
+
       {proBono ? null : (
       <div className="rounded-2xl bg-zone p-4 text-sm">
         <div className="flex items-center justify-between">
@@ -1241,6 +1260,12 @@ function ReviewStep({
             {variablePrice ? "Confirmed after review" : formatNaira(price.total)}
           </span>
         </div>
+        {!variablePrice && price.discountAmount > 0 ? (
+          <div className="mt-1 flex items-center justify-between text-success">
+            <span>Your code</span>
+            <span className="font-mono tabular-nums">− {formatNaira(price.discountAmount)}</span>
+          </div>
+        ) : null}
         {!variablePrice ? (
           <>
             <div className="mt-1 flex items-center justify-between text-muted-foreground">

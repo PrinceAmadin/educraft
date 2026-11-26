@@ -13,6 +13,7 @@ import { notifyClient } from "@/lib/services/client-notify";
 import { balancePayable } from "@/lib/payment-rules";
 import { formatNaira } from "@/lib/utils";
 import { resolveTemplate } from "@/lib/intake-templates";
+import { CouponError, prospectiveLegs, resolveCouponForOrder } from "@/lib/services/finance/coupons";
 import { computePrice } from "@/lib/pricing";
 import { intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
@@ -173,6 +174,7 @@ export async function initializeIntakePayment(
   const service = await db.service.findFirst({
     where: { serviceCode: input.serviceCode, isActive: true },
     select: {
+      serviceName: true,
       basePrice: true,
       intakeFormTemplate: true,
       expressDeliverySurcharge: true,
@@ -198,14 +200,53 @@ export async function initializeIntakePayment(
   if (isChapterService(input.serviceCode) && chapters.length === 0) {
     throw new PaystackPaymentError("Choose at least one chapter");
   }
-  const price = computePrice({
+  const priceInputs = {
     basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,
-  });
+  };
+  const price = computePrice(priceInputs);
   if (!(price.downpaymentAmount > 0)) {
     throw new PaystackPaymentError("This service doesn't have a fixed price yet — use the regular submit flow");
+  }
+
+  // A coupon is priced BEFORE the client is charged and the figure is kept on
+  // the PendingIntake row. The webhook builds the project from what is stored
+  // here and never resolves the code again, so the project can never be created
+  // at a price other than the one Paystack took.
+  let couponId: string | null = null;
+  let broughtByCouponId: string | null = null;
+  let discountAmount = 0;
+  if (input.couponCode?.trim()) {
+    const typedEmail = input.email?.trim() || "";
+    const returning = typedEmail
+      ? await db.client.findFirst({
+          where: { email: { equals: typedEmail, mode: "insensitive" } },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        })
+      : null;
+    try {
+      const resolved = await resolveCouponForOrder({
+        code: input.couponCode,
+        serviceCode: input.serviceCode,
+        serviceLabel: service.serviceName,
+        legs: await prospectiveLegs({ listPrice: price.total, referralCode: input.referralCode }),
+        clientId: returning?.id ?? null,
+        audience: "client",
+      });
+      couponId = resolved.discountAmount > 0 ? resolved.couponId : null;
+      broughtByCouponId = resolved.broughtByCouponId;
+      discountAmount = resolved.discountAmount;
+    } catch (error) {
+      if (error instanceof CouponError) throw new PaystackPaymentError(error.message);
+      throw error;
+    }
+  }
+  const billed = discountAmount > 0 ? computePrice({ ...priceInputs, discountAmount }) : price;
+  if (!(billed.downpaymentAmount > 0)) {
+    throw new PaystackPaymentError("That code leaves nothing to pay — message us and we'll set the order up for you");
   }
 
   const reference = `INTAKE-${crypto.randomUUID()}`;
@@ -215,6 +256,9 @@ export async function initializeIntakePayment(
       template: input.template,
       payload: input as unknown as Prisma.InputJsonValue,
       reference,
+      couponId,
+      discountAmount,
+      broughtByCouponId,
     },
     select: { id: true },
   });
@@ -225,7 +269,7 @@ export async function initializeIntakePayment(
   try {
     const tx = await initializeTransaction({
       email,
-      amountNaira: price.downpaymentAmount,
+      amountNaira: billed.downpaymentAmount,
       reference,
       callbackUrl: `${callbackBaseUrl()}/intake/success?ref=${encodeURIComponent(reference)}`,
       metadata: { pendingIntakeId: pending.id },
@@ -584,7 +628,16 @@ async function processPendingIntake(
   if (!projectCode) {
     let created: { projectId: string };
     try {
-      created = await submitIntake(pending.payload as unknown as IntakeSubmitInput);
+      // The coupon figure is ALWAYS passed, even when it is zero: that is what
+      // stops the replay resolving a code afresh and creating the project at a
+      // price the client was never charged.
+      created = await submitIntake(pending.payload as unknown as IntakeSubmitInput, {
+        lockedCoupon: {
+          couponId: pending.couponId,
+          discountAmount: pending.discountAmount,
+          broughtByCouponId: pending.broughtByCouponId,
+        },
+      });
     } catch (error) {
       console.error(`[paystack] submitIntake failed for pending intake ${pendingIntakeId}`, error);
       if (error instanceof IntakeError) {

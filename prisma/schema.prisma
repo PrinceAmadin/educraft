@@ -45,31 +45,31 @@ enum UserRole {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id                  String    @id @default(cuid())
+  email               String    @unique
   /// What the UI greets this person by. Role profiles (Worker, Ambassador,
   /// Client) carry their own fullName; staff accounts have no profile row,
   /// so without this the UI falls back to the email local-part.
-  displayName  String?
-  phone        String?  @unique
-  passwordHash String
-  role         UserRole
-  isActive     Boolean  @default(true)
+  displayName         String?
+  phone               String?   @unique
+  passwordHash        String
+  role                UserRole
+  isActive            Boolean   @default(true)
   /// When an emailed code last proved this person owns `email`. Client orders
   /// placed with the same email join this login (one login, several
   /// dashboards) only once this is set: a password alone proves nothing about
   /// the inbox, since worker and ambassador applicants type their own email.
-  emailVerifiedAt DateTime?
+  emailVerifiedAt     DateTime?
   /// Last successful password sign-in. Null means they have never signed in:
   /// Team & Roles lists an invited executive as pending until this is set.
-  lastSignInAt DateTime?
+  lastSignInAt        DateTime?
   /// The founder appointed this login to flag test projects (Settings > Test
   /// data). The COO may by role; only the founder deletes.
   canFlagTestProjects Boolean   @default(false)
   flagAppointedAt     DateTime?
   flagAppointedById   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   workerProfile     Worker?
   ambassadorProfile Ambassador?
@@ -79,22 +79,22 @@ model User {
   /// One Client row per person since Sept 2026 (a returning email joins it);
   /// older duplicates, if any, are all linked to the same User.
   clientProfiles    Client[]
-  projectMessages   ProjectMessage[]   @relation("ProjectMessageAuthor")
+  projectMessages   ProjectMessage[] @relation("ProjectMessageAuthor")
 
-  notifications     Notification[]
-  pushSubscriptions PushSubscription[]
-  statusChanges     ProjectStatusLog[] @relation("ChangedBy")
-  paymentsConfirmed Payment[]          @relation("ConfirmedBy")
-  researchJobsRequested ResearchJob[]  @relation("ResearchRequestedBy")
-  researchRunsStarted    ResearchRunLog[]        @relation("ResearchRunStartedBy")
-  rerunRequestsMade      ResearchRerunRequest[]  @relation("RerunRequestedBy")
-  rerunRequestsReviewed  ResearchRerunRequest[]  @relation("RerunReviewedBy")
+  notifications         Notification[]
+  pushSubscriptions     PushSubscription[]
+  statusChanges         ProjectStatusLog[]     @relation("ChangedBy")
+  paymentsConfirmed     Payment[]              @relation("ConfirmedBy")
+  researchJobsRequested ResearchJob[]          @relation("ResearchRequestedBy")
+  researchRunsStarted   ResearchRunLog[]       @relation("ResearchRunStartedBy")
+  rerunRequestsMade     ResearchRerunRequest[] @relation("RerunRequestedBy")
+  rerunRequestsReviewed ResearchRerunRequest[] @relation("RerunReviewedBy")
 
-  workerApplication           WorkerApplication?  @relation("WorkerApplicationUser")
-  workerApplicationsReviewed  WorkerApplication[]  @relation("WorkerApplicationReviewedBy")
-  workerRecordsUpdated        Worker[]             @relation("WorkerUpdatedBy")
-  trainingWatches             TrainingWatch[]
-  trainingQuizAttempts        TrainingQuizAttempt[]
+  workerApplication          WorkerApplication?    @relation("WorkerApplicationUser")
+  workerApplicationsReviewed WorkerApplication[]   @relation("WorkerApplicationReviewedBy")
+  workerRecordsUpdated       Worker[]              @relation("WorkerUpdatedBy")
+  trainingWatches            TrainingWatch[]
+  trainingQuizAttempts       TrainingQuizAttempt[]
 
   // Phase 4 (Operations Platform)
   projectNotes      ProjectNote[] @relation("ProjectNoteAuthor")
@@ -160,6 +160,7 @@ model University {
   clients                Client[]
   ambassadors            Ambassador[]
   ambassadorApplications AmbassadorApplication[]
+  recruitCards           RecruitCard[]
 
   @@index([region])
   @@index([status])
@@ -174,57 +175,109 @@ enum ApplicationStatus {
 }
 
 model AmbassadorApplication {
-  id              String            @id @default(cuid())
-  fullName        String
-  phone           String
-  email           String?
-  universityId    String?
-  university      University?        @relation(fields: [universityId], references: [id])
-  otherUniversity String?
-  department      String?
-  level           String?
+  id                String            @id @default(cuid())
+  fullName          String
+  phone             String
+  email             String?
+  universityId      String?
+  university        University?       @relation(fields: [universityId], references: [id])
+  otherUniversity   String?
+  department        String?
+  level             String?
   /// The old "why do you want to join" answer. Kept for applications made
   /// before Sept 2026 — the form no longer asks it, because asking for
   /// motivation only ever produced the same three words back.
-  motivation      String?
+  motivation        String?
   /// What they can actually reach: roles held (REACH_ROLES), how many
   /// final-year students, and the groups/pages they named.
-  reachRoles      String[]          @default([])
-  reachSize       String?
-  reachGroups     String?
+  reachRoles        String[]          @default([])
+  reachSize         String?
+  reachGroups       String?
   /// What they committed to in their first 30 days, and week one's first move.
   expectedReferrals Int?
-  firstWeekPlan   String?
+  firstWeekPlan     String?
   /// Retired Sept 2026: the form asked these for one day and stopped. The
   /// columns stay so an application submitted in that window still reads in
   /// full — nothing writes them any more.
-  serviceCheck    String?
-  pitchMessage    String?
-  objectionReply  String?
-  clientUpsetReply String?
+  serviceCheck      String?
+  pitchMessage      String?
+  objectionReply    String?
+  clientUpsetReply  String?
   /// Payment details, captured at application time so approval needs no
   /// follow-up — mirrors the fields already on Ambassador.
-  bankName        String?
-  accountNumber   String?
-  accountName     String?
-  status          ApplicationStatus  @default(PENDING)
-  reviewedById    String?
-  reviewNote      String?
-  reviewedAt      DateTime?
+  bankName          String?
+  accountNumber     String?
+  accountName       String?
+  status            ApplicationStatus @default(PENDING)
+  reviewedById      String?
+  reviewNote        String?
+  reviewedAt        DateTime?
   /// Set to the Ambassador.id created on approval.
-  ambassadorId    String?           @unique
+  ambassadorId      String?           @unique
   /// General slot ("059") auto-assigned when they applied — the first vacant
   /// slot, else the next number. Holds the slot while the application is
   /// PENDING; cleared on rejection so it can be reassigned.
-  slotCode        String?
+  slotCode          String?
   /// Their dashboard login, created inactive at submission (same as worker
   /// applications) and switched on at approval.
-  userId          String?           @unique
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  userId            String?           @unique
+  /// The RecruitCard code whose QR this applicant scanned (the `ecr` cookie
+  /// the /J route set). Null for anyone who found EduCraft on their own.
+  recruitCardCode   String?
+  /// Who held that card AT SUBMIT TIME: "HOG" (a User.id) or "AMBASSADOR" (an
+  /// Ambassador.id). Snapshotted rather than looked up at approval, because a
+  /// card can be retired or handed to someone else in between and the credit
+  /// belongs to whoever held it when the scan happened — the same reasoning as
+  /// PayoutRecord.recipientName.
+  recruitedByType   String?
+  recruitedBy       String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@index([status])
   @@index([slotCode])
+  @@index([recruitCardCode])
+}
+
+/// One printed QR design — about three to start, not three hundred: variable
+/// data printing of a unique code per card is not worth it at the price a card
+/// costs, so a code belongs to a HOLDER (one design per executive, later per
+/// Silver+ ambassador) and the stack they carry is a batch.
+///
+/// `holderType` / `holderId` deliberately use the same values as
+/// Ambassador.recruitedBy / recruitedByType, so carrying credit from a scanned
+/// card to the approved ambassador is a copy rather than a mapping, and the
+/// admin screens that already resolve those values need no change.
+model RecruitCard {
+  id           String      @id @default(cuid())
+  /// Printed on the card as /J/{code}. Four characters, upper case, from an
+  /// alphabet with no I, L, O or U so nobody mistypes it off a card.
+  code         String      @unique
+  /// "HOG" (a User.id) | "AMBASSADOR" (an Ambassador.id).
+  holderType   String
+  holderId     String
+  /// What the founder called it, to tell designs apart: "Prince — EUI December run".
+  label        String
+  /// The print run: "2026-12-EUI".
+  batch        String?
+  /// The school the batch was printed FOR. Never inferred from a scan's
+  /// location — a region code is a state, not a campus.
+  universityId String?
+  university   University? @relation(fields: [universityId], references: [id])
+  /// How many cards of this design were printed, and what one cost, so cost
+  /// per application is a real number. Entered by hand; never a counter.
+  printedCount Int?
+  unitCostNgn  Int?
+  /// ACTIVE | RETIRED. A retired card still records scans — the cards are out
+  /// there — but its holder no longer earns credit for them.
+  status       String      @default("ACTIVE")
+  createdById  String?
+  createdAt    DateTime    @default(now())
+  retiredAt    DateTime?
+
+  @@index([holderType, holderId])
+  @@index([batch])
+  @@index([status])
 }
 
 // ─── AMBASSADOR ROSTER ──────────────────────────────────
@@ -263,35 +316,36 @@ model AmbassadorSlot {
 // ─── CLIENTS ────────────────────────────────────────────
 
 model Client {
-  id               String      @id @default(cuid())
-  clientId         String      @unique // EC-C-XXXXX
-  fullName         String
-  phone            String
-  email            String?
-  universityId     String
-  university       University  @relation(fields: [universityId], references: [id])
-  faculty          String
-  department       String
-  level            String
-  referredById     String?
-  referredBy       Ambassador? @relation(fields: [referredById], references: [id])
-  referralCodeUsed String?
+  id                  String               @id @default(cuid())
+  clientId            String               @unique // EC-C-XXXXX
+  fullName            String
+  phone               String
+  email               String?
+  universityId        String
+  university          University           @relation(fields: [universityId], references: [id])
+  faculty             String
+  department          String
+  level               String
+  referredById        String?
+  referredBy          Ambassador?          @relation(fields: [referredById], references: [id])
+  referralCodeUsed    String?
   ambassadorReferrals AmbassadorReferral[]
-  status           String      @default("Active")
-  notes            String?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  status              String               @default("Active")
+  notes               String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   userId String?
   user   User?   @relation(fields: [userId], references: [id])
 
-  projects Project[]
+  projects   Project[]
+  coupons    Coupon[]          @relation("CouponOwner")
+  loginCodes ClientLoginCode[]
 
   @@index([universityId])
   @@index([referredById])
   @@index([phone])
   @@index([userId])
-  loginCodes ClientLoginCode[]
 }
 
 // ─── SERVICES ───────────────────────────────────────────
@@ -423,10 +477,10 @@ model Project {
   /// Pro bono job (marketing / visibility / admin's call). Price is 0, both
   /// payment legs are pre-cleared and payouts pre-marked paid, and it is left
   /// out of the finance dashboard's business-intelligence figures.
-  isProBono         Boolean       @default(false)
-  proBonoReason     String?
-  proBonoInviteId   String?       @unique
-  proBonoInvite     ProBonoInvite? @relation(fields: [proBonoInviteId], references: [id])
+  isProBono       Boolean        @default(false)
+  proBonoReason   String?
+  proBonoInviteId String?        @unique
+  proBonoInvite   ProBonoInvite? @relation(fields: [proBonoInviteId], references: [id])
 
   // ── Academic fields ──
   projectTitle        String?
@@ -469,13 +523,26 @@ model Project {
   expectedDeliveryAt DateTime?
 
   // ── Pricing ──
+  /// The LIST price: the basis every commission is computed on, discount or no
+  /// discount. A coupon never lowers it.
   price                Float
+  /// What a coupon took off this client's bill. Workers, ambassadors and the
+  /// executives are still paid on `price`, so EduCraft's own retained share
+  /// absorbs the whole discount; the client pays `price - discountAmount`.
+  discountAmount       Float             @default(0)
+  couponId             String?
+  coupon               Coupon?           @relation("ProjectCoupon", fields: [couponId], references: [id])
+  /// The coupon whose owner brought this client in. Carries no discount of its
+  /// own: it is how a client who is not an ambassador is credited for a referral.
+  broughtByCouponId    String?
+  broughtByCoupon      Coupon?           @relation("ProjectBroughtByCoupon", fields: [broughtByCouponId], references: [id])
+  couponRedemption     CouponRedemption?
   downpaymentAmount    Float
-  downpaymentStatus    String    @default("Unpaid") // Unpaid, Paid, Verified
+  downpaymentStatus    String            @default("Unpaid") // Unpaid, Paid, Verified
   downpaymentDate      DateTime?
   downpaymentReference String?
   balanceAmount        Float
-  balanceStatus        String    @default("Unpaid")
+  balanceStatus        String            @default("Unpaid")
   balanceDate          DateTime?
   balanceReference     String?
 
@@ -487,13 +554,13 @@ model Project {
   workerAcceptedDate DateTime?
 
   // ── QA ──
-  qaReviewerId  String?
-  qaStatus      String?
-  qaScore       Int?
-  qaNotes       String?
+  qaReviewerId    String?
+  qaStatus        String?
+  qaScore         Int?
+  qaNotes         String?
   /// Per-item QA checklist state: { "<item-id>": true }. Auto-saved.
-  qaChecklist   Json?
-  revisionCount Int     @default(0)
+  qaChecklist     Json?
+  revisionCount   Int       @default(0)
   /// Phase 4: when the FIRST QA review approved the work without a revision.
   /// Null on a project that needed a revision (or predates the field) — the
   /// QA first-pass rate counts projects where this is set.
@@ -501,7 +568,7 @@ model Project {
   /// Phase 4: the structured review (reviewer, Layer 4 delivery checklist,
   /// decision). The legacy qa* columns above are still written for the old
   /// screens; this row is the COO's record.
-  qaReview      QaReview?
+  qaReview        QaReview?
 
   // ── Internal ──
   /// Admin-only working notes. Never surfaced to client or worker.
@@ -510,20 +577,20 @@ model Project {
   // ── Phase 4: operations ──
   /// The COO's at-risk flag: the project needs watching even if its numbers
   /// look fine. Surfaces in Action required and on the row.
-  atRisk       Boolean   @default(false)
-  atRiskNote   String?
-  atRiskAt     DateTime?
+  atRisk                  Boolean   @default(false)
+  atRiskNote              String?
+  atRiskAt                DateTime?
   /// A strict supervisor (or a department known for rejections): the Tier 3
   /// reference check runs before delivery.
-  supervisorHighRisk Boolean @default(false)
+  supervisorHighRisk      Boolean   @default(false)
   /// The COO asked the founder for a senior domain review of this project.
   seniorReviewRequestedAt DateTime?
   seniorReviewNote        String?
   /// Lineage: a follow-on order (corrections beyond round 3, a chapter added
   /// later, a seminar built on the same topic) points at the project it came from.
-  parentProjectId String?
-  parentProject   Project?  @relation("ProjectLineage", fields: [parentProjectId], references: [id])
-  childProjects   Project[] @relation("ProjectLineage")
+  parentProjectId         String?
+  parentProject           Project?  @relation("ProjectLineage", fields: [parentProjectId], references: [id])
+  childProjects           Project[] @relation("ProjectLineage")
 
   // ── Test data ──
   /// Flagged as a test project by the COO or someone the founder appointed.
@@ -542,58 +609,58 @@ model Project {
   finalCompletionDate         DateTime?
 
   // ── Commission & payout ──
-  ambassadorId         String?
-  ambassador           Ambassador? @relation("ProjectAmbassador", fields: [ambassadorId], references: [id])
-  ambassadorCommRate   Float?
-  ambassadorCommission Float?
-  ambassadorCommPaid   Boolean     @default(false)
+  ambassadorId          String?
+  ambassador            Ambassador?      @relation("ProjectAmbassador", fields: [ambassadorId], references: [id])
+  ambassadorCommRate    Float?
+  ambassadorCommission  Float?
+  ambassadorCommPaid    Boolean          @default(false)
   /// When the job was allocated to its ambassador and the commission logged.
   ambassadorAllocatedAt DateTime?
   /// When the current ambassador was emailed about this commission. Null for
   /// a public-intake referral until its downpayment is verified.
-  ambassadorNotifiedAt DateTime?
+  ambassadorNotifiedAt  DateTime?
   /// The ambassador's parent (Core), when the ambassador is a Sub at the time
   /// of allocation and the parent has reached Silver. Independent of
   /// ambassadorId so removing/changing the ambassador clears both together.
-  parentAmbassadorId   String?
-  parentAmbassador     Ambassador? @relation("ProjectParentAmbassador", fields: [parentAmbassadorId], references: [id])
-  parentCommRate       Float?
-  parentCommission     Float?
-  parentCommPaid       Boolean     @default(false)
+  parentAmbassadorId    String?
+  parentAmbassador      Ambassador?      @relation("ProjectParentAmbassador", fields: [parentAmbassadorId], references: [id])
+  parentCommRate        Float?
+  parentCommission      Float?
+  parentCommPaid        Boolean          @default(false)
   /// When the parent was emailed about this commission. Same deferred-until-
   /// verified rule as ambassadorNotifiedAt.
-  parentNotifiedAt     DateTime?
-  workerPayoutRate     Float       @default(40)
-  workerPayout         Float?
-  workerPayoutPaid     Boolean     @default(false)
-  educraftRevenue      Float?
+  parentNotifiedAt      DateTime?
+  workerPayoutRate      Float            @default(35)
+  workerPayout          Float?
+  workerPayoutPaid      Boolean          @default(false)
+  educraftRevenue       Float?
   /// The cashflow structure this project is computed under: the version active
   /// when it was created, forever (the grandfather rule). Null only on rows the
   /// seed has not stamped yet, which then read the version in force at createdAt.
-  cashflowVersionId    String?
-  cashflowVersion      CashflowVersion? @relation(fields: [cashflowVersionId], references: [id])
+  cashflowVersionId     String?
+  cashflowVersion       CashflowVersion? @relation(fields: [cashflowVersionId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  files       ProjectFile[]
-  statusLog   ProjectStatusLog[]
-  payments    Payment[]
-  payoutRecords     PayoutRecord[]
-  bucketAllocations BucketAllocationLog[]
-  referral          AmbassadorReferral?
-  researchJob ResearchJob?
-  references  Reference[]
-  researchRunLogs      ResearchRunLog[]
+  files                 ProjectFile[]
+  statusLog             ProjectStatusLog[]
+  payments              Payment[]
+  payoutRecords         PayoutRecord[]
+  bucketAllocations     BucketAllocationLog[]
+  referral              AmbassadorReferral?
+  researchJob           ResearchJob?
+  references            Reference[]
+  researchRunLogs       ResearchRunLog[]
   researchRerunRequests ResearchRerunRequest[]
-  clientUpdates        ProjectUpdate[]
-  messages             ProjectMessage[]
-  deliverables         ProjectDeliverable[]
+  clientUpdates         ProjectUpdate[]
+  messages              ProjectMessage[]
+  deliverables          ProjectDeliverable[]
   // Phase 4 (Operations Platform)
-  notes                ProjectNote[]
-  correctionRounds     SupervisorCorrection[]
-  researchRequests     ResearchRequest[]
-  workerFlags          WorkerFlag[]
+  notes                 ProjectNote[]
+  correctionRounds      SupervisorCorrection[]
+  researchRequests      ResearchRequest[]
+  workerFlags           WorkerFlag[]
   // Phase D (report production)
   generationCheckpoints GenerationCheckpoint[]
   orchestratorRun       OrchestratorRun?
@@ -615,6 +682,8 @@ model Project {
   @@index([atRisk])
   @@index([parentProjectId])
   @@index([cashflowVersionId])
+  @@index([couponId])
+  @@index([broughtByCouponId])
 }
 
 /// A project the founder deleted as test data (Settings > Test data). The
@@ -657,43 +726,43 @@ enum FileStorage {
 }
 
 model ProjectFile {
-  id         String   @id @default(cuid())
-  projectId  String
-  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  fileName   String
+  id                 String              @id @default(cuid())
+  projectId          String
+  project            Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fileName           String
   /// For PRIVATE_BLOB this is the store's URL, which needs a credential: always
   /// link to a download route instead (see src/lib/files/links.ts).
-  fileUrl    String
-  fileSize   Int?
+  fileUrl            String
+  fileSize           Int?
   /// The content type we decided from the file's extension and first bytes.
-  fileType   String?
+  fileType           String?
   // from_client, from_worker, qa_reviewed, delivered,
   // supervisor_correction, ch34_data, department_outline, message_attachment,
   // data_upload (D4: a file sent at a data pause, by the client or the specialist)
-  category   String
-  uploadedBy String?
+  category           String
+  uploadedBy         String?
   /// WORKER / ADMIN / CLIENT for files uploaded to the private store.
-  uploaderRole String?
-  storage      FileStorage @default(EXTERNAL_LINK)
+  uploaderRole       String?
+  storage            FileStorage         @default(EXTERNAL_LINK)
   /// Private-store path, unique so one upload can never be registered twice.
-  blobPathname String?     @unique
+  blobPathname       String?             @unique
   /// An admin hid it from the worker (kept for the record).
   hiddenFromWorkerAt DateTime?
   deletedAt          DateTime?
-  deliverableId String?
-  deliverable   ProjectDeliverable? @relation(fields: [deliverableId], references: [id])
-  messageId     String?
-  message       ProjectMessage?     @relation(fields: [messageId], references: [id])
-  version       DeliverableVersion? @relation("VersionFile")
+  deliverableId      String?
+  deliverable        ProjectDeliverable? @relation(fields: [deliverableId], references: [id])
+  messageId          String?
+  message            ProjectMessage?     @relation(fields: [messageId], references: [id])
+  version            DeliverableVersion? @relation("VersionFile")
   /// Chapter gate: this file is the formatted copy of that version.
-  formattedFor  DeliverableVersion? @relation("VersionFormattedCopy")
+  formattedFor       DeliverableVersion? @relation("VersionFormattedCopy")
   /// D3c/D4: a data file sent at a pipeline pause (category data_upload; uploaderRole says who sent it), and its slot if any.
-  pauseId       String?
-  pause         PipelinePause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
-  pauseSlot     String?
+  pauseId            String?
+  pause              PipelinePause?      @relation(fields: [pauseId], references: [id], onDelete: SetNull)
+  pauseSlot          String?
   /// D3c: text read from a Word, CSV or Excel data file for the chapter prompts (PDFs and images go to Claude as they are).
-  extractedText String?             @db.Text
-  createdAt  DateTime @default(now())
+  extractedText      String?             @db.Text
+  createdAt          DateTime            @default(now())
 
   @@index([projectId, category])
   @@index([deliverableId])
@@ -737,29 +806,29 @@ enum VersionStatus {
 }
 
 model ProjectDeliverable {
-  id            String            @id @default(cuid())
-  projectId     String
-  project       Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id             String            @id @default(cuid())
+  projectId      String
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   /// ch1..chN, final, proposal, slides, or x-<n> for ones an admin added.
-  key           String
-  kind          DeliverableKind
-  chapter       Int?
+  key            String
+  kind           DeliverableKind
+  chapter        Int?
   /// Client-facing name ("Chapter 1", "Complete project").
-  title         String
-  sortOrder     Int
-  status        DeliverableStatus @default(NOT_STARTED)
-  access        DeliverableAccess
-  accessSetById String?
-  accessSetAt   DateTime?
-  archivedAt    DateTime?
+  title          String
+  sortOrder      Int
+  status         DeliverableStatus @default(NOT_STARTED)
+  access         DeliverableAccess
+  accessSetById  String?
+  accessSetAt    DateTime?
+  archivedAt     DateTime?
   /// Reviewed like any chapter but never listed for the client (a one-chapter order's chapter: the client gets it as the complete document).
-  clientHidden  Boolean           @default(false)
+  clientHidden   Boolean           @default(false)
   /// Chapter review: the COO's correction notes on a chapter already approved (the specialist sees them); the next approval clears them.
   changeNote     String?
   changeNoteAt   DateTime?
   changeNoteById String?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   versions DeliverableVersion[]
   files    ProjectFile[]
@@ -849,8 +918,8 @@ model Worker {
   /// Who last saved a change to this record — an admin correcting it, or the
   /// worker editing their own profile. Null means it hasn't been touched
   /// since creation (or predates this column).
-  updatedById String?
-  updatedBy   User?   @relation("WorkerUpdatedBy", fields: [updatedById], references: [id])
+  updatedById   String?
+  updatedBy     User?   @relation("WorkerUpdatedBy", fields: [updatedById], references: [id])
   /// "admin" or "worker" — paired with updatedById/updatedAt for the
   /// "last updated by ... on ..." line on the worker record.
   updatedByRole String?
@@ -861,7 +930,7 @@ model Worker {
   isQaReviewer    Boolean   @default(false)
   qaReviewerSince DateTime?
 
-  projects Project[]
+  projects         Project[]
   flags            WorkerFlag[]
   opsNotes         WorkerNote[]
   researchRequests ResearchRequest[]
@@ -877,33 +946,33 @@ model Worker {
 // owns a User from the moment it's submitted, created inactive until approved.
 
 model WorkerApplication {
-  id             String            @id @default(cuid())
-  userId         String            @unique
-  user           User              @relation("WorkerApplicationUser", fields: [userId], references: [id])
-  fullName       String
-  phone          String
-  email          String
-  educationLevel String?
-  specialties    String[]
-  skills         String[]
-  bankName       String?
-  accountNumber  String?
-  accountName    String?
-  status         ApplicationStatus @default(PENDING)
-  reviewedById   String?
-  reviewedBy     User?             @relation("WorkerApplicationReviewedBy", fields: [reviewedById], references: [id])
-  reviewNote     String?
-  reviewedAt     DateTime?
+  id              String               @id @default(cuid())
+  userId          String               @unique
+  user            User                 @relation("WorkerApplicationUser", fields: [userId], references: [id])
+  fullName        String
+  phone           String
+  email           String
+  educationLevel  String?
+  specialties     String[]
+  skills          String[]
+  bankName        String?
+  accountNumber   String?
+  accountName     String?
+  status          ApplicationStatus    @default(PENDING)
+  reviewedById    String?
+  reviewedBy      User?                @relation("WorkerApplicationReviewedBy", fields: [reviewedById], references: [id])
+  reviewNote      String?
+  reviewedAt      DateTime?
   /// Set to the Worker.id created on approval.
-  workerId       String?           @unique
+  workerId        String?              @unique
   /// Phase 4: the screening pipeline stage (SCREEN_SENT … FINAL_PASSED).
   /// Null = the direct-approve flow (the default); set only when the COO or
   /// founder opts this application into screening.
-  screeningStage String?
-  screening      ScreeningAssignment?
+  screeningStage  String?
+  screening       ScreeningAssignment?
   finalAssessment FinalAssessment?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@index([status])
 }
@@ -965,47 +1034,47 @@ model ScreeningItem {
 /// One candidate's screening instance: the unguessable token IS the link, the
 /// drawn items, the answers and the automatic score. One per application.
 model ScreeningAssignment {
-  id             String            @id @default(cuid())
-  applicationId  String            @unique
-  application    WorkerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  id              String            @id @default(cuid())
+  applicationId   String            @unique
+  application     WorkerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   /// 32-hex; the credential in /screen/{token}.
-  token          String            @unique
+  token           String            @unique
   /// SENT | IN_PROGRESS | SUBMITTED
-  status         String            @default("SENT")
+  status          String            @default("SENT")
   /// The Eye items drawn for this sitting, the one relevance item, the one rewrite item.
-  eyeItemIds     String[]
-  relItemId      String?
-  rewriteItemId  String?
+  eyeItemIds      String[]
+  relItemId       String?
+  rewriteItemId   String?
   /// { eye: { "<itemId>": { choice, tell } }, rel: { "<index>": label }, rewrite: "<text>" }
-  answers        Json?
-  eyeCorrect     Int?
-  eyeTotal       Int?
-  relCorrect     Int?
-  relTotal       Int?
+  answers         Json?
+  eyeCorrect      Int?
+  eyeTotal        Int?
+  relCorrect      Int?
+  relTotal        Int?
   /// Rewrite test: banned constructions cleared out of those planted in the paragraph.
-  rewriteCorrect Int?
-  rewriteTotal   Int?
+  rewriteCorrect  Int?
+  rewriteTotal    Int?
   /// The optional Claude voice rubric's advisory line (only when screening_rewrite_claude is on).
-  rewriteRubric  String?
+  rewriteRubric   String?
   /// Formatting practical: the fault ids planted in the broken .docx, how many the candidate cleared, and which remain.
-  formatInjected String[]
-  formatCorrect  Int?
-  formatTotal    Int?
+  formatInjected  String[]
+  formatCorrect   Int?
+  formatTotal     Int?
   formatRemaining Json?
-  overallPercent Int?
+  overallPercent  Int?
   /// PASS | FAIL | BORDERLINE (the automatic verdict).
-  outcome        String?
+  outcome         String?
   /// The COO's call on a borderline, or an override: PASS | FAIL.
-  reviewDecision String?
-  reviewNote     String?
-  reviewedById   String?
-  reviewedAt     DateTime?
-  sentById       String?
-  startedAt      DateTime?
-  submittedAt    DateTime?
-  deadlineAt     DateTime?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  reviewDecision  String?
+  reviewNote      String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  sentById        String?
+  startedAt       DateTime?
+  submittedAt     DateTime?
+  deadlineAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   @@index([status])
 }
@@ -1020,30 +1089,30 @@ enum AmbassadorTier {
 }
 
 model Ambassador {
-  id            String         @id @default(cuid())
-  ambassadorId  String         @unique // EC-A-XXXXX
+  id                          String         @id @default(cuid())
+  ambassadorId                String         @unique // EC-A-XXXXX
   /// Slot id from the original Ambassador Panel (e.g. "054", "ECSA-001-005")
   /// for ambassadors migrated from it — keeps the migration idempotent and
   /// ties a record back to its old referral link.
-  legacySlotId  String?        @unique
-  fullName      String
+  legacySlotId                String?        @unique
+  fullName                    String
   /// Optional: the original panel's self-registration never asked for one.
-  phone         String?
-  email         String?
-  universityId  String
-  university    University     @relation(fields: [universityId], references: [id])
-  department    String?
-  level         String?
-  referralCode  String         @unique
-  status        String         @default("Active")
-  tier          AmbassadorTier @default(BRONZE)
-  bankName      String?
-  accountNumber String?
-  accountName   String?
+  phone                       String?
+  email                       String?
+  universityId                String
+  university                  University     @relation(fields: [universityId], references: [id])
+  department                  String?
+  level                       String?
+  referralCode                String         @unique
+  status                      String         @default("Active")
+  tier                        AmbassadorTier @default(BRONZE)
+  bankName                    String?
+  accountNumber               String?
+  accountName                 String?
   /// True once they unsubscribe from the Monday link-performance summary (from
   /// the email link or their profile). Only that email is optional: welcome and
   /// commission emails are transactional and are unaffected.
-  weeklyEmailOptOut Boolean    @default(false)
+  weeklyEmailOptOut           Boolean        @default(false)
   /// A new ambassador holds their slot for PROVISIONAL_DAYS: bring one
   /// confirmed order and it's theirs, bring none and the slot is released.
   /// Provisional is a DATE, never a status — several queries match
@@ -1051,13 +1120,13 @@ model Ambassador {
   /// value would quietly drop provisional ambassadors out of them.
   /// Provisional means `provisionalUntil != null && activatedAt == null`;
   /// every ambassador from before this rule has all three null, i.e. settled.
-  provisionalUntil    DateTime?
+  provisionalUntil            DateTime?
   /// Stamped when their first referred downpayment is confirmed.
-  activatedAt         DateTime?
+  activatedAt                 DateTime?
   /// Stamped when the "days left" warning went out, so it sends once.
   /// Retired Oct 2026: the ambassador no longer sees a countdown (HOG's call),
   /// so no warning is sent. Kept for rows written while it was live.
-  provisionalWarnedAt DateTime?
+  provisionalWarnedAt         DateTime?
   /// Stamped the first time the silent 30-day sweep reports this new ambassador
   /// to the HOG for having brought no client (Oct 2026). Nothing is changed
   /// automatically any more — the HOG decides each one's fate — and this makes
@@ -1068,17 +1137,17 @@ model Ambassador {
   /// `tourVersion != TOUR_VERSION`. Every ambassador that existed when it
   /// shipped was stamped by `ambassadors:tour-backfill`, so only people
   /// approved afterwards ever meet it. Bumping TOUR_VERSION re-gates everyone.
-  tourVersion         String?
-  tourWatchedAt       DateTime?
+  tourVersion                 String?
+  tourWatchedAt               DateTime?
   /// Furthest point reached, in whole seconds — what the gate resumes from.
-  tourSecondsWatched  Int       @default(0)
+  tourSecondsWatched          Int            @default(0)
   /// The video length as the browser reported it, so "watched enough" is
   /// judged against the cut they actually saw.
-  tourDurationSeconds Int?
+  tourDurationSeconds         Int?
   /// First time they pressed play: lets the HOG see who opened it and stopped.
-  tourStartedAt       DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  tourStartedAt               DateTime?
+  createdAt                   DateTime       @default(now())
+  updatedAt                   DateTime       @updatedAt
 
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id])
@@ -1087,35 +1156,35 @@ model Ambassador {
   /// parent must reach Silver to activate). The rate a parent earns from a
   /// child's jobs lives on the CHILD, since it's set when the admin links
   /// them: null = the global default in Settings.
-  parentId       String?
-  parent         Ambassador?  @relation("AmbassadorParentChild", fields: [parentId], references: [id])
-  children       Ambassador[] @relation("AmbassadorParentChild")
+  parentId                 String?
+  parent                   Ambassador?  @relation("AmbassadorParentChild", fields: [parentId], references: [id])
+  children                 Ambassador[] @relation("AmbassadorParentChild")
   /// v2.0 (Phase 2): the parent (Core) earns 15% minus the sub's own rate, so
   /// EduCraft always pays 15% in total. `parentCommRate` is only used when
   /// `parentCommRateIsOverride` is set — and then only ever to LOWER the
   /// Core's cut (0 links them without paying a commission).
   parentCommRate           Float?
-  parentCommRateIsOverride Boolean @default(false)
+  parentCommRateIsOverride Boolean      @default(false)
 
-  clickEvents          ClickEvent[]
-  referredClients      Client[]
-  payments             Payment[] @relation("PaymentAmbassador")
-  projects             Project[] @relation("ProjectAmbassador")
+  clickEvents         ClickEvent[]
+  referredClients     Client[]
+  payments            Payment[]               @relation("PaymentAmbassador")
+  projects            Project[]               @relation("ProjectAmbassador")
   /// Jobs this ambassador earns a parent-commission on, referred by one of
   /// their sub-ambassadors.
-  subReferredProjects  Project[] @relation("ProjectParentAmbassador")
+  subReferredProjects Project[]               @relation("ProjectParentAmbassador")
   /// Device-locked WhatsApp group invites minted for them (Oct 2026). At most
   /// one is active (OPEN/BOUND) at a time; regenerating revokes the old one.
-  groupInvites         AmbassadorGroupInvite[]
+  groupInvites        AmbassadorGroupInvite[]
 
   // ── Phase 3 (Ambassador Platform) ──
   /// Cached from AmbassadorReferral: submitted referrals, conversions (a
   /// referred project whose downpayment was confirmed) and what the payout
   /// engine owes them. `recountAmbassador` recomputes all three; the tier is
   /// derived from lifetimeConversions and never set by hand.
-  lifetimeReferrals   Int       @default(0)
-  lifetimeConversions Int       @default(0)
-  lifetimeEarnings    Float     @default(0)
+  lifetimeReferrals   Int              @default(0)
+  lifetimeConversions Int              @default(0)
+  lifetimeEarnings    Float            @default(0)
   /// Last referral submitted for them, and last conversion — the activity
   /// label (Active / Dormant / Inactive / New) is derived from these at read
   /// time; `status` stays the account state (Active / Suspended / Terminated).
@@ -1182,47 +1251,47 @@ enum PaymentDirection {
 }
 
 model Payment {
-  id            String           @id @default(cuid())
-  paymentId     String           @unique // EC-PAY-XXXXX
-  type          PaymentType
-  direction     PaymentDirection
-  projectId     String?
-  project       Project?         @relation(fields: [projectId], references: [id])
-  personName    String?
-  personRole    String?
-  amount        Float
-  paymentMethod String?
-  reference     String?
-  confirmedById String?
-  confirmedBy   User?            @relation("ConfirmedBy", fields: [confirmedById], references: [id])
+  id                 String              @id @default(cuid())
+  paymentId          String              @unique // EC-PAY-XXXXX
+  type               PaymentType
+  direction          PaymentDirection
+  projectId          String?
+  project            Project?            @relation(fields: [projectId], references: [id])
+  personName         String?
+  personRole         String?
+  amount             Float
+  paymentMethod      String?
+  reference          String?
+  confirmedById      String?
+  confirmedBy        User?               @relation("ConfirmedBy", fields: [confirmedById], references: [id])
   /// Pending, Confirmed, Failed, Rejected (an admin refused a marked payment),
   /// Duplicate (a second Paystack charge on an already-verified leg — refund
   /// it), Reversed (reserved). Only Confirmed rows are revenue.
-  status        String           @default("Pending")
+  status             String              @default("Pending")
   /// Where the row came from: PAYSTACK (a checkout was opened), MANUAL (an
   /// admin marked a bank transfer / cash and finance verified it), SYSTEM
   /// (payouts, refunds, pay-first intake). A manual verification only ever
   /// claims a MANUAL row, so it can never swallow a live Paystack checkout.
-  source        String           @default("SYSTEM")
+  source             String              @default("SYSTEM")
   /// The project's ambassador when the row was written, kept in step whenever
   /// the job's allocation changes. The Project row is the truth; this is the
   /// Phase 2 spec's snapshot for the Revenue Tracker.
   ambassadorId       String?
-  ambassador         Ambassador?  @relation("PaymentAmbassador", fields: [ambassadorId], references: [id])
-  isAmbassadorDriven Boolean      @default(false)
+  ambassador         Ambassador?         @relation("PaymentAmbassador", fields: [ambassadorId], references: [id])
+  isAmbassadorDriven Boolean             @default(false)
   /// Phase 3: the AmbassadorReferral this payment converted (set on the confirmed downpayment).
-  referralId    String?
-  referral      AmbassadorReferral? @relation(fields: [referralId], references: [id])
-  notes         String?
-  date          DateTime         @default(now())
-  createdAt     DateTime         @default(now())
+  referralId         String?
+  referral           AmbassadorReferral? @relation(fields: [referralId], references: [id])
+  notes              String?
+  date               DateTime            @default(now())
+  createdAt          DateTime            @default(now())
 
   /// D10: private-blob path for the receipt PDF rendered on Verify (client
   /// Payments tab downloads this instead of re-rendering). Null for payments
   /// verified before D10, or when Blob write fails: the on-demand renderer
   /// is the fallback in both cases.
-  receiptBlobPath  String?
-  receiptStoredAt  DateTime?
+  receiptBlobPath String?
+  receiptStoredAt DateTime?
 
   bucketAllocation BucketAllocationLog?
   payoutRecords    PayoutRecord[]
@@ -1237,34 +1306,34 @@ model Payment {
 // ─── EXPENSES ───────────────────────────────────────────
 
 model Expense {
-  id          String   @id @default(cuid())
-  category    String // Software, Internet/Data, Marketing, Equipment, Personnel, Miscellaneous, API cost, Hosting, Sponsorship, Ambassador bonus, Legal, Content (+ the system commission categories)
-  description String
-  amount      Float
-  date        DateTime
-  recurring   Boolean  @default(false)
-  frequency   String?
+  id             String       @id @default(cuid())
+  category       String // Software, Internet/Data, Marketing, Equipment, Personnel, Miscellaneous, API cost, Hosting, Sponsorship, Ambassador bonus, Legal, Content (+ the system commission categories)
+  description    String
+  amount         Float
+  date           DateTime
+  recurring      Boolean      @default(false)
+  frequency      String?
   /// The admin who LOGGED the expense (User.id) — not an approval.
-  approvedBy  String?
+  approvedBy     String?
   /// Set on system-generated expenses tied to a job — today only the
   /// "Ambassador commission" logged when a job is allocated to an ambassador.
-  projectId   String?
+  projectId      String?
   /// MANUAL (logged by an admin), COMMISSION (a job's ambassador commission),
   /// AI (Claude API cost rolled up from AiUsageLog), SPONSORSHIP (the HOG's
   /// student-union spending from the Growth Fund).
-  kind        String   @default("MANUAL")
+  kind           String       @default("MANUAL")
   /// Which of EduCraft's buckets pays for it. Null for commission rows: those
   /// come out of the ambassador's 15%, never out of the retained share.
   bucketSource   BucketType?
   /// AUTO_APPROVED, PENDING_APPROVAL (over ₦50,000 and not logged by the
   /// founder — no bucket outflow until approved), APPROVED, DECLINED.
-  approvalStatus String    @default("AUTO_APPROVED")
+  approvalStatus String       @default("AUTO_APPROVED")
   approvedById   String?
   approvedAt     DateTime?
   /// Claude cost roll-up key ("ai:YYYY-MM-DD:<subsystem>:<projectId|->"): one
   /// expense per project (or subsystem) per day, amount kept in step with the
   /// AiUsageLog rows behind it. Locks the row against manual deletion.
-  aiUsageKey     String?   @unique
+  aiUsageKey     String?      @unique
   /// Phase 3: the partnership this sponsorship paid for (a term's commitment
   /// or a renewal), so the partnership shows what it has cost the Growth Fund.
   partnershipId  String?
@@ -1275,7 +1344,7 @@ model Expense {
   /// Phase 4: on a claude_api top-up, the USD of Anthropic credit bought — added
   /// to the credit-balance card's loaded USD when the top-up is counted.
   creditUsd      Float?
-  createdAt   DateTime @default(now())
+  createdAt      DateTime     @default(now())
 
   @@index([date])
   @@index([category])
@@ -1360,8 +1429,8 @@ model ResearchJob {
   driveFolderLink     String?
   /// Google Doc in the same Drive folder listing kept references with no
   /// downloadable PDF (paywalled), with DOI links for library access.
-  paywalledDocId   String?
-  paywalledDocLink String?
+  paywalledDocId      String?
+  paywalledDocLink    String?
 
   corePercent           Float?
   closelyRelatedPercent Float?
@@ -1376,45 +1445,45 @@ model ResearchJob {
   /// The token in the public supervisor URL `siteUrl()/research/{token}`.
   /// Minted once at PASSED-time (or by the tokenize backfill for old rows).
   /// The token is the credential — 32 hex chars, unguessable.
-  shareToken               String?   @unique
+  shareToken              String?   @unique
   /// Which subproblem (from `projectAnalysis.subproblems`) each kept reference
   /// primarily addresses. Written once per job by `computeSupervisorGrouping`
   /// (one Claude call, ~₦25) and reused for every supervisor page view.
   /// Shape: `{ groups: [{ subproblemIndex, referenceIds }], unassigned: [] }`.
   /// Null on jobs that predate 1 Oct 2026 — the supervisor page falls back
   /// to the Key / Supporting layout in that case.
-  supervisorGrouping       Json?
+  supervisorGrouping      Json?
   /// Supervisor access counters — updated by the public routes in `waitUntil`.
   /// The first view fires one notifyOperations; after that only the counter bumps.
-  supervisorViews          Int       @default(0)
-  supervisorFirstViewedAt  DateTime?
-  supervisorLastViewedAt   DateTime?
-  supervisorPdfDownloads   Int       @default(0)
+  supervisorViews         Int       @default(0)
+  supervisorFirstViewedAt DateTime?
+  supervisorLastViewedAt  DateTime?
+  supervisorPdfDownloads  Int       @default(0)
 
   /// Last-verified-by-CrossRef titles this job has already tried, so
   /// replacement rounds don't re-propose the same rejected candidates.
-  triedTitles String[] @default([])
+  triedTitles         String[] @default([])
   /// Legacy — was used by the removed title-recall top-up. Unused.
-  candidatesExhausted Boolean @default(false)
+  candidatesExhausted Boolean  @default(false)
 
   // ── Background execution ──
   // The job runs on the server as a self-chaining series of steps, so it
   // continues with every browser closed. A step takes this lease first, so two
   // runners (a chain plus a Resume click, say) can never work the same job.
-  lockedUntil DateTime?
+  lockedUntil      DateTime?
   /// When a step last finished — a stale value on an unfinished job means the chain broke.
-  lastStepAt  DateTime?
+  lastStepAt       DateTime?
   /// Consecutive failed steps; reset on success. The chain gives up after a few.
-  failedSteps Int       @default(0)
+  failedSteps      Int       @default(0)
   /// Why the chain stopped (transient errors that ran out of retries). Cleared on resume.
-  lastError   String?
+  lastError        String?
   /// Search queries Claude wrote for this job, run against OpenAlex in order.
   /// "[foundational] " prefix = no date filter, sorted by citation count.
-  searchQueries   String[] @default([])
+  searchQueries    String[]  @default([])
   /// Index of the next query in searchQueries to run.
-  searchCursor    Int      @default(0)
+  searchCursor     Int       @default(0)
   /// Set when Claude can't come up with any new queries — no more candidates to find.
-  queriesExhausted Boolean @default(false)
+  queriesExhausted Boolean   @default(false)
 
   errorMessage String?
 
@@ -1469,17 +1538,17 @@ model Reference {
   proposedYear  Int?
 
   // CrossRef-verified — the authoritative record once status is past CANDIDATE.
-  doi     String?
-  title   String?
-  authors String?
-  year    Int?
-  journal String?
+  doi      String?
+  title    String?
+  authors  String?
+  year     Int?
+  journal  String?
   abstract String?
 
-  pdfUrl String? // a probed, working open-access PDF location (Track A only once resolved)
+  pdfUrl       String? // a probed, working open-access PDF location (Track A only once resolved)
   citedByCount Int?
   /// Null until the open-access check has run for this reference.
-  access ReferenceAccess?
+  access       ReferenceAccess?
 
   /// Legacy — only set by jobs run before Zotero was dropped from the pipeline; used to clean them up.
   zoteroItemKey String?
@@ -1574,6 +1643,11 @@ model PendingIntake {
   /// The Paystack transaction reference for this attempt.
   reference         String    @unique
   status            String    @default("PENDING") // PENDING, CONSUMED, FAILED
+  /// The coupon resolved and PRICED at initialize time, so the webhook creates
+  /// the project at exactly the figure Paystack charged. Never re-resolved.
+  couponId          String?
+  discountAmount    Float     @default(0)
+  broughtByCouponId String?
   /// Set once the webhook has created the real Client + Project.
   resultProjectCode String?
   createdAt         DateTime  @default(now())
@@ -1586,37 +1660,37 @@ model PendingIntake {
 // One row per Claude API call made by EduCraft's own backend. IDs are plain
 // strings (no relations) so the log survives project/worker deletion.
 model AiUsageLog {
-  id            String   @id @default(cuid())
-  projectId     String? // Project.id
-  workerId      String? // Worker.id — whoever the project was assigned to
-  subsystem     String // research_pipeline, chapter_generation, quality_gate, …
-  step          String // the specific call, e.g. write_search_queries
-  chapterNumber Int?
-  model         String
+  id                String   @id @default(cuid())
+  projectId         String? // Project.id
+  workerId          String? // Worker.id — whoever the project was assigned to
+  subsystem         String // research_pipeline, chapter_generation, quality_gate, …
+  step              String // the specific call, e.g. write_search_queries
+  chapterNumber     Int?
+  model             String
   /// Uncached input tokens (usage.input_tokens).
-  inputTokens   Int      @default(0)
-  outputTokens  Int      @default(0)
+  inputTokens       Int      @default(0)
+  outputTokens      Int      @default(0)
   /// Of outputTokens, the part spent on extended thinking
   /// (usage.output_tokens_details.thinking_tokens). Billed at the output rate
   /// and, until this column existed, invisible — it is the largest single
   /// output line on a chapter part and the reason effort is worth tuning.
-  thinkingTokens Int     @default(0)
+  thinkingTokens    Int      @default(0)
   /// True when the call went through the Message Batches API (half price on
   /// every token), so the cost report can tell batched spend from live spend.
-  batch         Boolean  @default(false)
+  batch             Boolean  @default(false)
   /// Prompt-cache writes and reads (usage.cache_creation_input_tokens / cache_read_input_tokens), billed at 1.25x (5-minute) or 2x (1-hour) on a write and the model's own rate on a read (0.1x, but 0.05x on Opus 5.5 / Sonnet 5.5).
-  cacheWriteTokens Int   @default(0)
-  cacheReadTokens  Int   @default(0)
+  cacheWriteTokens  Int      @default(0)
+  cacheReadTokens   Int      @default(0)
   /// Anthropic web searches (usage.server_tool_use.web_search_requests), $10 per 1,000 on top of the tokens.
-  webSearchRequests Int  @default(0)
-  costUsd       Float    @default(0)
-  costNaira     Float    @default(0)
-  durationMs    Int      @default(0)
+  webSearchRequests Int      @default(0)
+  costUsd           Float    @default(0)
+  costNaira         Float    @default(0)
+  durationMs        Int      @default(0)
   /// success | error | timeout. A "timeout" is a call we never got an answer
   /// for: Anthropic most likely processed and billed it, so the row carries an
   /// ESTIMATED input cost rather than a silent zero.
-  status        String   @default("success")
-  createdAt     DateTime @default(now())
+  status            String   @default("success")
+  createdAt         DateTime @default(now())
 
   @@index([createdAt])
   @@index([projectId])
@@ -1729,55 +1803,55 @@ enum SourceOrigin {
 /// search for cases or archival sources. The COO edits `objectives` and ticks sources on
 /// the mode card; approving the mode freezes both (ResearchMode.isLocked).
 model ProjectBrief {
-  id                   String            @id @default(cuid())
-  projectId            String            @unique
-  project              Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  status               SourceStageStatus @default(PENDING)
+  id                         String            @id @default(cuid())
+  projectId                  String            @unique
+  project                    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status                     SourceStageStatus @default(PENDING)
   /// Null: this department has no source stage.
-  sourceKind           SourceKind?
+  sourceKind                 SourceKind?
   /// The department the stage ran for (the mode card may change it later).
-  department           String?
+  department                 String?
   /// What the drafter wrote, kept for the record.
-  draftedObjectives    String[]
+  draftedObjectives          String[]
   /// The COO's copy: Chapter 1 states these word for word once approved.
-  objectives           String[]
-  objectivesFromClient Boolean           @default(false)
+  objectives                 String[]
+  objectivesFromClient       Boolean           @default(false)
   /// The ResearchMode.modeNumber the current objectives were drafted under.
   /// Null until the first successful draft. When ResearchMode.modeNumber later
   /// differs, the card flags the objectives and approval refuses them until the
   /// founder or COO presses Draft again (nothing re-drafts on its own).
-  objectivesModeNumber Int?
+  objectivesModeNumber       Int?
   /// The COO's copy of the aim: one sentence, "The aim of this study is to …".
   /// Chapter One states it word for word once approved. Null on briefs drafted
   /// before aims were asked for (30 Sept 2026).
-  aim                  String?
+  aim                        String?
   /// What the drafter wrote (or suggested, on a report approved without an aim).
-  draftedAim           String?
+  draftedAim                 String?
   /// The independent check of the aim and objectives (a different model, blind
   /// to the drafter): scores, reasons, the inputs' key, the model and cost.
-  objectivesCheck      Json?
+  objectivesCheck            Json?
   /// Held while a check runs, so two never run at once.
   objectivesCheckLockedUntil DateTime?
   /// [{ index, text, attempts, outcome, queries }]
-  points               Json?
+  points                     Json?
   /// Web searches and archive queries spent; never more than 16 (source-policy.ts).
-  searchesUsed         Int               @default(0)
-  officialLookups      Int               @default(0)
+  searchesUsed               Int               @default(0)
+  officialLookups            Int               @default(0)
   /// One entry per search: point, source, query, results, kept, dropped.
-  searchLog            Json?
+  searchLog                  Json?
   /// The step the runner is on within SEARCHING (next point or attempt round).
-  cursor               Int               @default(0)
+  cursor                     Int               @default(0)
   /// Set by "Draft objectives again": the drafting step then skips planning and searching.
-  redraftOnly          Boolean           @default(false)
-  lockedUntil          DateTime?
-  failedSteps          Int               @default(0)
-  lastError            String?
-  startedById          String?
-  draftedAt            DateTime?
-  searchedAt           DateTime?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  sources              ProjectSource[]
+  redraftOnly                Boolean           @default(false)
+  lockedUntil                DateTime?
+  failedSteps                Int               @default(0)
+  lastError                  String?
+  startedById                String?
+  draftedAt                  DateTime?
+  searchedAt                 DateTime?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+  sources                    ProjectSource[]
 
   @@index([status])
 }
@@ -1873,25 +1947,25 @@ model ChapterCheck {
 }
 
 model GenerationCheckpoint {
-  id            String           @id @default(cuid())
-  projectId     String
-  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  chapterNumber Int
-  status        GenerationStatus @default(PENDING)
-  progressPercent Int            @default(0)
+  id              String           @id @default(cuid())
+  projectId       String
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chapterNumber   Int
+  status          GenerationStatus @default(PENDING)
+  progressPercent Int              @default(0)
 
   /// The assembled chapter prompt (Phase D1), frozen when the run starts, so
   /// every step sends identical bytes (prompt cache) and a prompt-library
   /// edit mid-run cannot change the chapter.
-  promptText String @db.Text
+  promptText  String @db.Text
   /// Project facts sent around the prompt: title, "Chapter N of 5",
   /// objectives, special instructions, supervisor TOC, output format.
-  briefText  String @db.Text
+  briefText   String @db.Text
   /// What the loader resolved (department, section, mode, template, style,
   /// blocks used), for audit.
-  promptMeta Json
+  promptMeta  Json
   /// Run options (effort; a simulated failure for tests, ignored in production).
-  options    Json?
+  options     Json?
   /// D3c: the worker's data files (PDFs, images) sent to Claude with every call of this chapter, frozen at the start.
   attachments Json?
 
@@ -1932,12 +2006,12 @@ model GenerationCheckpoint {
   errorMessage  String?
 
   // ── Background execution (same scheme as ResearchJob) ──
-  lockedUntil DateTime?
+  lockedUntil    DateTime?
   /// When a step last made progress (also refreshed while a part streams); stale on an unfinished run = the chain broke.
-  lastStepAt  DateTime?
+  lastStepAt     DateTime?
   /// Consecutive failed steps; reset on success.
-  failedSteps Int       @default(0)
-  lastError   String?
+  failedSteps    Int       @default(0)
+  lastError      String?
   /// D9: when the plan or a part was last SAVED (or the run was restarted). The watchdog's clock: unlike lastStepAt it
   /// does not move on a draft save or a failed attempt, so a chapter that keeps crashing cannot look healthy.
   lastProgressAt DateTime?
@@ -1971,17 +2045,17 @@ enum OrchestratorStatus {
 }
 
 model OrchestratorRun {
-  id        String             @id @default(cuid())
-  projectId String             @unique
-  project   Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  status    OrchestratorStatus @default(QUEUED)
+  id             String              @id @default(cuid())
+  projectId      String              @unique
+  project        Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status         OrchestratorStatus  @default(QUEUED)
   /// The chapter being written, or the next one to write.
   currentChapter Int?
   /// A code from orchestrator-rules.ts (CHAPTER_FAILED, CHAPTER_STALLED, PAUSE_CANCELLED…), with the detail a person reads.
-  reason       String?
-  reasonDetail String? @db.Text
+  reason         String?
+  reasonDetail   String?             @db.Text
   /// The status to go back to when a hold ends.
-  resumeStatus OrchestratorStatus?
+  resumeStatus   OrchestratorStatus?
 
   /// Which server owns the run ("production", "preview", "development"): a tick only works on its own server's runs,
   /// so a local test can never be picked up by production, or the reverse.
@@ -2089,7 +2163,6 @@ model ResearchRerunRequest {
   @@index([status])
 }
 
-
 // ─── LINK CLICK TRACKING ────────────────────────────────
 // Ported from Traqly's ClickEvent. One row per hit on a shared referral link
 // (/EduCraftA/{n}, /ECCA/{id}, /ECSA/{id}). The Redis `clicks:{id}` counters
@@ -2144,7 +2217,6 @@ model ClickEvent {
   @@index([ambassadorId, isTestClick, archivedAt])
 }
 
-
 // ─── CLIENT SIGN-IN (Client ID + emailed code) ──────────
 // The Client ID only says WHICH client; proof is a 6-digit code sent to the
 // email stored on that client. Codes are stored hashed, expire, are single
@@ -2175,7 +2247,6 @@ model ClientLoginAttempt {
 
   @@index([ipHash, kind, createdAt])
 }
-
 
 // ─── CLIENT DASHBOARD ───────────────────────────────────
 // The client sees ONLY what is written here and in their project's own fields
@@ -2218,16 +2289,16 @@ enum MessageSide {
 
 /// Client <-> EduCraft messages on one project. Workers never see these.
 model ProjectMessage {
-  id           String      @id @default(cuid())
+  id           String        @id @default(cuid())
   projectId    String
-  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   authorUserId String
-  author       User        @relation("ProjectMessageAuthor", fields: [authorUserId], references: [id])
+  author       User          @relation("ProjectMessageAuthor", fields: [authorUserId], references: [id])
   authorSide   MessageSide
   body         String
   /// When the other side opened the thread after this was sent.
   readAt       DateTime?
-  createdAt    DateTime    @default(now())
+  createdAt    DateTime      @default(now())
   files        ProjectFile[]
 
   @@index([projectId, createdAt])
@@ -2339,22 +2410,22 @@ model BucketTransaction {
 /// tagged with the pot (keyed by expenseId). The claude_api pot drains on a
 /// top-up, not on per-call usage (founder, decision 5).
 model PotTransaction {
-  id            String     @id @default(cuid())
-  potKey        String
-  bucketType    BucketType
+  id           String     @id @default(cuid())
+  potKey       String
+  bucketType   BucketType
   /// INFLOW, OUTFLOW, ADJUSTMENT
-  type          String
-  amount        Float
-  month         String
+  type         String
+  amount       Float
+  month        String
   /// The BucketAllocationLog this inflow split from (replay-safe with the unique below).
-  allocationId  String?
+  allocationId String?
   /// The expense that drained the pot (an outflow). One pot row per expense.
-  expenseId     String?    @unique
-  paymentId     String?
-  projectId     String?
-  note          String?
-  recordedById  String?
-  createdAt     DateTime   @default(now())
+  expenseId    String?    @unique
+  paymentId    String?
+  projectId    String?
+  note         String?
+  recordedById String?
+  createdAt    DateTime   @default(now())
 
   @@unique([allocationId, potKey])
   @@index([potKey, month])
@@ -2369,52 +2440,52 @@ model PotTransaction {
 /// the matching project flag in the same transaction, so the worker and
 /// ambassador portals never disagree with the CFO's screen.
 model PayoutRecord {
-  id            String   @id @default(cuid())
-  month         String
-  leg           String
+  id                String       @id @default(cuid())
+  month             String
+  leg               String
   /// WORKER, AMBASSADOR, EXECUTIVE
-  recipientType String
+  recipientType     String
   /// Worker.id, Ambassador.id, or the role string "HOG" / "COO" (the payee user is resolved when paid).
-  recipientId   String
-  recipientName String
+  recipientId       String
+  recipientName     String
   /// Null for an ambassador bonus (quarterly challenge, Platinum per-client): those carry `bonusKey`.
-  projectId     String?
-  project       Project? @relation(fields: [projectId], references: [id])
+  projectId         String?
+  project           Project?     @relation(fields: [projectId], references: [id])
   /// "challenge:Q3-2026:<ambassadorId>" | "platinum:Q3-2026:<ambassadorId>" — one row per bonus.
-  bonusKey      String?  @unique
-  amount        Float
-  basis         String
+  bonusKey          String?      @unique
+  amount            Float
+  basis             String
   /// PENDING (legacy, read-tolerated), ACCRUED (owed), PAID, REVERSED (refund), CANCELLED. See src/lib/finance/payout-status.ts.
-  status        String   @default("PENDING")
+  status            String       @default("PENDING")
   /// The cashflow version the row was computed under (the project's stamped version).
   cashflowVersionId String?
   /// The Level-1 key this leg belongs to: workers, ambassador, hog, coo, growth_associate, …
-  ruleKey       String?
+  ruleKey           String?
   /// The rate this leg was computed at, in percent.
-  ratePercent   Float?
+  ratePercent       Float?
   /// The trigger that produced the row: downpayment | full_payment | completion.
-  triggerEventKey String?
+  triggerEventKey   String?
   /// When the row became owed (ACCRUED).
-  accruedAt     DateTime?
+  accruedAt         DateTime?
   /// The payout batch that paid it (Phase 5).
-  batchId       String?
-  batch         PayoutBatch? @relation(fields: [batchId], references: [id])
+  batchId           String?
+  batch             PayoutBatch? @relation(fields: [batchId], references: [id])
   /// A refund's reversal (Phase 6).
-  reversedAt    DateTime?
-  reversalReason String?
-  refundId      String?
+  reversedAt        DateTime?
+  reversalReason    String?
+  refundId          String?
   /// A PAID row reversed by a refund: what must be recovered, and when it was.
-  recoveryAmount Float?
-  recoveredAt   DateTime?
-  recoveredById String?
-  paidAt        DateTime?
-  paidById      String?
-  paidToUserId  String?
-  paymentId     String?
-  payment       Payment? @relation(fields: [paymentId], references: [id])
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  recoveryAmount    Float?
+  recoveredAt       DateTime?
+  recoveredById     String?
+  paidAt            DateTime?
+  paidById          String?
+  paidToUserId      String?
+  paymentId         String?
+  payment           Payment?     @relation(fields: [paymentId], references: [id])
+  notes             String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   performanceBonus PerformanceBonus?
 
@@ -2431,25 +2502,25 @@ model PayoutRecord {
 /// BONUS-leg PayoutRecord (recipientType EXECUTIVE); this table keeps the
 /// pre-Phase-3 rows and links each to the record it became.
 model PerformanceBonus {
-  id            String   @id @default(cuid())
-  month         String
-  recipientType String   @default("EXECUTIVE")
+  id             String        @id @default(cuid())
+  month          String
+  recipientType  String        @default("EXECUTIVE")
   /// "HOG" | "COO"
-  recipientId   String
-  recipientName String
-  amount        Float
-  reason        String
+  recipientId    String
+  recipientName  String
+  amount         Float
+  reason         String
   /// PENDING, PAID, CANCELLED
-  status        String   @default("PENDING")
-  paidAt        DateTime?
-  paidById      String?
-  paymentId     String?
-  createdById   String?
+  status         String        @default("PENDING")
+  paidAt         DateTime?
+  paidById       String?
+  paymentId      String?
+  createdById    String?
   /// The BONUS PayoutRecord this bonus was folded into (Phase 3).
-  payoutRecordId String? @unique
+  payoutRecordId String?       @unique
   payoutRecord   PayoutRecord? @relation(fields: [payoutRecordId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@index([month, status])
 }
@@ -2457,7 +2528,7 @@ model PerformanceBonus {
 /// Founder money: tiered monthly draws, semester bonuses and the annual
 /// profit share, each a row per founder (CEO | CFO).
 model FounderDraw {
-  id            String   @id @default(cuid())
+  id            String       @id @default(cuid())
   month         String
   /// MONTHLY, MONTHLY_TOPUP, SEMESTER_BONUS, ANNUAL_PROFIT_SHARE
   drawType      String
@@ -2467,7 +2538,7 @@ model FounderDraw {
   /// The month's confirmed revenue at the time (what set the tier).
   monthRevenue  Float
   /// PENDING (recommended, awaiting the founder), DISTRIBUTED, CANCELLED
-  status        String   @default("PENDING")
+  status        String       @default("PENDING")
   distributedAt DateTime?
   approvedById  String?
   createdById   String?
@@ -2476,8 +2547,8 @@ model FounderDraw {
   /// The founders payout batch that distributed it (Phase 5).
   batchId       String?
   batch         PayoutBatch? @relation(fields: [batchId], references: [id])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   @@index([month, drawType])
   @@index([batchId])
@@ -2489,41 +2560,41 @@ model FounderDraw {
 /// cashflow tick, never inside the clear request). One batch per (cohort,
 /// periodKey).
 model PayoutBatch {
-  id             String   @id @default(cuid())
+  id                     String    @id @default(cuid())
   /// AMBASSADORS (weekly) | WORKERS | EXECUTIVES (monthly) | FOUNDERS (monthly)
-  cohort         String
+  cohort                 String
   /// "2026-W40" for a week, "2026-10" for a month.
-  periodKey      String
-  periodStart    DateTime
-  periodEnd      DateTime
+  periodKey              String
+  periodStart            DateTime
+  periodEnd              DateTime
   /// READY (gathered, not paid) | CLEARED (paid, undo window open) | FINALIZED (emails sent) | UNDONE
-  status         String   @default("READY")
-  totalAmount    Float    @default(0)
-  recipientCount Int      @default(0)
-  builtAt        DateTime @default(now())
+  status                 String    @default("READY")
+  totalAmount            Float     @default(0)
+  recipientCount         Int       @default(0)
+  builtAt                DateTime  @default(now())
   /// "tick" or a user id.
-  builtBy        String
-  clearedAt      DateTime?
-  clearedById    String?
-  paymentMethod  String?
-  paymentMethodDetail String?
-  batchReference String?
-  notes          String?
+  builtBy                String
+  clearedAt              DateTime?
+  clearedById            String?
+  paymentMethod          String?
+  paymentMethodDetail    String?
+  batchReference         String?
+  notes                  String?
   bankConfirmationFileId String?
   /// The batch sends its confirmation emails after this instant (clearedAt + 10 min); it is also the undo deadline.
-  emailsScheduledAt DateTime?
+  emailsScheduledAt      DateTime?
   /// A lease so only one tick finalises a batch.
-  emailsStartedAt DateTime?
-  emailsSentAt   DateTime?
+  emailsStartedAt        DateTime?
+  emailsSentAt           DateTime?
   /// Per-recipient send outcome once finalised: [{recipientType, recipientId, to, ok, error, at}].
-  emailReport    Json?
-  undoneAt       DateTime?
-  undoneById     String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  emailReport            Json?
+  undoneAt               DateTime?
+  undoneById             String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  records        PayoutRecord[]
-  draws          FounderDraw[]
+  records PayoutRecord[]
+  draws   FounderDraw[]
 
   @@unique([cohort, periodKey])
   @@index([status, emailsScheduledAt])
@@ -2554,29 +2625,29 @@ model FinanceFile {
 /// never does. A "keep the money" decision is a row with refundAmount 0 that
 /// leaves the project CANCELLED and clears the "decision needed" reminder.
 model RefundRecord {
-  id            String   @id @default(cuid())
-  projectId     String
+  id                     String    @id @default(cuid())
+  projectId              String
   /// The stage the CFO chose (1 before work, 2 started, 3 chapter delivered, 4 complete).
-  stage         Int
+  stage                  Int
   /// The stage the system detected (for the record, even if the CFO overrode it).
-  detectedStage Int
-  refundPercent Float
+  detectedStage          Int
+  refundPercent          Float
   /// Whole naira refunded to the client (0 for a keep-the-money decision).
-  refundAmount  Float
+  refundAmount           Float
   /// Net money in at the moment of the decision.
-  moneyInAtRefund Float
-  reason        String
-  initiatedById String
+  moneyInAtRefund        Float
+  reason                 String
+  initiatedById          String
   /// The REFUND OUTFLOW Payment this created (null for a 0 refund).
-  paymentId     String?  @unique
+  paymentId              String?   @unique
   /// A FinanceFile (bank_confirmation) attached as proof, if any.
   bankConfirmationFileId String?
   /// What the worker was paid for chapters delivered before the refund (decision 7).
-  workerPartialAmount Float?
+  workerPartialAmount    Float?
   /// The PayoutRecord ids reversed by this refund.
-  reversedRecordIds String[] @default([])
-  clientEmailedAt DateTime?
-  createdAt     DateTime @default(now())
+  reversedRecordIds      String[]  @default([])
+  clientEmailedAt        DateTime?
+  createdAt              DateTime  @default(now())
 
   @@index([projectId])
 }
@@ -2585,12 +2656,12 @@ model RefundRecord {
 /// figures live in `data` (JSON); the PDF and spreadsheet are rendered from it
 /// on demand, so there is nothing to store or keep in step. One per ISO week.
 model FinancialStatement {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   weekStart     DateTime
   weekEnd       DateTime
-  isoWeek       String   @unique
+  isoWeek       String    @unique
   generatedById String
-  generatedAt   DateTime @default(now())
+  generatedAt   DateTime  @default(now())
   notes         String?
   data          Json
   /// When the Sunday auto-email went out (so it is sent at most once a week).
@@ -2838,21 +2909,21 @@ model AmbassadorContentLog {
 /// Year 2: a cluster manager above Core ambassadors, recruited by the HOG.
 /// Schema only — the UI is a Coming Soon page until Year 2 activates it.
 model GrowthAssociate {
-  id               String       @id @default(cuid())
-  userId           String?
-  name             String
-  whatsapp         String
-  school           String
-  recruitedBy      String
+  id                 String       @id @default(cuid())
+  userId             String?
+  name               String
+  whatsapp           String
+  school             String
+  recruitedBy        String
   /// INACTIVE, ACTIVE
-  status           String       @default("INACTIVE")
-  clusterName      String?
-  lifetimeEarnings Float        @default(0)
-  isActive         Boolean      @default(false)
-  activatedAt      DateTime?
+  status             String       @default("INACTIVE")
+  clusterName        String?
+  lifetimeEarnings   Float        @default(0)
+  isActive           Boolean      @default(false)
+  activatedAt        DateTime?
   clusterAmbassadors Ambassador[] @relation("GrowthAssociateCluster")
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 }
 
 // ─── PHASE 4: OPERATIONS PLATFORM ─────────────────────────
@@ -2923,26 +2994,26 @@ model QaReview {
 
   // Automated gate results (Phase D8 quality gate, src/lib/quality-gate.ts)
   /// Layer 1 formatting checks passed, of 71.
-  formattingScore  Float?
-  structuralPass   Boolean?
-  referenceVerPass Boolean?
-  voiceCheckPass   Boolean?
+  formattingScore       Float?
+  structuralPass        Boolean?
+  referenceVerPass      Boolean?
+  voiceCheckPass        Boolean?
   /// Checks passed of `qualityTotal` (89); passed = 85 or more with no CRITICAL failure.
-  qualityScore     Int?
-  qualityTotal     Int?
-  qualityPassed    Boolean?
+  qualityScore          Int?
+  qualityTotal          Int?
+  qualityPassed         Boolean?
   /// Layer 3 structural checks passed, of 16.
-  structuralScore  Int?
+  structuralScore       Int?
   /// Layer 2b reference check passed (1) or not (0).
-  referenceScore   Int?
+  referenceScore        Int?
   /// Layer 2a voice check passed (1) or not (0).
-  voiceScore       Int?
+  voiceScore            Int?
   /// The failed checks' lines: [{ id, layer, severity, chapter, message, locations, fix }].
-  failuresJson     Json?
+  failuresJson          Json?
   /// Every check's result, warnings, notes, the per-chapter AI cache, cost and the last runs' history.
-  qualityReport    Json?
-  qualityRunAt     DateTime?
-  qualityRunById   String?
+  qualityReport         Json?
+  qualityRunAt          DateTime?
+  qualityRunById        String?
   /// Held while a run is in progress, so two runs never overlap.
   qualityRunLockedUntil DateTime?
   /// When the gate sent the report to QA on its own; the specialist may recall it until recallWindowExpiresAt.
@@ -3127,20 +3198,20 @@ model PipelinePause {
 // the quality gate passes, before the DeliverableVersion write, so the
 // document that reaches QA already carries them (D10).
 model PreliminaryPages {
-  id                String   @id @default(cuid())
-  projectId         String   @unique
-  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  acknowledgement   String   @db.Text
-  abstract          String   @db.Text
+  id                String    @id @default(cuid())
+  projectId         String    @unique
+  project           Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  acknowledgement   String    @db.Text
+  abstract          String    @db.Text
   /// 240–320 is the target band; abstractRetries counts word-count misses.
   abstractWordCount Int
-  abstractRetries   Int      @default(0)
+  abstractRetries   Int       @default(0)
   /// [{ token: "SPSS", expansion: "Statistical Package for the Social Sciences" }, ...] sorted A–Z.
   abbreviations     Json
   /// True when the abstract still misses the band after one automatic retry:
   /// the closest attempt is stored and the specialist reviews it on the
   /// Report tab. Never blocks delivery.
-  needsReview       Boolean  @default(false)
+  needsReview       Boolean   @default(false)
   /// The prompt hash the last run was built from. A re-run with the same
   /// hash returns the stored row without calling Claude again.
   promptHash        String?
@@ -3149,11 +3220,11 @@ model PreliminaryPages {
   sourceHash        String?
   /// D7b: the founder or the COO corrected the text by hand. An automatic run
   /// then keeps it; only "Write again" (force) replaces it.
-  editedByHand      Boolean  @default(false)
+  editedByHand      Boolean   @default(false)
   editedAt          DateTime?
   editedById        String?
-  generatedAt       DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  generatedAt       DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([needsReview])
 }
@@ -3166,7 +3237,7 @@ model PreliminaryPages {
 // them without a deploy; an episode with no videoUrl or isPublished=false
 // is the founder's draft and renders nowhere else.
 model TrainingVideo {
-  id              String  @id @default(cuid())
+  id              String   @id @default(cuid())
   /// "COO" | "WORKER" — constants in src/lib/training/rules.ts.
   audience        String
   /// Order within the audience. Sequential unlock for workers follows it.
@@ -3174,13 +3245,13 @@ model TrainingVideo {
   title           String
   description     String?
   /// Public Blob store URL (training/ prefix). "" until uploaded.
-  videoUrl        String  @default("")
-  posterUrl       String  @default("")
+  videoUrl        String   @default("")
+  posterUrl       String   @default("")
   /// As the browser reported it on first play; for "about N minutes" lines.
   durationSeconds Int?
   /// WORKER only: an unwatched required episode holds the portal gate.
-  requiredForGate Boolean @default(true)
-  isPublished     Boolean @default(false)
+  requiredForGate Boolean  @default(true)
+  isPublished     Boolean  @default(false)
   /// Phase 3 (quizzes): pass mark for this episode's quiz, when it has one.
   quizPassPercent Int?
   createdAt       DateTime @default(now())
@@ -3243,21 +3314,104 @@ model TrainingQuizAttempt {
 /// a row means unwatched, so there is no version column and no NULL-`not`
 /// trap. Forcing a rewatch = the founder resets the episode's rows.
 model TrainingWatch {
-  id      String        @id @default(cuid())
-  videoId String
-  video   TrainingVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  userId  String
-  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  videoId         String
+  video           TrainingVideo @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// Furthest point reached, in whole seconds — what the player resumes from.
-  secondsWatched  Int @default(0)
+  secondsWatched  Int           @default(0)
   durationSeconds Int?
   /// First press of play; lets staff see who opened an episode and stopped.
-  startedAt DateTime?
+  startedAt       DateTime?
   /// Set once they pass WATCHED_FRACTION of the episode.
-  watchedAt DateTime?
+  watchedAt       DateTime?
   /// Phase 3 (quizzes): set when a passing attempt exists.
-  quizPassedAt DateTime?
+  quizPassedAt    DateTime?
 
   @@unique([videoId, userId])
   @@index([userId])
+}
+
+/// A coupon code. The CEO creates them; the COO's wait for the CEO's approval
+/// while the `coupon_coo_needs_approval` setting is on.
+///
+/// The discount is EduCraft's to carry: see Project.discountAmount. A coupon can
+/// also act as a referral tag for a client who does not want to be an ambassador
+/// — `friendPercentOff` is what anyone else who types the code gets, and their
+/// order records `broughtByCouponId` whatever the discount.
+model Coupon {
+  id                String       @id @default(cuid())
+  /// Upper case, no spaces. What the client types.
+  code              String       @unique
+  label             String?
+  /// One of these two carries the owner's discount.
+  percentOff        Int?
+  amountOffNgn      Int?
+  /// What anyone who is not the owner gets for using the code (null = nothing).
+  friendPercentOff  Int?
+  /// When set, only this client's own orders take the owner's discount.
+  ownerClientId     String?
+  owner             Client?      @relation("CouponOwner", fields: [ownerClientId], references: [id])
+  /// Empty = every service.
+  serviceCodes      String[]     @default([])
+  minOrderNgn       Int?
+  expiresAt         DateTime?
+  /// null = no limit.
+  maxRedemptions    Int?
+  redemptionCount   Int          @default(0)
+  /// The promise behind the deal, so HQ can show promised against delivered.
+  expectedReferrals Int?
+  /// Whether someone else's order records this coupon as what brought them in.
+  tagsReferrals     Boolean      @default(true)
+  note              String?
+  status            CouponStatus @default(ACTIVE)
+  createdById       String
+  createdByRole     String
+  approvedById      String?
+  approvedAt        DateTime?
+  decisionNote      String?
+  revokedAt         DateTime?
+  revokedById       String?
+  /// The founder's override of the fundable cap: a discount deeper than the job
+  /// can pay for out of its own price. Only SUPER_ADMIN may set it.
+  overrideCap       Boolean      @default(false)
+  overrideReason    String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  redemptions CouponRedemption[]
+  discounted  Project[]          @relation("ProjectCoupon")
+  broughtIn   Project[]          @relation("ProjectBroughtByCoupon")
+
+  @@index([status])
+  @@index([ownerClientId])
+}
+
+/// One row per order a coupon discounted — what it cost EduCraft, at the figures
+/// in force when it was used.
+model CouponRedemption {
+  id             String   @id @default(cuid())
+  couponId       String
+  coupon         Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clientId       String
+  listPrice      Float
+  discountAmount Float
+  payablePrice   Float
+  /// True when the order was honoured past `maxRedemptions` — the client had
+  /// already paid, so HQ never takes a discount back; finance is told instead.
+  overLimit      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([couponId])
+  @@index([clientId])
+}
+
+enum CouponStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  REVOKED
 }

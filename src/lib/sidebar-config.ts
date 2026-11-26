@@ -24,6 +24,7 @@ import {
   Percent,
   Settings,
   ShieldCheck,
+  Ticket,
   TrendingUp,
   Trophy,
   UserCog,
@@ -56,6 +57,7 @@ export const ADMIN_SIDEBAR: NavSection[] = [
       // The COO's tutorial library ("How operations works"): his five slots are
       // full, so on phones this lands in the More sheet automatically.
       { label: "Tutorials", href: "/admin/tutorials", icon: MonitorPlay, matchNested: true, roles: [SA, COO] },
+      { label: "Coupons", href: "/admin/coupons", icon: Ticket, matchNested: true, roles: [SA, COO] },
     ],
   },
   {

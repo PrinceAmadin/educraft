@@ -5,7 +5,7 @@ import { nextId } from "@/lib/services/projects";
 import { ensureProjectReferral } from "@/lib/services/ambassador-platform/referrals";
 import type { SubmittedContact } from "@/lib/submitted-contact";
 import { recordUpdate } from "@/lib/services/client-updates";
-import { notifyOperations, notifyUsers } from "@/lib/services/notifications";
+import { notifyOperations, notifyRole, notifyUsers } from "@/lib/services/notifications";
 import { getActiveCashflow } from "@/lib/services/cashflow";
 import { ratePercentForTier, workersPercent } from "@/lib/finance/commission-config";
 import {
@@ -18,6 +18,7 @@ import { computePrice, computeSplit } from "@/lib/pricing";
 import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { proBonoFinancials } from "@/lib/pro-bono";
+import { CouponError, redeemCouponTx, resolveCouponForOrder } from "@/lib/services/finance/coupons";
 import type { IntakeSubmitInput } from "@/lib/validations/intake";
 
 export interface PublicService {
@@ -107,6 +108,12 @@ export class IntakeError extends Error {}
 export interface SubmitIntakeOptions {
   /** A pro bono submission: no price, no payment, no referral, opens at DOWNPAYMENT_VERIFIED. */
   proBono?: { inviteId: string; reason: string | null };
+  /**
+   * A coupon already resolved and PRICED before the client paid (the pay-first
+   * Paystack path). Passed through as it stands and never resolved again, so the
+   * project is created at exactly the figure Paystack charged.
+   */
+  lockedCoupon?: { couponId: string | null; discountAmount: number; broughtByCouponId: string | null };
 }
 
 export async function submitIntake(
@@ -118,6 +125,7 @@ export async function submitIntake(
     where: { serviceCode: input.serviceCode, isActive: true },
     select: {
       id: true,
+      serviceName: true,
       basePrice: true,
       estimatedDays: true,
       intakeFormTemplate: true,
@@ -149,12 +157,13 @@ export async function submitIntake(
   if (isChapterService(input.serviceCode) && chapters.length === 0) {
     throw new IntakeError("Choose at least one chapter");
   }
-  const price = computePrice({
+  const priceInputs = {
     basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,
-  });
+  };
+  const price = computePrice(priceInputs);
   // The structure in force now is the one this project is computed under for good.
   const cashflow = await getActiveCashflow();
   const structure = cashflow.structure;
@@ -285,6 +294,49 @@ export async function submitIntake(
   // A person who already has an EduCraft login with this email (worker, ambassador
   // or client) sees this order in the same dashboard straight away.
   const ownerLoginId = returningClient ? null : await loginForEmail(typedEmail);
+  // ── The coupon, if any ─────────────────────────────────────────────────
+  // It lowers what the client pays and NOTHING else: every leg above is a share
+  // of price.total, so EduCraft's own retained share carries the discount. The
+  // pay-first path priced it before charging, so that figure is used as it
+  // stands — re-resolving could create the project at a different price from the
+  // one Paystack took.
+  let couponId: string | null = null;
+  let broughtByCouponId: string | null = null;
+  let discountAmount = 0;
+  if (options.lockedCoupon) {
+    couponId = options.lockedCoupon.couponId;
+    broughtByCouponId = options.lockedCoupon.broughtByCouponId;
+    discountAmount = Math.max(0, Math.round(options.lockedCoupon.discountAmount));
+  } else if (!proBono && input.couponCode?.trim()) {
+    try {
+      const resolved = await resolveCouponForOrder({
+        code: input.couponCode,
+        serviceCode: input.serviceCode,
+        serviceLabel: service.serviceName,
+        legs: {
+          price: price.total,
+          workerPayout: split.workerPayout,
+          workerPayoutRate: workersPercent(structure),
+          ambassadorCommission: split.ambassadorCommission,
+          parentCommission,
+          ambassadorId,
+        },
+        clientId: returningClient?.id ?? null,
+        audience: "client",
+      });
+      couponId = resolved.discountAmount > 0 ? resolved.couponId : null;
+      broughtByCouponId = resolved.broughtByCouponId;
+      discountAmount = resolved.discountAmount;
+    } catch (error) {
+      // The client should read why their code did not work, not a 500.
+      if (error instanceof CouponError) throw new IntakeError(error.message);
+      throw error;
+    }
+  }
+  // The client's two legs come off the discounted figure; price.total does not move.
+  const billed = discountAmount > 0 ? computePrice({ ...priceInputs, discountAmount }) : price;
+  let couponOverLimit = false;
+
   const newProjectId = await nextId("PROJECT");
 
   const created = await db.$transaction(
@@ -357,8 +409,11 @@ export async function submitIntake(
               }
             : {
                 price: price.total,
-                downpaymentAmount: price.downpaymentAmount,
-                balanceAmount: price.balanceAmount,
+                discountAmount,
+                couponId,
+                broughtByCouponId,
+                downpaymentAmount: billed.downpaymentAmount,
+                balanceAmount: billed.balanceAmount,
                 downpaymentStatus: "Unpaid",
                 balanceStatus: "Unpaid",
                 ambassadorId,
@@ -370,11 +425,22 @@ export async function submitIntake(
                 parentCommission,
                 workerPayoutRate: workersPercent(structure),
                 workerPayout: split.workerPayout,
-                educraftRevenue: split.educraftRevenue - (parentCommission ?? 0),
+                educraftRevenue: split.educraftRevenue - (parentCommission ?? 0) - discountAmount,
               }),
         },
         select: { id: true, projectId: true },
       });
+
+      if (couponId || broughtByCouponId) {
+        const used = await redeemCouponTx(tx, {
+          couponId: (couponId ?? broughtByCouponId) as string,
+          projectId: project.id,
+          clientId: client.id,
+          listPrice: price.total,
+          discountAmount,
+        });
+        couponOverLimit = used.overLimit;
+      }
 
       if (ambassadorId && ambassadorCommRate != null && split.ambassadorCommission != null) {
         await upsertCommissionExpense(tx, {
@@ -438,6 +504,16 @@ export async function submitIntake(
     },
     { timeout: 30_000 }
   );
+
+  // A race let a code past its own limit. The client paid what they were billed,
+  // so the discount stands and the founder is told instead of it being taken back.
+  if (couponOverLimit) {
+    await notifyRole("SUPER_ADMIN", {
+      title: "A coupon was used past its limit",
+      message: `${created.projectId} used a code that had already reached the number of uses you set. The discount stands — the client had paid.`,
+      link: "/admin/coupons",
+    });
+  }
 
   await notifyOperations({
     title: proBono ? "New pro bono project submitted" : "New project submitted",

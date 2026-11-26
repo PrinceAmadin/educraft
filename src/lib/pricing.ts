@@ -7,13 +7,24 @@ export interface PriceInputs {
   override?: number | null;
   /** The service's downpayment split (Service.downpaymentPercentage). */
   downpaymentPercentage: number;
+  /**
+   * What a coupon takes off the client's bill. It lowers what they PAY and
+   * nothing else: `total` stays the list price every commission is computed on,
+   * so EduCraft's retained share carries the discount on its own.
+   */
+  discountAmount?: number;
 }
 
 export interface PriceBreakdown {
   base: number;
   variantAddon: number;
   expressSurcharge: number;
+  /** The LIST price — the basis for every commission, discount or not. */
   total: number;
+  /** Whole naira a coupon took off, never more than the total. */
+  discountAmount: number;
+  /** What the client is billed: total less the discount. */
+  payable: number;
   downpaymentAmount: number;
   balanceAmount: number;
   /** True when `override` diverged from the auto-computed figure. */
@@ -35,10 +46,14 @@ export function computePrice(inputs: PriceInputs): PriceBreakdown {
     inputs.override != null && Number.isFinite(inputs.override) && naira(inputs.override) !== computed;
   const total = overridden ? naira(inputs.override as number) : computed;
 
-  const downpaymentAmount = naira((total * inputs.downpaymentPercentage) / 100);
-  const balanceAmount = total - downpaymentAmount;
+  // The two legs the client pays come off the DISCOUNTED figure; the list price
+  // above is untouched, because the people on the job are paid from that.
+  const discountAmount = Math.max(0, Math.min(total, naira(inputs.discountAmount ?? 0)));
+  const payable = total - discountAmount;
+  const downpaymentAmount = naira((payable * inputs.downpaymentPercentage) / 100);
+  const balanceAmount = payable - downpaymentAmount;
 
-  return { base, variantAddon, expressSurcharge, total, downpaymentAmount, balanceAmount, overridden };
+  return { base, variantAddon, expressSurcharge, total, discountAmount, payable, downpaymentAmount, balanceAmount, overridden };
 }
 
 /**

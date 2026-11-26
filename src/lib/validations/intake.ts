@@ -111,6 +111,8 @@ export const intakeSubmitSchema = z
     level: z.string().trim().max(40).optional().or(z.literal("")),
     matricNumber: text,
     referralCode: z.string().trim().max(40).optional().or(z.literal("")),
+    /** A coupon code the client typed. Priced on the server, never trusted. */
+    couponCode: z.string().trim().max(32).optional().or(z.literal("")),
 
     // Topic / project
     projectTitle: z.string().trim().max(300).optional().or(z.literal("")),

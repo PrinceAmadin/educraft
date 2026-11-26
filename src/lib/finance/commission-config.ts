@@ -158,7 +158,14 @@ export function potSplit(bucketDelta: number, parentKey: BucketType, s: Cashflow
 
 /** The money fields of a project the engine needs (the names are the Prisma columns). */
 export interface ProjectLegs {
+  /** The LIST price. Every leg below is a share of THIS, discount or not. */
   price: number;
+  /**
+   * What a coupon took off the client's bill (0 for almost every project).
+   * It never reduces a leg — it reduces what EduCraft keeps, because the
+   * retained share is the residual of the money that actually came in.
+   */
+  discountAmount?: number | null;
   workerPayout: number | null;
   workerPayoutRate?: number | null;
   ambassadorCommission: number | null;
@@ -223,21 +230,41 @@ export function executiveLegs(p: ProjectLegs, s: CashflowStructure): { hog: numb
   };
 }
 
+/** What the client is billed: the list price less any coupon discount. */
+export function payableOf(p: ProjectLegs): number {
+  return Math.max(0, Math.round(p.price) - Math.round(p.discountAmount ?? 0));
+}
+
 /**
- * What EduCraft actually keeps of a project: the price less every leg owed
+ * What EduCraft actually keeps of a project: the money in less every leg owed
  * out. 44% of the standard referred job (worker 35, ambassador 15, HOG 3,
  * COO 3); 62% of a direct job (no ambassador, no HOG leg). Never below 0.
  */
 export function retainedForProject(p: ProjectLegs, s: CashflowStructure): number {
   if (p.isProBono || p.price <= 0) return 0;
   const people = personLegs(p, s).reduce((sum, l) => sum + l.amount, 0);
-  const retained = p.price - workerLeg(p, s) - (p.ambassadorCommission ?? 0) - (p.parentCommission ?? 0) - people;
+  const retained = payableOf(p) - workerLeg(p, s) - (p.ambassadorCommission ?? 0) - (p.parentCommission ?? 0) - people;
   return Math.max(0, Math.round(retained));
 }
 
-/** retained ÷ price, to four decimals (0.44 on the standard job). */
+/**
+ * retained ÷ what the client pays, to four decimals (0.44 on the standard job
+ * with no coupon, where the two are the same figure).
+ */
 export function retainedRateFor(p: ProjectLegs, s: CashflowStructure): number {
-  return p.price > 0 ? roundRate(retainedForProject(p, s) / p.price) : 0;
+  const payable = payableOf(p);
+  return payable > 0 ? roundRate(retainedForProject(p, s) / payable) : 0;
+}
+
+/**
+ * How much of a discount the job cannot fund out of its own price — what other
+ * projects' money would have to cover. 0 on every job inside the cap.
+ */
+export function shortfallForProject(p: ProjectLegs, s: CashflowStructure): number {
+  if (p.isProBono || p.price <= 0) return 0;
+  const people = personLegs(p, s).reduce((sum, l) => sum + l.amount, 0);
+  const owed = workerLeg(p, s) + (p.ambassadorCommission ?? 0) + (p.parentCommission ?? 0) + people;
+  return Math.max(0, Math.round(owed - payableOf(p)));
 }
 
 /**
@@ -248,8 +275,12 @@ export function retainedRateFor(p: ProjectLegs, s: CashflowStructure): number {
 export function expectedAllocation(p: ProjectLegs, netInflow: number, s: CashflowStructure): number {
   if (p.price <= 0 || netInflow <= 0) return 0;
   const retained = retainedForProject(p, s);
-  if (netInflow >= p.price) return retained;
-  return Math.round((retained * netInflow) / p.price);
+  // "Fully paid" means the client has paid what they were BILLED, which a
+  // coupon lowers; otherwise a discounted project would never allocate in full.
+  const payable = payableOf(p);
+  if (payable <= 0) return 0;
+  if (netInflow >= payable) return retained;
+  return Math.round((retained * netInflow) / payable);
 }
 
 /** The same, per bucket: what each bucket should hold for the project now. */
@@ -405,7 +436,7 @@ export function tierRuleOf(s: CashflowStructure, tier: AmbassadorTier): TierRule
   return tierRule(s, tier);
 }
 
-/** The workers row's percentage (40) — what a new project freezes as its workerPayoutRate. */
+/** The workers row's percentage (35 in v2) — what a new project freezes as its workerPayoutRate. */
 export function workersPercent(s: CashflowStructure): number {
   return recipientsPercent(s, "workers");
 }
