@@ -108,6 +108,7 @@ export function finishReport(
     chapters: input.chapters.map((c) => ({ ...c, plan: context.plans.get(c.number) ?? null })),
     chapterBased: !input.includePrelims,
     section: input.section,
+    referencingStyle: input.referencingStyle,
     mode: input.mode,
     pureScience: context.pureScience,
     template: prepared.template,

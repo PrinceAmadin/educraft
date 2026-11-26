@@ -13,6 +13,8 @@ export const FONT_NAME = "Times New Roman";
 export const FONT = { ascii: FONT_NAME, hAnsi: FONT_NAME, cs: FONT_NAME, eastAsia: FONT_NAME };
 /** 12pt, in half-points. */
 export const SIZE = 24;
+/** 10pt: NALT's footnote size, and the size the benchmark long essay sets its 446 footnotes at. */
+export const FOOTNOTE_SIZE = 20;
 export const BLACK = "000000";
 
 /** S1-S5: exactly 2.0, nothing before or after. */
@@ -34,6 +36,15 @@ export const STYLE = {
   figureCaption: { id: "FigureCaption", name: "Figure Caption" },
   tableText: { id: "TableText", name: "Table Text" },
   reference: { id: "Reference", name: "Reference" },
+  /**
+   * A primary-source entry: a case, a statute, a treaty or a resolution, in a law
+   * report's LIST OF CASES, LIST OF STATUTES and the PRIMARY SOURCES part of its
+   * bibliography. It looks exactly like a reference entry, but it is NOT one: the
+   * R rules judge the alphabetical order and the duplicates of the reference list,
+   * and a case that appears both in the list of cases and in the bibliography is
+   * NALT working as intended, not a duplicate reference.
+   */
+  sourceEntry: { id: "SourceEntry", name: "Source Entry" },
   pageNumber: { id: "PageNumber", name: "Page Number Footer" },
   equation: { id: "EquationLine", name: "Equation" },
   prelimText: { id: "PrelimCentred", name: "Preliminary Centred" },
@@ -58,7 +69,13 @@ function heading(level: 1 | 2 | 3) {
 /** The same 12pt, 2.0 look for a built-in style the report never uses, so none is left at another size. */
 const plainBuiltIn = { run: { ...run }, paragraph: { spacing: DOUBLE } };
 
-export function reportStyles(): IStylesOptions {
+/**
+ * `footnotes: true` (MODE_C, a NALT or doctrinal Law report) sets the footnote
+ * styles to NALT's 10pt, single spaced. Every other report leaves them at 12pt,
+ * where they are never rendered, so F3's "nothing is any other size" still holds.
+ */
+export function reportStyles(opts: { footnotes?: boolean } = {}): IStylesOptions {
+  const footnoteRun = opts.footnotes ? { ...run, size: FOOTNOTE_SIZE, sizeComplexScript: FOOTNOTE_SIZE } : { ...run };
   return {
     default: {
       document: {
@@ -73,9 +90,17 @@ export function reportStyles(): IStylesOptions {
       heading6: { ...plainBuiltIn, run: { ...run, bold: true } },
       title: { run: { ...run, bold: true }, paragraph: { spacing: DOUBLE, alignment: AlignmentType.CENTER } },
       listParagraph: plainBuiltIn,
-      footnoteText: plainBuiltIn,
+      // MODE_C page footnotes (NALT and doctrinal Law). NALT: "The footnote automatically converts
+      // into font size 10; but the font face may have to be converted manually into Times New Roman."
+      // Single spaced and left aligned, as the benchmark long essay sets them. A report with no
+      // footnotes never renders this style, so it is safe to set for every report.
+      footnoteText: {
+        run: footnoteRun,
+        paragraph: opts.footnotes ? { spacing: SINGLE, alignment: AlignmentType.LEFT, indent: { left: 0, firstLine: 0 } } : { spacing: DOUBLE },
+      },
+      footnoteTextChar: { run: footnoteRun },
+      footnoteReference: { run: { ...footnoteRun, superScript: true } },
       endnoteText: plainBuiltIn,
-      footnoteTextChar: { run: { ...run } },
       endnoteTextChar: { run: { ...run } },
       hyperlink: { run: { color: BLACK, underline: {} } },
     },
@@ -138,6 +163,15 @@ export function reportStyles(): IStylesOptions {
         name: STYLE.reference.name,
         basedOn: "Normal",
         next: STYLE.reference.id,
+        run: { ...run },
+        paragraph: { alignment: AlignmentType.JUSTIFIED, spacing: DOUBLE, indent: { left: 720, hanging: 720 } },
+      },
+      // The same look as a reference entry, for a law report's primary sources.
+      {
+        id: STYLE.sourceEntry.id,
+        name: STYLE.sourceEntry.name,
+        basedOn: "Normal",
+        next: STYLE.sourceEntry.id,
         run: { ...run },
         paragraph: { alignment: AlignmentType.JUSTIFIED, spacing: DOUBLE, indent: { left: 720, hanging: 720 } },
       },

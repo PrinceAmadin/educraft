@@ -47,7 +47,8 @@ const LIST_LINE = /^\s*(?:((?:[ivxlc]{1,6}|\d{1,2}|[a-z])[.)])|([•▪◦\-–*
 const NUMBERED_HEADING = /^\**\s*(\d+(?:\.\d+){1,4})\.?\s+(\S.*?)\s*\**:?$/;
 
 /** An [ENDNOTES] block's opening line; anything after the tag on the same line is its first entry. */
-export const ENDNOTES_START = /^\s*\[ENDNOTES\]\s*(.*)$/i;
+/** [ENDNOTES] for a note style, [FOOTNOTES] for MODE_C: the same block, the word the chapter's own style uses. */
+export const ENDNOTES_START = /^\s*\[(?:END|FOOT)NOTES\]\s*(.*)$/i;
 /** One endnote entry: "3. Full note" or "3) Full note". */
 export const ENDNOTE_ENTRY = /^\s*\**\s*(\d{1,3})[.)]\s+(\S.*)$/;
 /** One endnote entry written with a superscript number, "³ Full note" (the prompt files' own example). */

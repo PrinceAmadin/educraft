@@ -63,6 +63,7 @@ import {
   type SectionKey,
 } from "./department-map";
 import { STYLE_LABEL, citationPlacementFor, type CitationPlacement, type ReferencingStyleKey } from "./referencing";
+import { FOOTNOTE_DENSITY, followsNalt, isLawSection, NALT_CHAPTER_TITLES, NALT_SECTIONS } from "@/lib/law/nalt";
 
 export type { CitationPlacement, ReferencingStyleKey } from "./referencing";
 
@@ -255,6 +256,53 @@ export const LOADER_TEXT = {
   /** MODE_B: each part lists its own notes; the assembly joins them into the one document list. */
   endnotesDocument:
     "Number this chapter's notes from 1, in the order their markers appear. The notes are written chapter by chapter: each part of the chapter you are asked to write ends with an [ENDNOTES] line followed by one line per note whose marker appears in that part, written as 3. Full note text. Give a work's full citation in its first note in this chapter and the short form in later notes on it. The assembly joins every chapter's notes into the one numbered Endnotes list at the end of the document, numbering them continuously and joining identical notes, so write no Endnotes section of your own. This replaces the CITATION MODE BLOCK's line that the notes are collected at the document end.",
+  /**
+   * MODE_C (NALT and doctrinal Law): page footnotes. Each part lists its own notes and the
+   * assembly sets them as real Word footnotes at the foot of their pages, numbered continuously
+   * across the report. Before this the loader said nothing for MODE_C and no footnote text was
+   * ever written (the chapters carried bare superscripts and the specialist typed the notes).
+   */
+  footnotesPage:
+    "Number this chapter's notes from 1, in the order their markers appear. Each part of the chapter you are asked to write ends with a [FOOTNOTES] line followed by one line per note whose marker appears in that part, written as 3. Full note text. The assembly sets each one as a real footnote at the foot of its own page and numbers them continuously across the whole report, so write no footnote list, endnote list or bibliography of your own. Give a work's full citation the first time this chapter cites it and a short form afterwards.",
+  /**
+   * NALT's footnote forms, by source. The Chapter 1 prompt file's single example cites a BOOK in
+   * journal-article shape (title in quotation marks, publisher where the journal goes, surname
+   * only), which teaches the wrong shape for every footnote in the report; these replace it.
+   */
+  naltCitationForms:
+    [
+      "NALT footnote forms. Use the author's name as it is printed in the source (forename first); surname-first is the bibliography form, never the footnote form. Punctuation is minimal: no full stops inside an abbreviation (LFN, FWLR, NWLR, UNTS), and no full stop after s, art, para, pt or sch.",
+      "Book: Author Name, *Title of the Book: Subtitle* (Publisher Year) page. For example: David M Rosen, *Armies of the Young: Child Soldiers in War and Terrorism* (Rutgers University Press 2005) 8-14.",
+      "Chapter in an edited book: Author Name, 'Title of the Chapter' in Editor Name (ed), *Title of the Book* (Publisher Year) page.",
+      "Journal article: Author Name, 'Title of the Article' *Name of the Journal* [Year] (Volume) (Issue) first page. For example: EI Alemika, 'Criminal Justice System and Respect for Human Rights' *Human Rights Review* [2011] (12) (2) 25.",
+      "Case: *Parties* [Year] Volume Report (Pt Part) page, with the case name in italics and an unpunctuated v. For example: *Abacha v Fawehinmi* [2000] FWLR (Pt 4) 533. An unreported case: *Parties* (Suit number, Court, Date).",
+      "Statute: its short title with capitals for the major words, then the pinpoint. For example: Child Rights Act 2003, s 34; Evidence Act 2011, Cap 50, s 83(1).",
+      "The Constitution: Constitution of the Federal Republic of Nigeria 1999 (as amended), s 12(1) in full the first time, then CFRN 1999 (as amended).",
+      "Treaty or international instrument: Full Name of the Instrument (adopted DD Month YYYY, entered into force DD Month YYYY) Volume UNTS first page, art X.",
+      "Online source: the publication details as above, then <web address> accessed DD Month YYYY. Where a source is also in print, cite the printed version.",
+      "Separate two citations in one footnote with a semi-colon. Use a comma between the author's name and the title, and a colon between a title and its subtitle.",
+    ].join("\n\n"),
+  /** NALT's citation signals: the abolished Latin, ibid, and the (n X) cross-reference. */
+  naltSignals:
+    "NALT citation signals. Use \"ibid\" (lower case, never italicised, never capitalised) only to repeat the footnote immediately before, with no footnote in between. For a source cited earlier with something in between, write the short form and a cross-reference to the footnote where it first appeared: Rosen (n 2) 132-140, or *Lubanga* (n 16) para 617. NALT has ABOLISHED supra, infra, ante, contra, id, op cit, loc cit, passim and et seq: never write any of them. For three or more authors write \"and others\", never \"et al.\"; this replaces the et al. rule in the referencing rules above.",
+  /** The density the benchmark long essay sets; the gate judges a chapter against it. */
+  naltDensity: (target: number) =>
+    `A law chapter carries its authority in its footnotes: cite a statute, a case, a treaty or a published work roughly every ${String(target)} words, and give a footnote to every proposition that rests on a source, every statutory provision named and every case mentioned. A paragraph of legal analysis with no footnote is not finished work.`,
+  /** NALT H2 is upper case, not Title Case (the house AL3 rule does not apply to a law report). */
+  naltHeadings:
+    "Write every [H2] section heading in UPPER CASE, with its Arabic number (for example: [H2] 1.1 BACKGROUND TO THE STUDY). Write every [H3] sub-heading in Title Case with its sub-number (for example: [H3] 2.1.1 Definition of a Child). This is NALT's rule and it replaces the Title Case and sentence case heading rules in the formatting rules above.",
+  /** The seven sections of a NALT Chapter One, in NALT's order, with the research questions under the problem. */
+  naltChapterOne: (sections: readonly string[]) =>
+    `This Chapter One has exactly these seven numbered sections, in this order and under these titles: ${sections.map((s, i) => `1.${String(i + 1)} ${s}`).join("; ")}. The research questions are NOT a numbered section of their own: write them as the sub-section [H3] 1.2.1 Research Questions at the end of 1.2, itemised and numbered. Do not write a literature review in Chapter One: the literature is reviewed in Chapter Two at 2.3. 1.7 SYNOPSIS OF THE CHAPTERS gives one paragraph per chapter saying what that chapter does. This replaces the department section's own numbered list and its order.`,
+  /** NALT's Chapter Two: three sub-sections, including the historical foundation the prompt files drop. */
+  naltChapterTwo: (title: string, sections: readonly string[]) =>
+    `This Chapter Two is titled ${title} and has exactly these three numbered sections, in this order: ${sections.map((s, i) => `2.${String(i + 1)} ${s}`).join("; ")}. There is no introduction section and no separate summary or research-gap section: the gap the study addresses is drawn at the end of 2.3 LITERATURE REVIEW. 2.2 THEORETICAL AND HISTORICAL FOUNDATION covers BOTH the historical development of this area of law and the jurisprudential theories and principles it rests on, each as its own [H3] sub-section. This replaces the department section's own numbered list.`,
+  /** NALT's Chapter Five: five numbered sections, the conclusion LAST. */
+  naltChapterFive: (sections: readonly string[]) =>
+    `This Chapter Five is titled CONCLUSION and has exactly these five numbered sections, in this order and under these titles: ${sections.map((s, i) => `5.${String(i + 1)} ${s}`).join("; ")}. The conclusion is the LAST section, not the second, and there is no introduction section. 5.1 SUMMARY OF FINDINGS states what each preceding chapter established. 5.2 RECOMMENDATIONS are specific legal reforms, each flowing from a finding and addressed to whoever can make it (the National Assembly, a State House of Assembly, a Ministry, or the courts), each as its own [H3] sub-section. 5.3 CONTRIBUTIONS TO KNOWLEDGE states what this study adds that was not available before. 5.4 AREAS FOR FURTHER STUDIES names the questions left open. 5.5 CONCLUSION is the closing assessment, in two or three paragraphs. This replaces both the unnumbered Template B conclusion structure and the department section's own numbered list.`,
+  /** NALT's bibliography: the assembly builds it, so the chapters write none. */
+  naltBibliography:
+    "The report ends with a BIBLIOGRAPHY (not a References list), split into PRIMARY SOURCES and SECONDARY SOURCES. The assembly builds it from the footnotes and the verified reference list, so write no bibliography, reference list or table of cases of your own in this chapter.",
   /** MODE_A: each part lists its own notes; the assembly shows a chapter's notes together at its end. */
   endnotesChapter:
     "Number this chapter's notes from 1, in the order their markers appear. Each part of the chapter you are asked to write ends with an [ENDNOTES] line followed by one line per note whose marker appears in that part, written as 3. Full note text; the assembly shows the chapter's notes together at its end.",
@@ -915,6 +963,24 @@ export async function loadChapterPrompt(input: ChapterPromptInput): Promise<Asse
   // which no chapter writes (D11). Each part now lists its own notes; the assembly numbers and joins them.
   if (placement === "MODE_A" || placement === "MODE_B") {
     notes.push(LOADER_TEXT.noteMarkers, placement === "MODE_B" ? LOADER_TEXT.endnotesDocument : LOADER_TEXT.endnotesChapter);
+  }
+  // MODE_C (NALT, doctrinal Law): page footnotes. The chapters write the note text; the assembly sets
+  // each one as a real Word footnote. Nothing told the model this before, so no footnote was ever written.
+  if (placement === "MODE_C") notes.push(LOADER_TEXT.noteMarkers, LOADER_TEXT.footnotesPage);
+  // NALT: the citation forms, the signals, the density, the headings and the bibliography. The prompt
+  // files' own law blocks give a wrong footnote example, Title Case headings and the house et al. rule.
+  if (followsNalt({ section, referencingStyle: input.project.referencingStyle })) {
+    notes.push(LOADER_TEXT.naltCitationForms, LOADER_TEXT.naltSignals, LOADER_TEXT.naltHeadings, LOADER_TEXT.naltBibliography);
+    if (placement === "MODE_C") notes.push(LOADER_TEXT.naltDensity(FOOTNOTE_DENSITY.target));
+  }
+  // NALT's mandatory chapters: one, two and five are structured the same way for every law student,
+  // and the prompt files' own lists differ from the standard (a sixth chapter, the research questions
+  // as a numbered section, no synopsis, an introduction in the conclusion, no contributions section).
+  if (isLawSection(section)) {
+    const lawSections = NALT_SECTIONS[section];
+    if (chapter === 1) notes.push(LOADER_TEXT.naltChapterOne(lawSections[1]));
+    if (chapter === 2) notes.push(LOADER_TEXT.naltChapterTwo(NALT_CHAPTER_TITLES[2][section], lawSections[2]));
+    if (chapter === 5) notes.push(LOADER_TEXT.naltChapterFive(lawSections[5]));
   }
   // Q1/Q2: five chapters at most. Wherever the loaded text plans a sixth chapter, the note overrides it.
   if (parts.some((p) => SIX_CHAPTERS.test(p.text))) notes.push(LOADER_TEXT.fiveChapters);

@@ -246,6 +246,7 @@ const attr = (xml: string, tag: string, name: string) => [...xml.matchAll(new Re
 
 async function checkReport(engineering: boolean, outDir: string | null) {
   const label = engineering ? "ENG" : "STD";
+  const footnotes10pt = input(engineering).citationPlacement === "MODE_C";
   const { buffer, report } = await packReport(input(engineering));
   if (outDir) writeFileSync(join(outDir, `check-assembly-${label}.docx`), buffer);
   const zip = await JSZip.loadAsync(buffer);
@@ -259,7 +260,9 @@ async function checkReport(engineering: boolean, outDir: string | null) {
   // F1-F6
   check(`${label} F1 fonts are Times New Roman`, attr(all, "w:rFonts", "w:ascii").every((f) => f === "Times New Roman") && attr(all, "w:rFonts", "w:ascii").length > 0, [...new Set(attr(all, "w:rFonts", "w:ascii"))].join(","));
   const sizes = [...attr(all, "w:sz", "w:val"), ...attr(all, "w:szCs", "w:val")];
-  check(`${label} F2/F3 every size is 12pt (24 half-points), nothing 14pt`, sizes.every((s) => s === "24"), [...new Set(sizes)].join(","));
+  // A MODE_C report sets its footnotes at NALT's 10pt (20 half-points) and nothing else at any other size.
+  const allowed = new Set(["24", ...(footnotes10pt ? ["20"] : [])]);
+  check(`${label} F2/F3 every size is 12pt (24 half-points), nothing 14pt`, sizes.every((s) => allowed.has(s)), [...new Set(sizes)].join(","));
   check(`${label} F4 headings bold`, ["Heading1", "Heading2", "Heading3"].every((id) => /<w:b\/>|<w:b w:val="(?:true|1|on)"\/>/.test(styleBlock(styles, id))));
   const colours = attr(all, "w:color", "w:val");
   check(`${label} F5 black only`, colours.every((c) => c === "000000" || c === "auto"), [...new Set(colours)].join(","));

@@ -14,6 +14,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { AssemblyInput } from "../src/lib/assembly/assemble";
+import { isLawSection, NALT_RQ_SUBSECTION, NALT_SECTIONS } from "../src/lib/law/nalt";
 import { buildChapterBrief } from "../src/lib/generation/chapter-plan";
 import { extractDepartmentSection, type ChapterNumber } from "../src/lib/generation/prompt-loader";
 import type { SectionKey } from "../src/lib/generation/department-map";
@@ -23,7 +24,7 @@ import { finishReport, prepareReport, type AiResults, type PreparedReport } from
 import { runFormattingChecks, FORMATTING_RULES, type DocxParts } from "../src/lib/quality/formatting-checks";
 import { recallState, recallWindowEnd, RECALL_WINDOW_MINUTES } from "../src/lib/quality/recall";
 import { requiredSections } from "../src/lib/quality/required-sections";
-import { scoreQuality, PASS_MARK } from "../src/lib/quality/score";
+import { scoreQuality, LAYER_TOTALS, MAX_FAILURES, PASS_MARK, QUALITY_TOTAL } from "../src/lib/quality/score";
 import type { TraceabilityResult } from "../src/lib/quality/structural-checks";
 import type { CheckResult, QualityLayer } from "../src/lib/quality/types";
 import { BANNED_OPENERS, META_PHRASES, PROMOTIONAL, TRANSITION_WORDS, scanVoice, validateAiVoiceFindings } from "../src/lib/quality/voice-scan";
@@ -73,7 +74,7 @@ async function checkWrittenPrelims() {
   const written = await prepare(fixtureChapters(), pagesWith());
   const ok = finish(written.prepared, written.chapters);
   check("D7b: written pages -> ST1 PASS", statusOf(ok.checks, "ST1") === "PASS", JSON.stringify(byId(ok.checks, "ST1").issues));
-  check("D7b: written pages -> still 89 of 89", ok.score.qualityScore === 89 && ok.score.passed, String(ok.score.qualityScore));
+  check("D7b: written pages -> still full marks", ok.score.qualityScore === QUALITY_TOTAL && ok.score.passed, String(ok.score.qualityScore));
   check("D7b: plain pages give the voice check nothing to say", !byId(ok.checks, "VOICE").issues.some((i) => i.chapter == null), JSON.stringify(byId(ok.checks, "VOICE").issues.filter((i) => i.chapter == null)));
   check("D7b: the scored copy carries the abstract", written.prepared.parts.document.includes("mobile money adoption among market traders"));
   eq("D7b: no prelim placeholder recorded once written", written.prepared.report.prelimPlaceholders, []);
@@ -180,12 +181,12 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
   const { prepared, chapters } = await prepare();
   const clean = finish(prepared, chapters);
   const layerCount = (layer: QualityLayer) => clean.checks.filter((c) => c.layer === layer).length;
-  eq("89 checks: 71 formatting, 1 voice, 1 reference, 16 structural", [clean.checks.length, layerCount("formatting"), layerCount("voice"), layerCount("reference"), layerCount("structural")], [89, 71, 1, 1, 16]);
+  eq(`${QUALITY_TOTAL} checks: 71 formatting, 1 voice, 1 reference, 19 structural`, [clean.checks.length, layerCount("formatting"), layerCount("voice"), layerCount("reference"), layerCount("structural")], [QUALITY_TOTAL, 71, 1, 1, 19]);
   eq("formatting rule list is the 71 of formatting_rules.md, in order", FORMATTING_RULES.map((r) => r.id).join(" "), "F1 F2 F3 F4 F5 F6 S1 S2 S3 S4 S5 MG1 MG2 MG3 MG4 AL1 AL2 AL3 AL4 H1 H2 H3 H4 P1 P2 P3 P4 P5 PN1 PN2 PN3 PN4 T1 T2 T3 T4 T5 T6 T7 T8 FG1 FG2 FG3 FG4 FG5 FG6 EQ1 EQ2 EQ3 EQ4 EQ5 TOC1 TOC2 TOC3 TOC4 TOC5 LF1 LF2 LF3 LT1 LT2 LT3 LA1 LA2 LA3 R1 R2 R3 R4 R5 R6");
   eq("clean fixture: no check fails", failed(clean.checks), []);
-  check("clean fixture: 89 of 89, passed", clean.score.qualityScore === 89 && clean.score.passed, `${clean.score.qualityScore}, passed ${clean.score.passed}`);
-  eq("clean fixture: layer scores", [clean.score.formattingScore, clean.score.structuralScore, clean.score.referenceScore, clean.score.voiceScore], [71, 16, 1, 1]);
-  eq("clean fixture: not-applicable rules", clean.checks.filter((c) => c.status === "NA").map((c) => c.id), ["T2", "T3", "LA1", "LA2", "LA3"]);
+  check("clean fixture: full marks, passed", clean.score.qualityScore === QUALITY_TOTAL && clean.score.passed, `${clean.score.qualityScore}, passed ${clean.score.passed}`);
+  eq("clean fixture: layer scores", [clean.score.formattingScore, clean.score.structuralScore, clean.score.referenceScore, clean.score.voiceScore], [LAYER_TOTALS.formatting, LAYER_TOTALS.structural, LAYER_TOTALS.reference, LAYER_TOTALS.voice]);
+  eq("clean fixture: not-applicable rules", clean.checks.filter((c) => c.status === "NA").map((c) => c.id), ["T2", "T3", "LA1", "LA2", "LA3", "ST17", "ST18", "ST19"]);
   check("FIX 2: Davis (1989) is a WARN on the reference check, not a failure", statusOf(clean.checks, "REF") === "WARN" && byId(clean.checks, "REF").issues.some((i) => i.level === "WARN" && /Davis \(1989\) is cited but is not among the verified references/.test(i.message)));
   check("FIX 2: Yamane (1967) is a WARN too", byId(clean.checks, "REF").issues.some((i) => i.level === "WARN" && /Yamane \(1967\)/.test(i.message)));
   check("FIX 2: the known citations cost no point", clean.score.referenceScore === 1);
@@ -238,7 +239,7 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
     const all = finish(prepared, chapters);
     const swapped = all.checks.map((c) => res.find((r) => r.id === c.id) ?? c);
     const s = scoreQuality(swapped);
-    check("a CRITICAL failure (F1) blocks the pass even at 88 of 89", s.qualityScore === 88 && !s.passed && s.criticalFailures === 1, JSON.stringify({ score: s.qualityScore, passed: s.passed }));
+    check("a CRITICAL failure (F1) blocks the pass even one short of full marks", s.qualityScore === QUALITY_TOTAL - 1 && !s.passed && s.criticalFailures === 1, JSON.stringify({ score: s.qualityScore, passed: s.passed }));
   }
 
   // ── Layer 1 and 3 from the chapter text ──────────────────────────────────
@@ -272,7 +273,7 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
     const r = finish(p2, chs);
     const v = byId(r.checks, "VOICE");
     check("an injected \"In today's rapidly evolving\" fails voice", v.status === "FAIL" && v.issues.some((i) => i.level === "FAIL" && i.chapter === 1 && i.paragraph === 1 && /In today's rapidly evolving/.test(i.quote ?? "")), JSON.stringify(v.issues.slice(0, 2)));
-    check("…and costs exactly one point", r.score.qualityScore === 88 && r.score.voiceScore === 0);
+    check("…and costs exactly one point", r.score.qualityScore === QUALITY_TOTAL - 1 && r.score.voiceScore === 0);
   }
   const voiceOf = (text: string) => scanVoice(proseParagraphs([{ number: 1, text: `[H2] 1.1 Background\n${text}` }]));
   const hit = (text: string, rule: string, severity = "MAJOR") => voiceOf(text).some((f) => f.rule === rule && f.severity === severity);
@@ -427,6 +428,11 @@ ${AIM}
         for (const ctx of [{ mode: 3, pureScience: false, hasHypotheses: true }, { mode: 4, pureScience: false, hasHypotheses: true }, { mode: 2, pureScience: false, hasHypotheses: true }]) {
           const req = requiredSections(s, n, ctx);
           if (!req || req === "THEMATIC") continue;
+          // NALT rebuild (26 Nov 2026): for the law sections the standard is NALT, not the prompt
+          // file, whose own lists differ from it (a sixth chapter, the research questions as a
+          // numbered section, no synopsis, an introduction in the conclusion, no contributions
+          // section). Those chapters are held to NALT_SECTIONS below instead.
+          if (isLawSection(s) && (n === 1 || n === 2 || n === 5)) continue;
           const block = (await extractDepartmentSection(n, s)) ?? "";
           const headings = block.split("\n").filter((l) => new RegExp(`^${n}\\.\\d+\\s`).test(l.trim()));
           // Law non-doctrinal Chapter 1 and the Template B conclusion have no numbered list: nothing to hold them to.
@@ -439,16 +445,41 @@ ${AIM}
       }
     }
     check(`every required section (${listed} checked) matches a heading in its prompt block`, problems.length === 0, [...new Set(problems)].join("; "));
+
+    // The law sections' mandatory chapters are held to NALT instead: every section NALT names for
+    // chapters one, two and five must be a required section of that chapter, and nothing else.
+    const naltProblems: string[] = [];
+    let naltListed = 0;
+    for (const s of ["LAW_DOCTRINAL", "LAW_NON_DOCTRINAL"] as const) {
+      for (const n of [1, 2, 5] as const) {
+        const req = requiredSections(s, n, { mode: s === "LAW_DOCTRINAL" ? 1 : 2, pureScience: false, hasHypotheses: true });
+        if (!req || req === "THEMATIC") {
+          naltProblems.push(`${s} ch${n} has no required sections`);
+          continue;
+        }
+        for (const wanted of NALT_SECTIONS[s][n]) {
+          naltListed++;
+          if (!req.some((r) => r.match.test(wanted))) naltProblems.push(`${s} ch${n} does not require "${wanted}"`);
+        }
+        // Doctrinal Chapter One also requires the research questions, which NALT puts under the
+        // problem as the sub-section 1.2.1 rather than numbering it as one of the seven sections.
+        // Non-doctrinal numbers them as a section of its own, so it has no extra requirement.
+        const extra = n === 1 && s === "LAW_DOCTRINAL" ? 1 : 0;
+        if (req.length !== NALT_SECTIONS[s][n].length + extra) naltProblems.push(`${s} ch${n} requires ${req.length} sections, NALT names ${NALT_SECTIONS[s][n].length + extra}`);
+        if (extra && !req.some((r) => r.match.test(NALT_RQ_SUBSECTION))) naltProblems.push(`${s} ch1 does not require the research questions sub-section`);
+      }
+    }
+    check(`every NALT section (${naltListed} checked) is required of its law chapter, and no others`, naltProblems.length === 0, [...new Set(naltProblems)].join("; "));
   }
 
   // ── Scoring ──────────────────────────────────────────────────────────────
   {
     const mk = (fails: number, severity: "MAJOR" | "MINOR" | "CRITICAL" = "MINOR"): CheckResult[] =>
       clean.checks.map((c, i) => (i < fails ? { ...c, severity, status: "FAIL" as const, issues: [{ level: "FAIL" as const, message: "x" }] } : c));
-    check(`${PASS_MARK} of 89 passes`, scoreQuality(mk(4)).passed && scoreQuality(mk(4)).qualityScore === 85);
-    check("84 of 89 does not", !scoreQuality(mk(5)).passed);
-    check("one CRITICAL failure blocks 88 of 89", !scoreQuality(mk(1, "CRITICAL")).passed);
-    check("N/A and WARN count as passed", scoreQuality(clean.checks).qualityScore === 89);
+    check(`${PASS_MARK} of ${QUALITY_TOTAL} passes (at most ${MAX_FAILURES} failures)`, scoreQuality(mk(MAX_FAILURES)).passed && scoreQuality(mk(MAX_FAILURES)).qualityScore === PASS_MARK);
+    check(`${PASS_MARK - 1} of ${QUALITY_TOTAL} does not`, !scoreQuality(mk(MAX_FAILURES + 1)).passed);
+    check(`one CRITICAL failure blocks ${QUALITY_TOTAL - 1} of ${QUALITY_TOTAL}`, !scoreQuality(mk(1, "CRITICAL")).passed);
+    check("N/A and WARN count as passed", scoreQuality(clean.checks).qualityScore === QUALITY_TOTAL);
     let threw = false;
     try {
       scoreQuality(clean.checks.slice(1));
@@ -522,7 +553,7 @@ ${AIM}
     const base = endnotesChapters();
     const { p: enPrep, r: en } = await run(base);
     eq("endnotes: the clean Mode 1 report fails nothing", failed(en.checks), []);
-    check("endnotes: 89 of 89, passed", en.score.qualityScore === 89 && en.score.passed, `${en.score.qualityScore}`);
+    check("endnotes: full marks, passed", en.score.qualityScore === QUALITY_TOTAL && en.score.passed, `${en.score.qualityScore}`);
     check("endnotes: ST12 counts the 41 distinct notes", /41 distinct endnotes/.test(byId(en.checks, "ST12").summary ?? ""), byId(en.checks, "ST12").summary);
     eq("endnotes: every note is matched to a verified work (39 cited, 0 unmatched)", [enPrep.match.cited.length, enPrep.match.unmatched.length], [39, 0]);
     check("endnotes: the notes give the support check its pairs", enPrep.match.matched.filter((m) => m.use.raw.startsWith("(note")).length === 45);

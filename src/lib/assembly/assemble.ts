@@ -27,6 +27,7 @@ import {
   NumberFormat,
   Packer,
   PageNumber,
+  FootnoteReferenceRun,
   Paragraph,
   SectionType,
   StyleLevel,
@@ -57,6 +58,9 @@ import { formattedReferences, type DocReference, type ReferencingStyle as ListSt
 import { loadChapterTexts, type ChapterTextSource } from "@/lib/services/chapter-texts";
 import { parseChapter, type Block } from "./parse-chapter";
 import { analyseChapterNotes, collectEndnotes, resolveNotes, type CollectedEndnotes } from "./endnotes";
+import { collectFootnotes, type CollectedFootnotes } from "./footnotes";
+import { followsNalt, headingProfileFor, NALT_BIBLIOGRAPHY_PARTS, NALT_BIBLIOGRAPHY_TITLE, NALT_TEXT, type HeadingProfile } from "@/lib/law/nalt";
+import { isShortForm, primaryGroupOf, primarySourcesFrom, type PrimaryGroup } from "./bibliography";
 import { CHAPTER_STAMP, type ImageType } from "./read-chapter-docx";
 import { AssemblyError } from "./errors";
 import { finalizeDocx } from "./finalize-docx";
@@ -69,6 +73,7 @@ import {
   inlineSegments,
   italiciseEtAl,
   properNounsFrom,
+  referencesForNote,
   renumberEquationRefs,
   sentenceCase,
   titleCase,
@@ -149,6 +154,8 @@ export interface AssemblyReport {
   headingsRecased: number;
   equationsAsText: number;
   references: { style: string; listedAs: string; listed: number; leftOut: number; unmatchedCitations: string[] };
+  /** MODE_C: the footnotes set at the foot of their pages, and what could not be matched up. */
+  footnotes?: { built: number; dangling: number; unused: number; repeated: number };
   notes: string[];
 }
 
@@ -214,6 +221,9 @@ const PAGE_TITLES = {
   tables: "LIST OF TABLES",
   figures: "LIST OF FIGURES",
   abbreviations: "LIST OF ABBREVIATIONS",
+  /** NALT's law preliminaries. */
+  cases: "LIST OF CASES",
+  statutes: "LIST OF STATUTES, TREATIES AND INTERNATIONAL INSTRUMENTS",
   references: "REFERENCES",
   endnotes: "Endnotes",
   /** MODE_B: the one list of notes for the whole report, just before the References. */
@@ -357,6 +367,22 @@ interface Ctx {
   placement: string | null;
   /** Pictures from approved chapters. */
   media: AssemblyInput["media"];
+  /** MODE_C: note markers become real Word footnotes rather than plain superscripts. */
+  footnotes: boolean;
+  /** AL2-AL4: the house heading case, or NALT's (H2 upper case, H3 Title Case). */
+  headings: HeadingProfile;
+  /** NALT: a BIBLIOGRAPHY split into primary and secondary sources, not a References list. */
+  nalt: boolean;
+  /** The report's footnotes, for the primary sources the bibliography reads back out of them. */
+  footnoteTexts?: readonly { text: string }[];
+}
+
+/** The heading as its level wants it: NALT keeps a numbered section heading in upper case. */
+function casedHeading(text: string, level: 2 | 3, ctx: Ctx): string {
+  const want = level === 2 ? ctx.headings.h2 : ctx.headings.h3;
+  if (want === "upper") return upperH1(text);
+  if (want === "title") return titleCase(text);
+  return sentenceCase(text, ctx.properNouns);
 }
 
 function textRun(seg: Seg, extra: { bold?: boolean } = {}): TextRun {
@@ -369,8 +395,17 @@ function textRun(seg: Seg, extra: { bold?: boolean } = {}): TextRun {
   });
 }
 
+/**
+ * MODE_C: a note marker becomes a real Word footnote reference, so the note sits
+ * at the foot of its own page. Every other placement keeps it a plain superscript.
+ */
+function segRun(seg: Seg, ctx: Ctx, extra: { bold?: boolean } = {}): ParagraphChild {
+  if (ctx.footnotes && seg.note !== undefined) return new FootnoteReferenceRun(seg.note);
+  return textRun(seg, extra);
+}
+
 /** Runs for a piece of generated text: *italics*, et al. italic, P2 dashes (prose only). */
-function runsFor(text: string, ctx: Ctx, opts: { inTable?: boolean; prose?: boolean; bold?: boolean } = {}): TextRun[] {
+function runsFor(text: string, ctx: Ctx, opts: { inTable?: boolean; prose?: boolean; bold?: boolean } = {}): ParagraphChild[] {
   let t = text;
   if (opts.prose) {
     const fixed = fixSentenceDashes(t);
@@ -379,7 +414,7 @@ function runsFor(text: string, ctx: Ctx, opts: { inTable?: boolean; prose?: bool
   }
   const segs = inlineSegments(t, { inTable: opts.inTable });
   ctx.report.etAl += segs.filter((s) => s.italics && s.text === "et al.").length;
-  return segs.map((s) => textRun(s, opts.bold ? { bold: true } : {}));
+  return segs.map((s) => segRun(s, ctx, opts.bold ? { bold: true } : {}));
 }
 
 function plain(text: string, extra: { bold?: boolean; italics?: boolean; allCaps?: boolean } = {}): TextRun {
@@ -651,7 +686,7 @@ function chapterContent(chapter: { number: number; text: string }, first: boolea
     const block = parsed.blocks[i];
     switch (block.kind) {
       case "heading": {
-        const cased = block.level === 2 ? titleCase(block.text) : sentenceCase(block.text, ctx.properNouns);
+        const cased = casedHeading(block.text, block.level === 2 ? 2 : 3, ctx);
         if (cased !== block.text) ctx.report.headingsRecased++;
         push(new Paragraph({ heading: block.level === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3, children: runsFor(cased, ctx, { bold: true }) }));
         break;
@@ -709,6 +744,27 @@ function chapterContent(chapter: { number: number; text: string }, first: boolea
   return out;
 }
 
+/**
+ * MODE_C: the footnote parts Word puts at the foot of each page, keyed by the
+ * number the marker in the body carries.
+ */
+function footnoteParts(found: CollectedFootnotes, ctx: Ctx): Record<string, { children: Paragraph[] }> {
+  const parts: Record<string, { children: Paragraph[] }> = {};
+  for (const n of found.notes) {
+    // The footnote's own reference mark is written by Word; the text follows it after a space.
+    parts[String(n.number)] = { children: [new Paragraph({ style: "FootnoteText", children: [plain(" "), ...runsFor(n.text, { ...ctx, footnotes: false })] })] };
+  }
+  return parts;
+}
+
+/** What the specialist and the COO are told about the footnotes that were set. */
+function reportFootnotes(found: CollectedFootnotes, report: AssemblyReport): void {
+  report.footnotes = { built: found.notes.length, dangling: found.dangling.length, unused: found.unused.length, repeated: found.repeated };
+  if (found.notes.length) report.notes.push(NALT_TEXT.footnotesBuilt(found.notes.length));
+  if (found.dangling.length) report.notes.push(`${NALT_TEXT.footnoteDangling(found.dangling.length)} ${found.dangling.slice(0, 8).join("; ")}.`);
+  if (found.unused.length) report.notes.push(`${NALT_TEXT.footnoteUnused(found.unused.length)} ${found.unused.slice(0, 8).join("; ")}.`);
+}
+
 /** MODE_B: the report's one numbered list of notes, on its own page before the References. */
 function endnotesPages(notes: CollectedEndnotes["notes"], ctx: Ctx): Paragraph[] {
   return [
@@ -732,6 +788,8 @@ function listStyleFor(key: string): { style: ListStyle; note: string | null } {
     case "CHICAGO_AUTHOR_DATE":
     case "CHICAGO_NOTES_BIBLIOGRAPHY":
       return { style: "CHICAGO", note: null };
+    case "NALT":
+      return { style: "NALT", note: null };
     case "NMCN":
       return { style: "APA_7TH", note: null }; // the NMCN profile references in APA 7th
     default: {
@@ -767,16 +825,55 @@ function referencesPages(
     leftOut: uncited.length,
     unmatchedCitations: unmatched,
   };
+  const referenceParagraphs = entries.map(({ segs }) => {
+    const italic = italiciseEtAl(segs.map((s) => ({ text: s.text, ...(s.italics ? { italics: true } : {}) })));
+    ctx.report.etAl += italic.filter((s) => s.italics && s.text === "et al.").length;
+    return new Paragraph({ style: STYLE.reference.id, children: italic.map((s) => textRun(s)) });
+  });
+  // NALT: a BIBLIOGRAPHY, on a fresh page, split into primary and secondary sources.
+  if (ctx.nalt) return naltBibliography(referenceParagraphs, ctx, input.references, opts);
   // A single chapter that cites nothing gets no empty References page (R1 would fail it for having no entries).
   if (opts.omitWhenEmpty && entries.length === 0) return [];
   return [
     new Paragraph({ heading: HeadingLevel.HEADING_1, pageBreakBefore: true, children: [plain(PAGE_TITLES.references, { bold: true })] }),
-    ...entries.map(({ segs }) => {
-      const italic = italiciseEtAl(segs.map((s) => ({ text: s.text, ...(s.italics ? { italics: true } : {}) })));
-      ctx.report.etAl += italic.filter((s) => s.italics && s.text === "et al.").length;
-      return new Paragraph({ style: STYLE.reference.id, children: italic.map((s) => textRun(s)) });
-    }),
+    ...referenceParagraphs,
   ];
+}
+
+/**
+ * NALT's bibliography: the primary sources read back out of the report's own
+ * footnotes (statutes, treaties, cases and resolutions are cited nowhere else),
+ * then the verified secondary works. Each part only appears when the report
+ * cites something that belongs in it.
+ */
+function naltBibliography(secondaryParagraphs: Paragraph[], ctx: Ctx, references: DocReference[], opts: { omitWhenEmpty?: boolean }): Paragraph[] {
+  const primary = ctx.footnoteTexts ? primarySourcesFrom(ctx.footnoteTexts) : null;
+  const hasPrimary = Boolean(primary?.groups.length);
+  if (opts.omitWhenEmpty && !hasPrimary && secondaryParagraphs.length === 0) return [];
+  const out: Paragraph[] = [
+    new Paragraph({ heading: HeadingLevel.HEADING_1, pageBreakBefore: true, children: [plain(NALT_BIBLIOGRAPHY_TITLE, { bold: true })] }),
+  ];
+  if (primary && hasPrimary) {
+    out.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [plain(NALT_BIBLIOGRAPHY_PARTS[0].title, { bold: true })] }));
+    for (const { group, entries } of primary.groups) {
+      out.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [plain(group, { bold: true })] }));
+      for (const entry of entries) out.push(new Paragraph({ style: STYLE.sourceEntry.id, children: runsFor(entry, { ...ctx, footnotes: false }) }));
+    }
+  }
+  if (secondaryParagraphs.length) {
+    // With no primary sources to separate them from, the works stand under BIBLIOGRAPHY alone.
+    if (hasPrimary) out.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [plain(NALT_BIBLIOGRAPHY_PARTS[1].title, { bold: true })] }));
+    out.push(...secondaryParagraphs);
+  }
+  // A secondary work cited in a footnote that is not on the verified list cannot be formatted for the
+  // bibliography without inventing its publisher, so the specialist is told which ones to add by hand.
+  const missing = (primary?.secondary ?? []).filter((entry) => referencesForNote(references, entry).length === 0);
+  if (missing.length) {
+    ctx.report.notes.push(
+      `${String(missing.length)} work(s) cited in the footnotes are not on the verified reference list, so they are not in the bibliography. Add them under Secondary Sources: ${missing.slice(0, 6).join("; ")}${missing.length > 6 ? "; …" : ""}.`,
+    );
+  }
+  return out;
 }
 
 // ─── Preliminary pages (the founder's template) ──────────────────────────────
@@ -952,30 +1049,58 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
       ? [new Paragraph({ children: [plain(PRELIM_TEXT.acknowledgementFromOrder(input.acknowledgementNote.trim()))] })]
       : []),
 
-    pageTitle(PAGE_TITLES.abstract),
-    ...abstractParagraphs,
   ];
-  // LT1/LF1: a list exists when the report has any table or figure.
-  if (counts.tables > 0) {
-    out.push(pageTitle(PAGE_TITLES.tables), new TableOfContents(PAGE_TITLES.tables, { hyperlink: true, hideTabAndPageNumbersInWebView: true, stylesWithLevels: [new StyleLevel(STYLE.tableCaption.name, 1)] }));
-  }
-  if (counts.figures > 0) {
-    out.push(pageTitle(PAGE_TITLES.figures), new TableOfContents(PAGE_TITLES.figures, { hyperlink: true, hideTabAndPageNumbersInWebView: true, stylesWithLevels: [new StyleLevel(STYLE.figureCaption.name, 1)] }));
-  }
-  out.push(pageTitle(PAGE_TITLES.abbreviations));
+
+  const abstractPages = [pageTitle(PAGE_TITLES.abstract), ...abstractParagraphs];
+  const listOfTables = counts.tables > 0 ? [pageTitle(PAGE_TITLES.tables), new TableOfContents(PAGE_TITLES.tables, { hyperlink: true, hideTabAndPageNumbersInWebView: true, stylesWithLevels: [new StyleLevel(STYLE.tableCaption.name, 1)] })] : [];
+  const listOfFigures = counts.figures > 0 ? [pageTitle(PAGE_TITLES.figures), new TableOfContents(PAGE_TITLES.figures, { hyperlink: true, hideTabAndPageNumbersInWebView: true, stylesWithLevels: [new StyleLevel(STYLE.figureCaption.name, 1)] })] : [];
+  const abbreviations: (Paragraph | Table)[] = [pageTitle(PAGE_TITLES.abbreviations)];
   if (stored && stored.abbreviations.length > 0) {
-    out.push(abbreviationsTable(stored.abbreviations));
+    abbreviations.push(abbreviationsTable(stored.abbreviations));
   } else if (stored && stored.abbreviations.length === 0) {
     // D10: the scanner found nothing worth listing (or Claude expanded none confidently).
-    out.push(new Paragraph({ children: [plain(PRELIM_TEXT.noAbbreviations)] }));
+    abbreviations.push(new Paragraph({ children: [plain(PRELIM_TEXT.noAbbreviations)] }));
   } else {
-    out.push(new Paragraph({ children: [plain(PRELIM_TEXT.abbreviationsPlaceholder)] }));
+    abbreviations.push(new Paragraph({ children: [plain(PRELIM_TEXT.abbreviationsPlaceholder)] }));
   }
-  out.push(
-    // The template puts the Table of Contents last. TOC1-TOC5: a real field over Heading 1-3, no dotted leaders.
+  // TOC1-TOC5: a real field over Heading 1-3, no dotted leaders.
+  const contents = [
     pageTitle(PAGE_TITLES.contents),
     new TableOfContents(PAGE_TITLES.contents, { headingStyleRange: "1-3", hyperlink: true, hideTabAndPageNumbersInWebView: true, useAppliedParagraphOutlineLevel: true }),
-  );
+  ];
+
+  if (ctx.nalt) {
+    // NALT's order: the table of contents, then the lists, and the ABSTRACT is the last
+    // preliminary page before Chapter One. A law report carries a list of cases and a list of
+    // statutes, treaties and international instruments, read back out of the footnotes it cites.
+    out.push(...contents, ...naltSourceLists(ctx), ...listOfTables, ...listOfFigures, ...abbreviations, ...abstractPages);
+    return out;
+  }
+  // The founder's template: the abstract after the acknowledgement and the Table of Contents last.
+  out.push(...abstractPages, ...listOfTables, ...listOfFigures, ...abbreviations, ...contents);
+  return out;
+}
+
+/**
+ * NALT's LIST OF CASES and LIST OF STATUTES, TREATIES AND INTERNATIONAL
+ * INSTRUMENTS: the full citation of every primary source the footnotes cite,
+ * alphabetical, with no page numbers (as the benchmark long essay sets them).
+ * A report that cites none gets neither page.
+ */
+function naltSourceLists(ctx: Ctx): (Paragraph | Table)[] {
+  if (!ctx.footnoteTexts?.length) return [];
+  const primary = primarySourcesFrom(ctx.footnoteTexts);
+  const group = (name: PrimaryGroup) => primary.groups.find((g) => g.group === name)?.entries ?? [];
+  const cases = group("Cases");
+  const instruments = [...group("Treaties and International Instruments"), ...group("Statutes and Subsidiary Legislation")].sort((a, b) => a.replace(/\*/g, "").localeCompare(b.replace(/\*/g, "")));
+  const out: (Paragraph | Table)[] = [];
+  const list = (title: string, entries: string[]) => {
+    if (!entries.length) return;
+    out.push(pageTitle(title));
+    for (const entry of entries) out.push(new Paragraph({ style: STYLE.sourceEntry.id, children: runsFor(entry, { ...ctx, footnotes: false }) }));
+  };
+  list(PAGE_TITLES.cases, cases);
+  list(PAGE_TITLES.statutes, instruments);
   return out;
 }
 
@@ -1038,11 +1163,17 @@ export function buildReportDocument(input: AssemblyInput): { doc: Document; repo
     thematic: input.thematicTitles,
     placement: input.citationPlacement,
     media: input.media,
+    footnotes: input.citationPlacement === "MODE_C",
+    headings: headingProfileFor(input),
+    nalt: followsNalt(input),
   };
-  if (input.citationPlacement === "MODE_C") {
-    report.notes.push("This referencing style cites in footnotes. The chapters carry the note numbers, but the footnote text is not produced yet, so the specialist adds the notes.");
-  }
 
+  // MODE_C: every marker becomes a real Word footnote, numbered 1..N across the report (footnotes.ts).
+  const footnotes = input.citationPlacement === "MODE_C" ? collectFootnotes(input.chapters) : null;
+  if (footnotes) {
+    reportFootnotes(footnotes, report);
+    ctx.footnoteTexts = footnotes.notes;
+  }
   // MODE_B: every chapter's note blocks become one numbered list at the end of the document (endnotes.ts).
   const endnotes = input.citationPlacement === "MODE_B" ? collectEndnotes(input.chapters) : null;
   if (endnotes) {
@@ -1051,18 +1182,21 @@ export function buildReportDocument(input: AssemblyInput): { doc: Document; repo
     if (endnotes.merged) report.notes.push(`${endnotes.merged} note(s) repeated word for word in another chapter or part were joined into one.`);
   }
   const citedInNotes = new Set<DocReference>();
-  if (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B") {
+  if (input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B" || input.citationPlacement === "MODE_C") {
     let naming = 0;
     for (const ch of input.chapters) {
-      for (const [, refs] of resolveNotes(analyseChapterNotes(ch.text), input.references)) {
+      for (const [entry, refs] of resolveNotes(analyseChapterNotes(ch.text), input.references)) {
         if (refs === "comment") continue;
-        if (refs.length === 0) naming++;
+        // A law report's statutes, treaties, cases and resolutions are primary sources: they are cited in
+        // the footnotes and belong nowhere near the verified (secondary) reference list, so they are not
+        // works "not on the list". Only an unmatched secondary work is worth telling the specialist about.
+        if (refs.length === 0 && !(ctx.nalt && (primaryGroupOf(entry.text) || isShortForm(entry.text)))) naming++;
         refs.forEach((r) => citedInNotes.add(r));
       }
     }
     if (naming) report.notes.push(`${naming} note(s) name a work that is not on the verified reference list.`);
   }
-  const bodyChapters = endnotes ? endnotes.chapters : input.chapters;
+  const bodyChapters = footnotes ? footnotes.chapters : endnotes ? endnotes.chapters : input.chapters;
   const body = [
     ...bodyChapters.flatMap((c, i) => chapterContent(c, i === 0, ctx)),
     ...(endnotes?.notes.length ? endnotesPages(endnotes.notes, ctx) : []),
@@ -1102,7 +1236,8 @@ export function buildReportDocument(input: AssemblyInput): { doc: Document; repo
     title: input.title,
     description: `${input.projectCode} report`,
     features: { updateFields: true },
-    styles: reportStyles(),
+    styles: reportStyles({ footnotes: Boolean(footnotes) }),
+    ...(footnotes ? { footnotes: footnoteParts(footnotes, ctx) } : {}),
     sections,
   });
   // The cover repeats wording the title page also counted; keep each placeholder once.
@@ -1133,8 +1268,14 @@ export function buildChapterDocument(input: AssemblyInput, chapterNumber: number
     notes: [],
   };
   const notePlacement = input.citationPlacement === "MODE_A" || input.citationPlacement === "MODE_B";
+  // MODE_C: the chapter's own footnotes, numbered from 1, set at the foot of their pages. The
+  // specialist corrects them in Word and they read back as the same notes (read-chapter-docx).
+  const chapterFootnotes = input.citationPlacement === "MODE_C" ? collectFootnotes([chapter]) : null;
   let text = chapter.text;
-  if (notePlacement) {
+  if (chapterFootnotes) {
+    text = chapterFootnotes.chapters[0]?.text ?? chapter.text;
+    reportFootnotes(chapterFootnotes, report);
+  } else if (notePlacement) {
     const joined = collectEndnotes([chapter]);
     text = joined.chapters[0]?.text ?? chapter.text;
     if (joined.notes.length) text += `\n\n[ENDNOTES]\n${joined.notes.map((n) => `${n.number}. ${n.text}`).join("\n")}`;
@@ -1147,10 +1288,14 @@ export function buildChapterDocument(input: AssemblyInput, chapterNumber: number
     thematic: input.thematicTitles,
     placement: notePlacement ? "MODE_A" : input.citationPlacement,
     media: input.media,
+    footnotes: Boolean(chapterFootnotes),
+    headings: headingProfileFor(input),
+    nalt: followsNalt(input),
+    ...(chapterFootnotes ? { footnoteTexts: chapterFootnotes.notes } : {}),
   };
   const citedInNotes = new Set<DocReference>();
-  if (notePlacement) {
-    for (const [, refs] of resolveNotes(analyseChapterNotes(text), input.references)) if (refs !== "comment") refs.forEach((r) => citedInNotes.add(r));
+  if (notePlacement || chapterFootnotes) {
+    for (const [, refs] of resolveNotes(analyseChapterNotes(chapter.text), input.references)) if (refs !== "comment") refs.forEach((r) => citedInNotes.add(r));
   }
   const body = [...chapterContent({ number: chapterNumber, text }, true, ctx), ...referencesPages({ ...input, chapters: [{ number: chapterNumber, text }] }, ctx, citedInNotes, { omitWhenEmpty: true })];
   const doc = new Document({
@@ -1162,7 +1307,8 @@ export function buildChapterDocument(input: AssemblyInput, chapterNumber: number
       { name: CHAPTER_STAMP.chapter, value: String(chapterNumber) },
       { name: CHAPTER_STAMP.source, value: stamp.sourceHash },
     ],
-    styles: reportStyles(),
+    styles: reportStyles({ footnotes: Boolean(chapterFootnotes) }),
+    ...(chapterFootnotes ? { footnotes: footnoteParts(chapterFootnotes, ctx) } : {}),
     sections: [
       {
         properties: { page: { size: PAGE.size, margin: PAGE.margin, pageNumbers: { start: 1, formatType: NumberFormat.DECIMAL } } },

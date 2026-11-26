@@ -34,8 +34,9 @@ import { countWords } from "@/lib/generation/chapter-plan";
 import { loadPreliminaryPagesPrompts, PreliminaryPagesPromptError, type PromptValues } from "@/lib/generation/preliminary-pages-loader";
 import { parseChapter } from "@/lib/assembly/parse-chapter";
 import { writtenBlanks } from "@/lib/assembly/text-rules";
-import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS, ABSTRACT_TARGET_HI, ABSTRACT_TARGET_LO } from "@/lib/generation/preliminary-pages-rules";
+import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS, ABSTRACT_TARGET_HI, ABSTRACT_TARGET_LO, abstractBand, type AbstractBand } from "@/lib/generation/preliminary-pages-rules";
 import { isChapterBasedOrder, prelimIntakeGaps } from "@/lib/assembly/assemble";
+import { lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
 import { expectedChapters } from "@/lib/deliverables";
 import { loadChapterTexts } from "@/lib/services/chapter-texts";
 
@@ -90,6 +91,8 @@ export interface PreliminaryPagesContext {
   values: PromptValues;
   /** Chapter texts (only completed chapters). Used for the scanner and to derive extracted_* values. */
   chapters: { number: number; text: string }[];
+  /** The abstract's length band for this report: NALT's for a law report, the house band otherwise. */
+  band: AbstractBand;
 }
 
 // ── Initialism scanner ──────────────────────────────────────────
@@ -336,7 +339,7 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
           university: { select: { name: true } },
         },
       },
-      researchMode: { select: { modeNumber: true } },
+      researchMode: { select: { modeNumber: true, department: true, sectionOverride: true, referencingStyle: true } },
       brief: { select: { aim: true } },
       generationCheckpoints: {
         where: { status: "COMPLETED" },
@@ -386,7 +389,21 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
     extracted_method: extracted.method,
     extracted_conclusion: extracted.conclusion,
   };
-  return { projectDbId: project.id, values, chapters };
+  // A law report's abstract has NALT's band (26 Nov 2026), so the writer aims at the band it is judged against.
+  const band = abstractBand({ section: sectionOfApprovedMode(project.researchMode), referencingStyle: project.researchMode?.referencingStyle ?? null });
+  return { projectDbId: project.id, values, chapters, band };
+}
+
+/** The prompt section the approved mode resolves to, for the rules that differ by section. */
+function sectionOfApprovedMode(mode: { modeNumber: number; department: string; sectionOverride: string | null } | null): SectionKey | null {
+  if (!mode) return null;
+  try {
+    const entry = lookupDepartment(mode.department);
+    if (!entry) return null;
+    return resolveSection(entry, mode.modeNumber as 1 | 2 | 3 | 4 | 5, (mode.sectionOverride as SectionKey | null) ?? null);
+  } catch {
+    return null;
+  }
 }
 
 /** Reads acknowledgment names from Project.acknowledgmentDetails, when present. */
@@ -436,7 +453,7 @@ export async function runPreliminaryPages(context: PreliminaryPagesContext): Pro
 
   let prompts;
   try {
-    prompts = await loadPreliminaryPagesPrompts(context.values);
+    prompts = await loadPreliminaryPagesPrompts(context.values, context.band);
   } catch (error) {
     if (error instanceof PreliminaryPagesPromptError) throw error;
     throw new PreliminaryPagesPromptError(error instanceof Error ? error.message : String(error));
@@ -450,13 +467,14 @@ export async function runPreliminaryPages(context: PreliminaryPagesContext): Pro
   let abstract = firstAbstract;
   let abstractCount = countWords(abstract);
   let retries = 0;
-  if (abstractCount < ABSTRACT_MIN_WORDS || abstractCount > ABSTRACT_MAX_WORDS) {
+  const band = context.band;
+  if (abstractCount < band.min || abstractCount > band.max) {
     retries = 1;
-    console.info(`${TAG} ${context.projectDbId}: abstract ${abstractCount} words; retrying inside ${ABSTRACT_TARGET_LO}–${ABSTRACT_TARGET_HI}.`);
+    console.info(`${TAG} ${context.projectDbId}: abstract ${abstractCount} words; retrying inside ${band.targetLo}–${band.targetHi}.`);
     try {
       const second = await callAbstract(prompts.abstractSystem, prompts.abstractRetryUser, context.projectDbId, "abstract_retry");
       const secondCount = countWords(second);
-      if (distanceFromBand(secondCount) < distanceFromBand(abstractCount)) {
+      if (distanceFromBand(secondCount, band) < distanceFromBand(abstractCount, band)) {
         abstract = second;
         abstractCount = secondCount;
       }
@@ -464,7 +482,7 @@ export async function runPreliminaryPages(context: PreliminaryPagesContext): Pro
       console.warn(`${TAG} abstract retry threw`, error instanceof Error ? error.message : error);
     }
   }
-  const needsReview = abstractCount < ABSTRACT_MIN_WORDS || abstractCount > ABSTRACT_MAX_WORDS;
+  const needsReview = abstractCount < band.min || abstractCount > band.max;
 
   // Call B, only when there is something to expand.
   let abbreviations: Abbreviation[] = [];
@@ -488,9 +506,9 @@ export async function runPreliminaryPages(context: PreliminaryPagesContext): Pro
 }
 
 /** Distance from the accepted band; used to pick "closest" between the first and retry. */
-function distanceFromBand(count: number): number {
-  if (count >= ABSTRACT_MIN_WORDS && count <= ABSTRACT_MAX_WORDS) return 0;
-  return count < ABSTRACT_MIN_WORDS ? ABSTRACT_MIN_WORDS - count : count - ABSTRACT_MAX_WORDS;
+function distanceFromBand(count: number, band: AbstractBand): number {
+  if (count >= band.min && count <= band.max) return 0;
+  return count < band.min ? band.min - count : count - band.max;
 }
 
 /**
@@ -637,10 +655,12 @@ export async function getPreliminaryPagesView(projectDbId: string): Promise<Prel
       additionalData: true,
       chapterCount: true,
       service: { select: { serviceCode: true } },
+      researchMode: { select: { modeNumber: true, department: true, sectionOverride: true, referencingStyle: true } },
     },
   });
   if (!project) throw new PreliminaryPagesError("Project not found", 404, "NOT_FOUND");
-  const band = { min: ABSTRACT_MIN_WORDS, max: ABSTRACT_MAX_WORDS };
+  // A law report is written and judged against NALT’s band (26 Nov 2026).
+  const band = abstractBand({ section: sectionOfApprovedMode(project.researchMode), referencingStyle: project.researchMode?.referencingStyle ?? null });
   if (isChapterBasedOrder(project.service.serviceCode, project.additionalData)) {
     return { applies: false, chaptersReady: false, band, pages: null, intakeGaps: [], blanks: [], qaCopyOlder: null };
   }

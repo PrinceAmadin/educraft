@@ -15,6 +15,8 @@ import type { AssemblyInput, AssemblyProfile, AssemblyReport } from "@/lib/assem
 import { parseChapter } from "@/lib/assembly/parse-chapter";
 import { defaultParagraphStyle } from "@/lib/assembly/finalize-docx";
 import { citationsIn, citedReferences, nameKey, properNounsFrom, referencesForCitation, sentenceCase, titleCase } from "@/lib/assembly/text-rules";
+import { headingProfileFor, type HeadingCase } from "@/lib/law/nalt";
+import { FOOTNOTE_SIZE } from "@/lib/assembly/styles";
 import { result, shortQuote, type CheckResult, type QualityIssue, type Severity } from "./types";
 
 // ─── Reading the file ────────────────────────────────────────────────────────
@@ -359,7 +361,11 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
       "Body text is 12pt.",
     );
     const headingSizes = HEADING_STYLES.map((id) => attrs(styleBlock(styles, id), "w:sz", "w:val")[0]);
-    const other = [...new Set(sizes.filter((s) => s !== "24"))];
+    // NALT: "The footnote automatically converts into font size 10." A report that sets its
+    // citations at the foot of the page carries 10pt there and nowhere else; every other report
+    // still has to be 12pt throughout. 20 half-points = 10pt.
+    const footnoteSize = ctx.input.citationPlacement === "MODE_C" ? String(FOOTNOTE_SIZE) : null;
+    const other = [...new Set(sizes.filter((s) => s !== "24" && s !== footnoteSize))];
     push(
       "F3",
       [
@@ -484,23 +490,33 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
     "Heading 1 is centred and in capitals.",
   );
   const properNouns = properNounsFrom(ctx.input.chapters.map((c) => c.text));
+  // AL3/AL4 and H2/H3: the house profile is Title Case then sentence case. A NALT report (law, or any
+  // department whose supervisor asked for NALT) keeps its numbered section headings in UPPER CASE and
+  // its sub-headings in Title Case, so the same check judges them against their own profile.
+  const headings = headingProfileFor(ctx.input);
+  const wantedCase = (text: string, want: HeadingCase): string => (want === "upper" ? text.toUpperCase() : want === "title" ? titleCase(text) : sentenceCase(text, properNouns));
+  const caseName: Record<HeadingCase, string> = { upper: "capitals", title: "Title Case", sentence: "sentence case" };
   push(
     "AL3",
     [
       ...(!leftish(styleJc("Heading2")) ? [fail("AL3", "The Heading 2 style is not left-aligned.")] : []),
       ...h2Paras.filter((p) => !leftish(jcOf(p.xml))).map((p) => fail("AL3", "A section heading is not left-aligned.", locate(p))),
-      ...h2Paras.filter((p) => p.body && titleCase(p.text) !== p.text).map((p) => fail("AL3", `A section heading is not in Title Case (should read "${titleCase(p.text)}").`, locate(p))),
+      ...h2Paras
+        .filter((p) => p.body && wantedCase(p.text, headings.h2) !== p.text)
+        .map((p) => fail("AL3", `A section heading is not in ${caseName[headings.h2]} (should read "${wantedCase(p.text, headings.h2)}").`, locate(p))),
     ],
-    "Heading 2 is left-aligned, in Title Case.",
+    `Heading 2 is left-aligned, in ${caseName[headings.h2]}.`,
   );
   push(
     "AL4",
     [
       ...(!leftish(styleJc("Heading3")) ? [fail("AL4", "The Heading 3 style is not left-aligned.")] : []),
       ...h3Paras.filter((p) => !leftish(jcOf(p.xml))).map((p) => fail("AL4", "A sub-section heading is not left-aligned.", locate(p))),
-      ...h3Paras.filter((p) => sentenceCase(p.text, properNouns) !== p.text).map((p) => fail("AL4", `A sub-section heading is not in sentence case (should read "${sentenceCase(p.text, properNouns)}").`, locate(p))),
+      ...h3Paras
+        .filter((p) => wantedCase(p.text, headings.h3) !== p.text)
+        .map((p) => fail("AL4", `A sub-section heading is not in ${caseName[headings.h3]} (should read "${wantedCase(p.text, headings.h3)}").`, locate(p))),
     ],
-    "Heading 3 is left-aligned, in sentence case.",
+    `Heading 3 is left-aligned, in ${caseName[headings.h3]}.`,
   );
   const headingStyleIssues = (id: "H1" | "H2" | "H3", style: string, align: "center" | "left"): QualityIssue[] => {
     const block = styleBlock(styles, style);
@@ -514,8 +530,16 @@ export function runFormattingChecks(parts: DocxParts, ctx: FormattingContext): C
     return issues;
   };
   push("H1", [...headingStyleIssues("H1", "Heading1", "center"), ...h1Paras.filter((p) => p.text !== p.text.toUpperCase()).map((p) => fail("H1", "A chapter heading is not in capitals.", locate(p)))], "Chapter headings: 12pt, bold, Times New Roman, centred, capitals.");
-  push("H2", [...headingStyleIssues("H2", "Heading2", "left"), ...h2Paras.filter((p) => p.body && titleCase(p.text) !== p.text).map((p) => fail("H2", "A section heading is not in Title Case.", locate(p)))], "Section headings: 12pt, bold, Times New Roman, left, Title Case.");
-  push("H3", [...headingStyleIssues("H3", "Heading3", "left"), ...h3Paras.filter((p) => sentenceCase(p.text, properNouns) !== p.text).map((p) => fail("H3", "A sub-section heading is not in sentence case.", locate(p)))], "Sub-section headings: 12pt, bold, Times New Roman, left, sentence case.");
+  push(
+    "H2",
+    [...headingStyleIssues("H2", "Heading2", "left"), ...h2Paras.filter((p) => p.body && wantedCase(p.text, headings.h2) !== p.text).map((p) => fail("H2", `A section heading is not in ${caseName[headings.h2]}.`, locate(p)))],
+    `Section headings: 12pt, bold, Times New Roman, left, ${caseName[headings.h2]}.`,
+  );
+  push(
+    "H3",
+    [...headingStyleIssues("H3", "Heading3", "left"), ...h3Paras.filter((p) => wantedCase(p.text, headings.h3) !== p.text).map((p) => fail("H3", `A sub-section heading is not in ${caseName[headings.h3]}.`, locate(p)))],
+    `Sub-section headings: 12pt, bold, Times New Roman, left, ${caseName[headings.h3]}.`,
+  );
   {
     const issues: QualityIssue[] = [];
     if (/<w:pStyle w:val="Heading[4-9]"\/>/.test(xml)) issues.push(fail("H4", "A Heading 4 (or lower) style is used."));

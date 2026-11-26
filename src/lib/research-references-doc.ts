@@ -16,7 +16,7 @@ export interface DocReference {
   doi: string | null;
 }
 
-export type ReferencingStyle = "APA_7TH" | "APA_6TH" | "HARVARD" | "IEEE" | "CHICAGO" | "MLA" | "CUSTOM";
+export type ReferencingStyle = "APA_7TH" | "APA_6TH" | "HARVARD" | "IEEE" | "CHICAGO" | "MLA" | "NALT" | "CUSTOM";
 export type Seg = { text: string; italics?: boolean };
 
 const ET_AL: Seg = { text: "et al.", italics: true };
@@ -61,6 +61,22 @@ const authorList = (r: DocReference) => (r.authors ?? "").split(";").map(clean).
 function initialsFirst(a: string): string {
   const [surname, initials] = a.split(/,\s*/);
   return initials ? `${initials} ${surname}` : surname;
+}
+
+/**
+ * NALT bibliography form: "Bada, M. J." → "Bada MJ". The surname precedes the
+ * initials with no comma separating them, only initials of forenames are used,
+ * and a comma follows the final initial (added by the formatter).
+ */
+function naltName(a: string): string {
+  const [surname, rest] = a.split(/,\s*/);
+  if (!rest) return surname;
+  const initials = rest
+    .split(/[\s.]+/)
+    .filter(Boolean)
+    .map((p) => p[0].toUpperCase())
+    .join("");
+  return initials ? `${surname} ${initials}` : surname;
 }
 
 function key(s: string): string {
@@ -123,6 +139,16 @@ function format(style: ReferencingStyle, r: DocReference, n: number): Seg[] {
         ...(journal ? [j(journal), t(". ")] : []),
         ...(url ? [t(`Available at: ${url}.`)] : []),
       ];
+    }
+    // NALT: surname then initials with no comma between them, a comma after the final
+    // initial, the article title in single quotation marks, the journal italicised, and no
+    // page range (NALT: "generally, page numbers are not provided in bibliography").
+    // A work with no journal is a book or report: its title is italicised instead.
+    case "NALT": {
+      const names = join(authors.map(naltName), ", ", " and ");
+      const head = names ? `${names}, ` : "";
+      if (journal) return [t(`${head}'${title}' `), j(journal), t(` (${year})`)];
+      return [t(head), j(title), t(` (${year})`)];
     }
     case "IEEE": {
       const names = authors.map(initialsFirst);

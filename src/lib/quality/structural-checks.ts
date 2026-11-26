@@ -16,7 +16,9 @@ import type { CitationMatch } from "./citation-check";
 import { normaliseForMatch, plainText } from "./prose";
 import { forbidsDiscussionInChapterFour, requiredSections, type SectionContext } from "./required-sections";
 import { result, shortQuote, type CheckResult, type QualityIssue, type Severity } from "./types";
-import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS } from "@/lib/generation/preliminary-pages-rules";
+import { abstractBand } from "@/lib/generation/preliminary-pages-rules";
+import { collectFootnotes } from "@/lib/assembly/footnotes";
+import { checkCitationSignals, checkFootnoteDensity, followsNalt, isLawSection, NALT_SECTIONS, type LawSection } from "@/lib/law/nalt";
 
 export interface StructuralChapter {
   number: number;
@@ -29,6 +31,8 @@ export interface StructuralInput {
   chapters: StructuralChapter[];
   chapterBased: boolean;
   section: SectionKey | null;
+  /** The approved referencing style key: a NALT report is held to NALT's citation signals (ST17). */
+  referencingStyle?: string | null;
   mode: number | null;
   pureScience: boolean;
   template: "A" | "B";
@@ -89,6 +93,10 @@ export const STRUCTURAL_CHECKS: readonly { id: string; title: string; severity: 
   { id: "ST14", title: "Tables and figures referred to", severity: "MAJOR" },
   { id: "ST15", title: "Equations explained", severity: "MAJOR" },
   { id: "ST16", title: "No review placeholders left", severity: "MAJOR" },
+  // The NALT checks (26 Nov 2026). Not applicable to a report that does not follow NALT.
+  { id: "ST17", title: "NALT citation signals", severity: "MAJOR" },
+  { id: "ST18", title: "Footnote density", severity: "MAJOR" },
+  { id: "ST19", title: "NALT chapter section order", severity: "MAJOR" },
 ];
 
 export const REFERENCE_MINIMUM = { full: 35, chapterBased: 15 } as const;
@@ -117,6 +125,15 @@ function parse(chapters: StructuralChapter[]): Parsed[] {
       headings: p.blocks.filter((b): b is Extract<Block, { kind: "heading" }> => b.kind === "heading").map((b) => ({ level: b.level, text: b.text })),
     };
   });
+}
+
+/**
+ * ST17/ST18: a NALT report's footnotes, in the order their markers appear across the
+ * chapters, numbered 1..N exactly as the assembly numbers them (footnotes.ts). Short
+ * forms and cross-references are footnotes like any other and are checked as such.
+ */
+function footnoteLines(chapters: StructuralChapter[]): { number: number; text: string }[] {
+  return collectFootnotes(chapters.map((c) => ({ number: c.number, text: c.text }))).notes;
 }
 
 /** Text of a chapter's prose, lists and captions (what a reader reads as the chapter's words). */
@@ -168,7 +185,8 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
     const fillIn = p.placeholders.filter((x) => !later.includes(x));
     const w = p.written ?? null;
     if (later.length) issues.push({ level: "WARN", message: `Not written: ${later.join(", ")}.`, fix: "Write them again, or type them in, on the Preliminary pages card (Report tab)." });
-    if (w?.needsReview) issues.push({ level: "WARN", message: `The abstract is ${w.abstractWords} words; it should be ${ABSTRACT_MIN_WORDS}–${ABSTRACT_MAX_WORDS}.`, fix: "Shorten or lengthen it on the Preliminary pages card, or write it again." });
+    const band = abstractBand({ section: input.section, referencingStyle: input.referencingStyle });
+    if (w?.needsReview) issues.push({ level: "WARN", message: `The abstract is ${w.abstractWords} words; it should be ${band.min}–${band.max}.`, fix: "Shorten or lengthen it on the Preliminary pages card, or write it again." });
     if (w?.blanks.length) issues.push({ level: "WARN", message: `The acknowledgement or abstract still has blanks: ${w.blanks.join(", ")}.`, fix: "Add the missing details on Edit intake and write the pages again, or fill the blanks in by hand on the Preliminary pages card." });
     if (fillIn.length) issues.push({ level: "WARN", message: `Not collected at intake: ${fillIn.join(", ")}.`, fix: "Add them on the project's Edit intake page before delivery." });
     push("ST1", issues, { pass: "Cover, title page, declaration, certification, dedication, acknowledgement, abstract and contents are all there.", na: "A chapter-based order has no preliminary pages." }, { na: !p.included });
@@ -550,6 +568,68 @@ export function runStructuralChecks(input: StructuralInput): CheckResult[] {
       if (tasks.length) issues.push({ level: "WARN", message: `Chapter ${WORDS[c.number]} has specialist tasks: ${count(tasks)}.`, chapter: c.number, fix: "Insert the figures and page numbers before delivery." });
     }
     push("ST16", issues, "No review placeholder is left in the chapters.");
+  }
+
+  // ── ST17-ST19: NALT ──────────────────────────────────────────────────────
+  //
+  // A report that does not follow NALT is N/A on all three, so every report is still judged out of
+  // the same number of checks. The notes a law chapter carries are its footnotes (MODE_C): each
+  // [FOOTNOTES] block's entries, in the order their markers appear.
+  {
+    const nalt = followsNalt({ section: input.section, referencingStyle: input.referencingStyle });
+    const naltLaw = isLawSection(input.section);
+    const notes = nalt ? footnoteLines(input.chapters) : [];
+
+    // ST17 citation signals: no abolished Latin, ibid only after a note, every (n X) resolving.
+    {
+      const problems = checkCitationSignals(notes);
+      const issues: QualityIssue[] = problems.map((p) => ({
+        level: p.level === "fail" ? "FAIL" : "WARN",
+        message: `Footnote ${String(p.number)}: ${p.message}`,
+        fix: "Correct the footnote so it follows NALT's citation signals.",
+      }));
+      push("ST17", dedupe(issues), { pass: notes.length ? `${String(notes.length)} footnotes follow NALT's citation signals.` : "The chapters carry no footnotes to check.", na: "This report does not use NALT citations." }, { na: !nalt });
+    }
+
+    // ST18 footnote density: the benchmark long essay cites about one source every 70 words.
+    {
+      const issues: QualityIssue[] = [];
+      let pass = "";
+      if (nalt) {
+        const words = chapters.reduce((n, c) => n + countWords(readable(c.blocks)), 0);
+        const density = checkFootnoteDensity(words, notes.length);
+        if (density.level === "fail") issues.push({ level: "FAIL", message: density.message, fix: "Cite the authority for each proposition in a footnote." });
+        else if (density.level === "warn") issues.push({ level: "WARN", message: density.message, fix: "Add footnotes where a statement rests on a statute, a case or a published work." });
+        pass = density.message;
+      }
+      push("ST18", issues, { pass, na: "This report does not cite in footnotes." }, { na: !nalt });
+    }
+
+    // ST19 section order: chapters one, two and five are structured the same way for every law
+    // student, in NALT's order. The sections themselves are ST3/ST4/ST7; this is their order.
+    {
+      const issues: QualityIssue[] = [];
+      if (naltLaw) {
+        const wanted = NALT_SECTIONS[input.section as LawSection];
+        for (const n of [1, 2, 5] as const) {
+          const chapter = byNumber.get(n);
+          if (!chapter) continue;
+          if (input.scope && input.scope.chapter !== n) continue;
+          const headings = chapter.headings.filter((h) => h.level === 2).map((h) => h.text.replace(/^\d+(?:\.\d+)*\.?\s*/, "").trim().toUpperCase());
+          const seen = wanted[n].map((s) => headings.findIndex((h) => h.includes(s.toUpperCase()) || s.toUpperCase().includes(h))).filter((i) => i >= 0);
+          const ordered = seen.every((v, i) => i === 0 || seen[i - 1] < v);
+          if (!ordered) {
+            issues.push({
+              level: "FAIL",
+              message: `Chapter ${WORDS[n]}'s sections are not in NALT's order (${wanted[n].map((s, i) => `${String(n)}.${String(i + 1)} ${s}`).join("; ")}).`,
+              chapter: n,
+              fix: "Put the sections in NALT's order; every law student structures this chapter the same way.",
+            });
+          }
+        }
+      }
+      push("ST19", issues, { pass: "Chapters One, Two and Five follow NALT's section order.", na: "This report does not follow NALT's law structure." }, { na: !naltLaw });
+    }
   }
 
   if (out.length !== STRUCTURAL_CHECKS.length) throw new Error(`Structural layer returned ${out.length} checks`);

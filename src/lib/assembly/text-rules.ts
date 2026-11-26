@@ -22,6 +22,12 @@ export interface Seg {
    * notes at the chapter's end; the assembly renders each such number as a real Word superscript.
    */
   sup?: boolean;
+  /**
+   * The note's number, set on a superscript segment that came from a note marker.
+   * MODE_C (page footnotes) turns it into a real Word footnote reference instead
+   * of a plain superscript; every other placement leaves it as the superscript.
+   */
+  note?: number;
 }
 
 /**
@@ -142,7 +148,7 @@ export function superscriptNotes(segs: Seg[]): Seg[] {
       const digits = m[1] ?? m[2] ?? m[3] ?? m[4] ?? (m[5] ? String(superscriptNumber(m[5])) : undefined);
       if (!digits) continue;
       if (at > last) out.push({ ...seg, text: seg.text.slice(last, at) });
-      out.push({ ...seg, text: digits, sup: true, italics: false });
+      out.push({ ...seg, text: digits, sup: true, italics: false, note: Number(digits) });
       last = at + m[0].length;
     }
     if (last === 0) out.push(seg);

@@ -1,15 +1,23 @@
 /**
- * The quality score out of 89 (founder's brief, D8): 71 formatting + 16
- * structural + 1 reference + 1 voice. A check that passes, only warns, or does
- * not apply counts as passed. The report passes at 85 or more with no CRITICAL
- * failure (founder's call: one CRITICAL failure blocks auto-submit whatever the count). Pure.
+ * The quality score (founder's brief, D8): 71 formatting + 19 structural + 1
+ * reference + 1 voice. A check that passes, only warns, or does not apply counts
+ * as passed. The report passes with no CRITICAL failure and at most
+ * MAX_FAILURES failed checks (founder's call: one CRITICAL failure blocks
+ * auto-submit whatever the count).
+ *
+ * It was 85 of 89 until the NALT rebuild (26 Nov 2026) added ST17-ST19, the
+ * three law checks. They are N/A on every other report, and N/A counts as
+ * passed, so the bar a non-law report has to clear is unchanged: at most four
+ * failures. Pure.
  */
 
 import type { CheckResult, QualityIssue, QualityItem, QualityLayer, Severity } from "./types";
 
-export const LAYER_TOTALS: Record<QualityLayer, number> = { formatting: 71, structural: 16, reference: 1, voice: 1 };
-export const QUALITY_TOTAL = 89;
-export const PASS_MARK = 85;
+export const LAYER_TOTALS: Record<QualityLayer, number> = { formatting: 71, structural: 19, reference: 1, voice: 1 };
+export const QUALITY_TOTAL = Object.values(LAYER_TOTALS).reduce((a, b) => a + b, 0);
+/** The founder's rule, as a number of failures rather than a score, so adding a check cannot soften it. */
+export const MAX_FAILURES = 4;
+export const PASS_MARK = QUALITY_TOTAL - MAX_FAILURES;
 
 const RANK: Record<Severity, number> = { CRITICAL: 0, MAJOR: 1, MINOR: 2 };
 

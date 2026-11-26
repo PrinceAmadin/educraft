@@ -129,6 +129,10 @@ const RECOMMENDATIONS = R("Recommendations", /recommendation/i);
 const LIMITATIONS = R("Limitations of the Study", /limitation/i);
 const FURTHER = R("Suggestions for Further Study", /further (?:study|studies|research|work|investigation)|future (?:work|research|studies)/i);
 const IMPLICATIONS = R("Educational Implications", /implication/i);
+/** NALT's Chapter Five: "Contributions to Knowledge", a numbered section of its own. */
+const CONTRIBUTION = R("Contributions to Knowledge", /contribution/i);
+/** NALT's Chapter One 1.7: "Synopsis of the Chapters" (the guide also calls it "Chapters Analysis"). */
+const SYNOPSIS = R("Synopsis of the Chapters", /synopsis|chapters?\s+analysis|outline of (?:the )?chapters|organi[sz]ation of (?:the )?(?:study|chapters)/i);
 
 /** Chapter One's list with the aim added before the objectives, when the report has an aim and the list has none. */
 function withAim(list: RequiredSection[], ctx: SectionContext): RequiredSection[] {
@@ -162,10 +166,14 @@ export function requiredSectionsAsListed(section: SectionKey, chapter: number, c
         case "BUSINESS":
         case "ECONOMICS":
           return [BACKGROUND, PROBLEM, RQ, OBJECTIVES, HYPOTHESES, SIGNIFICANCE, SCOPE, DEFINITIONS];
+        // NALT's Chapter One, in its order: the research questions are the sub-section 1.2.1 under the
+        // problem (matched on H3), the scope section covers the limitations, and 1.7 SYNOPSIS OF THE
+        // CHAPTERS is mandatory ("a very critical area of a research project"). No literature review
+        // here: the founder's call (26 Nov 2026) keeps it in Chapter Two at 2.3, as the benchmark does.
         case "LAW_DOCTRINAL":
-          return [BACKGROUND, PROBLEM, OBJECTIVES, RQ, SIGNIFICANCE, SCOPE, METHODOLOGY_BRIEF, LITERATURE_BRIEF];
+          return [BACKGROUND, PROBLEM, OBJECTIVES, RQ, SCOPE, SIGNIFICANCE, METHODOLOGY_BRIEF, SYNOPSIS];
         case "LAW_NON_DOCTRINAL":
-          return [BACKGROUND, PROBLEM, OBJECTIVES, RQ, SIGNIFICANCE, SCOPE];
+          return [BACKGROUND, PROBLEM, OBJECTIVES, RQ_OR_HYP, SCOPE, SIGNIFICANCE, SYNOPSIS];
         case "HUMANITIES":
           return [BACKGROUND, OBJECTIVES, SIGNIFICANCE, SCOPE, METHODOLOGY_BRIEF, LITERATURE_BRIEF];
         case "EDUCATION":
@@ -182,10 +190,13 @@ export function requiredSectionsAsListed(section: SectionKey, chapter: number, c
         case "NURSING":
         case "BUSINESS":
         case "EDUCATION":
-        case "LAW_DOCTRINAL":
           return [CONCEPTUAL, THEORETICAL, EMPIRICAL, GAP_OR_SUMMARY];
+        // NALT's Chapter Two: three sections only, and 2.3 is titled "LITERATURE REVIEW" (not an
+        // empirical review). 2.2 covers the theoretical AND historical foundation, and the gap is
+        // drawn at the end of 2.3, not in a section of its own.
+        case "LAW_DOCTRINAL":
         case "LAW_NON_DOCTRINAL":
-          return [CONCEPTUAL, THEORETICAL, EMPIRICAL, GAP];
+          return [CONCEPTUAL, THEORETICAL, LITERATURE_BRIEF];
         case "COMPUTER_SCIENCE":
           return [CONCEPTUAL, EXISTING_SYSTEMS, TOOLS, DESIGN_METHODOLOGY, GAP_OR_SUMMARY];
         case "ECONOMICS":
@@ -256,9 +267,13 @@ export function requiredSectionsAsListed(section: SectionKey, chapter: number, c
         case "EDUCATION":
           return [SUMMARY, CONCLUSION, IMPLICATIONS, RECOMMENDATIONS, LIMITATIONS, FURTHER];
         case "HUMANITIES":
+          return [CONCLUSION, RECOMMENDATIONS];
+        // NALT's final chapter, the same under both approaches ("the final chapters either under
+        // doctrinal or non-doctrinal approaches are prepared in similar manner"): five numbered
+        // sections with the conclusion LAST. Contributions to Knowledge was missing entirely.
         case "LAW_DOCTRINAL":
         case "LAW_NON_DOCTRINAL":
-          return [CONCLUSION, RECOMMENDATIONS];
+          return [SUMMARY, RECOMMENDATIONS, CONTRIBUTION, FURTHER, CONCLUSION];
         default:
           return [SUMMARY, CONCLUSION, RECOMMENDATIONS, LIMITATIONS, FURTHER];
       }

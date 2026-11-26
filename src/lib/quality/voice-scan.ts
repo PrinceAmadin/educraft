@@ -130,7 +130,10 @@ export const WEAK_VERBS: readonly { phrase: string; pattern: RegExp }[] = [
 // ─── The scan ────────────────────────────────────────────────────────────────
 
 const CITED = /\((?:[^()]*?\b(?:19|20)\d{2}[a-z]?)[^()]*\)|\b\p{Lu}[\p{L}'’-]+(?:\s+et al\.?)?\s+\((?:19|20)\d{2}/u;
-const OUTLINE_SECTION = /outline|organi[sz]ation of the|structure of the (?:study|report|project|thesis)|chapter (?:summary|overview)|summary/i;
+// A section whose whole purpose is to say what each chapter does. NALT calls it the "Synopsis of
+// the Chapters" (its own guide also "Chapters Analysis") and makes it a mandatory section of every
+// law Chapter One, so pointing at the chapters there is the section working, not a cross-reference.
+const OUTLINE_SECTION = /outline|synopsis|chapters?\s+analysis|organi[sz]ation of the|structure of the (?:study|report|project|thesis)|chapter (?:summary|overview)|summary/i;
 const CROSS_REF = /\b(?:(?:sub-?)?section\s+\d+(?:\.\d+)+|chapter\s+(?:one|two|three|four|five|six|[1-6])\b)/gi;
 /** First person, outside quotation marks: we, our, us, my, and "I" before a verb. */
 const FIRST_PERSON = /\b(?:[Ww]e|[Oo]urs?|us|[Mm]y)\b|\bI (?:am|was|have|had|found|find|believe|think|will|would|shall|feel|observed|conducted|used|designed|chose|noticed|argue|propose|recommend|conclude|developed|collected|interviewed|wish|thank|acknowledge|appreciate|owe|dedicate)\b/;

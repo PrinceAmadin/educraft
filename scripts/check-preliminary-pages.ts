@@ -37,7 +37,11 @@ import {
   loadPreliminaryPagesPrompts,
   type PromptValues,
 } from "../src/lib/generation/preliminary-pages-loader";
+import { abstractBand } from "../src/lib/generation/preliminary-pages-rules";
 import { countWords } from "../src/lib/generation/chapter-plan";
+
+/** The house abstract band (every department but law). */
+const HOUSE_BAND = abstractBand({});
 
 let passed = 0;
 const failures: string[] = [];
@@ -224,11 +228,11 @@ await checkAsync("both page prompts substitute the project title and the departm
 });
 await checkAsync("the acknowledgement prompt carries only the acknowledgement's rules", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
-  return p.ackUser.includes(LOADER_TEXT.ackHeading) && !p.ackUser.includes(LOADER_TEXT.abstractHeading) && !p.ackUser.includes(LOADER_TEXT.abstractBand);
+  return p.ackUser.includes(LOADER_TEXT.ackHeading) && !p.ackUser.includes(LOADER_TEXT.abstractHeading) && !p.ackUser.includes(LOADER_TEXT.abstractBand(HOUSE_BAND));
 });
 await checkAsync("the abstract prompt (Opus) carries only the abstract's rules and band", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
-  return p.abstractUser.includes(LOADER_TEXT.abstractHeading) && p.abstractUser.includes(LOADER_TEXT.abstractBand) && !p.abstractUser.includes(LOADER_TEXT.ackHeading);
+  return p.abstractUser.includes(LOADER_TEXT.abstractHeading) && p.abstractUser.includes(LOADER_TEXT.abstractBand(HOUSE_BAND)) && !p.abstractUser.includes(LOADER_TEXT.ackHeading);
 });
 await checkAsync("the retry rewrites the abstract only, asking for the 260–290 band explicitly", async () => {
   const p = await loadPreliminaryPagesPrompts(values);
@@ -236,7 +240,7 @@ await checkAsync("the retry rewrites the abstract only, asking for the 260–290
     p.abstractRetryUser.includes(String(ABSTRACT_TARGET_LO)) &&
     p.abstractRetryUser.includes(String(ABSTRACT_TARGET_HI)) &&
     !p.abstractRetryUser.includes(LOADER_TEXT.ackHeading) &&
-    !/Acknowledgement/.test(LOADER_TEXT.abstractRetryIntro)
+    !/Acknowledgement/.test(LOADER_TEXT.abstractRetryIntro(HOUSE_BAND))
   );
 });
 await checkAsync("each call names its own tool", async () => {
@@ -269,11 +273,13 @@ await checkAsync("unresolved {TOKEN} throws PreliminaryPagesPromptError", async 
 // ─── LOADER_TEXT copy the founder should recognise ─────────────────────────
 check("Acknowledgement intro exists", LOADER_TEXT.ackIntro.length > 40);
 check("Abstract intro exists", LOADER_TEXT.abstractIntro.length > 40);
-check("Abstract retry intro exists", LOADER_TEXT.abstractRetryIntro.length > 40);
+check("Abstract retry intro exists", LOADER_TEXT.abstractRetryIntro(HOUSE_BAND).length > 40);
 check("Call B intro exists", LOADER_TEXT.callBIntro.length > 40);
 check("Ack rules headed as page 6", /PAGE\s+6/i.test(LOADER_TEXT.ackHeading));
 check("Abstract rules headed as page 7", /PAGE\s+7/i.test(LOADER_TEXT.abstractHeading));
-check("Abstract band mentions 250 and 300", LOADER_TEXT.abstractBand.includes("250") && LOADER_TEXT.abstractBand.includes("300"));
+check("Abstract band mentions the house band (240 and 320)", LOADER_TEXT.abstractBand(HOUSE_BAND).includes("240") && LOADER_TEXT.abstractBand(HOUSE_BAND).includes("320"));
+// 26 Nov 2026: a law report has NALT's band (250-350), so the wording follows the band it is given.
+check("Abstract band follows a law report's own band (250 and 350)", LOADER_TEXT.abstractBand(abstractBand({ section: "LAW_DOCTRINAL" })).includes("250") && LOADER_TEXT.abstractBand(abstractBand({ section: "LAW_DOCTRINAL" })).includes("350"));
 
 // ─── Section order — founder's PRELIMINARY PAGE TEMPLATE (TOC last) ────────
 // The order enforced by src/lib/assembly/assemble.ts. If someone reorders it,

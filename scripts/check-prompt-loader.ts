@@ -253,7 +253,11 @@ async function main() {
   has("MODE B: markers written as ^3, never ¹ (D11)", hist5.text, LOADER_TEXT.noteMarkers);
   has("MODE B: each part lists its notes; the assembly joins them into one list (D11)", hist5.text, LOADER_TEXT.endnotesDocument);
   expect("MODE B: no chapter-endnotes wording", hist5.text.includes(LOADER_TEXT.endnotesChapter), false);
-  expect("MODE C (page footnotes) is untouched by the endnote notes", [law.text.includes(LOADER_TEXT.noteMarkers), law.text.includes(LOADER_TEXT.endnotesDocument), law.text.includes(LOADER_TEXT.endnotesChapter)], [false, false, false]);
+  // MODE C: page footnotes. The chapters write the note text and the assembly sets each one as a real
+  // Word footnote; before the NALT rebuild nothing told the model this and no footnote was ever written.
+  has("MODE C: markers written as ^3", law.text, LOADER_TEXT.noteMarkers);
+  has("MODE C: each part lists its notes in a [FOOTNOTES] block", law.text, LOADER_TEXT.footnotesPage);
+  expect("MODE C: neither endnote wording is loaded", [law.text.includes(LOADER_TEXT.endnotesDocument), law.text.includes(LOADER_TEXT.endnotesChapter)], [false, false]);
   expect("in-text reports get no endnote notes", eng3.text.includes(LOADER_TEXT.noteMarkers), false);
   expect("the endnote wording tells the model the notes are joined, not collected at the document end", /collected at the document end/.test(LOADER_TEXT.endnotesDocument) && /replaces/.test(LOADER_TEXT.endnotesDocument), true);
   has("a thematic conclusion keeps the closing cardinal rules", hist5.text, "[OBJECTIVE NOT MET — COO TO REVIEW]");

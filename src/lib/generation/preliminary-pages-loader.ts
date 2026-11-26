@@ -12,6 +12,7 @@
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { abstractBand, type AbstractBand } from "./preliminary-pages-rules";
 
 const PROMPT_REL = "prompts/preliminary-pages/preliminary_pages_prompt.md";
 const TOKEN_RE = /\{([A-Z0-9_]+)\}/g;
@@ -69,16 +70,16 @@ export const LOADER_TEXT = {
   /** The abstract's call: Claude Opus 5.5 (SUPERVISOR_FACING_MODEL; founder, 30 Sept 2026: supervisors read the abstract first). */
   abstractIntro:
     "You are EduCraft's Preliminary Pages Agent. Read the project context and the rules below carefully, then write only the ABSTRACT page for this specific project and return it through the record_abstract tool. Do not add any other text. Do not include page numbers, headings or the section label: the tool captures the page as plain paragraphs of body text.",
-  abstractRetryIntro:
-    "The previous abstract was returned outside the 250–300 word range. Rewrite it to fall inside 260–290 words (aim for 275). Keep every rule in the ABSTRACT section below. Return the corrected Abstract through the tool.",
+  abstractRetryIntro: (band: AbstractBand) =>
+    `The previous abstract was returned outside the ${String(band.min)}–${String(band.max)} word range. Rewrite it to fall inside ${String(band.targetLo)}–${String(band.targetHi)} words (aim for ${String(Math.round((band.targetLo + band.targetHi) / 2))}). Keep every rule in the ABSTRACT section below. Return the corrected Abstract through the tool.`,
   callBIntro:
     "You are EduCraft's Preliminary Pages Agent. The token list below was scanned from the project's completed chapters. For each token, return its expansion through the expand_abbreviations tool. If you are not confident of an expansion, return null for that entry: an omitted entry is preferable to a guessed one. Do not add any other text.",
   contextHeading: "PROJECT CONTEXT",
   ackHeading: "ACKNOWLEDGEMENT — the rules for this section (from PAGE 6 of the founder's prompt)",
   abstractHeading: "ABSTRACT — the rules for this section (from PAGE 7 of the founder's prompt)",
   abbreviationsHeading: "ABBREVIATIONS — the tokens the scanner found in the completed chapters",
-  abstractBand:
-    "Aim for 275 words. Anything under 250 or over 300 is rejected and the run is asked again. Do not include citations, abbreviations without a first expansion, bullet points, or the phrases 'In conclusion' or 'To summarise'. Third person, past tense throughout.",
+  abstractBand: (band: AbstractBand) =>
+    `Aim for ${String(Math.round((band.targetLo + band.targetHi) / 2))} words. Anything under ${String(band.min)} or over ${String(band.max)} is rejected and the run is asked again. Do not include citations, abbreviations without a first expansion, bullet points, or the phrases 'In conclusion' or 'To summarise'. Third person, past tense throughout. Write it as one un-paragraphed block. This replaces the word count the ABSTRACT section above states.`,
   ackBand:
     "Aim for 200 words. 150–250 is acceptable. Third person only ('The researcher wishes to express …'), never 'I' or 'we'. Do not name anyone the context does not already give.",
 } as const;
@@ -140,7 +141,7 @@ export interface PreliminaryPromptBlocks {
  * Assembles both call prompts from the founder's file. Throws on any missing
  * page or unresolved token, so a broken prompt file never reaches the model.
  */
-export async function loadPreliminaryPagesPrompts(values: PromptValues): Promise<PreliminaryPromptBlocks> {
+export async function loadPreliminaryPagesPrompts(values: PromptValues, band: AbstractBand = abstractBand({})): Promise<PreliminaryPromptBlocks> {
   const raw = await loadRaw();
   const ackRules = extractPage(raw, 6);
   const abstractRules = extractPage(raw, 7);
@@ -178,17 +179,17 @@ export async function loadPreliminaryPagesPrompts(values: PromptValues): Promise
 
   const ackUser = [fill(context, values), "", LOADER_TEXT.ackHeading, fill(ackRules, values), "", LOADER_TEXT.ackBand].join("\n");
 
-  const abstractUser = [fill(context, values), "", LOADER_TEXT.abstractHeading, fill(abstractRules, values), "", LOADER_TEXT.abstractBand].join("\n");
+  const abstractUser = [fill(context, values), "", LOADER_TEXT.abstractHeading, fill(abstractRules, values), "", LOADER_TEXT.abstractBand(band)].join("\n");
 
   const abstractRetryUser = [
-    LOADER_TEXT.abstractRetryIntro,
+    LOADER_TEXT.abstractRetryIntro(band),
     "",
     fill(context, values),
     "",
     LOADER_TEXT.abstractHeading,
     fill(abstractRules, values),
     "",
-    LOADER_TEXT.abstractBand,
+    LOADER_TEXT.abstractBand(band),
   ].join("\n");
 
   const callBUser = (tokens: string[]) =>
