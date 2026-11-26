@@ -12,11 +12,16 @@
  *    for junk, a tampered auth tag, a truncated blob and a blob sealed under a
  *    different AUTH_SECRET (a rotated secret must degrade, not crash);
  *  - the status shape the screens render carries no field that could hold the
- *    key itself.
+ *    key itself;
+ *  - a status Anthropic answers with settles the key's fate the right way:
+ *    every 4xx bar 408/429 refuses the SAVE (26 Nov 2026 — an account key
+ *    that answers 400 had been saved unverified, and once saved it beat the
+ *    environment variable and took every Claude call in HQ down), while a
+ *    5xx or a throttle leaves the key saved but unverified.
  *
  * `npm run check:anthropic-key`.
  */
-import { keyHint, looksLikeAnthropicKey, type AnthropicKeyStatus } from "../src/lib/anthropic-key";
+import { anthropicRefusedKey, keyHint, looksLikeAnthropicKey, type AnthropicKeyStatus } from "../src/lib/anthropic-key";
 import { isSealed, openSecret, resetSecretBoxKey, sealSecret } from "../src/lib/secret-box";
 
 let passed = 0;
@@ -116,6 +121,28 @@ eq("a fresh seal under the new secret still works", openSecret(sealSecret(REAL))
 process.env.AUTH_SECRET = "check-anthropic-key-secret-one";
 resetSecretBoxKey();
 eq("back on the old secret, the original blob opens again", openSecret(sealed), REAL);
+
+// ── Whose verdict a status is ──────────────────────────────────
+// Anthropic saying no must refuse the save; Anthropic being unable to answer
+// must not, or an outage would lock the founder out of changing his own key.
+check("401 is a refusal (wrong or revoked key)", anthropicRefusedKey(401));
+check("403 is a refusal", anthropicRefusedKey(403));
+check("400 is a refusal — an account key, not a workspace key", anthropicRefusedKey(400));
+check("404 is a refusal", anthropicRefusedKey(404));
+check("422 is a refusal", anthropicRefusedKey(422));
+check("408 is NOT a refusal (ask again)", !anthropicRefusedKey(408));
+check("429 is NOT a refusal (throttled, ask again)", !anthropicRefusedKey(429));
+check("500 is NOT a refusal (save unverified)", !anthropicRefusedKey(500));
+check("502 is NOT a refusal", !anthropicRefusedKey(502));
+check("529 (Anthropic overloaded) is NOT a refusal", !anthropicRefusedKey(529));
+check("200 is not a refusal", !anthropicRefusedKey(200));
+check("no 5xx is ever a refusal", ![500, 501, 502, 503, 504, 520, 529].some(anthropicRefusedKey));
+check(
+  "every 4xx except 408 and 429 is a refusal",
+  Array.from({ length: 100 }, (_, i) => 400 + i)
+    .filter((s) => s !== 408 && s !== 429)
+    .every(anthropicRefusedKey),
+);
 
 // ── The status the screens render ──────────────────────────────
 // Compile-time: every field of AnthropicKeyStatus, so a new one must be listed here

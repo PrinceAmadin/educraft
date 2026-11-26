@@ -67,6 +67,27 @@ export function keyHint(key: string): string {
   return `${k.slice(0, HINT_PREFIX_CHARS)}…${k.slice(-HINT_SUFFIX_CHARS)}`;
 }
 
+/**
+ * Does an HTTP status from Anthropic settle the key's fate, or should we try
+ * again later?
+ *
+ * A 4xx is Anthropic's own verdict on the key and no amount of waiting changes
+ * it: a wrong or revoked key (401/403), or one of the wrong KIND — an account
+ * key where a workspace-scoped key is needed, which answers 400 and would then
+ * fail every single Claude call the pipeline makes. A key like that MUST be
+ * refused at the save: stored, it beats `ANTHROPIC_API_KEY` and takes report
+ * generation, the quality gate and every chapter check down silently.
+ *
+ * 408, 429 and any 5xx are worth asking again, and so are a timeout and no
+ * network: those mean "we could not ask", and the key is saved unverified,
+ * because an Anthropic outage must never lock the founder out of changing his
+ * own key.
+ */
+export function anthropicRefusedKey(status: number): boolean {
+  if (status === 408 || status === 429) return false;
+  return status >= 400 && status < 500;
+}
+
 /** Shape check only — whether Anthropic accepts it is settled by a real call. */
 export function looksLikeAnthropicKey(key: string): boolean {
   const k = key.trim();

@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import {
   ANTHROPIC_KEY_SETTING_KEYS as KEYS,
   getAnthropicKeyStatus,
+  anthropicRefusedKey,
   keyHint,
   looksLikeAnthropicKey,
   type AnthropicKeyStatus,
@@ -64,7 +65,7 @@ export async function checkAnthropicKey(key: string): Promise<KeyCheck> {
 
   if (res.ok) return { ok: true };
 
-  if (res.status === 401 || res.status === 403) {
+  if (anthropicRefusedKey(res.status)) {
     const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
     const detail = body?.error?.message?.trim();
     return {
