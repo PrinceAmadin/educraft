@@ -118,7 +118,7 @@ export interface ProcessStep {
 }
 
 /** The five stages; the downpayment share comes from the published cashflow structure. */
-export function processSteps(downpaymentPercent: number): ProcessStep[] {
+export function processSteps(downpaymentPercent: number | null): ProcessStep[] {
   return [
   {
     index: "01",
@@ -130,8 +130,13 @@ export function processSteps(downpaymentPercent: number): ProcessStep[] {
   {
     index: "02",
     title: "Specialist",
-    body: `A writer who works inside your discipline is assigned to the project. Work begins on a ${downpaymentPercent}% downpayment — the balance is only due at the end.`,
-    meta: `EduCraft · ${downpaymentPercent}% to start`,
+    body: `A writer who works inside your discipline is assigned to the project. Work begins on ${
+      downpaymentPercent === null ? "your downpayment" : `a ${downpaymentPercent}% downpayment`
+    } — the balance is only due at the end.`,
+    meta:
+      downpaymentPercent === null
+        ? "EduCraft · Downpayment to start"
+        : `EduCraft · ${downpaymentPercent}% to start`,
     icon: IconSpecialists,
   },
   {

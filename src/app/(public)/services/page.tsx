@@ -23,7 +23,8 @@ export default async function ServicesPage() {
         </h1>
         <p className="mt-3 max-w-[54ch] text-[15px] leading-relaxed text-muted-foreground sm:text-base">
           Everything you need for academic, technical and professional documentation. Prices are up
-          front — you pay {downpaymentPercent}% to begin and the balance once the work passes quality
+          front — you pay {downpaymentPercent === null ? "a downpayment" : `${downpaymentPercent}%`} to
+          begin and the balance once the work passes quality
           review.
         </p>
       </header>

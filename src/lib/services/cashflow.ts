@@ -191,13 +191,30 @@ export async function minServiceDownpayment(): Promise<number | null> {
 /**
  * The downpayment share public copy quotes ("you pay 45% to begin"): the
  * structure's baseline, else — before the seed has run — the lowest active
- * service's. A public page never throws over the money settings.
+ * service's, else null.
+ *
+ * A public page never throws over the money settings, and that promise has to
+ * hold against the database being unreachable, not only against an unseeded
+ * structure. `/`, `/intake` and `/services` are prerendered at BUILD time, so
+ * an exception here does not degrade one page — it fails the whole deploy, and
+ * the front door of the business is then down over a database blink.
+ *
+ * Null means "could not source it". Every caller drops the figure from its
+ * sentence rather than quoting a guess, the same rule the homepage ledger
+ * follows: no number about the business unless it can be shown.
  */
-export async function publicDownpaymentPercent(): Promise<number> {
-  const active = await readActive();
-  if (active) return active.structure.triggers.downpaymentPercent;
-  const service = await minServiceDownpayment();
-  return service ?? 0;
+export async function publicDownpaymentPercent(): Promise<number | null> {
+  try {
+    const active = await readActive();
+    if (active) return active.structure.triggers.downpaymentPercent;
+    return await minServiceDownpayment();
+  } catch (error) {
+    console.error(
+      "[cashflow] public downpayment read failed:",
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
 }
 
 export interface PublicCommissionTier {

@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
  * cashflow structure): the steps carry icon components, which cannot cross the
  * server-to-client boundary, so they are built here.
  */
-export function ProcessTimeline({ downpaymentPercent }: { downpaymentPercent: number }) {
+export function ProcessTimeline({ downpaymentPercent }: { downpaymentPercent: number | null }) {
   const PROCESS = React.useMemo(() => processSteps(downpaymentPercent), [downpaymentPercent]);
   const [active, setActive] = React.useState(0);
   const stageRefs = React.useRef<(HTMLLIElement | null)[]>([]);
