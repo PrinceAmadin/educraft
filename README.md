@@ -212,9 +212,9 @@ appears in the sidebar and mobile nav for that role.
 | Rule | Value | Where |
 |---|---|---|
 | Downpayment | 45% | `constants.ts`, `Service.downpaymentPercentage`, settings |
-| Worker payout | 40% | `constants.ts`, `Project.workerPayoutRate` |
+| Worker payout | 35% | Published `CashflowVersion` (seed baseline: `finance/cashflow-default.ts`); frozen per job as `Project.workerPayoutRate` |
 | Revision cap before escalation | 3 | `constants.ts`, settings |
-| Ambassador tiers | Bronze 10% · Silver 12% · Gold 15% · Platinum 15% | `constants.ts` |
+| Ambassador tiers | Bronze 10% · Silver 12% · Gold 15% · Platinum 15% | Published `CashflowVersion` |
 | Express surcharge | ₦2,000 general · ₦5,000 FYP | Seeded per service |
 | Annual revenue target | ₦1,000,000,000 | `constants.ts`, settings |
 

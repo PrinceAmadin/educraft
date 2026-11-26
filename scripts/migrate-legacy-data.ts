@@ -44,7 +44,7 @@
  *     everywhere the app reads that field (finance dashboard, reports).
  *   - createdAt / deliveryDate: YYYY-MM-DD, both optional.
  *
- * All monetary splits (downpayment %, worker 40%, ambassador tier rate) use
+ * All monetary splits (downpayment %, the worker share, ambassador tier rate) use
  * the same shipped defaults as the rest of the app — Settings overrides
  * saved through /admin/settings only affect projects created going forward.
  */

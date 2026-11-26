@@ -98,12 +98,12 @@ function Totals({ f, title }: { f: MonthFigures; title: string }) {
           <Row label="Net profit (retained less expenses)" value={money(f.netProfit)} strong tone={f.netProfit >= 0 ? "success" : "danger"} />
         </div>
         <div>
-          <Row label="Workers (40%)" value={money(f.payouts.byLeg.WORKER)} />
+          <Row label="Workers" value={money(f.payouts.byLeg.WORKER)} />
           <Row label="Ambassadors" value={money(f.payouts.byLeg.AMBASSADOR)} />
           <Row label="Core overrides" value={money(f.payouts.byLeg.PARENT)} />
           <Row label="Ambassador quarterly bonuses" value={money(f.payouts.byLeg.BONUS ?? 0)} />
-          <Row label="Head of Growth (2.5%)" value={money(f.payouts.byLeg.HOG)} />
-          <Row label="Chief Operating Officer (2.5%)" value={money(f.payouts.byLeg.COO)} />
+          <Row label="Head of Growth" value={money(f.payouts.byLeg.HOG)} />
+          <Row label="Chief Operating Officer" value={money(f.payouts.byLeg.COO)} />
           <Row label="Founder draws distributed" value={money(f.founderDraws)} />
           <Row label="Projects completed" value={String(f.completed)} strong />
         </div>

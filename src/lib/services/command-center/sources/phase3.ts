@@ -162,7 +162,7 @@ interface BonusRecordRow {
  * - never processed: last quarter's Platinum ambassadors had clients in it
  *   but nobody pressed "Process Qn bonuses", so no record exists yet.
  *   Eligibility mirrors Phase 3's quarterly tracker: Platinum by lifetime
- *   conversions, not suspended or terminated, ₦3,000 per client converted
+ *   conversions, not suspended or terminated, ₦1,000 per client converted
  *   in the quarter.
  */
 export async function platinumBonusAlerts(now: Date): Promise<CcAlert[] | null> {

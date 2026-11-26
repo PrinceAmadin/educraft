@@ -87,11 +87,11 @@ function monthlyBody(r: MonthlyReport): (Paragraph | Table)[] {
     ]),
     h2("Payouts by leg"),
     figures([
-      ["Workers (40%)", ngn(f.payouts.byLeg.WORKER)],
+      ["Workers", ngn(f.payouts.byLeg.WORKER)],
       ["Ambassadors (referral rate)", ngn(f.payouts.byLeg.AMBASSADOR)],
       ["Core ambassador overrides", ngn(f.payouts.byLeg.PARENT)],
-      ["Head of Growth (2.5%, ambassador-driven jobs)", ngn(f.payouts.byLeg.HOG)],
-      ["Chief Operating Officer (2.5%)", ngn(f.payouts.byLeg.COO)],
+      ["Head of Growth (ambassador-driven jobs)", ngn(f.payouts.byLeg.HOG)],
+      ["Chief Operating Officer", ngn(f.payouts.byLeg.COO)],
     ]),
     h2("Bucket balances and movements"),
     grid(

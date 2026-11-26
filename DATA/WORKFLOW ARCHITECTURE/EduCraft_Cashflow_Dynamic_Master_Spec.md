@@ -4,6 +4,14 @@
 Version 1.0 · 30 September 2026
 Author: Prince Amadin (CEO) with brainstorming assistance
 
+> **The percentages in this document are the September 2026 starting point, not the live rates.**
+> This spec was written before the rebuild shipped. The whole point of what it describes is that
+> the figures now live in a published `CashflowVersion` row in the database, which the founder
+> edits on Settings > EduCraft Cashflow. Version 2 has been in force since 3 October 2026:
+> workers **35%**, ambassador **15%**, HOG **3%**, COO **3%**, EduCraft retains **44%** of a
+> referred job and **62%** of a direct one; buckets **38.7 / 17 / 17 / 27.3** of the retained
+> share; Platinum per-client quarterly bonus **₦1,000**. Read the live structure, never this page.
+
 ---
 
 ## 0. Purpose

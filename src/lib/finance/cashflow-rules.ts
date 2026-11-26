@@ -74,7 +74,7 @@ export function coreOverrideFor(subTierRatePercent: number, s: CashflowStructure
   return round2(Math.max(0, ambassadorPercent - subTierRatePercent));
 }
 
-/** Founder Distribution's share of a project's price: its share of the retained share (27.5% × 40% = 11%). */
+/** Founder Distribution's share of a project's price: its share of the retained share (27.3% × 44%, about 12%). */
 export function founderDistributionShareOfRevenue(s: CashflowStructure): number {
   const fd = s.level2.find((b) => b.key === "FOUNDER_DISTRIBUTION");
   return fd ? round2((fd.percentage / 100) * retainedFraction(s) * 100) / 100 : 0;

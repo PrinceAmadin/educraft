@@ -153,7 +153,7 @@ export function recipientsPercent(s: CashflowStructure, recipients: Level1Recipi
   return row && isActiveRow(row) ? row.percentage : 0;
 }
 
-/** EduCraft's retained share of the standard referred project, as a fraction (0.4). */
+/** EduCraft's retained share of the standard referred project, as a fraction (0.44). */
 export function retainedFraction(s: CashflowStructure): number {
   const row = level1Row(s, LEVEL1.retained);
   return row ? row.percentage / 100 : 0;

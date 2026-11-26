@@ -6,7 +6,7 @@ import { monthLabel } from "@/lib/services/finance/surplus";
 
 /**
  * An executive's own money, from the payout ledger (Phase 3). The HOG and COO
- * each earn a commission leg (2.5% in v1) and any performance bonus, both owed
+ * each earn a commission leg (3% in v2) and any performance bonus, both owed
  * as BONUS/role records under `recipientType: "EXECUTIVE"` keyed by the role
  * string. Their login is resolved from the role the same way the payout engine
  * pays them, so a hand-over between logins keeps one history.

@@ -44,7 +44,7 @@ export function computePrice(inputs: PriceInputs): PriceBreakdown {
 /**
  * Split a project total into the worker / ambassador / EduCraft legs.
  * `workersPercent` is the Workers row of the cashflow structure in force
- * (40 in v1); it is frozen on the project as `workerPayoutRate`.
+ * (35 in v2); it is frozen on the project as `workerPayoutRate`.
  */
 export function computeSplit(total: number, ambassadorRate: number | null, workersPercent: number) {
   const workerPayout = naira((total * workersPercent) / 100);

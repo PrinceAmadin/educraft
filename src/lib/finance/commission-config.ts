@@ -112,7 +112,7 @@ export function bucketShareOfRetained(bucket: BucketType, s: CashflowStructure):
   return row ? roundRate(row.percentage / 100) : 0;
 }
 
-/** Share of TOTAL revenue a bucket gets on the standard referred project (37.5% of 40% = 15%). */
+/** Share of TOTAL revenue a bucket gets on the standard referred project (38.7% of 44%, about 17%). */
 export function bucketShareOfRevenue(bucket: BucketType, s: CashflowStructure): number {
   return roundRate(bucketShareOfRetained(bucket, s) * retainedFraction(s));
 }
@@ -225,8 +225,8 @@ export function executiveLegs(p: ProjectLegs, s: CashflowStructure): { hog: numb
 
 /**
  * What EduCraft actually keeps of a project: the price less every leg owed
- * out. 40% of the standard referred job (worker 40, ambassador 15, HOG 2.5,
- * COO 2.5); 57.5% of a direct job (no ambassador, no HOG leg). Never below 0.
+ * out. 44% of the standard referred job (worker 35, ambassador 15, HOG 3,
+ * COO 3); 62% of a direct job (no ambassador, no HOG leg). Never below 0.
  */
 export function retainedForProject(p: ProjectLegs, s: CashflowStructure): number {
   if (p.isProBono || p.price <= 0) return 0;
@@ -235,7 +235,7 @@ export function retainedForProject(p: ProjectLegs, s: CashflowStructure): number
   return Math.max(0, Math.round(retained));
 }
 
-/** retained ÷ price, to four decimals (0.4 on the standard job). */
+/** retained ÷ price, to four decimals (0.44 on the standard job). */
 export function retainedRateFor(p: ProjectLegs, s: CashflowStructure): number {
   return p.price > 0 ? roundRate(retainedForProject(p, s) / p.price) : 0;
 }

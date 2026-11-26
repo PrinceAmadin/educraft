@@ -146,10 +146,12 @@ Verification is a deliberate admin action that sets `status: "VERIFIED"`, `verif
 
 ## Commission calculation
 
-- Worker: **40%** of project total, always.
-- Ambassador by tier: Bronze **10%**, Silver **12%**, Gold **15%**, Platinum **15%** + quarterly bonus.
-- Parent ambassador: **5%** of a sub-ambassador's referral total (max 1 level deep, max 5 subs, parent must be Silver+).
-- EduCraft: the remainder.
+Every rate lives in ONE place: the `CashflowVersion` row published in the database, which the founder edits on Settings > EduCraft Cashflow. **Never hardcode a percentage.** Read the structure and use the helpers in `src/lib/finance/commission-config.ts` (`workerLeg`, `personLegs`, `retainedForProject`, `expectedBucketAllocation`, `tierFor`):
+
+- `cashflowForProject(project)` for money on an existing project — it reads the version stamped on the row, so a published change is never retroactive.
+- `getActiveCashflow()` for a new project.
+
+As of version 2 (3 October 2026) the figures are: worker **35%**, ambassador **15%** in total, HOG **3%** (ambassador-driven jobs only, owed at the downpayment), COO **3%**, and EduCraft retains the rest — **44%** of a referred job, **62%** of a direct one. Tiers: Bronze **10%**, Silver **12%**, Gold **15%**, Platinum **15%** plus a **₦1,000** per-client quarterly bonus. The Core override is **15 minus the sub's own rate** (one level deep, max 10 subs, the Core must be Silver+). Those are today's values, not the contract — the database wins.
 
 **Ambassador commission is created when the client's downpayment is verified**, not on completion. Compute from the project total, not the downpayment amount.
 

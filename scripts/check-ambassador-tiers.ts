@@ -41,7 +41,7 @@ expect("progress at Platinum", tierProgressPercent(31, T), 100);
 
 // Labels derived from the structure (no figures typed into components).
 expect("sub-team threshold label", subTeamThresholdLabel(T), "Silver (6 conversions)");
-expect("percent labels", [percentLabel(ambassadorTotalRate(S)), percentLabel(personLegs({ price: 100, workerPayout: 40, ambassadorCommission: 15, parentCommission: null, ambassadorId: "a" }, S).find((l) => l.role === "HOG")!.ratePercent / 100), percentLabel(0.12)], ["15%", "2.5%", "12%"]);
+expect("percent labels", [percentLabel(ambassadorTotalRate(S)), percentLabel(personLegs({ price: 100, workerPayout: 40, ambassadorCommission: 15, parentCommission: null, ambassadorId: "a" }, S).find((l) => l.role === "HOG")!.ratePercent / 100), percentLabel(0.12)], ["15%", "3%", "12%"]);
 expect("the portal's ladder rows", tierLadderRows(T).map((r) => `${r.label}:${r.minPayingClients}:${r.rate}`), ["Bronze:0:10", "Silver:6:12", "Gold:16:15", "Platinum:31:15"]);
 expect("portal progress from the stored tier", tierProgress("SILVER", 9, T), { current: "SILVER", currentLabel: "Silver", next: "GOLD", nextLabel: "Gold", payingClients: 9, toNext: 7, percent: 30, eligibleForPromotion: false });
 expect("a count above the stored tier is eligible for promotion", tierProgress("BRONZE", 8, T).eligibleForPromotion, true);

@@ -1,28 +1,35 @@
 import type { CashflowStructure } from "@/lib/finance/cashflow-types";
 
 /**
- * Cashflow version 1: the numbers of `EduCraft Cashflow & Commission
- * Structure v2.0` (September 2026). This is the ONLY file that holds them.
- * The seed publishes it as v1 and the check scripts prove the maths against
- * it; nothing at runtime falls back to it — money is always computed from a
- * published version.
+ * The cashflow structure as published today: version 2, in force since
+ * 3 October 2026 (workers 35, ambassador 15, HOG 3, COO 3, EduCraft 44,
+ * buckets 38.7 / 17 / 17 / 27.3). This is the ONLY file in the codebase that
+ * holds the figures.
+ *
+ * It is NOT the source of truth at runtime. Money is always computed from the
+ * `CashflowVersion` row published in the database, which the founder edits on
+ * Settings > EduCraft Cashflow; `check:cashflow-static` fails on any runtime
+ * import of this file. Its two jobs are to seed version 1 on a fresh database
+ * and to give the check scripts figures to prove the maths against, so keep it
+ * equal to the active published version. `cashflow:seed` never rewrites a
+ * version that already exists — it only reports the difference.
  */
 export const DEFAULT_CASHFLOW: CashflowStructure = {
   schemaVersion: 1,
   level1: [
-    { key: "workers", label: "Workers", percentage: 40, displayOrder: 1, kind: "person", recipients: "workers", trigger: "completion" },
+    { key: "workers", label: "Workers", percentage: 35, displayOrder: 1, kind: "person", recipients: "workers", trigger: "completion" },
     { key: "ambassador", label: "Ambassador", percentage: 15, displayOrder: 2, kind: "person", recipients: "ambassadors", trigger: "downpayment", note: "EduCraft always pays this much in total: the referrer's tier rate, the rest to their Core." },
-    { key: "hog", label: "Head of Growth", percentage: 2.5, displayOrder: 3, kind: "person", recipients: "role", role: "HOG", trigger: "completion", condition: "ambassador_driven" },
-    { key: "coo", label: "COO", percentage: 2.5, displayOrder: 4, kind: "person", recipients: "role", role: "COO", trigger: "completion" },
+    { key: "hog", label: "Head of Growth", percentage: 3, displayOrder: 3, kind: "person", recipients: "role", role: "HOG", trigger: "downpayment", condition: "ambassador_driven" },
+    { key: "coo", label: "COO", percentage: 3, displayOrder: 4, kind: "person", recipients: "role", role: "COO", trigger: "completion" },
     // Inactive rows are left out of the 100% sum: switching this on (Year 2) makes the total 102% and the absorber gives the 2% up.
     { key: "growth_associate", label: "Growth Associate", percentage: 2, displayOrder: 5, kind: "person", recipients: "user", assignedUserId: null, trigger: "completion", active: false, note: "Year 2: 2% from the retained share once active." },
-    { key: "educraft_retained", label: "EduCraft retains", percentage: 40, displayOrder: 6, kind: "fund", isAbsorber: true },
+    { key: "educraft_retained", label: "EduCraft retains", percentage: 44, displayOrder: 6, kind: "fund", isAbsorber: true },
   ],
   level2: [
-    { key: "OPERATIONS_RESERVE", label: "Operations Reserve", percentage: 37.5, holder: "CFO", purpose: "Platform costs, Claude API, software, emergencies" },
-    { key: "GROWTH_FUND", label: "Growth Fund", percentage: 17.5, holder: "HOG spends, CFO tracks", purpose: "Ambassador bonuses, sponsorships, school entry" },
-    { key: "REINVESTMENT_FUND", label: "Reinvestment Fund", percentage: 17.5, holder: "CEO directs, CFO holds", purpose: "Platform development, new services, equipment, legal", isAbsorber: true },
-    { key: "FOUNDER_DISTRIBUTION", label: "Founder Distribution", percentage: 27.5, holder: "CEO + CFO 50/50", purpose: "CEO and Co-CEO/CFO monthly draws and bonuses" },
+    { key: "OPERATIONS_RESERVE", label: "Operations Reserve", percentage: 38.7, holder: "CFO", purpose: "Platform costs, Claude API, software, emergencies" },
+    { key: "GROWTH_FUND", label: "Growth Fund", percentage: 17, holder: "HOG spends, CFO tracks", purpose: "Ambassador bonuses, sponsorships, school entry" },
+    { key: "REINVESTMENT_FUND", label: "Reinvestment Fund", percentage: 17, holder: "CEO directs, CFO holds", purpose: "Platform development, new services, equipment, legal", isAbsorber: true },
+    { key: "FOUNDER_DISTRIBUTION", label: "Founder Distribution", percentage: 27.3, holder: "CEO + CFO 50/50", purpose: "CEO and Co-CEO/CFO monthly draws and bonuses" },
   ],
   level3: [
     { key: "claude_api", label: "Claude API", parentKey: "OPERATIONS_RESERVE", percentage: 40, isTrackedAsPot: true, description: "Read into the AI usage tab" },
@@ -45,7 +52,7 @@ export const DEFAULT_CASHFLOW: CashflowStructure = {
     { key: "coo_on_time", recipient: "coo", label: "On-time delivery rate above 97%", condition: "On-time delivery rate above 97%", amountNgn: 30_000, cadence: "monthly", metric: { key: "onTimeRate", op: ">", value: 97 } },
     { key: "coo_zero_rejections", recipient: "coo", label: "Zero supervisor rejections in a month", condition: "Zero supervisor rejections", amountNgn: 50_000, cadence: "monthly", metric: { key: "supervisorRejections", op: "==", value: 0 } },
     { key: "coo_satisfaction", recipient: "coo", label: "Client satisfaction above 90% positive", condition: "Client satisfaction > 90% positive", amountNgn: 25_000, cadence: "monthly" },
-    { key: "platinum_per_client", recipient: "platinum_ambassador", label: "Platinum quarterly bonus, per client referred", condition: "Per client referred in the quarter, Platinum only", amountNgn: 3_000, cadence: "quarterly", perClient: true },
+    { key: "platinum_per_client", recipient: "platinum_ambassador", label: "Platinum quarterly bonus, per client referred", condition: "Per client referred in the quarter, Platinum only", amountNgn: 1_000, cadence: "quarterly", perClient: true },
     { key: "quarterly_challenge", recipient: "any_ambassador", label: "Quarterly challenge: 10 or more clients in the quarter", condition: "10+ paying clients referred in the quarter", amountNgn: 35_000, cadence: "quarterly", target: 10, extensionDays: 7 },
   ],
   founderDrawTiers: [

@@ -51,13 +51,13 @@ expect("level totals", [levelTotal(s.level1), levelTotal(s.level2), levelTotal(s
 expect("the inactive Growth Associate is not counted", levelTotal(s.level1.map((r) => (r.key === "growth_associate" ? { ...r, percentage: 50 } : r))), 100);
 
 // ── X-10% ────────────────────────────────────────────────────────────────
-expect("downpayment exposure is the ambassador's 15", downpaymentExposure(s), 15);
+expect("downpayment exposure is the ambassador's 15 + the HOG's 3", downpaymentExposure(s), 18);
 expect("ceiling is 45 − 10", downpaymentCeiling(s), 35);
 expect("moving the workers to the downpayment breaks X-10%", errors(validateStructure(withL1((r) => { r.find((x) => x.key === "workers")!.trigger = "downpayment"; }))), ["X10"]);
 expect("HOG at the downpayment (17.5) still fits", errors(validateStructure(withL1((r) => { r.find((x) => x.key === "hog")!.trigger = "downpayment"; }))), []);
 
 // ── Sums ─────────────────────────────────────────────────────────────────
-expect("102% at level 1 fails with the overage named", validateStructure(withL1((r) => { r.find((x) => x.key === "hog")!.percentage = 3.5; r.find((x) => x.key === "coo")!.percentage = 3.5; })).find((v) => v.code === "SUM_100")?.message, "Revenue split adds up to 102%, not 100% (over by 2%)");
+expect("102% at level 1 fails with the overage named", validateStructure(withL1((r) => { r.find((x) => x.key === "hog")!.percentage = 4; r.find((x) => x.key === "coo")!.percentage = 4; })).find((v) => v.code === "SUM_100")?.message, "Revenue split adds up to 102%, not 100% (over by 2%)");
 expect("a bucket total of 99 fails", errors(validateStructure({ ...s, level2: s.level2.map((b) => (b.key === "GROWTH_FUND" ? { ...b, percentage: 16.5 } : b)) })), ["SUM_100"]);
 expect("pots that add to 90 fail for their bucket", validateStructure({ ...s, level3: s.level3.map((p) => (p.key === "emergencies" ? { ...p, percentage: 15 } : p)) }).filter((v) => v.code === "SUM_100").map((v) => v.rowKey), ["OPERATIONS_RESERVE"]);
 expect("a bucket with no pots is fine", errors(validateStructure({ ...s, level3: [] })), []);
@@ -66,8 +66,8 @@ expect("percentages over 100 or with three decimals are refused", errors(validat
 // ── Absorbers and rows ───────────────────────────────────────────────────
 expect("a person cannot absorb", errors(validateStructure(withL1((r) => { r.find((x) => x.key === "workers")!.isAbsorber = true; }))).includes("PERSON_ABSORBER"), true);
 expect("EduCraft retains is required", errors(validateStructure({ ...s, level1: s.level1.filter((r) => r.key !== "educraft_retained") })).includes("RETAINED_MISSING"), true);
-expect("an active custom person row needs an assignee", errors(validateStructure(withL1((r) => { const ga = r.find((x) => x.key === "growth_associate")!; ga.active = true; r.find((x) => x.key === "educraft_retained")!.percentage = 38; }))), ["ASSIGNEE_MISSING"]);
-expect("an assigned, active Growth Associate at 2% with retained at 38 is clean", errors(validateStructure(withL1((r) => { const ga = r.find((x) => x.key === "growth_associate")!; ga.active = true; ga.assignedUserId = "u1"; r.find((x) => x.key === "educraft_retained")!.percentage = 38; }))), []);
+expect("an active custom person row needs an assignee", errors(validateStructure(withL1((r) => { const ga = r.find((x) => x.key === "growth_associate")!; ga.active = true; r.find((x) => x.key === "educraft_retained")!.percentage = 42; }))), ["ASSIGNEE_MISSING"]);
+expect("an assigned, active Growth Associate at 2% with retained at 42 is clean", errors(validateStructure(withL1((r) => { const ga = r.find((x) => x.key === "growth_associate")!; ga.active = true; ga.assignedUserId = "u1"; r.find((x) => x.key === "educraft_retained")!.percentage = 42; }))), []);
 expect("two rows cannot pay the COO", errors(validateStructure(withL1((r) => { r.push({ key: "coo2", label: "COO again", percentage: 0, displayOrder: 9, kind: "person", recipients: "role", role: "COO", trigger: "completion" }); }))).includes("ROLE_TWICE"), true);
 expect("a duplicate key is refused", errors(validateStructure(withL1((r) => { r.push({ ...r[0], key: "workers" }); }))).includes("DUPLICATE_KEY"), true);
 expect("a key with money on it cannot be deleted", errors(validateStructure({ ...s, level1: s.level1.filter((r) => r.key !== "hog").map((r) => (r.key === "educraft_retained" ? { ...r, percentage: 42.5 } : r)) }, { previous: s, keysWithRecords: ["hog"] })).includes("KEY_IN_USE"), true);
@@ -82,8 +82,8 @@ expect("derived overrides", [10, 12, 15, 15].map((r) => coreOverrideFor(r, s)), 
 expect("raising the ambassador row to 16 raises every override by 1", [10, 12, 15].map((r) => coreOverrideFor(r, withL1((rows) => { rows.find((x) => x.key === "ambassador")!.percentage = 16; rows.find((x) => x.key === "educraft_retained")!.percentage = 39; }))), [6, 4, 1]);
 
 // ── Draw tiers ───────────────────────────────────────────────────────────
-expect("Founder Distribution is 11% of revenue", founderDistributionShareOfRevenue(s), 0.11);
-expect("the ₦1M tier cannot self-fund ₦75K × 2 (warn, never block)", validateStructure(s).some((v) => v.code === "DRAW_UNFUNDED" && v.message.includes("₦1,000,000") && v.message.includes("₦110,000")), true);
+expect("Founder Distribution is 12% of revenue", founderDistributionShareOfRevenue(s), 0.1201);
+expect("the ₦1M tier cannot self-fund ₦75K × 2 (warn, never block)", validateStructure(s).some((v) => v.code === "DRAW_UNFUNDED" && v.message.includes("₦1,000,000") && v.message.includes("₦120,100")), true);
 expect("a self-funding tier does not warn", warnings(validateStructure({ ...s, founderDrawTiers: [{ minRevenueNgn: 0, maxRevenueNgn: null, drawPerFounderNgn: 0 }] })), []);
 expect("a gap in the draw tiers", errors(validateStructure({ ...s, founderDrawTiers: s.founderDrawTiers.map((d, i) => (i === 1 ? { ...d, minRevenueNgn: 600_000 } : d)) })), ["DRAW_GAP"]);
 expect("the first draw tier must start at 0", errors(validateStructure({ ...s, founderDrawTiers: s.founderDrawTiers.slice(1) })).includes("DRAW_GAP"), true);
@@ -93,9 +93,9 @@ expect("a buffer as big as the downpayment is refused (and leaves no room under 
 expect("an active service below the baseline warns", warnings(validateStructure(s, { minServiceDownpayment: 40 })).includes("SERVICE_BELOW_BASELINE"), true);
 
 // ── Auto-balance ─────────────────────────────────────────────────────────
-const over = withL1((r) => { r.find((x) => x.key === "hog")!.percentage = 3.5; r.find((x) => x.key === "coo")!.percentage = 3.5; });
+const over = withL1((r) => { r.find((x) => x.key === "hog")!.percentage = 4; r.find((x) => x.key === "coo")!.percentage = 4; });
 const balanced = autoBalance(over, { level: "level1" });
-expect("auto-balance moves the 2% off EduCraft retains", balanced.ok && [balanced.structure.level1.find((r) => r.key === "educraft_retained")!.percentage, balanced.moved, balanced.absorberKey], [38, -2, "educraft_retained"]);
+expect("auto-balance moves the 2% off EduCraft retains", balanced.ok && [balanced.structure.level1.find((r) => r.key === "educraft_retained")!.percentage, balanced.moved, balanced.absorberKey], [42, -2, "educraft_retained"]);
 expect("balanced structure is clean", balanced.ok ? errors(validateStructure(balanced.structure)) : ["not ok"], []);
 expect("nothing to move when already 100", (() => { const r = autoBalance(s, { level: "level1" }); return r.ok && r.moved; })(), 0);
 expect("auto-balance refuses when the absorber would go negative", (() => { const r = autoBalance(withL1((rows) => { rows.find((x) => x.key === "workers")!.percentage = 90; }), { level: "level1" }); return r.ok ? "ok" : r.error.includes("below 0"); })(), true);
@@ -104,8 +104,8 @@ expect("a pot level balances on its absorber", (() => { const r = autoBalance({ 
 expect("auto-balance refuses a person absorber", (() => { const r = autoBalance(withL1((rows) => { rows.find((x) => x.key === "educraft_retained")!.isAbsorber = false; rows.find((x) => x.key === "workers")!.isAbsorber = true; rows.find((x) => x.key === "hog")!.percentage = 3; }), { level: "level1" }); return r.ok ? "ok" : r.error.includes("person"); })(), true);
 
 // ── Diff, hash ───────────────────────────────────────────────────────────
-const v2 = withL1((r) => { r.find((x) => x.key === "hog")!.percentage = 3; r.find((x) => x.key === "educraft_retained")!.percentage = 39.5; });
-expect("the diff names the two changed rows", diffStructures(s, v2).map((d) => `${d.label}: ${d.from} → ${d.to}`), ["Head of Growth: 2.5% · completion → 3% · completion", "EduCraft retains: 40% · absorber → 39.5% · absorber"]);
+const v2 = withL1((r) => { r.find((x) => x.key === "hog")!.percentage = 4; r.find((x) => x.key === "educraft_retained")!.percentage = 43; });
+expect("the diff names the two changed rows", diffStructures(s, v2).map((d) => `${d.label}: ${d.from} → ${d.to}`), ["Head of Growth: 3% · downpayment → 4% · downpayment", "EduCraft retains: 44% · absorber → 43% · absorber"]);
 expect("a new pot shows as added", diffStructures(s, { ...s, level3: [...s.level3, { key: "legal", label: "Legal", parentKey: "REINVESTMENT_FUND", percentage: 100, isTrackedAsPot: true }] }).map((d) => [d.label, d.from, d.to]), [["Legal", null, "100% of reinvestment fund"]]);
 expect("tier changes are detected for the recount", [tiersChanged(s, v2), tiersChanged(s, { ...s, tiers: s.tiers.map((t) => (t.key === "SILVER" ? { ...t, ratePercent: 13 } : t)) })], [false, true]);
 expect("the hash ignores key order and is stable", [canonicalHash(s) === canonicalHash(JSON.parse(JSON.stringify(s))), canonicalHash(s) === canonicalHash(v2), canonicalHash(s).length], [true, false, 16]);
@@ -119,4 +119,4 @@ if (failures) {
   console.log(`\n${failures} check(s) failed`);
   process.exit(1);
 }
-console.log(`Cashflow structure rules hold (${hasErrors(validateStructure(s)) ? "v1 has errors!" : "v1 clean"}).`);
+console.log(`Cashflow structure rules hold (${hasErrors(validateStructure(s)) ? "v2 has errors!" : "v2 clean"}).`);
