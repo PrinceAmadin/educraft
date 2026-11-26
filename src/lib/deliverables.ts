@@ -31,7 +31,7 @@ export const DEFAULT_CHAPTER_COUNT = 5;
 /** Chapters of a full report that unlock with the downpayment. */
 export const EARLY_CHAPTERS = 2;
 
-const FULL_REPORTS = new Set(["FYP-FULL", "THESIS"]);
+const FULL_REPORTS = new Set(["FYP-FULL", "THESIS", "PHD-THESIS"]);
 const WITH_PROPOSAL = new Set(["COMBO-PR", "COMBO-PR-DA", "COMBO-PRDS", "COMBO-PFRS"]);
 const WITH_SLIDES = new Set(["COMBO-RS", "COMBO-RS-DA", "COMBO-PRDS", "COMBO-PFRS"]);
 

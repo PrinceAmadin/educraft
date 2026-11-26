@@ -36,7 +36,7 @@ import { parseChapter } from "@/lib/assembly/parse-chapter";
 import { writtenBlanks } from "@/lib/assembly/text-rules";
 import { ABSTRACT_MAX_WORDS, ABSTRACT_MIN_WORDS, ABSTRACT_TARGET_HI, ABSTRACT_TARGET_LO, abstractBand, type AbstractBand } from "@/lib/generation/preliminary-pages-rules";
 import { isChapterBasedOrder, prelimIntakeGaps } from "@/lib/assembly/assemble";
-import { lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
+import { degreeName, getDegreeFromDepartment, lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
 import { expectedChapters } from "@/lib/deliverables";
 import { loadChapterTexts } from "@/lib/services/chapter-texts";
 
@@ -329,6 +329,7 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
       matricNumber: true,
       supervisorName: true,
       hodName: true,
+      degreeLevel: true,
       dedicationDetails: true,
       acknowledgmentDetails: true,
       client: {
@@ -376,7 +377,16 @@ export async function readContext(projectDbId: string): Promise<PreliminaryPages
     hod_name: stripTitle(hod) || "[HOD_NAME]",
     hod_title: extractTitle(hod) ?? "Dr.",
     parent_reference: parentReference,
-    degree_programme: "Bachelor of Science",
+    // Was hard-coded "Bachelor of Science", so every engineering, law and nursing report got the
+    // wrong award from the AI page writer while the document assembly had it right all along. The
+    // COO-confirmed department on the mode card wins over the one typed at intake.
+    degree_programme: degreeName(
+      getDegreeFromDepartment(project.researchMode?.department ?? project.client?.department, {
+        faculty: project.client?.faculty,
+        institution: project.client?.university?.name,
+        level: project.degreeLevel,
+      }),
+    ),
     submission_year: String(now.getFullYear()),
     submission_month: monthName(now.getMonth() + 1),
     research_mode: `Mode ${project.researchMode?.modeNumber ?? 1}`,

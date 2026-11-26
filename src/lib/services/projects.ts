@@ -16,6 +16,7 @@ import {
 } from "@/lib/services/ambassador-commission";
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
+import { degreeLevelForService } from "@/lib/degree-level";
 import { formatNaira } from "@/lib/utils";
 import { pausedDaysBetween, shiftedDeadlines } from "@/lib/pause-clock";
 import { proBonoFinancials } from "@/lib/pro-bono";
@@ -1560,6 +1561,8 @@ export async function createProjectManual(
         referencingStyle: input.referencingStyle ? input.referencingStyle : null,
         minimumPages: input.minimumPages || null,
         projectType: input.projectType ? input.projectType : "NOT_APPLICABLE",
+        // The service says the level; the admin form may override it (a PhD is always made here).
+        degreeLevel: input.degreeLevel || degreeLevelForService(service.serviceCode),
         intakeModeAnswer: input.intakeModeAnswer ? input.intakeModeAnswer : null,
         chapterCount: input.chapterCount ?? null,
         specialInstructions: input.specialInstructions || null,

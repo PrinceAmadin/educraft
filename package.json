@@ -26,6 +26,7 @@
     "check:tiers": "tsx scripts/check-ambassador-tiers.ts",
     "check:cc": "tsx scripts/check-command-center.ts",
     "check:prompts": "tsx scripts/check-prompt-loader.ts",
+    "check:degree-level": "tsx scripts/check-degree-level.ts",
     "check:generation": "tsx scripts/check-generation.ts",
     "check:modes": "tsx scripts/check-mode-classifier.ts",
     "check:sources": "tsx scripts/check-source-stage.ts",

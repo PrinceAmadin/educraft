@@ -16,6 +16,7 @@ import {
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { degreeLevelForService } from "@/lib/degree-level";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { proBonoFinancials } from "@/lib/pro-bono";
 import { CouponError, redeemCouponTx, resolveCouponForOrder } from "@/lib/services/finance/coupons";
@@ -378,6 +379,8 @@ export async function submitIntake(
           supervisorName: input.supervisorName || null,
           hodName: input.hodName || null,
           projectType: input.projectType ? input.projectType : "NOT_APPLICABLE",
+      // The service says what level the work is, so the form asks no extra question.
+      degreeLevel: degreeLevelForService(input.serviceCode),
           chapterCount: isChapterService(input.serviceCode) ? chapters.length : (input.chapterCount ?? null),
           referencingStyle: input.referencingStyle ? input.referencingStyle : null,
           dataRequirements: input.dataRequirements ? input.dataRequirements : null,

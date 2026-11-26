@@ -291,14 +291,32 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
     expressDeliverySurcharge: EXPRESS_GENERAL,
   },
   {
-    // Listed under Section B, but a final-year-equivalent report: the final-year
-    // express surcharge (founder, 27 Sept 2026).
+    // A master's dissertation: ₦120,000 flat (founder, 26 Nov 2026). Priced for the work, not the
+    // title — the base covers writing the report from research and results the student supplies,
+    // and data analysis is the separate option below. 150-200 pages of written chapters.
     serviceCode: "THESIS",
-    serviceName: "Thesis / Dissertation",
+    serviceName: "Master's Dissertation",
     category: ServiceCategory.ACADEMIC,
-    basePrice: 70000,
+    basePrice: 120000,
     intakeFormTemplate: "academic_fyp",
-    estimatedDays: 30,
+    estimatedDays: 45,
+    description: "A master's dissertation written from your research and results, 150-200 pages.",
+    expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
+    variants: [{ name: "With Data Analysis", priceAddon: 40000 }],
+  },
+  {
+    // Quote-only (founder, 26 Nov 2026): doctoral scope varies more than any other category, the
+    // six-chapter path has never been run, and an original contribution to knowledge is the one
+    // claim a generation pipeline cannot make for itself. ₦200,000 is the starting figure, agreed
+    // after we have seen the work, so this carries no list price.
+    serviceCode: "PHD-THESIS",
+    serviceName: "PhD Thesis",
+    category: ServiceCategory.ACADEMIC,
+    basePrice: 0,
+    pricingModel: PricingModel.VARIABLE,
+    intakeFormTemplate: "academic_fyp",
+    estimatedDays: 90,
+    description: "A doctoral thesis. Quoted after we have seen the scope of the research.",
     expressDeliverySurcharge: EXPRESS_FINAL_YEAR,
   },
 
@@ -382,6 +400,23 @@ export const SERVICE_CATALOGUE: CatalogueService[] = [
  *            Final year editing at 10% / 15% — switched off (same decision)
  */
 export const RETIRED_SERVICE_CODES = [
+  // Specialising on final-year, ENT, seminar, publication and postgraduate work
+  // (founder, 26 Nov 2026). Deactivated, never deleted: existing projects point at them.
+  // Note IT-PPT and EDIT-IT also covered SEMINAR reports, so the seminar-slides and
+  // seminar-editing routes go with them; SEM remains the seminar service.
+  "IT-3M",
+  "IT-6M",
+  "IT-PPT",
+  "EDIT-IT",
+  "TERM",
+  "ASSIGN",
+  "MINI",
+  "ESSAY",
+  "CASE",
+  "LTR-INF",
+  "LTR-APP",
+  "LTR-FORM",
+
   "DATA",
   "FORMAT",
   "GD-FLY",

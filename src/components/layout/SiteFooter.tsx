@@ -19,9 +19,9 @@ function groups(hq: HqContact) {
       heading: "Services",
       links: [
         { label: "Final year projects", href: "/services" },
-        { label: "Reports & papers", href: "/services" },
+        { label: "Master's & PhD", href: "/services" },
+        { label: "Publication papers", href: "/services" },
         { label: "Presentations", href: "/services" },
-        { label: "Letters & essays", href: "/services" },
         { label: "Editing & formatting", href: "/services" },
       ],
     },

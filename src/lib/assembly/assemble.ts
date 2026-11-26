@@ -50,6 +50,7 @@ import { downloadName } from "@/lib/files/policy";
 import { readSubmittedContact } from "@/lib/submitted-contact";
 import { expectedChapters, orderedChapters } from "@/lib/deliverables";
 import { isReportTemplate } from "@/lib/generation/generation-state";
+import { workNoun, type DegreeLevel } from "@/lib/degree-level";
 import { chapterTitle } from "@/lib/generation/progress-events";
 import { CERTIFICATE_AWARDS, degreeName, getDegreeFromDepartment, lookupDepartment, resolveSection, type SectionKey } from "@/lib/generation/department-map";
 import { STYLE_LABEL, effectivePlacement } from "@/lib/generation/referencing";
@@ -97,6 +98,12 @@ export interface AssemblyInput {
   hod: string | null;
   /** The month and year printed on the cover and title page. */
   submission: Date;
+  /**
+   * Undergraduate project, master's dissertation or PhD thesis. Decides the award on the title page
+   * and the word the document calls itself; absent means undergraduate, so every report written
+   * before postgraduate work existed assembles byte for byte as it did.
+   */
+  degreeLevel?: DegreeLevel;
   dedication: { type: string | null; details: string | null };
   acknowledgementNote: string | null;
   mode: number | null;
@@ -180,19 +187,20 @@ function awardPhrase(degree: string, upper = false): string {
  */
 export const PRELIM_TEXT = {
   /** Title page, in bold capitals under the student's name; `degree` is getDegreeFromDepartment's abbreviation (its case is kept). */
-  submission: (dept: string, faculty: string, university: string, degree: string) =>
-    `${`A project submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, in partial fulfilment of the requirements for the award of`.toUpperCase()} ${awardPhrase(degree, true)}`,
+  submission: (dept: string, faculty: string, university: string, degree: string, level: DegreeLevel = "UNDERGRADUATE") =>
+    `${`A ${workNoun(level)} submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, in partial fulfilment of the requirements for the award of`.toUpperCase()} ${awardPhrase(degree, true)}`,
   by: "BY",
   supervisedBy: (name: string) => `SUPERVISED BY: ${name.toUpperCase()}`,
-  declaration: (title: string, dept: string, faculty: string, university: string, supervisor: string) =>
-    `I hereby declare that this project titled, "${title}", submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, is an original work carried out by me under the supervision of ${supervisor}. The work has not been submitted wholly or in part for the award of any degree in this or any other institution.`,
-  certification: (title: string, student: string, matric: string, dept: string, faculty: string, university: string, degree: string) =>
-    `This is to certify that this project titled, "${title}", was carried out by ${student} (${matric}), of the Department of ${dept}, Faculty of ${faculty}, ${university}, under my supervision, and has been found suitable for the award of ${awardPhrase(degree)}.`,
-  dedication: {
-    God: "This project is dedicated to the Almighty God, the source of my wisdom, strength and understanding.",
-    Family: "This project is dedicated to my family, whose unwavering support, encouragement and sacrifices made this achievement possible.",
-    Both: "This project is dedicated to the Almighty God, for His grace and mercy, and to my family, whose unwavering support and sacrifices made this achievement possible.",
-  } as Record<string, string>,
+  declaration: (title: string, dept: string, faculty: string, university: string, supervisor: string, level: DegreeLevel = "UNDERGRADUATE") =>
+    `I hereby declare that this ${workNoun(level)} titled, "${title}", submitted to the Department of ${dept}, Faculty of ${faculty}, ${university}, is an original work carried out by me under the supervision of ${supervisor}. The work has not been submitted wholly or in part for the award of any degree in this or any other institution.`,
+  certification: (title: string, student: string, matric: string, dept: string, faculty: string, university: string, degree: string, level: DegreeLevel = "UNDERGRADUATE") =>
+    `This is to certify that this ${workNoun(level)} titled, "${title}", was carried out by ${student} (${matric}), of the Department of ${dept}, Faculty of ${faculty}, ${university}, under my supervision, and has been found suitable for the award of ${awardPhrase(degree)}.`,
+  /** `level` only changes the noun: "This project is dedicated…" becomes "This dissertation is dedicated…". */
+  dedication: (level: DegreeLevel = "UNDERGRADUATE"): Record<string, string> => ({
+    God: `This ${workNoun(level)} is dedicated to the Almighty God, the source of my wisdom, strength and understanding.`,
+    Family: `This ${workNoun(level)} is dedicated to my family, whose unwavering support, encouragement and sacrifices made this achievement possible.`,
+    Both: `This ${workNoun(level)} is dedicated to the Almighty God, for His grace and mercy, and to my family, whose unwavering support and sacrifices made this achievement possible.`,
+  }),
   dedicationPlaceholder: "[DEDICATION TO BE SUPPLIED]",
   acknowledgementPlaceholder: "[ACKNOWLEDGEMENT TO BE SUPPLIED]",
   acknowledgementFromOrder: (note: string) => `[FROM THE ORDER: ${note}]`,
@@ -270,6 +278,7 @@ export async function loadAssemblyInput(
       acknowledgmentDetails: true,
       additionalData: true,
       chapterCount: true,
+      degreeLevel: true,
       expectedDeliveryAt: true,
       clientDeadline: true,
       service: { select: { serviceCode: true, intakeFormTemplate: true } },
@@ -329,6 +338,7 @@ export async function loadAssemblyInput(
     supervisor: project.supervisorName,
     hod: project.hodName,
     submission: project.expectedDeliveryAt ?? project.clientDeadline ?? new Date(),
+    degreeLevel: project.degreeLevel,
     dedication: { type: project.dedicationType ?? dedication?.type ?? null, details: dedication?.details ?? null },
     acknowledgementNote: acknowledgement?.details ?? null,
     mode: settings?.mode ?? null,
@@ -894,7 +904,9 @@ export function prelimIntakeGaps(input: Pick<AssemblyInput, "student" | "supervi
   if (!input.supervisor?.trim()) gaps.push("Supervisor's name");
   if (!input.hod?.trim()) gaps.push("Head of Department's name");
   const custom = input.dedication.type === "Custom" || (!input.dedication.type && input.dedication.details);
-  const dedicated = custom ? Boolean(input.dedication.details?.trim()) : Boolean(PRELIM_TEXT.dedication[input.dedication.type ?? ""]);
+  // The level is irrelevant here: this asks whether the type is one we have wording for, and the
+  // three keys (God, Family, Both) are the same at every level.
+  const dedicated = custom ? Boolean(input.dedication.details?.trim()) : Boolean(PRELIM_TEXT.dedication()[input.dedication.type ?? ""]);
   if (!dedicated) gaps.push("Dedication");
   return gaps;
 }
@@ -940,6 +952,7 @@ function titlePage(input: AssemblyInput, degree: string, matric: string, supervi
     input.faculty.replace(/^faculty of\s+/i, "") || "[FACULTY]",
     input.university || "[UNIVERSITY]",
     degree,
+    input.degreeLevel,
   );
   // The template's gaps: 6 blank lines after the topic, 3 after the matric number, 3 after the statement, 3 after the supervisor.
   const gaps = [6, 3, 3, 3];
@@ -991,7 +1004,7 @@ function signatureBlock(name: string, role: string | null): Paragraph[] {
 }
 
 function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: number; figures: number }): (Paragraph | Table | TableOfContents)[] {
-  const degree = getDegreeFromDepartment(input.department, { faculty: input.faculty, institution: input.university });
+  const degree = getDegreeFromDepartment(input.department, { faculty: input.faculty, institution: input.university, level: input.degreeLevel });
   const matric = orPlaceholder(input.student.matric, PRELIM_TEXT.matricPlaceholder, ctx);
   const supervisor = orPlaceholder(input.supervisor, PRELIM_TEXT.supervisorPlaceholder, ctx);
   const hod = orPlaceholder(input.hod, PRELIM_TEXT.hodPlaceholder, ctx);
@@ -1001,7 +1014,7 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
   const dedicationText =
     input.dedication.type === "Custom" || (!input.dedication.type && input.dedication.details)
       ? orPlaceholder(input.dedication.details, PRELIM_TEXT.dedicationPlaceholder, ctx)
-      : (PRELIM_TEXT.dedication[input.dedication.type ?? ""] ?? orPlaceholder(null, PRELIM_TEXT.dedicationPlaceholder, ctx));
+      : (PRELIM_TEXT.dedication(input.degreeLevel)[input.dedication.type ?? ""] ?? orPlaceholder(null, PRELIM_TEXT.dedicationPlaceholder, ctx));
 
   // D10: the acknowledgement, abstract and list of abbreviations use the stored
   // agent output when the PreliminaryPages row exists; otherwise the founder's
@@ -1025,13 +1038,13 @@ function preliminaryChildren(input: AssemblyInput, ctx: Ctx, counts: { tables: n
     ...titlePage(input, degree, matric, supervisor),
 
     pageTitle(PAGE_TITLES.declaration),
-    new Paragraph({ children: runsFor(PRELIM_TEXT.declaration(input.title, dept, faculty, input.university, supervisor), ctx) }),
+    new Paragraph({ children: runsFor(PRELIM_TEXT.declaration(input.title, dept, faculty, input.university, supervisor, input.degreeLevel), ctx) }),
     ...blanks(2),
     ...signatureBlock(input.student.name, null),
     new Paragraph({ children: [plain(matric)] }),
 
     pageTitle(PAGE_TITLES.certification),
-    new Paragraph({ children: runsFor(PRELIM_TEXT.certification(input.title, input.student.name, matric, dept, faculty, input.university, degree), ctx) }),
+    new Paragraph({ children: runsFor(PRELIM_TEXT.certification(input.title, input.student.name, matric, dept, faculty, input.university, degree, input.degreeLevel), ctx) }),
     ...blanks(3),
     ...signatureBlock(supervisor, PRELIM_TEXT.projectSupervisor),
     ...blanks(2),

@@ -12,6 +12,8 @@
  * Pure (no database, no filesystem) so the mode classifier and the checks can use it.
  */
 
+import type { DegreeLevel } from "../degree-level";
+
 /** The eleven department-section tags the chapter prompt files contain. */
 export const SECTION_KEYS = [
   "AGRICULTURE",
@@ -395,6 +397,34 @@ export const DEGREE_NAMES: Record<string, string> = {
   "LL.B": "Bachelor of Laws",
   RN: "Registered Nurse",
   RM: "Registered Midwife",
+  // Postgraduate awards (26 Nov 2026). An MBA is never derived — it comes from the programme the
+  // client states, because a Business master's may be an MBA or an M.Sc depending on the course.
+  "M.Sc": "Master of Science",
+  "M.Eng": "Master of Engineering",
+  "M.Tech": "Master of Technology",
+  "M.A": "Master of Arts",
+  "M.Ed": "Master of Education",
+  "M.Arch": "Master of Architecture",
+  "M.Pharm": "Master of Pharmacy",
+  "LL.M": "Master of Laws",
+  MBA: "Master of Business Administration",
+  MPH: "Master of Public Health",
+  "M.Phil": "Master of Philosophy",
+  "Ph.D": "Doctor of Philosophy",
+};
+
+/**
+ * The master's award that follows a department's first degree. Anything not listed takes M.Sc,
+ * which is what most Nigerian faculties award for a taught master's outside the named professions.
+ */
+const MASTERS_AWARD: Record<string, string> = {
+  "B.Eng": "M.Eng",
+  "B.Tech": "M.Tech",
+  "B.A": "M.A",
+  "B.Ed": "M.Ed",
+  "B.Arch": "M.Arch",
+  "B.Pharm": "M.Pharm",
+  "LL.B": "LL.M",
 };
 
 /** Schools of nursing and midwifery award the RN / RM certificate, not a degree. */
@@ -421,15 +451,29 @@ function degreeFromText(text: string | null | undefined): string | null {
  */
 export function getDegreeFromDepartment(
   department: string | null | undefined,
-  context: { faculty?: string | null; institution?: string | null } = {},
+  context: { faculty?: string | null; institution?: string | null; level?: DegreeLevel } = {},
 ): string {
+  const level = context.level ?? "UNDERGRADUATE";
   const entry = lookupDepartment(department);
-  if (entry?.section === "NURSING") {
+  if (entry?.section === "NURSING" && level === "UNDERGRADUATE") {
     const where = `${context.faculty ?? ""} ${context.institution ?? ""}`;
     if (/\b(school|college)s? of (nursing|midwifery)\b/i.test(where)) return /midwi/i.test(entry.name) ? "RM" : "RN";
   }
-  if (entry && !entry.group) return entry.degree;
-  return degreeFromText(department) ?? degreeFromText(context.faculty) ?? entry?.degree ?? "B.Sc";
+  const first = entry && !entry.group ? entry.degree : (degreeFromText(department) ?? degreeFromText(context.faculty) ?? entry?.degree ?? "B.Sc");
+  return postgraduateAward(first, level);
+}
+
+/**
+ * The award a level confers, given the department's first degree. A PhD is Ph.D everywhere; a
+ * master's follows MASTERS_AWARD and otherwise takes M.Sc. An undergraduate award is returned
+ * unchanged, so every report written before postgraduate work existed reads exactly as it did.
+ */
+export function postgraduateAward(firstDegree: string, level: DegreeLevel): string {
+  if (level === "PHD") return "Ph.D";
+  if (level !== "MASTERS") return firstDegree;
+  // A school of nursing's RN/RM is a certificate, not a first degree to build on.
+  if (CERTIFICATE_AWARDS.has(firstDegree)) return "M.Sc";
+  return MASTERS_AWARD[firstDegree] ?? "M.Sc";
 }
 
 /** "Bachelor of Science" for "B.Sc" (the abbreviation itself when the name is unknown). */

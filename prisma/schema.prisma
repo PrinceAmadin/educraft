@@ -432,6 +432,15 @@ enum ProjectType {
   NOT_APPLICABLE
 }
 
+/// Undergraduate project, master's dissertation or PhD thesis. Decides the award on the title page,
+/// the word the document calls itself, the chapter ceiling (six is PhD only), the reference floor,
+/// the abstract band and the length target. Rules: src/lib/degree-level.ts.
+enum DegreeLevel {
+  UNDERGRADUATE
+  MASTERS
+  PHD
+}
+
 enum ReferencingStyle {
   APA_7TH
   APA_6TH
@@ -490,6 +499,9 @@ model Project {
   otherSupervisors    String?
   hodName             String?
   projectType         ProjectType       @default(NOT_APPLICABLE)
+  /// Every report written before postgraduate work existed is an undergraduate project, which the
+  /// default keeps true without a backfill.
+  degreeLevel         DegreeLevel       @default(UNDERGRADUATE)
   chapterCount        Int?
   referencingStyle    ReferencingStyle?
   minimumPages        String?

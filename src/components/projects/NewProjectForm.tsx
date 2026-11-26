@@ -26,6 +26,7 @@ import {
 import { EmailToggle } from "@/components/projects/AmbassadorAllocation";
 import { createProjectSchema, type CreateProjectInput } from "@/lib/validations/projects";
 import { ACADEMIC_LEVELS, INTAKE_MODE_LABEL, PROJECT_TYPES, REFERENCING_STYLES } from "@/lib/constants";
+import { DEGREE_LEVELS, degreeLevelLabel } from "@/lib/degree-level";
 import { COMMISSION_RATE_PRESETS, commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
@@ -835,6 +836,16 @@ function DetailsStep({ service }: { service: ServiceOption | null }) {
           </Field>
           <Field label="Minimum pages" htmlFor="minimumPages">
             <Input id="minimumPages" {...register("minimumPages")} />
+          </Field>
+          <Field label="Level" htmlFor="degreeLevel" hint="Leave blank and the service decides. A PhD is always set here.">
+            <Select id="degreeLevel" {...register("degreeLevel")}>
+              <option value="">From the service</option>
+              {DEGREE_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {degreeLevelLabel(l)}
+                </option>
+              ))}
+            </Select>
           </Field>
           <Field label="Project type" htmlFor="projectType">
             <Select id="projectType" {...register("projectType")}>
