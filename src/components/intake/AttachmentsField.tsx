@@ -39,7 +39,7 @@ export function AttachmentsField({
   const setBusy = React.useContext(UploadBusyContext);
   const all = (watch("attachments") ?? []) as IntakeAttachment[];
   const mine = all.filter((f) => f.category === category);
-  const [pending, setPending] = React.useState<string[]>([]);
+  const [pending, setPending] = React.useState<{ name: string; percent: number }[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const input = React.useRef<HTMLInputElement>(null);
 
@@ -62,12 +62,17 @@ export function AttachmentsField({
         setError(`${file.name} is over 25 MB.`);
         continue;
       }
-      setPending((p) => [...p, file.name]);
+      setPending((p) => [...p, { name: file.name, percent: 0 }]);
       try {
         const blob = await upload(`intake/${file.name}`, file, {
           access: "public",
           handleUploadUrl: "/api/intake/upload",
           contentType: file.type || undefined,
+          onUploadProgress: ({ percentage }) => {
+            setPending((p) =>
+              p.map((item) => (item.name === file.name ? { ...item, percent: percentage } : item))
+            );
+          },
         });
         const next: IntakeAttachment = {
           url: blob.url,
@@ -86,7 +91,7 @@ export function AttachmentsField({
             : `${file.name} could not be uploaded. Please try again.`
         );
       } finally {
-        setPending((p) => p.filter((n) => n !== file.name));
+        setPending((p) => p.filter((item) => item.name !== file.name));
       }
     }
     if (input.current) input.current.value = "";
@@ -137,10 +142,26 @@ export function AttachmentsField({
                 </button>
               </li>
             ))}
-            {pending.map((name) => (
-              <li key={`p-${name}`} className="flex min-h-11 items-center gap-3 py-1 text-muted-foreground">
+            {pending.map((item) => (
+              <li key={`p-${item.name}`} className="flex min-h-11 items-center gap-3 py-1 text-muted-foreground">
                 <LuLoaderCircle className="size-4 shrink-0 animate-spin" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{name}</span>
+                <div className="min-w-0 flex-1">
+                  <span className="block truncate">{item.name}</span>
+                  <div
+                    className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-zone"
+                    role="progressbar"
+                    aria-valuenow={Math.round(item.percent)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Uploading ${item.name}`}
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
+                      style={{ width: `${Math.max(3, Math.min(100, item.percent))}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="shrink-0 font-mono text-xs text-subtle">{Math.round(item.percent)}%</span>
               </li>
             ))}
           </ul>
