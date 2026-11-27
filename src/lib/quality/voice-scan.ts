@@ -139,6 +139,59 @@ const CROSS_REF = /\b(?:(?:sub-?)?section\s+\d+(?:\.\d+)+|chapter\s+(?:one|two|t
 const FIRST_PERSON = /\b(?:[Ww]e|[Oo]urs?|us|[Mm]y)\b|\bI (?:am|was|have|had|found|find|believe|think|will|would|shall|feel|observed|conducted|used|designed|chose|noticed|argue|propose|recommend|conclude|developed|collected|interviewed|wish|thank|acknowledge|appreciate|owe|dedicate)\b/;
 const stripQuotes = (s: string) => s.replace(/“[^”]*”|"[^"]*"/g, " ");
 
+/**
+ * Where a paragraph's quotation marks open and close. A span runs from just
+ * after the opening mark to just before the closing one; an unclosed quotation
+ * runs to the end of the paragraph, because that is still the person being
+ * quoted and not the report.
+ */
+function quotedSpans(text: string): [number, number][] {
+  const spans: [number, number][] = [];
+  let open: number | null = null;
+  let closer = '"';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (open === null) {
+      if (c === '"') {
+        open = i;
+        closer = '"';
+      } else if (c === "“") {
+        open = i;
+        closer = "”";
+      }
+    } else if (c === closer) {
+      spans.push([open + 1, i]);
+      open = null;
+    }
+  }
+  if (open !== null) spans.push([open + 1, text.length]);
+  return spans;
+}
+
+/**
+ * The paragraph with everything inside quotation marks replaced by spaces, so
+ * the voice rules read only EduCraft's own words. The replacement keeps the
+ * same length, so an offset into this string is the same offset into the
+ * original.
+ *
+ * Why this is not `stripQuotes`: that works on one sentence and needs the
+ * opening and closing mark in the same one. A verbatim quotation almost always
+ * contains a full stop, so `splitSentences` cuts it in two and neither half
+ * carries a matched pair — the quoted words then read as the report's own
+ * voice. The Mode 6 pilot (26 Nov 2026) hit this on the very chapter Mode 6
+ * exists to produce: a Chapter Four quoting nine nurses, every quotation
+ * traced word for word to the transcripts, failed the first-person rule nine
+ * times on the nurses' own words — and a failed chapter check is then handed
+ * to a repair or a rewrite, which would have stripped out the quotations that
+ * are the chapter's whole evidential basis. A quotation is evidence, not
+ * EduCraft's prose, and every rule here exists to police EduCraft's prose.
+ */
+function withoutQuotations(text: string): string {
+  let out = text;
+  for (const [a, b] of quotedSpans(text)) out = out.slice(0, a) + " ".repeat(b - a) + out.slice(b);
+  return out;
+}
+
 function finding(p: ProseParagraph, quote: string, rule: VoiceRule, severity: "MAJOR" | "MINOR"): VoiceFinding {
   return { chapter: p.chapter, paragraph: p.index, section: p.section, quote: shortQuote(quote, 200), rule, severity, fix: VOICE_FIX[rule], source: "scan" };
 }
@@ -159,23 +212,31 @@ export function scanVoice(paragraphs: ProseParagraph[]): VoiceFinding[] {
     const thin: ProseParagraph[] = [];
     paras.forEach((p, i) => {
       const sentences = splitSentences(p.text);
+      // Every rule below judges EduCraft's own words, so each sentence is read
+      // with its quotations blanked out. `bare` has the same length and the same
+      // offsets as `s`, and the finding still carries the real sentence, so the
+      // COO sees what was written and the AI review can still match it verbatim.
+      const unquoted = withoutQuotations(p.text);
+      let cursor = 0;
       for (const s of sentences) {
-        const opener = BANNED_OPENERS.find((o) => o.pattern.test(s));
+        const at = p.text.indexOf(s, cursor);
+        const bare = at >= 0 ? unquoted.slice(at, at + s.length) : stripQuotes(s);
+        if (at >= 0) cursor = at + s.length;
+        const opener = BANNED_OPENERS.find((o) => o.pattern.test(bare));
         if (opener) out.push(finding(p, s, "opener", opener.severity));
-        if (/^(?:Firstly|Secondly|Thirdly)\b/.test(s)) ordinals.push({ p, s });
+        if (/^(?:Firstly|Secondly|Thirdly)\b/.test(bare)) ordinals.push({ p, s });
         for (const w of PROMOTIONAL) {
-          if (!w.pattern.test(s) || (w.except && w.except.test(s)) || (w.allowCited && CITED.test(s))) continue;
+          if (!w.pattern.test(bare) || (w.except && w.except.test(bare)) || (w.allowCited && CITED.test(s))) continue;
           out.push(finding(p, s, "promotional", "MAJOR"));
           break;
         }
-        const meta = META_PHRASES.find((m) => m.pattern.test(s));
+        const meta = META_PHRASES.find((m) => m.pattern.test(bare));
         if (meta) out.push(finding(p, s, "meta", "MAJOR"));
-        const bare = stripQuotes(s);
         if (FIRST_PERSON.test(bare)) out.push(finding(p, s, "first_person", "MAJOR"));
-        const lower = s.toLowerCase();
+        const lower = bare.toLowerCase();
         const vague = VAGUE_QUALIFIERS.find((v) => lower.includes(v));
         if (vague) out.push(finding(p, s, "vague", "MINOR"));
-        const weak = WEAK_VERBS.find((v) => v.pattern.test(s));
+        const weak = WEAK_VERBS.find((v) => v.pattern.test(bare));
         if (weak) out.push(finding(p, s, "weak_verb", "MINOR"));
       }
       const first = sentences[0] ?? p.text;

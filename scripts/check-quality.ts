@@ -286,6 +286,28 @@ const replaceOnce = (s: string, a: string | RegExp, b: string) => {
   check("scan: a Firstly… Secondly run", hit("Firstly, traders adopted. Secondly, fees fell.", "transition"));
   check("scan: meta-commentary", hit("This chapter aims to explain adoption.", "meta") && hit("This section will discuss adoption.", "meta"));
   check("scan: first person, not inside quotes or 'US'", hit("We found that sales rose.", "first_person") && !hit('Traders answered "we use wallets daily" in the survey. The US market differs.', "first_person"));
+  // A verbatim quotation is evidence, not EduCraft's prose, and it almost always
+  // contains a full stop — so sentence splitting cuts it in two and neither half
+  // carries a matched pair of quote marks. The Mode 6 pilot (26 Nov 2026) hit
+  // this on the very chapter Mode 6 exists to produce: a Chapter Four quoting
+  // nine nurses, every quotation traced word for word to the transcripts, failed
+  // the first-person rule nine times on the nurses' own words.
+  {
+    const nurse =
+      'Participant 1 described a sustained separation from her household, stating that "every cough I heard from a patient, I was thinking of my children at home. I started sleeping in the sitting room, away from my husband and the children, for almost two months" (Participant 1, registered nurse, 9 years).';
+    check("scan: a quotation spanning a full stop is not the report's own first person", !hit(nurse, "first_person"), voiceOf(nurse).map((f) => f.rule).join(", "));
+    check("scan: the report's own first person around a quotation is still caught", hit(`We interviewed her. ${nurse}`, "first_person"));
+    check(
+      "scan: a quotation left unclosed is still the participant speaking, to the end of the paragraph",
+      !hit('She said that "I was afraid. I will not lie to you, my children were on my mind.', "first_person"),
+    );
+    // The promotional rules are not anchored to a sentence start, so a banned
+    // word inside a participant's words used to fire wherever it sat.
+    const praise = 'She recalled the period, saying that "the matron was groundbreaking. She played a pivotal role in keeping us alive."';
+    check("scan: the other voice rules ignore quoted speech too", !hit(praise, "promotional") && !hit(praise, "first_person"), voiceOf(praise).map((f) => f.rule).join(", "));
+    check("scan: the same word in EduCraft's own prose is still caught", hit("The matron's approach was groundbreaking.", "promotional"));
+    check("scan: a banned opener outside a quotation is still caught", hit('In today\'s fast-paced world, traders "use wallets", they said.', "opener"));
+  }
   check("scan: two section cross-references in a paragraph", voiceOf("Traders sell food.\n\nAs discussed in Section 2.3 and Section 2.4, fees matter.").some((f) => f.rule === "cross_reference"));
   check("scan: vague qualifiers and weak verbs are MINOR", hit("The wallet showed high performance.", "vague", "MINOR") && hit("Traders utilise wallets.", "weak_verb", "MINOR"));
   check("scan: sentences do not break on et al. or initials", splitSentences("Okafor et al. (2020) found this. Dr. K. Bello agreed. Sales rose.").length === 3);
