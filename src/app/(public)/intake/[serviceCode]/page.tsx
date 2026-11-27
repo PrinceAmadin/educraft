@@ -8,6 +8,7 @@ import { resolveTemplate } from "@/lib/intake-templates";
 import { IntakeForm } from "@/components/intake/IntakeForm";
 import { formatNaira } from "@/lib/utils";
 import { isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { isPublicationService, normalizePaperCount } from "@/lib/publication-pricing";
 import { getHqContact } from "@/lib/services/hq-contact";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export default async function IntakeServicePage({
   searchParams,
 }: {
   params: { serviceCode: string };
-  searchParams: { ref?: string; chapters?: string; option?: string };
+  searchParams: { ref?: string; chapters?: string; papers?: string; option?: string };
 }) {
   const [service, hq] = await Promise.all([getServiceByCode(params.serviceCode), getHqContact()]);
   if (!service) notFound();
@@ -41,6 +42,9 @@ export default async function IntakeServicePage({
       .filter((n) => Number.isInteger(n))
   );
   const initialVariantId = service.variants.some((v) => v.id === searchParams.option) ? searchParams.option : "";
+
+  // The price list can hand over a paper count for the publication service.
+  const initialPapers = searchParams.papers ? normalizePaperCount(Number(searchParams.papers)) : 1;
 
   // Validate a URL referral code so the form only prefills a real one.
   const ref = searchParams.ref?.trim();
@@ -74,7 +78,9 @@ export default async function IntakeServicePage({
             ? "Price confirmed after review"
             : isChapterService(service.serviceCode)
               ? "Priced by the chapters you pick"
-              : `${service.variants.length > 0 ? "from " : ""}${formatNaira(service.basePrice)}`}
+              : isPublicationService(service.serviceCode)
+                ? "Priced by the number of papers"
+                : `${service.variants.length > 0 ? "from " : ""}${formatNaira(service.basePrice)}`}
           {" · "}~{service.estimatedDays} days
         </p>
       </div>
@@ -98,6 +104,7 @@ export default async function IntakeServicePage({
           })}
           initialReferralCode={initialReferralCode}
           initialChapters={initialChapters}
+          initialPapers={initialPapers}
           initialVariantId={initialVariantId}
         />
       ) : (

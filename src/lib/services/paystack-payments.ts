@@ -201,7 +201,7 @@ export async function initializeIntakePayment(
     throw new PaystackPaymentError("Choose at least one chapter");
   }
   const priceInputs = {
-    basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters }),
+    basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters, papers: input.papers }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,

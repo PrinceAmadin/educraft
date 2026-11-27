@@ -16,6 +16,7 @@ import {
 import { commissionFor } from "@/lib/commission";
 import { computePrice, computeSplit } from "@/lib/pricing";
 import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { isPublicationService, normalizePaperCount } from "@/lib/publication-pricing";
 import { degreeLevelForService } from "@/lib/degree-level";
 import { resolveTemplate } from "@/lib/intake-templates";
 import { proBonoFinancials } from "@/lib/pro-bono";
@@ -158,8 +159,9 @@ export async function submitIntake(
   if (isChapterService(input.serviceCode) && chapters.length === 0) {
     throw new IntakeError("Choose at least one chapter");
   }
+  const papers = normalizePaperCount(input.papers);
   const priceInputs = {
-    basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters }),
+    basePrice: intakeBasePrice({ serviceCode: input.serviceCode, basePrice: service.basePrice, variantAddon, chapters, papers }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: input.isExpressDelivery,
     downpaymentPercentage: service.downpaymentPercentage,
@@ -214,6 +216,7 @@ export async function submitIntake(
   add("lecturerInstructions", input.lecturerInstructions);
   add("proposalNotes", input.proposalNotes);
   if (isChapterService(input.serviceCode)) add("chapters", chapters);
+  if (isPublicationService(input.serviceCode)) add("papers", papers);
 
   // IT report
   add("companyName", input.companyName);

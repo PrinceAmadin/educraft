@@ -26,7 +26,9 @@ import { computePrice } from "@/lib/pricing";
 import { CouponField, type AppliedCoupon } from "@/components/intake/CouponField";
 import { baseOptionLabel } from "@/lib/service-groups";
 import { ChapterCalculator } from "@/components/services/ChapterCalculator";
+import { PaperStepper } from "@/components/services/PaperStepper";
 import { chapterListLabel, intakeBasePrice, isChapterService, normalizeChapters } from "@/lib/chapter-pricing";
+import { isPublicationService, paperCountLabel, PUBLICATION_PRICING_TEXT } from "@/lib/publication-pricing";
 import { MAX_REPORT_CHAPTERS } from "@/lib/deliverables";
 import { AttachmentsField, UploadBusyContext } from "@/components/intake/AttachmentsField";
 import { VariantField, type ServiceVariantProp } from "@/components/intake/VariantField";
@@ -91,6 +93,11 @@ const STEP_FIELDS: Record<IntakeTemplate, Record<string, (keyof IntakeSubmitInpu
     files: ["specialInstructions", "clientDeadline"],
     review: ["agreeTerms"],
   },
+  academic_publication: {
+    personal: ["fullName", "phone", "email", "universityId", "department", "level", "referralCode"],
+    source: ["projectTitle", "attachments", "specialInstructions", "clientDeadline"],
+    review: ["agreeTerms"],
+  },
   career_cv: {
     contact: ["fullName", "phone", "email", "linkedin", "address", "universityId", "referralCode"],
     education: ["education"],
@@ -120,6 +127,7 @@ export function IntakeForm({
   universities,
   initialReferralCode = "",
   initialChapters = [],
+  initialPapers = 1,
   initialVariantId = "",
   proBono,
 }: {
@@ -128,6 +136,7 @@ export function IntakeForm({
   universities: UniversityOption[];
   initialReferralCode?: string;
   initialChapters?: number[];
+  initialPapers?: number;
   initialVariantId?: string;
   proBono?: ProBonoMode;
 }) {
@@ -144,6 +153,7 @@ export function IntakeForm({
       serviceCode: service.serviceCode,
       serviceVariantId: initialVariantId,
       chapters: initialChapters,
+      papers: initialPapers,
       attachments: [],
       fullName: "",
       phone: "",
@@ -200,7 +210,9 @@ export function IntakeForm({
   const isExpress = watch("isExpressDelivery");
   const variantId = watch("serviceVariantId");
   const chosenChapters = watch("chapters");
+  const chosenPapers = watch("papers");
   const chapterService = isChapterService(service.serviceCode);
+  const publicationService = isPublicationService(service.serviceCode);
   const variantAddon = service.variants?.find((v) => v.id === variantId)?.priceAddon ?? 0;
   const [uploading, setUploading] = React.useState(false);
   // A coupon the client applied on the review step. The server priced it; this
@@ -213,6 +225,7 @@ export function IntakeForm({
       basePrice: service.basePrice,
       variantAddon,
       chapters: chosenChapters,
+      papers: chosenPapers,
     }),
     expressSurcharge: service.expressDeliverySurcharge ?? 0,
     isExpressDelivery: Boolean(isExpress),
@@ -374,6 +387,8 @@ export function IntakeForm({
 
         {step === 0 && chapterService ? (
           <ChapterPicker service={service} />
+        ) : step === 0 && publicationService ? (
+          <PublicationPicker service={service} />
         ) : step === 0 && service.variants && service.variants.length > 0 ? (
           <VariantField basePrice={service.basePrice} variants={service.variants} />
         ) : null}
@@ -478,6 +493,8 @@ function StepContent({
       return <TermDetailsStep />;
     case "it":
       return <ItStep />;
+    case "source":
+      return <PublicationSourceStep service={service} />;
     case "education":
       return <CvEducationStep />;
     case "experience":
@@ -519,6 +536,79 @@ function ChapterPicker({ service }: { service: ServiceProp }) {
         analysisAddon={variant?.priceAddon ?? 0}
       />
     </section>
+  );
+}
+
+/** The publication order's source path and paper count, bound to the form. */
+function PublicationPicker({ service }: { service: ServiceProp }) {
+  const { watch, setValue } = useFormContext<IntakeSubmitInput>();
+  // The single PUB variant is "a report EduCraft did not write", so choosing the
+  // outside-report path just selects it — the per-paper premium then rides the
+  // variant, exactly as the chapter order's "with data analysis" does.
+  const variant = service.variants?.[0];
+  return (
+    <section className="space-y-4">
+      <h2 className="text-base font-semibold tracking-tight text-foreground">Your papers</h2>
+      <PaperStepper
+        papers={watch("papers") ?? 1}
+        onPapers={(n) => setValue("papers", n, { shouldDirty: true })}
+        outsideReport={Boolean(variant && watch("serviceVariantId") === variant.id)}
+        onOutsideReport={(on) => setValue("serviceVariantId", on && variant ? variant.id : "", { shouldDirty: true })}
+        basePrice={service.basePrice}
+        premiumPerPaper={variant?.priceAddon ?? 0}
+      />
+    </section>
+  );
+}
+
+/** Publication source step: the topic, the report the paper is drawn from, and what we deliver. */
+function PublicationSourceStep({ service }: { service: ServiceProp }) {
+  const {
+    register,
+    watch,
+    formState: { errors },
+  } = useFormContext<IntakeSubmitInput>();
+  const variant = service.variants?.[0];
+  const outsideReport = Boolean(variant && watch("serviceVariantId") === variant.id);
+  return (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold tracking-tight text-foreground">Your report</h2>
+
+      <Field
+        label="What is the paper about?"
+        required
+        htmlFor="projectTitle"
+        hint="The topic of the report, or the working title of the paper"
+        error={errors.projectTitle?.message as string | undefined}
+      >
+        <Input id="projectTitle" {...register("projectTitle")} />
+      </Field>
+
+      <Field
+        label={outsideReport ? "Upload your report" : "Attach your report (optional)"}
+        htmlFor="att-source"
+        hint={PUBLICATION_PRICING_TEXT.sourceFormat}
+        error={(errors.attachments?.message as string | undefined) ?? undefined}
+      >
+        <AttachmentsField bare id="att-source" category="from_client" />
+      </Field>
+      {!outsideReport ? (
+        <p className="-mt-3 text-xs text-muted-foreground">
+          If EduCraft wrote this report, you don&apos;t need to upload it — we work from the copy on your account.
+        </p>
+      ) : null}
+
+      <Field label="Anything else we should know?" htmlFor="specialInstructions">
+        <Textarea id="specialInstructions" rows={3} {...register("specialInstructions")} />
+      </Field>
+
+      <div className="rounded-xl bg-zone p-3.5 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground">What you receive</p>
+        <p className="mt-1">{PUBLICATION_PRICING_TEXT.manuscriptOnly}</p>
+      </div>
+
+      <DeadlineField />
+    </div>
   );
 }
 
@@ -1255,6 +1345,9 @@ function ReviewStep({
         {isChapterService(service.serviceCode) ? (
           <Row label="Chapters" value={chapterListLabel(v.chapters ?? [])} />
         ) : null}
+        {isPublicationService(service.serviceCode) ? (
+          <Row label="Papers" value={paperCountLabel(v.papers)} />
+        ) : null}
         {service.variants?.length && v.serviceVariantId ? (
           <Row label="Option" value={service.variants.find((x) => x.id === v.serviceVariantId)?.name ?? ""} />
         ) : service.variants?.length ? (
@@ -1319,7 +1412,7 @@ function ReviewStep({
         <span>
           {proBono
             ? "I agree to EduCraft's terms: up to 3 rounds of revisions within scope."
-            : `I agree to EduCraft's terms: ${variablePrice ? "a" : "45%"} downpayment to begin, balance on approval, and up to 3 rounds of revisions within scope.`}
+            : `I agree to EduCraft's terms: ${variablePrice ? "a" : `${service.downpaymentPercentage}%`} downpayment to begin, balance on approval, and up to 3 rounds of revisions within scope.`}
         </span>
       </label>
       {errors.agreeTerms ? <p className="text-xs text-danger">{errors.agreeTerms.message as string}</p> : null}

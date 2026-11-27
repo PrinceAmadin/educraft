@@ -94,6 +94,7 @@ export const INTAKE_TEMPLATES = [
   "academic_termpaper",
   "academic_seminar",
   "academic_it",
+  "academic_publication",
   "career_cv",
   "design_presentation",
   "editing",
@@ -110,6 +111,7 @@ export const DEPARTMENT_TEMPLATES: readonly (typeof INTAKE_TEMPLATES)[number][] 
   "academic_termpaper",
   "academic_seminar",
   "academic_it",
+  "academic_publication",
 ];
 
 /**
@@ -226,10 +228,19 @@ export const intakeSubmitSchema = z
       "academic_termpaper",
       "academic_seminar",
       "academic_it",
+      "academic_publication",
       "design_presentation",
     ].includes(v.template);
     if (needsTopic) {
       require("projectTitle", Boolean(v.projectTitle && v.projectTitle.length >= 3), "Enter the topic");
+    }
+
+    // Publication: the paper is written FROM a report, so a client whose report
+    // EduCraft did not write (the only variant, which carries the per-paper
+    // premium) must upload it. A client whose report we wrote leaves the variant
+    // blank and we work from the report already on their account.
+    if (v.template === "academic_publication" && v.serviceVariantId) {
+      require("attachments", (v.attachments ?? []).length > 0, "Upload the report your paper will be written from");
     }
 
     if (v.template === "academic_fyp") {

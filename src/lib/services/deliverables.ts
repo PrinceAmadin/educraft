@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { Prisma, type DeliverableAccess, type ProjectStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { sqlTable } from "@/lib/db-schema";
-import { deliverableTemplate, expectedChapters, orderedChapters } from "@/lib/deliverables";
+import { deliverableTemplate, expectedChapters, orderedChapters, orderedPapers } from "@/lib/deliverables";
 import { deliverableGate, type Gate } from "@/lib/files/policy";
 import { checkUploadedFile, type UploadedFileInput } from "@/lib/files/register";
 import { buildPrivatePath } from "@/lib/files/paths";
@@ -178,6 +178,7 @@ export async function ensureDeliverables(projectDbId: string): Promise<void> {
     serviceName: project.service.serviceName,
     chapterCount: project.chapterCount,
     chapters: orderedChapters(project.additionalData),
+    papers: orderedPapers(project.additionalData),
   }).filter((s) => !have.has(s.key));
   if (specs.length === 0) return;
   await db.projectDeliverable.createMany({

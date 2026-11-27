@@ -9,6 +9,7 @@ export const SUPPORTED_TEMPLATES = [
   "academic_termpaper",
   "academic_seminar",
   "academic_it",
+  "academic_publication",
   "career_cv",
   "design_presentation",
   "editing",
@@ -22,6 +23,7 @@ export function resolveTemplate(raw: string): IntakeTemplate | null {
   if (raw === "academic_termpaper") return "academic_termpaper";
   if (raw === "academic_seminar") return "academic_seminar";
   if (raw === "academic_it") return "academic_it";
+  if (raw === "academic_publication") return "academic_publication";
   if (raw === "career_cv") return "career_cv";
   if (raw === "design_presentation") return "design_presentation";
   if (raw === "editing" || raw === "formatting") return "editing";
@@ -57,6 +59,11 @@ export const TEMPLATE_STEPS: Record<IntakeTemplate, StepDef[]> = {
     { id: "personal", label: "Your details" },
     { id: "it", label: "IT details" },
     { id: "files", label: "Documents" },
+    { id: "review", label: "Review" },
+  ],
+  academic_publication: [
+    { id: "personal", label: "Your details" },
+    { id: "source", label: "Your report" },
     { id: "review", label: "Review" },
   ],
   career_cv: [
